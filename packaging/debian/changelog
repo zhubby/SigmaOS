@@ -1,0 +1,5 @@
+sigmaos (0.1.0) unstable; urgency=medium
+
+  * Initial native NAS appliance package scaffold.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Thu, 20 Aug 2026 18:20:00 +0800

@@ -1,0 +1,77 @@
+import { describe, expect, it } from "vitest";
+import { describeTextPreview, highlightSource, parseDelimitedTablePreview } from "./preview-utils.js";
+
+describe("preview utilities", () => {
+  it("detects common code and structured text preview types from file names", () => {
+    expect(describeTextPreview("App.tsx", "text/plain")).toMatchObject({
+      language: "typescript",
+      languageLabel: "TSX",
+      structuredKind: null
+    });
+    expect(describeTextPreview("README.md", "text/plain")).toMatchObject({
+      language: "markdown",
+      languageLabel: "Markdown",
+      structuredKind: "markdown"
+    });
+    expect(describeTextPreview("data.tsv", "text/plain")).toMatchObject({
+      languageLabel: "TSV",
+      structuredKind: "table",
+      delimiter: "\t"
+    });
+  });
+
+  it("detects special text file names without relying on extensions", () => {
+    expect(describeTextPreview("Dockerfile", "text/plain")).toMatchObject({
+      language: "dockerfile",
+      languageLabel: "Dockerfile"
+    });
+    expect(describeTextPreview("Dockerfile.dev", "text/plain")).toMatchObject({
+      language: "dockerfile",
+      languageLabel: "Dockerfile"
+    });
+    expect(describeTextPreview("Makefile", "text/plain")).toMatchObject({
+      language: "makefile",
+      languageLabel: "Makefile"
+    });
+    expect(describeTextPreview(".env.local", "text/plain")).toMatchObject({
+      language: "properties",
+      languageLabel: "ENV"
+    });
+    expect(describeTextPreview("config.toml", "text/plain")).toMatchObject({
+      language: "ini",
+      languageLabel: "TOML"
+    });
+  });
+
+  it("renders highlighted source and escapes fallback content", () => {
+    expect(highlightSource("const value = 1;", "typescript").html).toContain("hljs-keyword");
+    expect(highlightSource("<script>alert('x')</script>", "unknown").html).toBe(
+      "&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;"
+    );
+  });
+
+  it("parses and truncates delimited table previews", () => {
+    const source = [
+      Array.from({ length: 42 }, (_, index) => `h${index + 1}`).join(","),
+      Array.from({ length: 42 }, (_, index) => `a${index + 1}`).join(","),
+      Array.from({ length: 42 }, (_, index) => `b${index + 1}`).join(",")
+    ].join("\n");
+
+    const preview = parseDelimitedTablePreview(source, ",", 1, 40);
+
+    expect(preview).toMatchObject({
+      totalRows: 2,
+      totalColumns: 42,
+      truncatedRows: true,
+      truncatedColumns: true
+    });
+    expect(preview?.headers).toHaveLength(40);
+    expect(preview?.rows).toHaveLength(1);
+    expect(preview?.rows[0]?.[0]).toBe("a1");
+  });
+
+  it("returns null for empty or invalid delimited content", () => {
+    expect(parseDelimitedTablePreview("", ",")).toBeNull();
+    expect(parseDelimitedTablePreview('name,role\n"unterminated', ",")).toBeNull();
+  });
+});

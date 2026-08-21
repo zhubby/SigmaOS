@@ -1,0 +1,31 @@
+[Unit]
+Description=SigmaOS API and web UI
+Documentation=/usr/share/doc/sigmaos/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sigmaos
+Group=sigmaos
+Environment=SIGMAOS_CONFIG=/etc/sigmaos/config.toml
+Environment=SIGMAOS_WEB_DIST=/usr/lib/sigmaos/apps/web/dist
+WorkingDirectory=/var/lib/sigmaos
+StateDirectory=sigmaos
+RuntimeDirectory=sigmaos
+LogsDirectory=sigmaos
+ExecStart=/usr/bin/node /usr/lib/sigmaos/apps/api/dist/index.js
+Restart=on-failure
+RestartSec=3
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/sigmaos /var/log/sigmaos /srv/nas
+NoNewPrivileges=yes
+PrivateTmp=yes
+CapabilityBoundingSet=
+MemoryMax=512M
+CPUQuota=150%
+TasksMax=256
+
+[Install]
+WantedBy=multi-user.target

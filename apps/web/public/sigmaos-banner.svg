@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 190 48">
+  <defs>
+    <linearGradient id="sigma-banner-line" x1="12" y1="9" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#21d6c2" />
+      <stop offset="0.52" stop-color="#f2f3f5" />
+      <stop offset="1" stop-color="#5865f2" />
+    </linearGradient>
+    <linearGradient id="wordmark-rule" x1="58" y1="38" x2="150" y2="38" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#21d6c2" />
+      <stop offset="1" stop-color="#5865f2" />
+    </linearGradient>
+    <radialGradient id="banner-glow" cx="55%" cy="12%" r="78%">
+      <stop offset="0" stop-color="#5865f2" stop-opacity="0.42" />
+      <stop offset="1" stop-color="#17181f" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+  <rect x="1" y="1" width="46" height="46" rx="10" fill="#101116" />
+  <rect x="4" y="4" width="40" height="40" rx="8" fill="#17181f" />
+  <rect x="4" y="4" width="40" height="40" rx="8" fill="url(#banner-glow)" />
+  <path
+    d="M35.5 12H14L24 24L14 36H36"
+    fill="none"
+    stroke="url(#sigma-banner-line)"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="5.2"
+  />
+  <path
+    d="M17.5 18.5H32"
+    fill="none"
+    stroke="#101116"
+    stroke-linecap="round"
+    stroke-width="3"
+    opacity="0.72"
+  />
+  <circle cx="35.5" cy="12" r="3" fill="#21d6c2" />
+  <circle cx="36" cy="36" r="3" fill="#5865f2" />
+  <text
+    x="57"
+    y="30"
+    fill="#f2f3f5"
+    font-family="gg sans, Noto Sans SC, Noto Sans, Helvetica Neue, Arial, sans-serif"
+    font-size="25"
+    font-weight="800"
+  >SigmaOS</text>
+  <rect x="59" y="37" width="88" height="2" rx="1" fill="url(#wordmark-rule)" opacity="0.9" />
+</svg>

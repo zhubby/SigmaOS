@@ -1,0 +1,15 @@
+Source: sigmaos
+Section: admin
+Priority: optional
+Maintainer: SigmaOS Maintainers <maintainers@sigmaos.local>
+Build-Depends: debhelper-compat (= 13), nodejs (>= 22), npm
+Standards-Version: 4.7.0
+Homepage: https://sigmaos.local
+Rules-Requires-Root: no
+
+Package: sigmaos
+Architecture: any
+Depends: nodejs (>= 22), sqlite3, adduser, ${misc:Depends}
+Description: Native Linux NAS appliance with approval-gated AI file operations
+ SigmaOS provides a local web UI, API service, agent worker, SQLite FTS
+ indexer, and scheduled maintenance tasks for a single-user NAS appliance.

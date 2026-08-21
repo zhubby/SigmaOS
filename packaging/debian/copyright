@@ -1,0 +1,12 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: sigmaos
+Source: https://sigmaos.local
+
+Files: *
+Copyright: 2026 SigmaOS Maintainers
+License: MIT
+
+License: MIT
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files, to deal in the Software
+ without restriction, subject to the project license file when provided.

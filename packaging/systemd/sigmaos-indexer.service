@@ -1,0 +1,27 @@
+[Unit]
+Description=SigmaOS NAS indexer
+Documentation=/usr/share/doc/sigmaos/README.md
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=sigmaos
+Group=sigmaos
+Environment=SIGMAOS_CONFIG=/etc/sigmaos/config.toml
+WorkingDirectory=/var/lib/sigmaos
+StateDirectory=sigmaos
+RuntimeDirectory=sigmaos
+LogsDirectory=sigmaos
+ExecStart=/usr/bin/node /usr/lib/sigmaos/apps/indexer/dist/index.js
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/sigmaos /var/log/sigmaos /srv/nas
+NoNewPrivileges=yes
+PrivateTmp=yes
+CapabilityBoundingSet=
+MemoryMax=1G
+CPUQuota=250%
+TasksMax=256
+
+[Install]
+WantedBy=multi-user.target

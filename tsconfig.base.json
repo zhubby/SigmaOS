@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@sigmaos/agent": ["packages/agent/src/index.ts"],
+      "@sigmaos/db": ["packages/db/src/index.ts"],
+      "@sigmaos/nas-tools": ["packages/nas-tools/src/index.ts"],
+      "@sigmaos/shared": ["packages/shared/src/index.ts"]
+    }
+  }
+}
+

@@ -1,0 +1,187 @@
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { parse } from "smol-toml";
+import type { NasRootConfig, SigmaConfig } from "./types.js";
+
+interface TomlConfig {
+  data_dir?: string;
+  api?: {
+    host?: string;
+    port?: number;
+    allowed_origins?: string[];
+  };
+  worker?: {
+    poll_ms?: number;
+  };
+  admin?: {
+    display_name?: string;
+    auth_mode?: "local-only";
+  };
+  model?: {
+    provider?: "pi" | "cloud" | "local";
+    pi_command?: string;
+    local_endpoint?: string;
+  };
+  nas_roots?: Array<{
+    id?: string;
+    name?: string;
+    path?: string;
+  }>;
+}
+
+export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): SigmaConfig {
+  const configPath = env.SIGMAOS_CONFIG ?? "/etc/sigmaos/config.toml";
+  const fileConfig = loadTomlConfig(configPath);
+  const workspaceRoot = findWorkspaceRoot(cwd);
+  const dataDir = path.resolve(
+    workspaceRoot,
+    env.SIGMAOS_DATA_DIR ?? fileConfig.data_dir ?? ".sigmaos"
+  );
+  const nasRoots = loadNasRoots(env, fileConfig, workspaceRoot);
+
+  return {
+    dataDir,
+    databasePath: env.SIGMAOS_DATABASE_PATH ?? path.join(dataDir, "sigmaos.sqlite"),
+    api: {
+      host: env.SIGMAOS_API_HOST ?? fileConfig.api?.host ?? "127.0.0.1",
+      port: toPort(env.SIGMAOS_API_PORT, fileConfig.api?.port ?? 3010),
+      allowedOrigins: loadAllowedOrigins(env, fileConfig)
+    },
+    worker: {
+      pollMs: toPositiveInteger(env.SIGMAOS_WORKER_POLL_MS, fileConfig.worker?.poll_ms ?? 750)
+    },
+    admin: {
+      displayName: env.SIGMAOS_ADMIN_DISPLAY_NAME ?? fileConfig.admin?.display_name ?? "SigmaOS Admin",
+      authMode: "local-only"
+    },
+    model: {
+      provider: loadModelProvider(env.SIGMAOS_MODEL_PROVIDER, fileConfig.model?.provider),
+      piCommand: env.SIGMAOS_PI_COMMAND ?? fileConfig.model?.pi_command ?? "pi",
+      localEndpoint: env.SIGMAOS_LOCAL_ENDPOINT ?? fileConfig.model?.local_endpoint ?? null
+    },
+    nasRoots
+  };
+}
+
+function loadTomlConfig(configPath: string): TomlConfig {
+  if (!existsSync(configPath)) {
+    return {};
+  }
+
+  const parsed = parse(readFileSync(configPath, "utf8")) as TomlConfig;
+  return parsed;
+}
+
+function loadNasRoots(
+  env: NodeJS.ProcessEnv,
+  fileConfig: TomlConfig,
+  cwd: string
+): NasRootConfig[] {
+  if (env.SIGMAOS_NAS_ROOTS) {
+    return env.SIGMAOS_NAS_ROOTS.split(",")
+      .map((entry, index) => parseNasRootEnv(entry.trim(), index, cwd))
+      .filter((root): root is NasRootConfig => root !== null);
+  }
+
+  if (fileConfig.nas_roots?.length) {
+    return fileConfig.nas_roots.map((root, index) => ({
+      id: root.id ?? `root-${index + 1}`,
+      name: root.name ?? root.id ?? `Root ${index + 1}`,
+      path: path.resolve(cwd, root.path ?? cwd)
+    }));
+  }
+
+  return [
+    {
+      id: "local",
+      name: "System root",
+      path: systemRootPath(cwd)
+    }
+  ];
+}
+
+function systemRootPath(cwd: string): string {
+  return path.parse(path.resolve(cwd)).root || path.sep;
+}
+
+function parseNasRootEnv(entry: string, index: number, cwd: string): NasRootConfig | null {
+  if (!entry) {
+    return null;
+  }
+
+  const parts = entry.split(":");
+  if (parts.length >= 3) {
+    const [id, name, ...pathParts] = parts;
+    return {
+      id: id || `root-${index + 1}`,
+      name: name || id || `Root ${index + 1}`,
+      path: path.resolve(cwd, pathParts.join(":"))
+    };
+  }
+
+  const rootPath = path.resolve(cwd, entry);
+  return {
+    id: `root-${index + 1}`,
+    name: path.basename(rootPath) || `Root ${index + 1}`,
+    path: rootPath
+  };
+}
+
+function toPort(value: string | undefined, fallback: number): number {
+  return toPositiveInteger(value, fallback);
+}
+
+function loadModelProvider(
+  envValue: string | undefined,
+  fileValue: "pi" | "cloud" | "local" | undefined
+): "pi" | "cloud" | "local" {
+  const raw = envValue ?? fileValue ?? "pi";
+  return raw === "cloud" || raw === "local" || raw === "pi" ? raw : "pi";
+}
+
+function loadAllowedOrigins(env: NodeJS.ProcessEnv, fileConfig: TomlConfig): string[] {
+  if (env.SIGMAOS_ALLOWED_ORIGINS) {
+    return env.SIGMAOS_ALLOWED_ORIGINS.split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean);
+  }
+
+  return fileConfig.api?.allowed_origins ?? [];
+}
+
+function toPositiveInteger(value: string | number | undefined, fallback: number): number {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
+function findWorkspaceRoot(startPath: string): string {
+  let current = path.resolve(startPath);
+
+  while (true) {
+    const packagePath = path.join(current, "package.json");
+    if (existsSync(packagePath)) {
+      try {
+        const pkg = JSON.parse(readFileSync(packagePath, "utf8")) as { workspaces?: unknown };
+        if (pkg.workspaces) {
+          return current;
+        }
+      } catch {
+        return current;
+      }
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return path.resolve(startPath);
+    }
+    current = parent;
+  }
+}

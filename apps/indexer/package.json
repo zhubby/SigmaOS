@@ -1,0 +1,20 @@
+{
+  "name": "@sigmaos/indexer",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/indexer.ts"
+  },
+  "types": "./src/indexer.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "once": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsup src/index.ts --format esm --platform node --target node22 --external better-sqlite3 --out-dir dist"
+  },
+  "dependencies": {
+    "@sigmaos/db": "0.1.0",
+    "@sigmaos/nas-tools": "0.1.0",
+    "@sigmaos/shared": "0.1.0"
+  }
+}

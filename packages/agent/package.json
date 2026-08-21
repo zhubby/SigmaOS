@@ -1,0 +1,14 @@
+{
+  "name": "@sigmaos/agent",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@sigmaos/nas-tools": "0.1.0",
+    "@sigmaos/shared": "0.1.0"
+  }
+}
+

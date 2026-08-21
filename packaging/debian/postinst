@@ -1,0 +1,22 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "configure" ]; then
+  if ! getent group sigmaos >/dev/null; then
+    addgroup --system sigmaos
+  fi
+  if ! id sigmaos >/dev/null 2>&1; then
+    adduser --system --ingroup sigmaos --home /var/lib/sigmaos --no-create-home sigmaos
+  fi
+
+  install -d -o sigmaos -g sigmaos -m 0750 /var/lib/sigmaos /var/lib/sigmaos/trash /var/lib/sigmaos/reports /var/lib/sigmaos/pi-sessions
+  install -d -o sigmaos -g sigmaos -m 0755 /srv/nas
+  chown -R sigmaos:sigmaos /var/lib/sigmaos
+
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload || true
+    systemctl enable sigmaos-api.service sigmaos-worker@1.service sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer || true
+  fi
+fi
+
+#DEBHELPER#

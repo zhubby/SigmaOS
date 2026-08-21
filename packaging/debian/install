@@ -1,0 +1,12 @@
+apps/api/dist/ usr/lib/sigmaos/apps/api/dist/
+apps/worker/dist/ usr/lib/sigmaos/apps/worker/dist/
+apps/indexer/dist/ usr/lib/sigmaos/apps/indexer/dist/
+apps/scheduler/dist/ usr/lib/sigmaos/apps/scheduler/dist/
+apps/web/dist/ usr/lib/sigmaos/apps/web/dist/
+node_modules/ usr/lib/sigmaos/node_modules/
+package.json usr/lib/sigmaos/
+package-lock.json usr/lib/sigmaos/
+packaging/etc/config.toml etc/sigmaos/
+packaging/scripts/sigmaos-first-boot.sh usr/lib/sigmaos/scripts/
+packaging/systemd/*.service lib/systemd/system/
+packaging/systemd/*.timer lib/systemd/system/

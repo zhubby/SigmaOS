@@ -1,0 +1,23 @@
+data_dir = "/var/lib/sigmaos"
+
+[api]
+host = "127.0.0.1"
+port = 3010
+allowed_origins = []
+
+[worker]
+poll_ms = 750
+
+[admin]
+display_name = "SigmaOS Admin"
+auth_mode = "local-only"
+
+[model]
+provider = "pi"
+pi_command = "pi"
+local_endpoint = ""
+
+[[nas_roots]]
+id = "primary"
+name = "Primary NAS"
+path = "/srv/nas"

@@ -1,0 +1,42 @@
+name = "sigmaos-appliance"
+version = "0.1.0"
+base_suite = "bookworm"
+target_arch = "arm64"
+
+[runtime]
+node = ">=22"
+database = "sqlite"
+init = "systemd"
+package = "sigmaos.deb"
+
+[services]
+units = [
+  "sigmaos-api.service",
+  "sigmaos-worker@1.service",
+  "sigmaos-indexer.timer",
+  "sigmaos-scheduler.timer",
+  "sigmaos-maintenance.timer"
+]
+
+[packages]
+base = [
+  "systemd-sysv",
+  "ca-certificates",
+  "curl",
+  "nodejs",
+  "npm",
+  "sqlite3",
+  "rsync"
+]
+ai = [
+  "pi"
+]
+ocr_media_helpers = [
+  "tesseract-ocr",
+  "poppler-utils",
+  "ffmpeg",
+  "imagemagick"
+]
+nas_health = [
+  "smartmontools"
+]
