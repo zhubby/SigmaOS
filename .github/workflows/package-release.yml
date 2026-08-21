@@ -1,0 +1,208 @@
+name: Package Release
+
+'on':
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  quality:
+    name: Quality
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  package:
+    name: Package (${{ matrix.deb_arch }})
+    needs: quality
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - deb_arch: amd64
+            runner: ubuntu-24.04
+          - deb_arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install Debian packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates curl gnupg
+
+          sudo install -d -m 0755 /etc/apt/keyrings
+          nodesource_key="$RUNNER_TEMP/nodesource-repo.gpg.key"
+          nodesource_keyring="$RUNNER_TEMP/nodesource.gpg"
+          curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key -o "$nodesource_key"
+
+          fingerprint="$(gpg --show-keys --with-colons "$nodesource_key" | awk -F: '$1 == "fpr" { print $10; exit }')"
+          if [[ "$fingerprint" != "6F71F525282841EEDAF851B42F59B5F99B1BE0B4" ]]; then
+            echo "Unexpected NodeSource signing key fingerprint: $fingerprint" >&2
+            exit 1
+          fi
+
+          gpg --batch --yes --dearmor -o "$nodesource_keyring" "$nodesource_key"
+          sudo install -m 0644 "$nodesource_keyring" /etc/apt/keyrings/nodesource.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
+            | sudo tee /etc/apt/sources.list.d/nodesource.list >/dev/null
+
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            debhelper \
+            dpkg-dev \
+            fakeroot \
+            nodejs \
+            rsync
+
+      - name: Build Debian package
+        run: packaging/scripts/build-deb.sh
+
+      - name: Collect package artifacts
+        run: |
+          artifact_dir="artifacts/${{ matrix.deb_arch }}"
+          mkdir -p "$artifact_dir"
+
+          shopt -s nullglob
+          files=(.sigmaos/*.deb .sigmaos/*.changes .sigmaos/*.buildinfo)
+          if (( ${#files[@]} == 0 )); then
+            echo "No Debian package artifacts were produced under .sigmaos" >&2
+            exit 1
+          fi
+
+          cp "${files[@]}" "$artifact_dir/"
+
+          for extension in deb changes buildinfo; do
+            matches=("$artifact_dir"/sigmaos_*_${{ matrix.deb_arch }}."$extension")
+            if (( ${#matches[@]} != 1 )); then
+              echo "Expected exactly one ${{ matrix.deb_arch }} .$extension artifact, found ${#matches[@]}" >&2
+              printf '%s\n' "${matches[@]}" >&2
+              exit 1
+            fi
+          done
+
+          ls -lh "$artifact_dir"
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: sigmaos-deb-${{ matrix.deb_arch }}
+          path: artifacts/${{ matrix.deb_arch }}/*
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: GitHub Release
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify tag is on main
+        run: |
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "Release tag $GITHUB_REF_NAME must point to a commit reachable from origin/main" >&2
+            exit 1
+          fi
+
+      - name: Verify tag matches Debian changelog
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          changelog_version="$(sed -n '1s/^sigmaos (\([^)]*\)).*/\1/p' packaging/debian/changelog)"
+
+          if [[ -z "$changelog_version" ]]; then
+            echo "Could not read SigmaOS version from packaging/debian/changelog" >&2
+            exit 1
+          fi
+
+          if [[ "$tag_version" != "$changelog_version" ]]; then
+            echo "Tag version v$tag_version does not match Debian changelog version $changelog_version" >&2
+            exit 1
+          fi
+
+      - name: Download package artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: sigmaos-deb-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify release assets
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+
+          for arch in amd64 arm64; do
+            for extension in deb changes buildinfo; do
+              asset="release-assets/sigmaos_${tag_version}_${arch}.${extension}"
+              if [[ ! -f "$asset" ]]; then
+                echo "Missing release asset $asset" >&2
+                find release-assets -maxdepth 1 -type f -print >&2
+                exit 1
+              fi
+            done
+          done
+
+      - name: Generate checksums
+        run: |
+          cd release-assets
+          sha256sum *.deb *.changes *.buildinfo > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            release-assets/* \
+            --verify-tag \
+            --generate-notes \
+            --title "$GITHUB_REF_NAME"
