@@ -1,0 +1,309 @@
+.workspace-pane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  background: #20222c;
+}
+
+.workspace-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(190px, 280px);
+  align-items: end;
+  gap: 10px;
+  min-height: 62px;
+  padding: 12px 16px;
+  background: var(--channel-bg);
+}
+
+.workspace-header.has-root-switcher {
+  grid-template-columns: minmax(170px, 230px) minmax(0, 1fr) auto minmax(190px, 280px);
+  min-height: 70px;
+}
+
+.root-control {
+  display: grid;
+  gap: 5px;
+}
+
+.root-control label {
+  color: var(--muted-2);
+  font-size: 10.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.root-control select,
+.search input {
+  height: 38px;
+  padding: 0 10px;
+}
+
+.breadcrumbs {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: auto;
+  padding-bottom: 1px;
+}
+
+.breadcrumbs button {
+  flex: 0 0 auto;
+  max-width: 170px;
+  height: 30px;
+  padding: 0 9px;
+  border-radius: 5px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.breadcrumbs button::after {
+  content: "/";
+  margin-left: 8px;
+  color: var(--muted-2);
+}
+
+.breadcrumbs button:last-child::after {
+  content: "";
+  margin: 0;
+}
+
+.breadcrumbs button:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.workspace-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.icon-button {
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: var(--surface);
+}
+
+.search {
+  position: relative;
+}
+
+.search svg {
+  position: absolute;
+  top: 10px;
+  left: 11px;
+  color: var(--muted-2);
+  pointer-events: none;
+}
+
+.search input {
+  padding-left: 36px;
+}
+
+.workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.92fr) minmax(360px, 1.08fr);
+  gap: 12px;
+  min-height: 0;
+  padding: 12px;
+}
+
+.file-browser,
+.preview-pane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--channel-bg);
+  box-shadow: var(--shadow);
+}
+
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 62px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.panel-heading > div {
+  min-width: 0;
+}
+
+.panel-heading dl {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
+  margin: 0;
+}
+
+.panel-heading dt {
+  color: var(--muted-2);
+  font-size: 10.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.panel-heading dd {
+  margin: 2px 0 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.file-list {
+  min-height: 0;
+  overflow: auto;
+}
+
+.file-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) 92px 90px 132px;
+  align-items: center;
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border-bottom: 1px solid rgb(255 255 255 / 4%);
+  color: var(--muted);
+  background: transparent;
+  text-align: left;
+}
+
+button.file-row {
+  cursor: pointer;
+}
+
+button.file-row:hover:not(:disabled),
+button.file-row.is-selected {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.file-row-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  min-height: 34px;
+  color: var(--muted-2);
+  background: #222530;
+  font-size: 10.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.file-name {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  overflow: hidden;
+}
+
+.file-name svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.file-type-icon {
+  flex: 0 0 auto;
+}
+
+.file-type-label {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.file-name .file-type-directory,
+.file-name .file-type-symlink,
+.file-type-label.file-type-directory,
+.file-type-label.file-type-symlink {
+  color: #8ea1ff;
+}
+
+.file-name .file-type-code,
+.file-name .file-type-shell,
+.file-type-label.file-type-code,
+.file-type-label.file-type-shell {
+  color: #6ed3f5;
+}
+
+.file-name .file-type-config,
+.file-name .file-type-package,
+.file-type-label.file-type-config,
+.file-type-label.file-type-package {
+  color: #f2c16b;
+}
+
+.file-name .file-type-json,
+.file-name .file-type-markdown,
+.file-name .file-type-text,
+.file-name .file-type-document,
+.file-name .file-type-pdf,
+.file-type-label.file-type-json,
+.file-type-label.file-type-markdown,
+.file-type-label.file-type-text,
+.file-type-label.file-type-document,
+.file-type-label.file-type-pdf {
+  color: #dbdee1;
+}
+
+.file-name .file-type-image,
+.file-type-label.file-type-image {
+  color: #8ddc9a;
+}
+
+.file-name .file-type-audio,
+.file-name .file-type-video,
+.file-type-label.file-type-audio,
+.file-type-label.file-type-video {
+  color: #cfa8ff;
+}
+
+.file-name .file-type-spreadsheet,
+.file-name .file-type-database,
+.file-type-label.file-type-spreadsheet,
+.file-type-label.file-type-database {
+  color: #78d8c8;
+}
+
+.file-name .file-type-archive,
+.file-name .file-type-font,
+.file-type-label.file-type-archive,
+.file-type-label.file-type-font {
+  color: #b5bac1;
+}
+
+.file-name .file-type-secure,
+.file-name .file-type-blocked,
+.file-type-label.file-type-secure,
+.file-type-label.file-type-blocked {
+  color: #ffb3b6;
+}
+
+.file-name .file-type-other,
+.file-type-label.file-type-other {
+  color: var(--muted-2);
+}
+
+.file-name span,
+.file-row > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-kind {
+  flex: 0 0 auto;
+  text-transform: capitalize;
+}
+

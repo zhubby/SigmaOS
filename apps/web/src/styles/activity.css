@@ -1,0 +1,64 @@
+.activity-strip {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 8px 14px;
+  border-top: 1px solid rgb(0 0 0 / 24%);
+  background: var(--channel-bg);
+}
+
+.activity-strip ol {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.activity-strip li {
+  display: grid;
+  grid-template-columns: 12px minmax(120px, 220px) auto;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  color: var(--muted);
+  background: var(--surface);
+}
+
+.activity-strip li > svg {
+  color: var(--yellow);
+  fill: currentColor;
+}
+
+.activity-strip strong,
+.activity-strip small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-strip strong {
+  color: var(--text);
+  font-size: 11.5px;
+}
+
+.activity-strip small {
+  color: var(--muted-2);
+  font-size: 10.5px;
+}
+
+.activity-strip button {
+  width: 28px;
+  height: 28px;
+  border-radius: 5px;
+}
+

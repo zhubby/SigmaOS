@@ -1,0 +1,228 @@
+:root {
+  color-scheme: dark;
+  font-family: "gg sans", "Noto Sans SC", "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+  background: #0f1015;
+  color: #f2f3f5;
+  --app-bg: #0f1015;
+  --server-bg: #17181f;
+  --channel-bg: #1e2029;
+  --chat-bg: #252733;
+  --surface: #2b2d3a;
+  --surface-hover: #343746;
+  --surface-strong: #3b3e50;
+  --line: #3f4354;
+  --line-soft: #323544;
+  --text: #f2f3f5;
+  --muted: #b5bac1;
+  --muted-2: #858b98;
+  --accent: #5865f2;
+  --accent-hover: #4752c4;
+  --green: #23a559;
+  --yellow: #f0b232;
+  --red: #da373c;
+  --shadow: 0 18px 60px rgb(0 0 0 / 28%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgb(88 101 242 / 8%), transparent 34%),
+    var(--app-bg);
+  font-size: 13px;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 0;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.chat-header h2,
+.panel-heading h2 {
+  margin: 0;
+}
+
+.brand-banner {
+  display: block;
+  width: min(148px, 100%);
+  height: auto;
+  filter: drop-shadow(0 8px 18px rgb(88 101 242 / 16%));
+  transition:
+    filter 140ms ease,
+    opacity 140ms ease;
+}
+
+.brand:hover .brand-banner,
+.settings-rail-brand:hover .brand-banner {
+  filter: drop-shadow(0 9px 20px rgb(33 214 194 / 20%));
+}
+
+.agent-list-head,
+.dock-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.agent-list-head {
+  justify-content: space-between;
+  padding: 14px 8px 8px;
+}
+
+.agent-list-head button,
+.icon-button,
+.activity-strip button,
+.approval-actions button,
+.settings-button,
+.settings-content-header button,
+.split-handle {
+  display: inline-grid;
+  place-items: center;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease;
+}
+
+.agent-list-head button:hover,
+.icon-button:hover:not(:disabled),
+.activity-strip button:hover,
+.approval-actions button:hover,
+.settings-button:hover,
+.settings-content-header button:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.session-item span,
+.message p,
+.approval-item span,
+.activity-strip small,
+.file-name span {
+  min-width: 0;
+}
+
+.chat-header,
+.workspace-header {
+  border-bottom: 1px solid rgb(0 0 0 / 24%);
+}
+
+.chat-header h2,
+.panel-heading h2 {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-stats span,
+.preview-kind,
+.risk-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--surface);
+  font-size: 11.5px;
+  font-weight: 800;
+}
+
+.empty-state,
+.preview-empty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  min-height: 220px;
+  padding: 24px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.empty-state strong,
+.preview-empty strong {
+  color: var(--text);
+}
+
+.primary-button,
+.secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 86px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 5px;
+  color: white;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.primary-button {
+  background: var(--accent);
+}
+
+.primary-button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.secondary-button {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.secondary-button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}

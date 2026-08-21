@@ -1,0 +1,355 @@
+.chat-pane {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  background: var(--chat-bg);
+}
+
+.agent-list {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 14px 10px;
+  background: var(--server-bg);
+  border-right: 1px solid rgb(0 0 0 / 24%);
+}
+
+.brand {
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  min-width: 0;
+  height: 48px;
+  padding: 0 8px;
+}
+
+.agent-list-head button {
+  width: 28px;
+  height: 28px;
+  border-radius: 5px;
+}
+
+
+.session-list {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 2px 10px;
+}
+
+.session-item {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 42px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  color: var(--muted);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-item:hover,
+.session-item.is-active {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.session-item svg {
+  color: inherit;
+}
+
+.session-item strong,
+.session-item small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-item strong {
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.session-item small {
+  margin-top: 2px;
+  color: var(--muted-2);
+  font-size: 11.5px;
+}
+
+.agent-footer {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-button {
+  width: 36px;
+  height: 36px;
+  border-radius: 5px;
+  color: var(--muted);
+  background: var(--surface);
+}
+
+.agent-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: 5px;
+  background: rgb(35 165 89 / 13%);
+  color: #78d89d;
+  font-size: 12.5px;
+  font-weight: 800;
+}
+
+.agent-status[data-state="error"],
+.agent-status[data-state="offline"] {
+  background: rgb(218 55 60 / 14%);
+  color: #ff8a8e;
+}
+
+.agent-status[data-state="loading"],
+.agent-status[data-state="searching"],
+.agent-status[data-state="queued"],
+.agent-status[data-state="agent-running"],
+.agent-status[data-state="reconnecting"] {
+  background: rgb(240 178 50 / 15%);
+  color: #ffd37a;
+}
+
+.chat-main {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  min-width: 0;
+  min-height: 0;
+  background: var(--chat-bg);
+}
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 64px;
+  padding: 12px 18px;
+}
+
+.eyebrow {
+  display: block;
+  overflow: hidden;
+  color: var(--muted-2);
+  font-size: 11.5px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+
+.chat-stats {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.error-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 18px 0;
+  padding: 10px 12px;
+  border: 1px solid rgb(218 55 60 / 36%);
+  border-radius: 5px;
+  background: rgb(218 55 60 / 13%);
+  color: #ffb3b6;
+  font-size: 12.5px;
+}
+
+.transcript {
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 18px 18px;
+}
+
+.message {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 0;
+}
+
+.message:hover {
+  background: rgb(255 255 255 / 2%);
+}
+
+.avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: white;
+  background: var(--accent);
+}
+
+.message-user .avatar {
+  background: var(--green);
+}
+
+.message header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.message strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.message time {
+  color: var(--muted-2);
+  font-size: 11.5px;
+}
+
+.message p {
+  margin: 4px 0 0;
+  color: #dbdee1;
+  font-size: 13px;
+  line-height: 1.48;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.approval-dock {
+  display: grid;
+  gap: 8px;
+  max-height: 190px;
+  overflow: auto;
+  padding: 10px 18px;
+  border-top: 1px solid rgb(0 0 0 / 20%);
+  background: rgb(0 0 0 / 8%);
+}
+
+.approval-dock p {
+  margin: 0;
+  color: var(--muted-2);
+  font-size: 12.5px;
+}
+
+.approval-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 68px;
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: var(--surface);
+}
+
+.approval-item strong,
+.approval-item span {
+  display: block;
+}
+
+.approval-item strong {
+  font-size: 12.5px;
+}
+
+.approval-item span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.risk-pill[data-risk="low"] {
+  color: #78d89d;
+  background: rgb(35 165 89 / 14%);
+}
+
+.risk-pill[data-risk="medium"] {
+  color: #ffd37a;
+  background: rgb(240 178 50 / 15%);
+}
+
+.risk-pill[data-risk="high"] {
+  color: #ff9da1;
+  background: rgb(218 55 60 / 15%);
+}
+
+.approval-actions {
+  display: grid;
+  grid-template-columns: 30px 30px;
+  gap: 6px;
+}
+
+.approval-actions button {
+  width: 30px;
+  height: 30px;
+  border-radius: 5px;
+}
+
+.approval-actions button:first-child {
+  color: white;
+  background: var(--green);
+}
+
+.approval-actions button:last-child {
+  color: white;
+  background: var(--red);
+}
+
+.composer {
+  display: grid;
+  gap: 10px;
+  padding: 12px 18px 18px;
+}
+
+.composer textarea,
+.search input,
+.root-control select {
+  width: 100%;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.composer textarea {
+  min-height: 74px;
+  max-height: 180px;
+  resize: vertical;
+  padding: 12px;
+  line-height: 1.42;
+}
+
+.composer textarea::placeholder,
+.search input::placeholder {
+  color: var(--muted-2);
+}
+
+.composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+
