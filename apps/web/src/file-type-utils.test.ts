@@ -4,32 +4,26 @@ import { describeFileVisual } from "./file-type-utils.js";
 describe("file type utilities", () => {
   it("classifies entry safety and non-file kinds first", () => {
     expect(describeFileVisual({ name: "private.txt", kind: "file", isSafe: false })).toEqual({
-      kind: "blocked",
-      label: "blocked"
+      kind: "blocked"
     });
     expect(describeFileVisual({ name: "src", kind: "directory", isSafe: true })).toEqual({
-      kind: "directory",
-      label: "folder"
+      kind: "directory"
     });
     expect(describeFileVisual({ name: "latest", kind: "symlink", isSafe: true })).toEqual({
-      kind: "symlink",
-      label: "link"
+      kind: "symlink"
     });
   });
 
   it("classifies common source and structured text files", () => {
-    expect(describeFileVisual({ name: "App.tsx", kind: "file", isSafe: true })).toMatchObject({ kind: "code", label: "code" });
+    expect(describeFileVisual({ name: "App.tsx", kind: "file", isSafe: true })).toMatchObject({ kind: "code" });
     expect(describeFileVisual({ name: "README.md", kind: "file", isSafe: true })).toMatchObject({
-      kind: "markdown",
-      label: "markdown"
+      kind: "markdown"
     });
     expect(describeFileVisual({ name: "package.json", kind: "file", isSafe: true })).toMatchObject({
-      kind: "package",
-      label: "package"
+      kind: "package"
     });
     expect(describeFileVisual({ name: "data.csv", kind: "file", isSafe: true })).toMatchObject({
-      kind: "spreadsheet",
-      label: "table"
+      kind: "spreadsheet"
     });
   });
 
@@ -44,16 +38,13 @@ describe("file type utilities", () => {
 
   it("classifies special extensionless config files", () => {
     expect(describeFileVisual({ name: "Dockerfile.dev", kind: "file", isSafe: true })).toMatchObject({
-      kind: "config",
-      label: "config"
+      kind: "config"
     });
     expect(describeFileVisual({ name: "Makefile", kind: "file", isSafe: true })).toMatchObject({
-      kind: "config",
-      label: "config"
+      kind: "config"
     });
     expect(describeFileVisual({ name: ".env.local", kind: "file", isSafe: true })).toMatchObject({
-      kind: "config",
-      label: "config"
+      kind: "config"
     });
   });
 });

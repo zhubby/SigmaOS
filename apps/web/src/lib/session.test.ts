@@ -40,6 +40,7 @@ describe("session helpers", () => {
     expect(sessionTitle({ ...baseSession, firstMessage: "First", lastMessage: "Last" })).toBe("First");
     expect(sessionTitle({ ...baseSession, lastMessage: "Last" })).toBe("Last");
     expect(sessionTitle(baseSession)).toBe("Root agent");
+    expect(sessionTitle(baseSession, "Root session")).toBe("Root session");
     expect(sessionTitle({ ...baseSession, currentPath: "media/photos" })).toBe("media/photos");
   });
 

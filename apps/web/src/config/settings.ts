@@ -1,5 +1,7 @@
+import type { TFunction } from "i18next";
 import type { ModelProviderKind, ModelProviderSettings } from "../api.js";
-import { formatDate } from "../lib/format.js";
+import { formatDate } from "../i18n/format.js";
+import type { SupportedLocale } from "../i18n/locale.js";
 
 export type SettingsSectionId =
   | "overview"
@@ -10,7 +12,11 @@ export type SettingsSectionId =
   | "appearance"
   | "advanced";
 
+export type SettingsBlueprintSectionId = Exclude<SettingsSectionId, "overview" | "model-providers">;
+export type SettingsGroupId = "sigmaos" | "ai" | "workspace" | "administration";
 export type SettingsState = "ready" | "planned" | "missing";
+
+type Translate = TFunction<"translation">;
 
 export interface ModelProviderFormState {
   provider: ModelProviderKind;
@@ -23,9 +29,7 @@ export interface ModelProviderFormState {
 
 export interface SettingsSection {
   id: SettingsSectionId;
-  group: "SigmaOS" | "AI" | "Workspace" | "Administration";
-  title: string;
-  description: string;
+  group: SettingsGroupId;
   status?: "configured" | "planned";
 }
 
@@ -45,160 +49,322 @@ export interface SettingsBlueprintBlock {
 export const SETTINGS_SECTIONS: SettingsSection[] = [
   {
     id: "overview",
-    group: "SigmaOS",
-    title: "Overview",
-    description: "Service status and appliance identity.",
+    group: "sigmaos",
     status: "planned"
   },
   {
     id: "model-providers",
-    group: "AI",
-    title: "Model Providers",
-    description: "Third-party model provider credentials and endpoint routing.",
+    group: "ai",
     status: "configured"
   },
   {
     id: "agents",
-    group: "AI",
-    title: "Agents",
-    description: "Agent defaults, tools, approvals, and memory policy.",
+    group: "ai",
     status: "planned"
   },
   {
     id: "files",
-    group: "Workspace",
-    title: "Files & Preview",
-    description: "Preview limits, media behavior, indexing, and trash policy.",
+    group: "workspace",
     status: "planned"
   },
   {
     id: "security",
-    group: "Administration",
-    title: "Security",
-    description: "Access control, secret handling, and operation safety.",
+    group: "administration",
     status: "planned"
   },
   {
     id: "appearance",
-    group: "SigmaOS",
-    title: "Appearance",
-    description: "Theme, density, layout defaults, and motion settings.",
+    group: "sigmaos",
     status: "planned"
   },
   {
     id: "advanced",
-    group: "Administration",
-    title: "Advanced",
-    description: "Diagnostics, runtime paths, backups, and maintenance.",
+    group: "administration",
     status: "planned"
   }
 ];
 
-export const SETTINGS_BLUEPRINTS: Record<
-  Exclude<SettingsSectionId, "overview" | "model-providers">,
-  SettingsBlueprintBlock[]
-> = {
-  agents: [
-    {
-      title: "Agent Defaults",
-      description: "Baseline behavior for every new agent session.",
-      items: [
-        { label: "Default mode", detail: "Initial reasoning and execution profile.", value: "Balanced", state: "planned" },
-        { label: "Session memory", detail: "Transcript and workspace context retention.", value: "Per root", state: "planned" },
-        { label: "Tool routing", detail: "Filesystem, terminal, and preview tool availability.", value: "Role based", state: "planned" }
-      ]
-    },
-    {
-      title: "Approval Policy",
-      description: "Operation gates before agents modify the workspace.",
-      items: [
-        { label: "Destructive file actions", detail: "Delete, overwrite, and rollback requests.", value: "Ask first", state: "planned" },
-        { label: "Shell commands", detail: "Command classes that require confirmation.", value: "Profile rules", state: "planned" },
-        { label: "Stop behavior", detail: "How active jobs are interrupted.", value: "Immediate", state: "planned" }
-      ]
-    }
-  ],
-  files: [
-    {
-      title: "Browser & Preview",
-      description: "Limits and handlers for the right workspace pane.",
-      items: [
-        { label: "Text preview cap", detail: "Maximum UTF-8 bytes returned for inline reads.", value: "64 KB", state: "planned" },
-        { label: "PDF handler", detail: "Browser-native PDF viewer in the preview pane.", value: "Native", state: "ready" },
-        { label: "Media streaming", detail: "Range-enabled audio and video playback.", value: "Enabled", state: "ready" }
-      ]
-    },
-    {
-      title: "Indexing",
-      description: "Workspace discovery, search freshness, and ignored paths.",
-      items: [
-        { label: "Search index", detail: "Background file indexing per root.", value: "Manual", state: "planned" },
-        { label: "Hidden files", detail: "Visibility of dotfiles and generated folders.", value: "Filtered", state: "planned" },
-        { label: "Large file policy", detail: "Preview and scan behavior for large binaries.", value: "Metadata only", state: "planned" }
-      ]
-    }
-  ],
-  security: [
-    {
-      title: "Secrets",
-      description: "Credential storage and masking rules.",
-      items: [
-        { label: "API key display", detail: "Stored credentials never render in plain text.", value: "Masked", state: "ready" },
-        { label: "Secret rotation", detail: "Replace credentials without revealing the old value.", value: "Manual", state: "planned" },
-        { label: "Export policy", detail: "Whether settings exports include sensitive fields.", value: "Redacted", state: "planned" }
-      ]
-    },
-    {
-      title: "Workspace Safety",
-      description: "Guards around files, roots, and agent operations.",
-      items: [
-        { label: "Path traversal", detail: "API path resolution stays inside the selected root.", value: "Blocked", state: "ready" },
-        { label: "Operation audit", detail: "File operation proposals and outcomes.", value: "Recorded", state: "ready" },
-        { label: "Admin locks", detail: "High-risk settings require elevated confirmation.", value: "Planned", state: "planned" }
-      ]
-    }
-  ],
-  appearance: [
-    {
-      title: "Interface",
-      description: "Workspace layout, density, and theme preferences.",
-      items: [
-        { label: "Theme", detail: "Discord-like dark surface hierarchy.", value: "Dark", state: "ready" },
-        { label: "Density", detail: "Compact controls for repeated agent work.", value: "Compact", state: "ready" },
-        { label: "Split width", detail: "Persisted chat and workspace pane sizing.", value: "Saved locally", state: "ready" }
-      ]
-    },
-    {
-      title: "Motion",
-      description: "Transitions for modal, navigation, and preview changes.",
-      items: [
-        { label: "Reduced motion", detail: "Respect OS-level motion preferences.", value: "System", state: "planned" },
-        { label: "Panel transitions", detail: "Lightweight content and hover feedback.", value: "Subtle", state: "planned" },
-        { label: "Mobile tabs", detail: "Chat and workspace switch behavior.", value: "Enabled", state: "ready" }
-      ]
-    }
-  ],
-  advanced: [
-    {
-      title: "Runtime",
-      description: "Local service, worker, and diagnostics configuration.",
-      items: [
-        { label: "API endpoint", detail: "Web client target for SigmaOS API routes.", value: "Same origin", state: "ready" },
-        { label: "Worker routing", detail: "Apply provider settings to agent execution.", value: "Pending", state: "planned" },
-        { label: "Diagnostics", detail: "Runtime health snapshots and logs.", value: "Planned", state: "planned" }
-      ]
-    },
-    {
-      title: "Maintenance",
-      description: "Backups, imports, and service-level administration.",
-      items: [
-        { label: "Settings backup", detail: "Export non-secret system settings.", value: "Planned", state: "planned" },
-        { label: "Reset section", detail: "Restore defaults for one settings area.", value: "Planned", state: "planned" },
-        { label: "Schema status", detail: "Database migration visibility.", value: "Planned", state: "planned" }
-      ]
-    }
-  ]
-};
+const SECTION_TITLE_KEYS = {
+  overview: "settings.sections.overview.title",
+  "model-providers": "settings.sections.modelProviders.title",
+  agents: "settings.sections.agents.title",
+  files: "settings.sections.files.title",
+  security: "settings.sections.security.title",
+  appearance: "settings.sections.appearance.title",
+  advanced: "settings.sections.advanced.title"
+} as const satisfies Record<SettingsSectionId, string>;
+
+const SECTION_DESCRIPTION_KEYS = {
+  overview: "settings.sections.overview.description",
+  "model-providers": "settings.sections.modelProviders.description",
+  agents: "settings.sections.agents.description",
+  files: "settings.sections.files.description",
+  security: "settings.sections.security.description",
+  appearance: "settings.sections.appearance.description",
+  advanced: "settings.sections.advanced.description"
+} as const satisfies Record<SettingsSectionId, string>;
+
+const GROUP_LABEL_KEYS = {
+  sigmaos: "settings.groups.sigmaos",
+  ai: "settings.groups.ai",
+  workspace: "settings.groups.workspace",
+  administration: "settings.groups.administration"
+} as const satisfies Record<SettingsGroupId, string>;
+
+export function settingsBlueprints(t: Translate): Record<SettingsBlueprintSectionId, SettingsBlueprintBlock[]> {
+  return {
+    agents: [
+      {
+        title: t("settings.blueprints.agents.defaultsTitle"),
+        description: t("settings.blueprints.agents.defaultsDescription"),
+        items: [
+          {
+            label: t("settings.blueprints.agents.defaultMode"),
+            detail: t("settings.blueprints.agents.defaultModeDetail"),
+            value: t("settings.blueprints.agents.balanced"),
+            state: "planned"
+          },
+          {
+            label: t("settings.blueprints.agents.sessionMemory"),
+            detail: t("settings.blueprints.agents.sessionMemoryDetail"),
+            value: t("settings.blueprints.agents.perRoot"),
+            state: "planned"
+          },
+          {
+            label: t("settings.blueprints.agents.toolRouting"),
+            detail: t("settings.blueprints.agents.toolRoutingDetail"),
+            value: t("settings.blueprints.agents.roleBased"),
+            state: "planned"
+          }
+        ]
+      },
+      {
+        title: t("settings.blueprints.agents.approvalTitle"),
+        description: t("settings.blueprints.agents.approvalDescription"),
+        items: [
+          {
+            label: t("settings.blueprints.agents.destructiveActions"),
+            detail: t("settings.blueprints.agents.destructiveActionsDetail"),
+            value: t("settings.blueprints.agents.askFirst"),
+            state: "planned"
+          },
+          {
+            label: t("settings.blueprints.agents.shellCommands"),
+            detail: t("settings.blueprints.agents.shellCommandsDetail"),
+            value: t("settings.blueprints.agents.profileRules"),
+            state: "planned"
+          },
+          {
+            label: t("settings.blueprints.agents.stopBehavior"),
+            detail: t("settings.blueprints.agents.stopBehaviorDetail"),
+            value: t("settings.blueprints.agents.immediate"),
+            state: "planned"
+          }
+        ]
+      }
+    ],
+    files: [
+      {
+        title: t("settings.blueprints.files.browserTitle"),
+        description: t("settings.blueprints.files.browserDescription"),
+        items: [
+          {
+            label: t("settings.blueprints.files.textPreviewCap"),
+            detail: t("settings.blueprints.files.textPreviewCapDetail"),
+            value: "64 KB",
+            state: "planned"
+          },
+          {
+            label: t("settings.blueprints.files.pdfHandler"),
+            detail: t("settings.blueprints.files.pdfHandlerDetail"),
+            value: t("settings.blueprints.files.native"),
+            state: "ready"
+          },
+          {
+            label: t("settings.blueprints.files.mediaStreaming"),
+            detail: t("settings.blueprints.files.mediaStreamingDetail"),
+            value: t("settings.blueprints.files.enabled"),
+            state: "ready"
+          }
+        ]
+      },
+      {
+        title: t("settings.blueprints.files.indexingTitle"),
+        description: t("settings.blueprints.files.indexingDescription"),
+        items: [
+          {
+            label: t("settings.blueprints.files.searchIndex"),
+            detail: t("settings.blueprints.files.searchIndexDetail"),
+            value: t("settings.blueprints.files.manual"),
+            state: "planned"
+          },
+          {
+            label: t("settings.blueprints.files.hiddenFiles"),
+            detail: t("settings.blueprints.files.hiddenFilesDetail"),
+            value: t("settings.blueprints.files.filtered"),
+            state: "planned"
+          },
+          {
+            label: t("settings.blueprints.files.largeFilePolicy"),
+            detail: t("settings.blueprints.files.largeFilePolicyDetail"),
+            value: t("settings.blueprints.files.metadataOnly"),
+            state: "planned"
+          }
+        ]
+      }
+    ],
+    security: [
+      {
+        title: t("settings.blueprints.security.secretsTitle"),
+        description: t("settings.blueprints.security.secretsDescription"),
+        items: [
+          {
+            label: t("settings.blueprints.security.apiKeyDisplay"),
+            detail: t("settings.blueprints.security.apiKeyDisplayDetail"),
+            value: t("settings.blueprints.security.masked"),
+            state: "ready"
+          },
+          {
+            label: t("settings.blueprints.security.secretRotation"),
+            detail: t("settings.blueprints.security.secretRotationDetail"),
+            value: t("settings.blueprints.security.manual"),
+            state: "planned"
+          },
+          {
+            label: t("settings.blueprints.security.exportPolicy"),
+            detail: t("settings.blueprints.security.exportPolicyDetail"),
+            value: t("settings.blueprints.security.redacted"),
+            state: "planned"
+          }
+        ]
+      },
+      {
+        title: t("settings.blueprints.security.workspaceSafetyTitle"),
+        description: t("settings.blueprints.security.workspaceSafetyDescription"),
+        items: [
+          {
+            label: t("settings.blueprints.security.pathTraversal"),
+            detail: t("settings.blueprints.security.pathTraversalDetail"),
+            value: t("settings.blueprints.security.blocked"),
+            state: "ready"
+          },
+          {
+            label: t("settings.blueprints.security.operationAudit"),
+            detail: t("settings.blueprints.security.operationAuditDetail"),
+            value: t("settings.blueprints.security.recorded"),
+            state: "ready"
+          },
+          {
+            label: t("settings.blueprints.security.adminLocks"),
+            detail: t("settings.blueprints.security.adminLocksDetail"),
+            value: t("common.states.planned"),
+            state: "planned"
+          }
+        ]
+      }
+    ],
+    appearance: [
+      {
+        title: t("settings.blueprints.appearance.interfaceTitle"),
+        description: t("settings.blueprints.appearance.interfaceDescription"),
+        items: [
+          {
+            label: t("settings.blueprints.appearance.theme"),
+            detail: t("settings.blueprints.appearance.themeDetail"),
+            value: t("settings.blueprints.appearance.dark"),
+            state: "ready"
+          },
+          {
+            label: t("settings.blueprints.appearance.density"),
+            detail: t("settings.blueprints.appearance.densityDetail"),
+            value: t("settings.blueprints.appearance.compact"),
+            state: "ready"
+          },
+          {
+            label: t("settings.blueprints.appearance.splitWidth"),
+            detail: t("settings.blueprints.appearance.splitWidthDetail"),
+            value: t("settings.blueprints.appearance.savedLocally"),
+            state: "ready"
+          }
+        ]
+      },
+      {
+        title: t("settings.blueprints.appearance.motionTitle"),
+        description: t("settings.blueprints.appearance.motionDescription"),
+        items: [
+          {
+            label: t("settings.blueprints.appearance.reducedMotion"),
+            detail: t("settings.blueprints.appearance.reducedMotionDetail"),
+            value: t("settings.blueprints.appearance.system"),
+            state: "planned"
+          },
+          {
+            label: t("settings.blueprints.appearance.panelTransitions"),
+            detail: t("settings.blueprints.appearance.panelTransitionsDetail"),
+            value: t("settings.blueprints.appearance.subtle"),
+            state: "planned"
+          },
+          {
+            label: t("settings.blueprints.appearance.mobileTabs"),
+            detail: t("settings.blueprints.appearance.mobileTabsDetail"),
+            value: t("settings.blueprints.appearance.enabled"),
+            state: "ready"
+          }
+        ]
+      }
+    ],
+    advanced: [
+      {
+        title: t("settings.blueprints.advanced.runtimeTitle"),
+        description: t("settings.blueprints.advanced.runtimeDescription"),
+        items: [
+          {
+            label: t("settings.blueprints.advanced.apiEndpoint"),
+            detail: t("settings.blueprints.advanced.apiEndpointDetail"),
+            value: t("settings.blueprints.advanced.sameOrigin"),
+            state: "ready"
+          },
+          {
+            label: t("settings.blueprints.advanced.workerRouting"),
+            detail: t("settings.blueprints.advanced.workerRoutingDetail"),
+            value: t("settings.blueprints.advanced.pending"),
+            state: "planned"
+          },
+          {
+            label: t("settings.blueprints.advanced.diagnostics"),
+            detail: t("settings.blueprints.advanced.diagnosticsDetail"),
+            value: t("common.states.planned"),
+            state: "planned"
+          }
+        ]
+      },
+      {
+        title: t("settings.blueprints.advanced.maintenanceTitle"),
+        description: t("settings.blueprints.advanced.maintenanceDescription"),
+        items: [
+          {
+            label: t("settings.blueprints.advanced.settingsBackup"),
+            detail: t("settings.blueprints.advanced.settingsBackupDetail"),
+            value: t("common.states.planned"),
+            state: "planned"
+          },
+          {
+            label: t("settings.blueprints.advanced.resetSection"),
+            detail: t("settings.blueprints.advanced.resetSectionDetail"),
+            value: t("common.states.planned"),
+            state: "planned"
+          },
+          {
+            label: t("settings.blueprints.advanced.schemaStatus"),
+            detail: t("settings.blueprints.advanced.schemaStatusDetail"),
+            value: t("common.states.planned"),
+            state: "planned"
+          }
+        ]
+      }
+    ]
+  };
+}
 
 export function modelSettingsToForm(settings: ModelProviderSettings | null): ModelProviderFormState {
   return {
@@ -211,18 +377,36 @@ export function modelSettingsToForm(settings: ModelProviderSettings | null): Mod
   };
 }
 
-export function settingsStatus(settings: ModelProviderSettings | null): string {
-  if (!settings) {
-    return "Not loaded";
-  }
-  return settings.apiKeyConfigured ? "API key configured" : "No API key";
+export function settingsGroupLabel(group: SettingsGroupId, t: Translate): string {
+  return t(GROUP_LABEL_KEYS[group]);
 }
 
-export function settingsUpdatedAtLabel(settings: ModelProviderSettings | null): string {
-  if (!settings || settings.updatedAt === new Date(0).toISOString()) {
-    return "Not saved";
+export function settingsSectionTitle(section: SettingsSection, t: Translate): string {
+  return t(SECTION_TITLE_KEYS[section.id]);
+}
+
+export function settingsSectionDescription(section: SettingsSection, t: Translate): string {
+  return t(SECTION_DESCRIPTION_KEYS[section.id]);
+}
+
+export function settingsStatus(settings: ModelProviderSettings | null, t: Translate): string {
+  if (!settings) {
+    return t("settings.modelProvider.notLoaded");
   }
-  return formatDate(settings.updatedAt);
+  return settings.apiKeyConfigured
+    ? t("settings.modelProvider.apiKeyConfigured")
+    : t("settings.modelProvider.noApiKey");
+}
+
+export function settingsUpdatedAtLabel(
+  settings: ModelProviderSettings | null,
+  locale: SupportedLocale,
+  t: Translate
+): string {
+  if (!settings || settings.updatedAt === new Date(0).toISOString()) {
+    return t("settings.modelProvider.notSaved");
+  }
+  return formatDate(settings.updatedAt, locale);
 }
 
 export function settingsSectionState(section: SettingsSection, settings: ModelProviderSettings | null): SettingsState {
@@ -235,30 +419,31 @@ export function settingsSectionState(section: SettingsSection, settings: ModelPr
 export function settingsSectionLabel(
   section: SettingsSection,
   settings: ModelProviderSettings | null,
-  loading = false
+  loading: boolean,
+  t: Translate
 ): string {
   if (loading && section.id === "model-providers") {
-    return "Loading";
+    return t("common.states.loading");
   }
   const state = settingsSectionState(section, settings);
   if (state === "ready") {
-    return "Configured";
+    return t("common.states.configured");
   }
   if (state === "missing") {
-    return "Needs key";
+    return t("common.states.needsKey");
   }
-  return "Planned";
+  return t("common.states.planned");
 }
 
-export function providerLabel(provider: ModelProviderKind): string {
+export function providerLabel(provider: ModelProviderKind, t: Translate): string {
   switch (provider) {
     case "openai-compatible":
-      return "OpenAI compatible";
+      return t("settings.modelProvider.providers.openaiCompatible");
     case "anthropic-compatible":
-      return "Anthropic compatible";
+      return t("settings.modelProvider.providers.anthropicCompatible");
     case "local":
-      return "Local endpoint";
+      return t("settings.modelProvider.providers.local");
     case "pi":
-      return "Pi";
+      return t("settings.modelProvider.providers.pi");
   }
 }

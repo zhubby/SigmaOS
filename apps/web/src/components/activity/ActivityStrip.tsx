@@ -1,4 +1,5 @@
 import { Clock3, RotateCcw, Square } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { FileOperation } from "../../api.js";
 
 export function ActivityStrip({
@@ -8,11 +9,13 @@ export function ActivityStrip({
   operations: FileOperation[];
   onRollback: (operation: FileOperation) => void;
 }) {
+  const { t } = useTranslation();
+
   return (
-    <footer className="activity-strip" aria-label="Recent operations">
+    <footer className="activity-strip" aria-label={t("workspace.recentOperations")}>
       <div className="dock-title">
         <Clock3 aria-hidden="true" size={16} />
-        <span>Activity</span>
+        <span>{t("workspace.activity")}</span>
       </div>
       <ol>
         {operations.slice(0, 5).map((operation) => {
@@ -28,12 +31,12 @@ export function ActivityStrip({
                   {operation.operation} {operation.status}
                 </strong>
                 <small>
-                  {operation.sourcePath ?? "-"}
+                  {operation.sourcePath ?? t("common.dash")}
                   {operation.targetPath ? ` -> ${operation.targetPath}` : ""}
                 </small>
               </span>
               {canRollback ? (
-                <button type="button" onClick={() => onRollback(operation)} title="Rollback">
+                <button type="button" onClick={() => onRollback(operation)} title={t("common.actions.rollback")}>
                   <RotateCcw aria-hidden="true" size={14} />
                 </button>
               ) : null}

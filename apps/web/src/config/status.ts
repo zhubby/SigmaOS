@@ -1,0 +1,17 @@
+export type AppStatus =
+  | "starting"
+  | "offline"
+  | "loading"
+  | "error"
+  | "ready"
+  | "agent-running"
+  | "reconnecting"
+  | "creating-agent"
+  | "searching"
+  | "queued"
+  | "cancelling"
+  | "cancelled"
+  | "applying"
+  | "rejecting"
+  | "restoring"
+  | "rolling-back";

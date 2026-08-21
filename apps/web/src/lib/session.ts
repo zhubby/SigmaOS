@@ -34,7 +34,7 @@ export function isRecoverablePathError(error: unknown): boolean {
   return error instanceof Error && (error.message === "Path not found" || error.message === "Path is not accessible");
 }
 
-export function sessionTitle(session: SessionSummary): string {
-  const source = session.firstMessage ?? session.lastMessage ?? (session.currentPath === "." ? "Root agent" : session.currentPath);
+export function sessionTitle(session: SessionSummary, rootFallback = "Root agent"): string {
+  const source = session.firstMessage ?? session.lastMessage ?? (session.currentPath === "." ? rootFallback : session.currentPath);
   return source.length > 34 ? `${source.slice(0, 31)}...` : source;
 }

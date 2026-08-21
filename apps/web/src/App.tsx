@@ -1,4 +1,5 @@
 import { FormEvent, KeyboardEvent, PointerEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useTranslation } from "react-i18next";
 import { GripVertical, MessageSquare, PanelRight, Settings } from "lucide-react";
 import {
   approveRequest,
@@ -36,7 +37,16 @@ import { ChatPane } from "./components/chat/ChatPane.js";
 import { SettingsModal } from "./components/settings/SettingsModal.js";
 import { WorkspacePane } from "./components/workspace/WorkspacePane.js";
 import { modelSettingsToForm, type ModelProviderFormState, type SettingsSectionId } from "./config/settings.js";
+import type { AppStatus } from "./config/status.js";
+import {
+  readStoredLanguagePreference,
+  resolveBrowserLocale,
+  resolveSupportedLocale,
+  writeStoredLanguagePreference,
+  type LanguagePreference
+} from "./i18n/locale.js";
 import { eventToTranscriptMessage, getEventJobId } from "./lib/events.js";
+import { i18n } from "./i18n/index.js";
 import { toErrorMessage } from "./lib/format.js";
 import { clampSplitWidth, readStoredSplitWidth, writeStoredSplitWidth } from "./lib/layout.js";
 import { loadEntriesForSession } from "./lib/session.js";
@@ -44,6 +54,7 @@ import { loadEntriesForSession } from "./lib/session.js";
 type MobileView = "chat" | "workspace";
 
 export function App() {
+  const { t } = useTranslation();
   const [roots, setRoots] = useState<NasRoot[]>([]);
   const [selectedRootId, setSelectedRootId] = useState("");
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -63,7 +74,7 @@ export function App() {
   const [message, setMessage] = useState("");
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [status, setStatus] = useState("Starting");
+  const [status, setStatus] = useState<AppStatus>("starting");
   const [error, setError] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<MobileView>("chat");
   const [splitWidth, setSplitWidth] = useState(() => readStoredSplitWidth());
@@ -77,6 +88,7 @@ export function App() {
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [languagePreference, setLanguagePreference] = useState<LanguagePreference>(() => readStoredLanguagePreference());
   const seenEvents = useRef(new Set<number>());
   const transcriptRef = useRef<HTMLDivElement | null>(null);
 
@@ -85,7 +97,8 @@ export function App() {
   const activeSessionSummary = sessions.find((item) => item.id === activeSessionId);
   const activeApprovals = approvals.filter((approval) => !session || approval.sessionId === session.id);
   const blobUrl = selectedRootId && selectedFilePath ? getFileBlobUrl(selectedRootId, selectedFilePath) : "";
-  const displayPath = currentPath === "." ? "root" : currentPath;
+  const resolvedLocale = resolveSupportedLocale(i18n.resolvedLanguage ?? i18n.language);
+  const displayPath = currentPath;
   const safeEntries = entries.filter((entry) => entry.isSafe).length;
   const breadcrumbs = useMemo(() => (currentPath === "." ? [] : currentPath.split("/").filter(Boolean)), [currentPath]);
 
@@ -101,7 +114,7 @@ export function App() {
       })
       .catch((nextError: unknown) => {
         setError(toErrorMessage(nextError));
-        setStatus("Offline");
+        setStatus("offline");
       });
     return () => {
       active = false;
@@ -116,7 +129,7 @@ export function App() {
     let active = true;
     const rootId = selectedRootId;
     async function loadRootWorkspace() {
-      setStatus("Loading");
+      setStatus("loading");
       setError(null);
       const nextSessions = await getSessions(rootId);
       let nextSession: Session | SessionSummary | null = nextSessions[0] ?? null;
@@ -149,7 +162,7 @@ export function App() {
       setPreviewMeta(null);
       setTextPreview(null);
       setPreviewError(null);
-      setStatus("Ready");
+      setStatus("ready");
       void refreshWorkQueues();
     }
 
@@ -158,7 +171,7 @@ export function App() {
         return;
       }
       setError(toErrorMessage(nextError));
-      setStatus("Error");
+      setStatus("error");
     });
 
     return () => {
@@ -188,21 +201,21 @@ export function App() {
       }
 
       if (parsed.type === "job.running") {
-        setStatus("Agent running");
+        setStatus("agent-running");
       }
       const eventJobId = getEventJobId(parsed);
       if (parsed.type === "job.completed") {
-        setStatus("Ready");
+        setStatus("ready");
         setActiveJobId((current) => (!eventJobId || current === eventJobId ? null : current));
         void refreshWorkQueues();
         void reloadSessions();
       }
       if (parsed.type === "job.failed") {
-        setStatus("Error");
+        setStatus("error");
         setActiveJobId((current) => (!eventJobId || current === eventJobId ? null : current));
       }
       if (parsed.type === "job.cancelled") {
-        setStatus("Cancelled");
+        setStatus("cancelled");
         setActiveJobId((current) => (!eventJobId || current === eventJobId ? null : current));
       }
       if (parsed.type === "approval.pending") {
@@ -228,7 +241,7 @@ export function App() {
       source.addEventListener(eventType, handleEvent);
     }
     source.onerror = () => {
-      setStatus("Reconnecting");
+      setStatus("reconnecting");
     };
 
     return () => {
@@ -362,7 +375,7 @@ export function App() {
     }
 
     try {
-      setStatus("Loading");
+      setStatus("loading");
       setError(null);
       seenEvents.current.clear();
       setEvents([]);
@@ -383,10 +396,10 @@ export function App() {
       if (loaded.didResetPath) {
         void reloadSessions();
       }
-      setStatus("Ready");
+      setStatus("ready");
     } catch (nextError) {
       setError(toErrorMessage(nextError));
-      setStatus("Error");
+      setStatus("error");
     }
   }
 
@@ -394,7 +407,7 @@ export function App() {
     if (!selectedRootId) {
       return;
     }
-    setStatus("Creating agent");
+    setStatus("creating-agent");
     setError(null);
     const nextSession = await createSession(selectedRootId, currentPath);
     const [nextSessions, nextTranscript] = await Promise.all([
@@ -407,7 +420,7 @@ export function App() {
     setSession(nextSession);
     setActiveSessionId(nextSession.id);
     setTranscript(nextTranscript);
-    setStatus("Ready");
+    setStatus("ready");
     setMobileView("chat");
   }
 
@@ -415,9 +428,9 @@ export function App() {
     if (!selectedRootId) {
       return;
     }
-    setStatus("Loading");
+    setStatus("loading");
     setEntries(await getFiles(selectedRootId, currentPath));
-    setStatus("Ready");
+    setStatus("ready");
   }
 
   async function submitSearch(event: FormEvent<HTMLFormElement>) {
@@ -427,17 +440,17 @@ export function App() {
       return;
     }
 
-    setStatus("Searching");
+    setStatus("searching");
     setEntries(await searchFiles(selectedRootId, currentPath, searchQuery.trim()));
     setSelectedFilePath(null);
-    setStatus("Ready");
+    setStatus("ready");
   }
 
   async function openDirectory(pathname: string) {
     if (!selectedRootId) {
       return;
     }
-    setStatus("Loading");
+    setStatus("loading");
     setError(null);
     setSearchQuery("");
     setSelectedFilePath(null);
@@ -453,7 +466,7 @@ export function App() {
       setSession(updatedSession);
     }
     await reloadSessions();
-    setStatus("Ready");
+    setStatus("ready");
   }
 
   async function submitMessage(event: FormEvent<HTMLFormElement>) {
@@ -474,7 +487,7 @@ export function App() {
         createdAt: now
       }
     ]);
-    setStatus("Queued");
+    setStatus("queued");
     const job = await sendMessage(session.id, content);
     setActiveJobId(job.id);
     void reloadSessions();
@@ -486,7 +499,7 @@ export function App() {
     }
 
     await cancelJob(activeJobId);
-    setStatus("Cancelling");
+    setStatus("cancelling");
   }
 
   async function refreshWorkQueues() {
@@ -500,24 +513,30 @@ export function App() {
   }
 
   async function handleApprove(approvalId: string) {
-    setStatus("Applying");
+    setStatus("applying");
     await approveRequest(approvalId);
     await Promise.all([refreshWorkQueues(), refreshFiles()]);
-    setStatus("Ready");
+    setStatus("ready");
   }
 
   async function handleReject(approvalId: string) {
-    setStatus("Rejecting");
+    setStatus("rejecting");
     await rejectRequest(approvalId);
     await refreshWorkQueues();
-    setStatus("Ready");
+    setStatus("ready");
   }
 
   async function handleRollback(operation: FileOperation) {
-    setStatus(operation.operation === "trash" ? "Restoring" : "Rolling back");
+    setStatus(operation.operation === "trash" ? "restoring" : "rolling-back");
     await rollbackOperation(operation.id);
     await Promise.all([refreshWorkQueues(), refreshFiles()]);
-    setStatus("Ready");
+    setStatus("ready");
+  }
+
+  function changeLanguagePreference(preference: LanguagePreference) {
+    writeStoredLanguagePreference(preference);
+    setLanguagePreference(preference);
+    void i18n.changeLanguage(preference === "system" ? resolveBrowserLocale() : preference);
   }
 
   function selectRoot(rootId: string) {
@@ -582,14 +601,14 @@ export function App() {
       style={{ "--chat-pane-width": `${splitWidth}px` } as CSSProperties}
     >
       <div className="mobile-tabs">
-        <div className="mobile-tab-buttons" role="tablist" aria-label="Primary views">
+        <div className="mobile-tab-buttons" role="tablist" aria-label={t("chat.primaryViews")}>
           <button
             type="button"
             className={mobileView === "chat" ? "is-active" : ""}
             onClick={() => setMobileView("chat")}
           >
             <MessageSquare aria-hidden="true" size={16} />
-            <span>Chat</span>
+            <span>{t("chat.mobileChat")}</span>
           </button>
           <button
             type="button"
@@ -597,10 +616,10 @@ export function App() {
             onClick={() => setMobileView("workspace")}
           >
             <PanelRight aria-hidden="true" size={16} />
-            <span>Workspace</span>
+            <span>{t("chat.mobileWorkspace")}</span>
           </button>
         </div>
-        <button className="mobile-settings-button" type="button" onClick={() => void openSettings()} title="System settings">
+        <button className="mobile-settings-button" type="button" onClick={() => void openSettings()} title={t("common.actions.systemSettings")}>
           <Settings aria-hidden="true" size={17} />
         </button>
       </div>
@@ -617,6 +636,7 @@ export function App() {
         activeApprovals={activeApprovals}
         message={message}
         status={status}
+        locale={resolvedLocale}
         activeJobId={activeJobId}
         hasSession={Boolean(session)}
         transcriptRef={transcriptRef}
@@ -635,7 +655,7 @@ export function App() {
         type="button"
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize panes"
+        aria-label={t("common.actions.resizePanes")}
         onPointerDown={startResize}
         onKeyDown={resizeWithKeyboard}
       >
@@ -661,6 +681,7 @@ export function App() {
         blobUrl={blobUrl}
         searchQuery={searchQuery}
         operations={operations}
+        locale={resolvedLocale}
         onSelectRoot={selectRoot}
         onGoHome={goHome}
         onGoUp={goUp}
@@ -680,8 +701,11 @@ export function App() {
           loading={settingsLoading}
           saving={settingsSaving}
           settings={modelSettings}
+          languagePreference={languagePreference}
+          resolvedLocale={resolvedLocale}
           onClose={() => setSettingsOpen(false)}
           onFormChange={setModelSettingsForm}
+          onLanguagePreferenceChange={changeLanguagePreference}
           onSectionChange={setActiveSettingsSection}
           onSubmit={(event) => void saveSettings(event)}
         />

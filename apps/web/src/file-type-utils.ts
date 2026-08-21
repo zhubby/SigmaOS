@@ -29,7 +29,6 @@ export interface FileVisualInput {
 
 export interface FileVisualDescriptor {
   kind: FileVisualKind;
-  label: string;
 }
 
 const IMAGE_EXTENSIONS = new Set([".avif", ".bmp", ".gif", ".heic", ".ico", ".jpeg", ".jpg", ".png", ".svg", ".tif", ".tiff", ".webp"]);
@@ -121,80 +120,80 @@ const CONFIG_FILE_NAMES = new Set([
 
 export function describeFileVisual(input: FileVisualInput): FileVisualDescriptor {
   if (!input.isSafe) {
-    return { kind: "blocked", label: "blocked" };
+    return { kind: "blocked" };
   }
   if (input.kind === "directory") {
-    return { kind: "directory", label: "folder" };
+    return { kind: "directory" };
   }
   if (input.kind === "symlink") {
-    return { kind: "symlink", label: "link" };
+    return { kind: "symlink" };
   }
   if (input.kind !== "file") {
-    return { kind: "other", label: input.kind };
+    return { kind: "other" };
   }
 
   const lowerName = input.name.toLocaleLowerCase();
   if (PACKAGE_FILE_NAMES.has(lowerName)) {
-    return { kind: "package", label: "package" };
+    return { kind: "package" };
   }
   if (CONFIG_FILE_NAMES.has(lowerName) || lowerName.startsWith(".env.") || lowerName.startsWith("dockerfile.") || lowerName.startsWith("makefile.")) {
-    return { kind: "config", label: "config" };
+    return { kind: "config" };
   }
 
   const extension = getExtension(lowerName);
   if (IMAGE_EXTENSIONS.has(extension)) {
-    return { kind: "image", label: "image" };
+    return { kind: "image" };
   }
   if (AUDIO_EXTENSIONS.has(extension)) {
-    return { kind: "audio", label: "audio" };
+    return { kind: "audio" };
   }
   if (VIDEO_EXTENSIONS.has(extension)) {
-    return { kind: "video", label: "video" };
+    return { kind: "video" };
   }
   if (extension === ".pdf") {
-    return { kind: "pdf", label: "PDF" };
+    return { kind: "pdf" };
   }
   if (ARCHIVE_EXTENSIONS.has(extension)) {
-    return { kind: "archive", label: "archive" };
+    return { kind: "archive" };
   }
   if (SPREADSHEET_EXTENSIONS.has(extension)) {
-    return { kind: "spreadsheet", label: "table" };
+    return { kind: "spreadsheet" };
   }
   if (DOCUMENT_EXTENSIONS.has(extension)) {
-    return { kind: "document", label: "document" };
+    return { kind: "document" };
   }
   if (MARKDOWN_EXTENSIONS.has(extension)) {
-    return { kind: "markdown", label: "markdown" };
+    return { kind: "markdown" };
   }
   if (JSON_EXTENSIONS.has(extension)) {
-    return { kind: "json", label: "JSON" };
+    return { kind: "json" };
   }
   if (DATABASE_EXTENSIONS.has(extension)) {
-    return { kind: "database", label: "database" };
+    return { kind: "database" };
   }
   if (FONT_EXTENSIONS.has(extension)) {
-    return { kind: "font", label: "font" };
+    return { kind: "font" };
   }
   if (SECURE_EXTENSIONS.has(extension)) {
-    return { kind: "secure", label: "secret" };
+    return { kind: "secure" };
   }
   if (SHELL_EXTENSIONS.has(extension)) {
-    return { kind: "shell", label: "script" };
+    return { kind: "shell" };
   }
   if (CONFIG_EXTENSIONS.has(extension)) {
-    return { kind: "config", label: "config" };
+    return { kind: "config" };
   }
   if (CODE_EXTENSIONS.has(extension)) {
-    return { kind: "code", label: "code" };
+    return { kind: "code" };
   }
   if (extension === ".log") {
-    return { kind: "text", label: "log" };
+    return { kind: "text" };
   }
   if (extension === ".txt" || extension === ".text") {
-    return { kind: "text", label: "text" };
+    return { kind: "text" };
   }
 
-  return { kind: "other", label: "file" };
+  return { kind: "other" };
 }
 
 function getExtension(fileName: string): string {

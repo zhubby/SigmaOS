@@ -366,6 +366,35 @@
   color: var(--muted-2);
 }
 
+.settings-preference-field {
+  display: grid;
+  gap: 7px;
+  max-width: 360px;
+  min-width: 0;
+}
+
+.settings-preference-field > span {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 800;
+}
+
+.settings-preference-field select {
+  width: 100%;
+  height: 40px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  padding: 0 10px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.settings-preference-field small {
+  color: var(--muted-2);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
 .settings-check {
   display: flex !important;
   align-items: center;
@@ -553,4 +582,3 @@
 .settings-config-row {
   grid-template-columns: minmax(0, 1fr) auto;
 }
-

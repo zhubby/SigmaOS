@@ -1,8 +1,10 @@
 import { FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { ChevronLeft, Home, RefreshCw, Search } from "lucide-react";
 import type { FileEntry, FileMeta, FileOperation, NasRoot, TextPreview } from "../../api.js";
 import { describeFileVisual } from "../../file-type-utils.js";
-import { formatBytes, formatDate } from "../../lib/format.js";
+import { formatBytes, formatDate, formatLocaleNumber } from "../../i18n/format.js";
+import type { SupportedLocale } from "../../i18n/locale.js";
 import { ActivityStrip } from "../activity/ActivityStrip.js";
 import { FileTypeIcon } from "../file/FileTypeIcon.js";
 import { PreviewContent, previewIcon } from "../preview/PreviewContent.js";
@@ -28,6 +30,7 @@ export function WorkspacePane({
   blobUrl,
   searchQuery,
   operations,
+  locale,
   onSelectRoot,
   onGoHome,
   onGoUp,
@@ -56,6 +59,7 @@ export function WorkspacePane({
   blobUrl: string;
   searchQuery: string;
   operations: FileOperation[];
+  locale: SupportedLocale;
   onSelectRoot: (rootId: string) => void;
   onGoHome: () => void;
   onGoUp: () => void;
@@ -66,12 +70,17 @@ export function WorkspacePane({
   onOpenEntry: (entry: FileEntry) => void;
   onRollback: (operation: FileOperation) => void;
 }) {
+  const { t } = useTranslation();
+  const displayTitle = displayPath === "." ? t("common.root") : displayPath;
+  const entryCount = formatLocaleNumber(entries.length, locale);
+  const safeEntryCount = formatLocaleNumber(safeEntries, locale);
+
   return (
-    <section className={`workspace-pane ${active ? "is-mobile-active" : ""}`} aria-label="Workspace">
+    <section className={`workspace-pane ${active ? "is-mobile-active" : ""}`} aria-label={t("workspace.label")}>
       <header className={`workspace-header${hasRootSwitcher ? " has-root-switcher" : ""}`}>
         {hasRootSwitcher ? (
           <div className="root-control">
-            <label htmlFor="root-select">Root</label>
+            <label htmlFor="root-select">{t("workspace.rootLabel")}</label>
             <select
               id="root-select"
               value={selectedRootId}
@@ -86,9 +95,9 @@ export function WorkspacePane({
           </div>
         ) : null}
 
-        <nav className="breadcrumbs" aria-label="Breadcrumbs">
+        <nav className="breadcrumbs" aria-label={t("workspace.breadcrumbs")}>
           <button type="button" onClick={() => onGoToBreadcrumb(-1)}>
-            root
+            {t("common.root")}
           </button>
           {breadcrumbs.map((crumb, index) => (
             <button key={`${crumb}-${index}`} type="button" onClick={() => onGoToBreadcrumb(index)}>
@@ -103,15 +112,15 @@ export function WorkspacePane({
             type="button"
             onClick={onGoHome}
             disabled={!selectedRoot?.homePath || currentPath === selectedRoot.homePath}
-            title="Home directory"
-            aria-label="Home directory"
+            title={t("common.actions.homeDirectory")}
+            aria-label={t("common.actions.homeDirectory")}
           >
             <Home aria-hidden="true" size={18} />
           </button>
-          <button className="icon-button" type="button" onClick={onGoUp} disabled={currentPath === "."} title="Up">
+          <button className="icon-button" type="button" onClick={onGoUp} disabled={currentPath === "."} title={t("common.actions.up")}>
             <ChevronLeft aria-hidden="true" size={18} />
           </button>
-          <button className="icon-button" type="button" onClick={onRefreshFiles} title="Refresh">
+          <button className="icon-button" type="button" onClick={onRefreshFiles} title={t("common.actions.refresh")}>
             <RefreshCw aria-hidden="true" size={18} />
           </button>
         </div>
@@ -121,37 +130,37 @@ export function WorkspacePane({
           <input
             value={searchQuery}
             onChange={(event) => onSearchQueryChange(event.target.value)}
-            placeholder="Search filenames"
-            aria-label="Search filenames"
+            placeholder={t("workspace.searchPlaceholder")}
+            aria-label={t("workspace.searchAria")}
           />
         </form>
       </header>
 
       <div className="workspace-grid">
-        <section className="file-browser" aria-label="File browser">
+        <section className="file-browser" aria-label={t("workspace.fileBrowser")}>
           <div className="panel-heading">
             <div>
-              <span className="eyebrow">Files</span>
-              <h2>{displayPath}</h2>
+              <span className="eyebrow">{t("workspace.files")}</span>
+              <h2>{displayTitle}</h2>
             </div>
             <dl>
               <div>
-                <dt>Items</dt>
-                <dd>{entries.length}</dd>
+                <dt>{t("workspace.items")}</dt>
+                <dd>{entryCount}</dd>
               </div>
               <div>
-                <dt>Safe</dt>
-                <dd>{safeEntries}</dd>
+                <dt>{t("workspace.safe")}</dt>
+                <dd>{safeEntryCount}</dd>
               </div>
             </dl>
           </div>
 
-          <div className="file-list" role="table" aria-label="Files">
+          <div className="file-list" role="table" aria-label={t("workspace.table.files")}>
             <div className="file-row file-row-head" role="row">
-              <span role="columnheader">Name</span>
-              <span role="columnheader">Type</span>
-              <span role="columnheader">Size</span>
-              <span role="columnheader">Modified</span>
+              <span role="columnheader">{t("workspace.table.name")}</span>
+              <span role="columnheader">{t("workspace.table.type")}</span>
+              <span role="columnheader">{t("workspace.table.size")}</span>
+              <span role="columnheader">{t("workspace.table.modified")}</span>
             </div>
             {entries.map((entry) => {
               const fileVisual = describeFileVisual(entry);
@@ -169,26 +178,26 @@ export function WorkspacePane({
                     <span>{entry.name}</span>
                   </span>
                   <span className={`file-type-label file-type-${fileVisual.kind}`} role="cell">
-                    {fileVisual.label}
+                    {t(`files.labels.${fileVisual.kind}`)}
                   </span>
-                  <span role="cell">{entry.sizeBytes ? formatBytes(entry.sizeBytes) : "-"}</span>
-                  <span role="cell">{entry.modifiedAt === EPOCH_DATE ? "-" : formatDate(entry.modifiedAt)}</span>
+                  <span role="cell">{entry.sizeBytes ? formatBytes(entry.sizeBytes, locale) : t("common.dash")}</span>
+                  <span role="cell">{entry.modifiedAt === EPOCH_DATE ? t("common.dash") : formatDate(entry.modifiedAt, locale)}</span>
                 </button>
               );
             })}
           </div>
         </section>
 
-        <section className="preview-pane" aria-label="Preview">
+        <section className="preview-pane" aria-label={t("workspace.preview")}>
           <div className="panel-heading">
             <div>
-              <span className="eyebrow">Preview</span>
-              <h2>{previewMeta?.name ?? "Select a file"}</h2>
+              <span className="eyebrow">{t("workspace.preview")}</span>
+              <h2>{previewMeta?.name ?? t("workspace.selectFile")}</h2>
             </div>
             {previewMeta ? (
               <span className="preview-kind">
                 {previewIcon(previewMeta.previewKind)}
-                {previewMeta.previewKind}
+                {t(`preview.kind.${previewMeta.previewKind}`)}
               </span>
             ) : null}
           </div>
@@ -199,6 +208,7 @@ export function WorkspacePane({
             meta={previewMeta}
             error={previewError}
             textPreview={textPreview}
+            locale={locale}
           />
         </section>
       </div>

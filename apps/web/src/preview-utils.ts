@@ -175,7 +175,8 @@ export function parseDelimitedTablePreview(
   source: string,
   delimiter: DelimitedPreviewDelimiter,
   maxRows = MAX_TABLE_ROWS,
-  maxColumns = MAX_TABLE_COLUMNS
+  maxColumns = MAX_TABLE_COLUMNS,
+  fallbackHeaderLabel: (index: number) => string = defaultFallbackHeaderLabel
 ): DelimitedTablePreview | null {
   const parsed = Papa.parse<string[]>(source, {
     delimiter,
@@ -201,7 +202,7 @@ export function parseDelimitedTablePreview(
   const dataRows = parsedRows.slice(1);
 
   return {
-    headers: normalizeDelimitedRow(headerRow, displayColumnCount).map((cell, index) => cell.trim() || `Column ${index + 1}`),
+    headers: normalizeDelimitedRow(headerRow, displayColumnCount).map((cell, index) => cell.trim() || fallbackHeaderLabel(index + 1)),
     rows: dataRows.slice(0, maxRows).map((row) => normalizeDelimitedRow(row, displayColumnCount)),
     totalRows: dataRows.length,
     totalColumns,
@@ -264,6 +265,10 @@ function tableDescriptor(delimiter: DelimitedPreviewDelimiter, languageLabel: st
     structuredKind: "table",
     delimiter
   };
+}
+
+function defaultFallbackHeaderLabel(index: number): string {
+  return `Column ${index}`;
 }
 
 function getBaseName(fileName: string): string {

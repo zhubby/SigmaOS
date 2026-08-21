@@ -2,8 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Music, PanelRight, Play, Video } from "lucide-react";
 import remarkGfm from "remark-gfm";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type { FileMeta, FilePreviewKind, TextPreview } from "../../api.js";
-import { formatBytes } from "../../lib/format.js";
+import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
+import type { SupportedLocale } from "../../i18n/locale.js";
 import {
   describeTextPreview,
   highlightSource,
@@ -17,16 +20,20 @@ export function PreviewContent({
   loading,
   meta,
   error,
-  textPreview
+  textPreview,
+  locale
 }: {
   blobUrl: string;
   loading: boolean;
   meta: FileMeta | null;
   error: string | null;
   textPreview: TextPreview | null;
+  locale: SupportedLocale;
 }) {
+  const { t } = useTranslation();
+
   if (loading) {
-    return <div className="preview-empty">Loading preview...</div>;
+    return <div className="preview-empty">{t("preview.loading")}</div>;
   }
   if (error) {
     return (
@@ -40,12 +47,12 @@ export function PreviewContent({
     return (
       <div className="preview-empty">
         <PanelRight aria-hidden="true" size={24} />
-        <span>Choose a text, image, audio, video, or PDF file.</span>
+        <span>{t("preview.chooseFile")}</span>
       </div>
     );
   }
   if (meta.previewKind === "text") {
-    return <TextPreviewPanel meta={meta} textPreview={textPreview} />;
+    return <TextPreviewPanel meta={meta} textPreview={textPreview} locale={locale} />;
   }
   if (meta.previewKind === "image") {
     return (
@@ -76,7 +83,7 @@ export function PreviewContent({
     <div className="preview-empty">
       <File aria-hidden="true" size={24} />
       <strong>{meta.mimeType}</strong>
-      <span>{formatBytes(meta.sizeBytes)} cannot be previewed inline.</span>
+      <span>{t("preview.cannotPreview", { size: formatBytes(meta.sizeBytes, locale) })}</span>
     </div>
   );
 }
@@ -104,15 +111,30 @@ export function previewIcon(kind: FilePreviewKind) {
 }
 
 type TextPreviewMode = "rendered" | "table" | "source";
+type Translate = TFunction<"translation">;
 
-function TextPreviewPanel({ meta, textPreview }: { meta: FileMeta; textPreview: TextPreview | null }) {
+function TextPreviewPanel({
+  meta,
+  textPreview,
+  locale
+}: {
+  meta: FileMeta;
+  textPreview: TextPreview | null;
+  locale: SupportedLocale;
+}) {
+  const { t } = useTranslation();
   const content = textPreview?.content ?? "";
   const descriptor = useMemo(() => describeTextPreview(meta.name, meta.mimeType), [meta.name, meta.mimeType]);
   const defaultMode = getDefaultTextPreviewMode(descriptor);
   const [mode, setMode] = useState<TextPreviewMode>(defaultMode);
   const tablePreview = useMemo(
-    () => (descriptor.structuredKind === "table" && descriptor.delimiter ? parseDelimitedTablePreview(content, descriptor.delimiter) : null),
-    [content, descriptor.delimiter, descriptor.structuredKind]
+    () =>
+      descriptor.structuredKind === "table" && descriptor.delimiter
+        ? parseDelimitedTablePreview(content, descriptor.delimiter, undefined, undefined, (index) =>
+            t("preview.column", { index: formatLocaleNumber(index, locale) })
+          )
+        : null,
+    [content, descriptor.delimiter, descriptor.structuredKind, locale, t]
   );
   const highlighted = useMemo(() => highlightSource(content, descriptor.language), [content, descriptor.language]);
   const availableModes = getTextPreviewModes(descriptor, tablePreview);
@@ -129,10 +151,10 @@ function TextPreviewPanel({ meta, textPreview }: { meta: FileMeta; textPreview: 
       <div className="text-preview-toolbar">
         <div className="preview-source-meta">
           <span>{descriptor.languageLabel}</span>
-          {textPreview?.truncated ? <em>Preview truncated</em> : null}
+          {textPreview?.truncated ? <em>{t("preview.truncated")}</em> : null}
         </div>
         {availableModes.length > 1 ? (
-          <div className="preview-mode-switch" aria-label="Text preview mode">
+          <div className="preview-mode-switch" aria-label={t("preview.modeAria")}>
             {availableModes.map((nextMode) => (
               <button
                 key={nextMode}
@@ -141,7 +163,7 @@ function TextPreviewPanel({ meta, textPreview }: { meta: FileMeta; textPreview: 
                 aria-pressed={nextMode === activeMode}
                 onClick={() => setMode(nextMode)}
               >
-                {textPreviewModeLabel(nextMode)}
+                {textPreviewModeLabel(nextMode, t)}
               </button>
             ))}
           </div>
@@ -151,7 +173,7 @@ function TextPreviewPanel({ meta, textPreview }: { meta: FileMeta; textPreview: 
       {activeMode === "rendered" ? (
         <MarkdownPreview source={content} />
       ) : activeMode === "table" && tablePreview ? (
-        <DelimitedTable preview={tablePreview} />
+        <DelimitedTable preview={tablePreview} locale={locale} />
       ) : (
         <SourcePreview html={highlighted.html} language={highlighted.language} />
       )}
@@ -184,7 +206,9 @@ function MarkdownPreview({ source }: { source: string }) {
   );
 }
 
-function DelimitedTable({ preview }: { preview: DelimitedTablePreview }) {
+function DelimitedTable({ preview, locale }: { preview: DelimitedTablePreview; locale: SupportedLocale }) {
+  const { t } = useTranslation();
+
   return (
     <div className="table-preview">
       <table>
@@ -209,7 +233,12 @@ function DelimitedTable({ preview }: { preview: DelimitedTablePreview }) {
       </table>
       {preview.truncatedRows || preview.truncatedColumns ? (
         <div className="table-preview-note">
-          Showing {preview.rows.length} of {preview.totalRows} rows and {preview.headers.length} of {preview.totalColumns} columns.
+          {t("preview.tableTruncated", {
+            rows: formatLocaleNumber(preview.rows.length, locale),
+            totalRows: formatLocaleNumber(preview.totalRows, locale),
+            columns: formatLocaleNumber(preview.headers.length, locale),
+            totalColumns: formatLocaleNumber(preview.totalColumns, locale)
+          })}
         </div>
       ) : null}
     </div>
@@ -244,14 +273,14 @@ function getTextPreviewModes(descriptor: TextPreviewDescriptor, tablePreview: De
   return ["source"];
 }
 
-function textPreviewModeLabel(mode: TextPreviewMode): string {
+function textPreviewModeLabel(mode: TextPreviewMode, t: Translate): string {
   if (mode === "rendered") {
-    return "Rendered";
+    return t("preview.modes.rendered");
   }
   if (mode === "table") {
-    return "Table";
+    return t("preview.modes.table");
   }
-  return "Source";
+  return t("preview.modes.source");
 }
 
 function markdownCodeLanguage(className: string | undefined): string | null {

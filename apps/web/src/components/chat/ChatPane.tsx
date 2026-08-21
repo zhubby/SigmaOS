@@ -1,4 +1,5 @@
 import { FormEvent, type RefObject } from "react";
+import { useTranslation } from "react-i18next";
 import {
   AlertTriangle,
   Bot,
@@ -12,8 +13,12 @@ import {
   X
 } from "lucide-react";
 import type { AgentEvent, NasRoot, PendingApproval, SessionSummary, TranscriptMessage } from "../../api.js";
-import { formatTime } from "../../lib/format.js";
+import type { AppStatus } from "../../config/status.js";
+import { formatLocaleNumber, formatTime } from "../../i18n/format.js";
+import type { SupportedLocale } from "../../i18n/locale.js";
 import { sessionTitle } from "../../lib/session.js";
+
+type ApprovalRisk = PendingApproval["proposal"][number]["risk"];
 
 export function ChatPane({
   active,
@@ -27,6 +32,7 @@ export function ChatPane({
   activeApprovals,
   message,
   status,
+  locale,
   activeJobId,
   hasSession,
   transcriptRef,
@@ -49,7 +55,8 @@ export function ChatPane({
   error: string | null;
   activeApprovals: PendingApproval[];
   message: string;
-  status: string;
+  status: AppStatus;
+  locale: SupportedLocale;
   activeJobId: string | null;
   hasSession: boolean;
   transcriptRef: RefObject<HTMLDivElement | null>;
@@ -62,22 +69,27 @@ export function ChatPane({
   onMessageChange: (message: string) => void;
   onCancelActiveJob: () => void;
 }) {
+  const { t } = useTranslation();
+  const rootAgentTitle = t("chat.rootAgent");
+  const messageCount = formatLocaleNumber(transcript.length, locale);
+  const eventCount = formatLocaleNumber(events.length, locale);
+
   return (
-    <section className={`chat-pane ${active ? "is-mobile-active" : ""}`} aria-label="Agents">
-      <aside className="agent-list" aria-label="Agent sessions">
+    <section className={`chat-pane ${active ? "is-mobile-active" : ""}`} aria-label={t("chat.agents")}>
+      <aside className="agent-list" aria-label={t("chat.agentSessions")}>
         <div className="brand">
           <img className="brand-banner" src="/sigmaos-banner.svg" alt="" aria-hidden="true" />
-          <h1 className="visually-hidden">SigmaOS</h1>
+          <h1 className="visually-hidden">{t("common.appName")}</h1>
         </div>
 
         <div className="agent-list-head">
-          <span>Agents</span>
-          <button type="button" onClick={onCreateAgent} title="New agent">
+          <span>{t("chat.agents")}</span>
+          <button type="button" onClick={onCreateAgent} title={t("common.actions.newAgent")}>
             <Plus aria-hidden="true" size={16} />
           </button>
         </div>
 
-        <nav className="session-list" aria-label="Agent sessions">
+        <nav className="session-list" aria-label={t("chat.agentSessions")}>
           {sessions.map((item) => (
             <button
               key={item.id}
@@ -87,33 +99,33 @@ export function ChatPane({
             >
               <Bot aria-hidden="true" size={16} />
               <span>
-                <strong>{sessionTitle(item)}</strong>
-                <small>{item.currentPath === "." ? "root" : item.currentPath}</small>
+                <strong>{sessionTitle(item, rootAgentTitle)}</strong>
+                <small>{item.currentPath === "." ? t("common.root") : item.currentPath}</small>
               </span>
             </button>
           ))}
         </nav>
 
         <div className="agent-footer">
-          <button className="settings-button" type="button" onClick={onOpenSettings} title="System settings">
+          <button className="settings-button" type="button" onClick={onOpenSettings} title={t("common.actions.systemSettings")}>
             <Settings aria-hidden="true" size={17} />
           </button>
-          <div className="agent-status" data-state={status.toLowerCase().replace(/\s+/g, "-")}>
-            <span>{status}</span>
+          <div className="agent-status" data-state={status}>
+            <span>{t(`status.${status}`)}</span>
             <ShieldCheck aria-hidden="true" size={15} />
           </div>
         </div>
       </aside>
 
-      <section className="chat-main" aria-label="Agent chat">
+      <section className="chat-main" aria-label={t("chat.agentChat")}>
         <header className="chat-header">
           <div>
-            <span className="eyebrow">{selectedRoot?.name ?? "No root"}</span>
-            <h2>{activeSessionSummary ? sessionTitle(activeSessionSummary) : "Agent"}</h2>
+            <span className="eyebrow">{selectedRoot?.name ?? t("chat.noRoot")}</span>
+            <h2>{activeSessionSummary ? sessionTitle(activeSessionSummary, rootAgentTitle) : t("chat.agent")}</h2>
           </div>
-          <div className="chat-stats" aria-label="Session metrics">
-            <span>{transcript.length} messages</span>
-            <span>{events.length} events</span>
+          <div className="chat-stats" aria-label={t("chat.sessionMetrics")}>
+            <span>{t("chat.metrics.messages", { count: transcript.length, formattedCount: messageCount })}</span>
+            <span>{t("chat.metrics.events", { count: events.length, formattedCount: eventCount })}</span>
           </div>
         </header>
 
@@ -124,7 +136,7 @@ export function ChatPane({
           </div>
         ) : null}
 
-        <div ref={transcriptRef} className="transcript" aria-label="Transcript">
+        <div ref={transcriptRef} className="transcript" aria-label={t("chat.transcript")}>
           {transcript.length ? (
             transcript.map((item) => (
               <article key={item.id} className={`message message-${item.role}`}>
@@ -133,8 +145,8 @@ export function ChatPane({
                 </div>
                 <div>
                   <header>
-                    <strong>{item.role === "assistant" ? "Sigma Agent" : "You"}</strong>
-                    <time>{formatTime(item.createdAt)}</time>
+                    <strong>{item.role === "assistant" ? t("chat.sigmaAgent") : t("chat.you")}</strong>
+                    <time>{formatTime(item.createdAt, locale)}</time>
                   </header>
                   <p>{item.content}</p>
                 </div>
@@ -143,39 +155,42 @@ export function ChatPane({
           ) : (
             <div className="empty-state">
               <Bot aria-hidden="true" size={22} />
-              <strong>Ready for a NAS task.</strong>
-              <span>Ask about the selected folder or request approval-gated file work.</span>
+              <strong>{t("chat.emptyTitle")}</strong>
+              <span>{t("chat.emptyBody")}</span>
             </div>
           )}
         </div>
 
-        <section className="approval-dock" aria-label="Pending approvals">
+        <section className="approval-dock" aria-label={t("chat.pendingApprovals")}>
           <div className="dock-title">
             <ShieldCheck aria-hidden="true" size={16} />
-            <span>Approvals</span>
+            <span>{t("chat.approvals")}</span>
           </div>
           {activeApprovals.length ? (
-            activeApprovals.map((approval) => (
-              <article key={approval.id} className="approval-item">
-                <div>
-                  <strong>{approval.proposal.map((item) => item.operation).join(", ")}</strong>
-                  <span>{approval.proposal.map((item) => item.summary).join("; ")}</span>
-                </div>
-                <span className="risk-pill" data-risk={approval.proposal[0]?.risk ?? "low"}>
-                  {approval.proposal[0]?.risk ?? "low"} risk
-                </span>
-                <div className="approval-actions">
-                  <button type="button" onClick={() => onApprove(approval.id)} title="Approve">
-                    <Check aria-hidden="true" size={15} />
-                  </button>
-                  <button type="button" onClick={() => onReject(approval.id)} title="Reject">
-                    <X aria-hidden="true" size={15} />
-                  </button>
-                </div>
-              </article>
-            ))
+            activeApprovals.map((approval) => {
+              const risk = approval.proposal[0]?.risk ?? "low";
+              return (
+                <article key={approval.id} className="approval-item">
+                  <div>
+                    <strong>{approval.proposal.map((item) => item.operation).join(", ")}</strong>
+                    <span>{approval.proposal.map((item) => item.summary).join("; ")}</span>
+                  </div>
+                  <span className="risk-pill" data-risk={risk}>
+                    {t("chat.risk", { risk: approvalRiskLabel(risk, t) })}
+                  </span>
+                  <div className="approval-actions">
+                    <button type="button" onClick={() => onApprove(approval.id)} title={t("common.actions.approve")}>
+                      <Check aria-hidden="true" size={15} />
+                    </button>
+                    <button type="button" onClick={() => onReject(approval.id)} title={t("common.actions.reject")}>
+                      <X aria-hidden="true" size={15} />
+                    </button>
+                  </div>
+                </article>
+              );
+            })
           ) : (
-            <p>No pending approvals.</p>
+            <p>{t("chat.noApprovals")}</p>
           )}
         </section>
 
@@ -183,22 +198,32 @@ export function ChatPane({
           <textarea
             value={message}
             onChange={(event) => onMessageChange(event.target.value)}
-            placeholder="Message Sigma Agent"
-            aria-label="Agent message"
+            placeholder={t("chat.messagePlaceholder")}
+            aria-label={t("chat.messageAria")}
             rows={3}
           />
           <div className="composer-actions">
             <button className="secondary-button" type="button" onClick={onCancelActiveJob} disabled={!activeJobId}>
               <CircleStop aria-hidden="true" size={16} />
-              <span>Stop</span>
+              <span>{t("common.actions.stop")}</span>
             </button>
             <button className="primary-button" type="submit" disabled={!hasSession || !message.trim()}>
               <Send aria-hidden="true" size={16} />
-              <span>Send</span>
+              <span>{t("common.actions.send")}</span>
             </button>
           </div>
         </form>
       </section>
     </section>
   );
+}
+
+function approvalRiskLabel(risk: ApprovalRisk, t: ReturnType<typeof useTranslation>["t"]): string {
+  if (risk === "high") {
+    return t("chat.risks.high");
+  }
+  if (risk === "medium") {
+    return t("chat.risks.medium");
+  }
+  return t("chat.risks.low");
 }
