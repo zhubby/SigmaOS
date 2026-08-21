@@ -9,6 +9,7 @@ import {
   createUserMessageAndJob,
   ensureNasRoots,
   getFileOperation,
+  getTrashEntry,
   listFileOperations,
   openSigmaDb,
   updateJobStatus,
@@ -568,6 +569,65 @@ describe("API server", () => {
     expect(response.statusCode).toBe(202);
     await expect(readFile(path.join(rootDir, "hello.txt"), "utf8")).resolves.toBe("hello");
     expect(applied ? getFileOperation(db, applied.id)?.status : null).toBe("rolled_back");
+    await server.close();
+  });
+
+  it("restores a trash entry directly through the trash API", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const { job } = createUserMessageAndJob(db, {
+      sessionId: session.id,
+      content: "trash hello.txt"
+    });
+    updateJobStatus(db, job.id, "waiting_approval");
+    const approval = createPendingApproval(db, {
+      jobId: job.id,
+      proposal: [
+        {
+          operation: "trash",
+          rootId: "local",
+          sourcePath: "hello.txt",
+          risk: "medium",
+          reversible: true,
+          summary: "Trash hello.txt"
+        }
+      ]
+    });
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    await server.inject({
+      method: "POST",
+      url: `/api/approvals/${approval.id}/approve`
+    });
+    const applied = listFileOperations(db).find(
+      (operation) => operation.operation === "trash" && operation.status === "applied"
+    );
+    const trashEntryId = applied?.metadata.trashEntryId;
+    expect(typeof trashEntryId).toBe("string");
+    if (typeof trashEntryId !== "string") {
+      throw new Error("Missing trash entry id");
+    }
+    await expect(stat(path.join(rootDir, "hello.txt"))).rejects.toThrow();
+
+    const response = await server.inject({
+      method: "POST",
+      url: `/api/trash/${trashEntryId}/restore`
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({
+      trashEntryId,
+      operation: {
+        operation: "restore",
+        status: "applied",
+        targetPath: "hello.txt"
+      }
+    });
+    await expect(readFile(path.join(rootDir, "hello.txt"), "utf8")).resolves.toBe("hello");
+    expect(getTrashEntry(db, trashEntryId)?.restoredAt).toEqual(expect.any(String));
+    expect(
+      listFileOperations(db).some(
+        (operation) => operation.operation === "restore" && operation.metadata.trashEntryId === trashEntryId
+      )
+    ).toBe(true);
     await server.close();
   });
 
