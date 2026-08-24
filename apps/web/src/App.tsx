@@ -89,6 +89,7 @@ export function App() {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [approvals, setApprovals] = useState<PendingApproval[]>([]);
   const [operations, setOperations] = useState<FileOperation[]>([]);
+  const [operationsReady, setOperationsReady] = useState(false);
   const [currentPath, setCurrentPath] = useState(".");
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
@@ -562,6 +563,7 @@ export function App() {
       const [nextApprovals, nextOperations] = await Promise.all([getApprovals(), getOperations()]);
       setApprovals(nextApprovals);
       setOperations(nextOperations);
+      setOperationsReady(true);
     } catch (nextError) {
       setError(toErrorMessage(nextError));
     }
@@ -847,6 +849,7 @@ export function App() {
         previewCollapsed={previewCollapsed}
         searchQuery={searchQuery}
         operations={operations}
+        operationsReady={operationsReady}
         locale={resolvedLocale}
         onSelectRoot={selectRoot}
         onGoHome={goHome}

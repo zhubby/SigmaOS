@@ -123,6 +123,7 @@ export const en = {
     expandPreview: "Expand preview",
     recentOperations: "Recent operations",
     activity: "Activity",
+    noActivity: "No recent activity.",
     actions: {
       rename: "Rename",
       renameEntry: "Rename {{name}}",
@@ -598,6 +599,7 @@ export const zhCN = {
     expandPreview: "展开预览",
     recentOperations: "最近操作",
     activity: "活动",
+    noActivity: "暂无最近活动。",
     actions: {
       rename: "重命名",
       renameEntry: "重命名 {{name}}",

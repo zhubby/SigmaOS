@@ -1,64 +1,136 @@
-.activity-strip {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 12px;
-  min-height: 56px;
-  padding: 8px 14px;
-  border-top: 1px solid rgb(0 0 0 / 24%);
-  background: var(--channel-bg);
+.activity-menu {
+  position: relative;
+  flex: 0 0 auto;
 }
 
-.activity-strip ol {
-  display: flex;
+.activity-menu-button {
+  position: relative;
+}
+
+.activity-unread-dot {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--red);
+  box-shadow: 0 0 0 2px rgb(218 55 60 / 18%);
+}
+
+.activity-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  display: grid;
   gap: 10px;
+  width: min(360px, calc(100vw - 28px));
+  max-height: min(440px, calc(100vh - 98px));
+  padding: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: #232631;
+  box-shadow: var(--shadow);
+}
+
+.activity-popover::before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  right: 13px;
+  width: 10px;
+  height: 10px;
+  border-top: 1px solid var(--line-soft);
+  border-left: 1px solid var(--line-soft);
+  background: #232631;
+  transform: rotate(45deg);
+}
+
+.activity-popover header {
+  display: grid;
+  gap: 3px;
   min-width: 0;
+  padding: 0 2px;
+}
+
+.activity-popover header strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.activity-popover ol {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  max-height: 340px;
   margin: 0;
   padding: 0;
   overflow: auto;
   list-style: none;
 }
 
-.activity-strip li {
+.activity-popover li {
   display: grid;
-  grid-template-columns: 12px minmax(120px, 220px) auto;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
-  flex: 0 0 auto;
-  min-height: 36px;
-  padding: 0 8px;
-  border: 1px solid var(--line-soft);
+  gap: 8px;
+  min-height: 42px;
+  padding: 8px;
+  border: 1px solid rgb(255 255 255 / 5%);
   border-radius: 5px;
   color: var(--muted);
-  background: var(--surface);
+  background: rgb(255 255 255 / 4%);
 }
 
-.activity-strip li > svg {
+.activity-popover li > svg {
   color: var(--yellow);
   fill: currentColor;
 }
 
-.activity-strip strong,
-.activity-strip small {
+.activity-popover li > span,
+.activity-popover strong,
+.activity-popover small {
   display: block;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.activity-strip strong {
+.activity-popover li strong {
   color: var(--text);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
-.activity-strip small {
+.activity-popover small {
+  margin-top: 3px;
   color: var(--muted-2);
   font-size: 10.5px;
 }
 
-.activity-strip button {
+.activity-popover button {
+  display: inline-grid;
+  place-items: center;
   width: 28px;
   height: 28px;
   border-radius: 5px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
 }
 
+.activity-popover button:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.activity-popover p {
+  margin: 0;
+  padding: 18px 4px 8px;
+  color: var(--muted-2);
+  font-size: 12px;
+  text-align: center;
+}

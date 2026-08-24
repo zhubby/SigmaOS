@@ -386,7 +386,7 @@
     display: none;
   }
 
-  .activity-strip {
-    grid-template-columns: 1fr;
+  .activity-popover {
+    max-height: calc(100dvh - 92px);
   }
 }

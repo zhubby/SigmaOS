@@ -5,7 +5,7 @@ import type { FileEntry, FileMeta, FileOperation, NasRoot, TextPreview } from ".
 import { describeFileVisual } from "../../file-type-utils.js";
 import { formatBytes, formatDate, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
-import { ActivityStrip } from "../activity/ActivityStrip.js";
+import { ActivityMenu } from "../activity/ActivityMenu.js";
 import { CustomSelect } from "../common/CustomSelect.js";
 import { FileTypeIcon } from "../file/FileTypeIcon.js";
 import { PreviewContent, previewIcon } from "../preview/PreviewContent.js";
@@ -33,6 +33,7 @@ export function WorkspacePane({
   previewCollapsed,
   searchQuery,
   operations,
+  operationsReady,
   locale,
   onSelectRoot,
   onGoHome,
@@ -68,6 +69,7 @@ export function WorkspacePane({
   previewCollapsed: boolean;
   searchQuery: string;
   operations: FileOperation[];
+  operationsReady: boolean;
   locale: SupportedLocale;
   onSelectRoot: (rootId: string) => void;
   onGoHome: () => void;
@@ -254,6 +256,7 @@ export function WorkspacePane({
           <button className="icon-button" type="button" onClick={onRefreshFiles} title={t("common.actions.refresh")}>
             <RefreshCw aria-hidden="true" size={18} />
           </button>
+          <ActivityMenu operations={operations} operationsReady={operationsReady} onRollback={onRollback} />
         </div>
 
         <form className="search" onSubmit={onSubmitSearch}>
@@ -493,7 +496,6 @@ export function WorkspacePane({
         </div>
       ) : null}
 
-      <ActivityStrip operations={operations} onRollback={onRollback} />
     </section>
   );
 }

@@ -117,7 +117,6 @@ button:disabled {
 
 .agent-list-head button,
 .icon-button,
-.activity-strip button,
 .approval-actions button,
 .settings-button,
 .settings-content-header button,
@@ -136,7 +135,6 @@ button:disabled {
 
 .agent-list-head button:hover,
 .icon-button:hover:not(:disabled),
-.activity-strip button:hover,
 .approval-actions button:hover,
 .settings-button:hover,
 .settings-content-header button:hover {
@@ -146,7 +144,6 @@ button:disabled {
 .session-item span,
 .message p,
 .approval-item span,
-.activity-strip small,
 .file-name span {
   min-width: 0;
 }
