@@ -78,6 +78,18 @@ export const en = {
       medium: "medium",
       high: "high"
     },
+    approvalCards: {
+      fileOperation: "File operation",
+      fileTitle: "File work",
+      fileApproval: "Review the requested file operation.",
+      toolCall: "Tool call",
+      toolTitle: "Pi {{tool}}",
+      toolApproval: "Review the requested tool call.",
+      root: "Root",
+      paths: "Paths",
+      cwd: "CWD",
+      args: "Args"
+    },
     messagePlaceholder: "Message Sigma Agent",
     messageAria: "Agent message",
     metrics: {
@@ -514,6 +526,18 @@ export const zhCN = {
       low: "低",
       medium: "中",
       high: "高"
+    },
+    approvalCards: {
+      fileOperation: "文件操作",
+      fileTitle: "文件任务",
+      fileApproval: "请确认请求的文件操作。",
+      toolCall: "工具调用",
+      toolTitle: "Pi {{tool}}",
+      toolApproval: "请确认请求的工具调用。",
+      root: "根目录",
+      paths: "路径",
+      cwd: "工作目录",
+      args: "参数"
     },
     messagePlaceholder: "给 Sigma Agent 发消息",
     messageAria: "Agent 消息",

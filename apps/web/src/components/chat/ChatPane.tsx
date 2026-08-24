@@ -5,11 +5,13 @@ import {
   Bot,
   Check,
   CircleStop,
+  FileCog,
   MessageSquare,
   Plus,
   Send,
   Settings,
   ShieldCheck,
+  TerminalSquare,
   X
 } from "lucide-react";
 import type { AgentEvent, NasRoot, PendingApproval, SessionSummary, TranscriptMessage } from "../../api.js";
@@ -19,6 +21,15 @@ import type { SupportedLocale } from "../../i18n/locale.js";
 import { sessionTitle } from "../../lib/session.js";
 
 type ApprovalRisk = PendingApproval["proposal"][number]["risk"];
+type ApprovalCardKind = "file" | "tool";
+
+interface ApprovalCard {
+  kind: ApprovalCardKind;
+  title: string;
+  detail: string;
+  meta: string;
+  items: { label: string; value: string }[];
+}
 
 export function ChatPane({
   active,
@@ -161,30 +172,71 @@ export function ChatPane({
           )}
         </div>
 
-        <section className="approval-dock" aria-label={t("chat.pendingApprovals")}>
+        <section
+          className={activeApprovals.length ? "approval-dock has-approvals" : "approval-dock"}
+          aria-label={t("chat.pendingApprovals")}
+        >
           <div className="dock-title">
-            <ShieldCheck aria-hidden="true" size={16} />
-            <span>{t("chat.approvals")}</span>
+            <span>
+              <ShieldCheck aria-hidden="true" size={16} />
+              {t("chat.approvals")}
+            </span>
+            {activeApprovals.length ? <strong>{formatLocaleNumber(activeApprovals.length, locale)}</strong> : null}
           </div>
           {activeApprovals.length ? (
             activeApprovals.map((approval) => {
               const risk = approval.proposal[0]?.risk ?? "low";
-              const summary = approvalSummary(approval);
+              const card = approvalCard(approval, t);
+              const CardIcon = card.kind === "tool" ? TerminalSquare : FileCog;
               return (
-                <article key={approval.id} className="approval-item">
-                  <div>
-                    <strong>{summary.title}</strong>
-                    <span>{summary.detail}</span>
+                <article key={approval.id} className="approval-card">
+                  <div className="approval-card-icon" aria-hidden="true" data-kind={card.kind}>
+                    <CardIcon size={18} />
                   </div>
-                  <span className="risk-pill" data-risk={risk}>
-                    {t("chat.risk", { risk: approvalRiskLabel(risk, t) })}
-                  </span>
+
+                  <div className="approval-card-body">
+                    <div className="approval-card-head">
+                      <div>
+                        <span className="approval-card-kicker">{card.meta}</span>
+                        <strong>{card.title}</strong>
+                      </div>
+                      <span className="risk-pill" data-risk={risk}>
+                        {t("chat.risk", { risk: approvalRiskLabel(risk, t) })}
+                      </span>
+                    </div>
+
+                    <p>{card.detail}</p>
+
+                    {card.items.length ? (
+                      <dl className="approval-card-details">
+                        {card.items.map((item) => (
+                          <div key={`${item.label}-${item.value}`}>
+                            <dt>{item.label}</dt>
+                            <dd title={item.value}>{item.value}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    ) : null}
+                  </div>
+
                   <div className="approval-actions">
-                    <button type="button" onClick={() => onApprove(approval.id)} title={t("common.actions.approve")}>
+                    <button
+                      type="button"
+                      className="approval-approve"
+                      onClick={() => onApprove(approval.id)}
+                      title={t("common.actions.approve")}
+                    >
                       <Check aria-hidden="true" size={15} />
+                      <span>{t("common.actions.approve")}</span>
                     </button>
-                    <button type="button" onClick={() => onReject(approval.id)} title={t("common.actions.reject")}>
+                    <button
+                      type="button"
+                      className="approval-reject"
+                      onClick={() => onReject(approval.id)}
+                      title={t("common.actions.reject")}
+                    >
                       <X aria-hidden="true" size={15} />
+                      <span>{t("common.actions.reject")}</span>
                     </button>
                   </div>
                 </article>
@@ -229,25 +281,54 @@ function approvalRiskLabel(risk: ApprovalRisk, t: ReturnType<typeof useTranslati
   return t("chat.risks.low");
 }
 
-function approvalSummary(approval: PendingApproval): { title: string; detail: string } {
+function approvalCard(approval: PendingApproval, t: ReturnType<typeof useTranslation>["t"]): ApprovalCard {
   if (approval.kind === "pi_tool_call") {
     const toolCall = approval.proposal.find((proposal) => "toolName" in proposal);
     if (!toolCall || !("toolName" in toolCall)) {
       return {
-        title: "Pi tool",
-        detail: "Tool approval"
+        kind: "tool",
+        title: t("chat.approvalCards.toolTitle", { tool: "Pi" }),
+        detail: t("chat.approvalCards.toolApproval"),
+        meta: t("chat.approvalCards.toolCall"),
+        items: []
       };
     }
     return {
-      title: `Pi ${toolCall.toolName}`,
-      detail: `${toolCall.summary} | cwd ${toolCall.cwd} | ${summarizeArgs(toolCall.args)}`
+      kind: "tool",
+      title: t("chat.approvalCards.toolTitle", { tool: toolCall.toolName }),
+      detail: toolCall.summary,
+      meta: t("chat.approvalCards.toolCall"),
+      items: [
+        { label: t("chat.approvalCards.cwd"), value: toolCall.cwd },
+        { label: t("chat.approvalCards.args"), value: summarizeArgs(toolCall.args) || t("common.dash") }
+      ]
     };
   }
 
   const fileOperations = approval.proposal.filter((proposal) => "operation" in proposal);
+  const firstOperation = fileOperations[0];
+  const affectedPaths = Array.from(
+    new Set(
+      fileOperations
+        .flatMap((item) => ("operation" in item ? [item.sourcePath, item.targetPath, item.trashEntryId] : []))
+        .filter((path): path is string => Boolean(path))
+    )
+  );
   return {
-    title: fileOperations.map((item) => ("operation" in item ? item.operation : "")).join(", "),
-    detail: fileOperations.map((item) => ("summary" in item ? item.summary : "")).join("; ")
+    kind: "file",
+    title: fileOperations.map((item) => ("operation" in item ? item.operation : "")).join(", ") || t("chat.approvalCards.fileTitle"),
+    detail:
+      fileOperations.map((item) => ("summary" in item ? item.summary : "")).filter(Boolean).join("; ") ||
+      t("chat.approvalCards.fileApproval"),
+    meta: t("chat.approvalCards.fileOperation"),
+    items: [
+      ...(firstOperation && "rootId" in firstOperation
+        ? [{ label: t("chat.approvalCards.root"), value: firstOperation.rootId }]
+        : []),
+      ...(affectedPaths.length
+        ? [{ label: t("chat.approvalCards.paths"), value: affectedPaths.join(" -> ") }]
+        : [])
+    ]
   };
 }
 

@@ -359,13 +359,22 @@
     flex-direction: column;
   }
 
-  .approval-item {
-    grid-template-columns: minmax(0, 1fr) auto;
+  .approval-dock.has-approvals {
+    min-height: min(300px, 42vh);
+  }
+
+  .approval-card {
+    grid-template-columns: 36px minmax(0, 1fr);
   }
 
   .approval-actions {
     grid-column: 1 / -1;
-    justify-content: end;
+    grid-template-columns: 1fr 1fr;
+    min-width: 0;
+  }
+
+  .approval-card-details {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .file-row {
