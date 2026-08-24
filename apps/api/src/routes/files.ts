@@ -1,5 +1,6 @@
 import { createReadStream } from "node:fs";
 import { lstat, stat, writeFile } from "node:fs/promises";
+import path from "node:path";
 import type { FastifyInstance } from "fastify";
 import {
   inferMimeType,
@@ -7,10 +8,11 @@ import {
   listDir,
   readText,
   resolveSafeExistingPath,
+  resolveSafeTargetPath,
   searchFiles
 } from "@sigmaos/nas-tools";
-import { recordAppliedOperation } from "@sigmaos/db";
-import type { NasRootRecord } from "@sigmaos/shared";
+import { appendEvent, createPendingApproval, createUserMessageAndJob, getSession, recordAppliedOperation } from "@sigmaos/db";
+import type { FileOperationProposal, NasRootRecord } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
 import {
   clampPreviewBytes,
@@ -169,6 +171,80 @@ export function registerFileRoutes(server: FastifyInstance, { db }: ApiRouteCont
     });
   });
 
+  server.post<{
+    Body: {
+      sessionId?: string;
+      rootId?: string;
+      operation?: "rename" | "trash";
+      sourcePath?: string;
+      targetName?: string;
+    };
+  }>("/api/files/proposals", async (request, reply) => {
+    const session = getSession(db, request.body?.sessionId ?? "");
+    if (!session) {
+      reply.status(404).send({ error: "Session not found" });
+      return;
+    }
+
+    const root = resolveRoot(db, request.body?.rootId);
+    if (!root) {
+      reply.status(404).send({ error: "NAS root not found" });
+      return;
+    }
+    if (session.rootId !== root.id) {
+      reply.status(400).send({ error: "Session root does not match proposal root" });
+      return;
+    }
+
+    const operation = request.body?.operation;
+    if (operation !== "rename" && operation !== "trash") {
+      reply.status(400).send({ error: "Unsupported file proposal operation" });
+      return;
+    }
+
+    const source = await getMutableSource(root, request.body?.sourcePath ?? ".");
+    if ("error" in source) {
+      reply.status(source.statusCode).send({ error: source.error });
+      return;
+    }
+
+    const proposal =
+      operation === "rename"
+        ? await buildRenameProposal(root, source.safe.relativePath, request.body?.targetName)
+        : buildTrashProposal(root, source.safe.relativePath);
+    if ("error" in proposal) {
+      reply.status(proposal.statusCode).send({ error: proposal.error });
+      return;
+    }
+
+    const summary = proposal.proposal.summary;
+    const { message, job } = createUserMessageAndJob(db, {
+      sessionId: session.id,
+      content: summary,
+      status: "waiting_approval"
+    });
+    const approval = createPendingApproval(db, {
+      jobId: job.id,
+      proposal: [proposal.proposal]
+    });
+    appendEvent(db, {
+      sessionId: session.id,
+      jobId: job.id,
+      type: "approval.pending",
+      payload: {
+        approvalId: approval.id,
+        proposal: approval.proposal,
+        summary: `Created approval ${approval.id}: ${summary}. No files were changed.`
+      }
+    });
+
+    reply.status(202).send({
+      message,
+      job,
+      approval
+    });
+  });
+
   server.get<{
     Querystring: { rootId?: string; path?: string };
   }>("/api/files/blob", async (request, reply) => {
@@ -267,4 +343,107 @@ async function getEditableTextTarget(
   }
 
   return { safe, meta };
+}
+
+async function getMutableSource(
+  root: NasRootRecord,
+  requestedPath: string
+): Promise<
+  | {
+      safe: Awaited<ReturnType<typeof resolveSafeExistingPath>>;
+    }
+  | { statusCode: number; error: string }
+> {
+  const safe = await resolveSafeExistingPath(root.path, requestedPath);
+  if (safe.relativePath === ".") {
+    return { statusCode: 400, error: "Cannot mutate the NAS root" };
+  }
+  const linkStat = await lstat(safe.absolutePath);
+  if (linkStat.isSymbolicLink()) {
+    return { statusCode: 400, error: "Refusing to mutate through a symlink" };
+  }
+
+  return { safe };
+}
+
+async function buildRenameProposal(
+  root: NasRootRecord,
+  sourcePath: string,
+  rawTargetName: string | undefined
+): Promise<
+  | {
+      proposal: FileOperationProposal;
+    }
+  | { statusCode: number; error: string }
+> {
+  const targetName = normalizeTargetName(rawTargetName);
+  if ("error" in targetName) {
+    return targetName;
+  }
+
+  const sourceName = path.basename(sourcePath);
+  if (targetName.name === sourceName) {
+    return { statusCode: 400, error: "New name must be different" };
+  }
+
+  const parentPath = path.dirname(sourcePath);
+  const targetPath = parentPath === "." ? targetName.name : path.join(parentPath, targetName.name);
+  const target = await resolveSafeTargetPath(root.path, targetPath);
+  const targetExists = await pathExists(target.absolutePath);
+  if (targetExists) {
+    return { statusCode: 409, error: "Mutation target already exists" };
+  }
+
+  return {
+    proposal: {
+      operation: "rename",
+      rootId: root.id,
+      sourcePath,
+      targetPath: target.relativePath,
+      risk: "medium",
+      reversible: true,
+      summary: `Rename ${sourcePath} to ${target.relativePath}`
+    }
+  };
+}
+
+function buildTrashProposal(
+  root: NasRootRecord,
+  sourcePath: string
+): {
+  proposal: FileOperationProposal;
+} {
+  return {
+    proposal: {
+      operation: "trash",
+      rootId: root.id,
+      sourcePath,
+      risk: "medium",
+      reversible: true,
+      summary: `Move ${sourcePath} to SigmaOS trash`
+    }
+  };
+}
+
+function normalizeTargetName(rawTargetName: string | undefined): { name: string } | { statusCode: number; error: string } {
+  const name = rawTargetName?.trim() ?? "";
+  if (!name) {
+    return { statusCode: 400, error: "New name is required" };
+  }
+  if (name === "." || name === ".." || path.isAbsolute(name) || name.includes("/") || name.includes("\\")) {
+    return { statusCode: 400, error: "New name must stay in the same folder" };
+  }
+  return { name };
+}
+
+async function pathExists(absolutePath: string): Promise<boolean> {
+  try {
+    await stat(absolutePath);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
 }

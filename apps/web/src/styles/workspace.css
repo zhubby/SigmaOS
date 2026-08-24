@@ -178,12 +178,13 @@
 
 .file-list {
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .file-row {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) 92px 90px 132px;
+  grid-template-columns: minmax(150px, 1fr) 92px 90px 132px 66px;
   align-items: center;
   width: 100%;
   min-height: 42px;
@@ -194,14 +195,20 @@
   text-align: left;
 }
 
-button.file-row {
+.file-row:not(.file-row-head) {
   cursor: pointer;
 }
 
-button.file-row:hover:not(:disabled),
-button.file-row.is-selected {
+.file-row:not(.file-row-head):hover,
+.file-row:not(.file-row-head):focus-visible,
+.file-row.is-selected {
   color: var(--text);
   background: var(--surface-hover);
+}
+
+.file-row[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.62;
 }
 
 .file-row-head {
@@ -214,6 +221,14 @@ button.file-row.is-selected {
   font-size: 10.5px;
   font-weight: 800;
   text-transform: uppercase;
+}
+
+.workspace-grid.has-preview:not(.is-preview-collapsed) .file-row {
+  grid-template-columns: minmax(0, 1fr) 78px 74px 66px;
+}
+
+.workspace-grid.has-preview:not(.is-preview-collapsed) .file-row > span:nth-child(4) {
+  display: none;
 }
 
 .file-name {
@@ -314,6 +329,168 @@ button.file-row.is-selected {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.file-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+  opacity: 0;
+  overflow: visible;
+  pointer-events: none;
+  transform: translateX(4px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+  white-space: normal;
+}
+
+.file-row:not(.file-row-head):hover .file-row-actions,
+.file-row:focus-within .file-row-actions {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
+.file-action-button {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  color: var(--muted);
+  background: rgb(255 255 255 / 4%);
+  cursor: pointer;
+  transition:
+    color 140ms ease,
+    background 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease;
+}
+
+.file-action-button:hover:not(:disabled) {
+  color: var(--text);
+  border-color: rgb(255 255 255 / 14%);
+  background: var(--surface-hover);
+  transform: translateY(-1px);
+}
+
+.file-action-button.is-danger {
+  color: #ff9da1;
+  background: rgb(218 55 60 / 12%);
+}
+
+.file-action-button.is-danger:hover:not(:disabled) {
+  color: white;
+  border-color: rgb(218 55 60 / 45%);
+  background: var(--red);
+}
+
+.file-action-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgb(10 11 15 / 62%);
+  backdrop-filter: blur(8px);
+}
+
+.file-action-dialog {
+  display: grid;
+  gap: 14px;
+  width: min(420px, 100%);
+  padding: 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: #232631;
+  box-shadow: var(--shadow);
+}
+
+.file-action-dialog header {
+  display: grid;
+  gap: 4px;
+}
+
+.file-action-dialog h2 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-action-field {
+  display: grid;
+  gap: 7px;
+}
+
+.file-action-field span,
+.file-action-hint {
+  color: var(--muted-2);
+  font-size: 11.5px;
+}
+
+.file-action-field span {
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.file-action-field input {
+  width: 100%;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.file-action-hint,
+.file-action-copy,
+.file-action-error {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.file-action-copy {
+  color: #dbdee1;
+}
+
+.file-action-error {
+  padding: 9px 10px;
+  border: 1px solid rgb(218 55 60 / 36%);
+  border-radius: 5px;
+  color: #ffb3b6;
+  background: rgb(218 55 60 / 12%);
+  font-size: 12px;
+}
+
+.file-action-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.danger-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 86px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 5px;
+  color: white;
+  background: var(--red);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.danger-button:hover:not(:disabled) {
+  background: #b92f34;
 }
 
 .preview-kind {

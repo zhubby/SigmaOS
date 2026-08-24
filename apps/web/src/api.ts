@@ -43,6 +43,14 @@ export interface Job {
   status: string;
 }
 
+export interface AgentMessage {
+  id: string;
+  sessionId: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+}
+
 export interface FileOperationProposal {
   operation: string;
   rootId: string;
@@ -155,6 +163,12 @@ export interface SaveEditableTextResult {
   meta: FileMeta;
   textPreview: TextPreview;
   operation: FileOperation;
+}
+
+export interface FileProposalResult {
+  message: AgentMessage;
+  job: Job;
+  approval: PendingApproval;
 }
 
 export const MAX_EDIT_TEXT_BYTES = 1024 * 1024;
@@ -334,6 +348,24 @@ export async function saveEditableText(input: {
   });
   await ensureOk(response);
   return (await response.json()) as SaveEditableTextResult;
+}
+
+export async function proposeFileOperation(input: {
+  sessionId: string;
+  rootId: string;
+  operation: "rename" | "trash";
+  sourcePath: string;
+  targetName?: string;
+}): Promise<FileProposalResult> {
+  const response = await fetch("/api/files/proposals", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(input)
+  });
+  await ensureOk(response);
+  return (await response.json()) as FileProposalResult;
 }
 
 export function getFileBlobUrl(rootId: string, currentPath: string): string {

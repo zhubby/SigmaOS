@@ -16,6 +16,7 @@ import {
   getTranscript,
   getModelProviderSettings,
   getPiToolPolicySettings,
+  proposeFileOperation,
   rejectRequest,
   rollbackOperation,
   saveModelProviderSettings,
@@ -567,8 +568,10 @@ export function App() {
   }
 
   async function handleApprove(approvalId: string) {
+    const approval = approvals.find((item) => item.id === approvalId);
     setStatus("applying");
     await approveRequest(approvalId);
+    applyApprovedSelectionChange(approval);
     await Promise.all([refreshWorkQueues(), refreshFiles()]);
     setStatus("ready");
   }
@@ -622,6 +625,81 @@ export function App() {
       )
     );
     setOperations((current) => [result.operation, ...current.filter((operation) => operation.id !== result.operation.id)].slice(0, 100));
+  }
+
+  async function requestFileRename(entry: FileEntry, targetName: string) {
+    if (!session || !selectedRootId) {
+      throw new Error(t("workspace.actions.noSession"));
+    }
+
+    setStatus("queued");
+    setError(null);
+    try {
+      await proposeFileOperation({
+        sessionId: session.id,
+        rootId: selectedRootId,
+        operation: "rename",
+        sourcePath: entry.path,
+        targetName
+      });
+      await Promise.all([refreshWorkQueues(), reloadSessions()]);
+      setStatus("ready");
+    } catch (nextError) {
+      setStatus("error");
+      setError(toErrorMessage(nextError));
+      throw nextError;
+    }
+  }
+
+  async function requestFileTrash(entry: FileEntry) {
+    if (!session || !selectedRootId) {
+      throw new Error(t("workspace.actions.noSession"));
+    }
+
+    setStatus("queued");
+    setError(null);
+    try {
+      await proposeFileOperation({
+        sessionId: session.id,
+        rootId: selectedRootId,
+        operation: "trash",
+        sourcePath: entry.path
+      });
+      await Promise.all([refreshWorkQueues(), reloadSessions()]);
+      setStatus("ready");
+    } catch (nextError) {
+      setStatus("error");
+      setError(toErrorMessage(nextError));
+      throw nextError;
+    }
+  }
+
+  function applyApprovedSelectionChange(approval: PendingApproval | undefined) {
+    if (!approval || !selectedFilePath) {
+      return;
+    }
+
+    for (const proposal of approval.proposal) {
+      if (!("operation" in proposal)) {
+        continue;
+      }
+      if (proposal.operation === "trash" && proposal.sourcePath && pathContains(proposal.sourcePath, selectedFilePath)) {
+        setSelectedFilePath(null);
+        setPreviewMeta(null);
+        setTextPreview(null);
+        setPreviewError(null);
+        setPreviewCollapsed(false);
+        return;
+      }
+      if (proposal.operation === "rename" && proposal.sourcePath && proposal.targetPath) {
+        const renamedSelection = renamedPath(selectedFilePath, proposal.sourcePath, proposal.targetPath);
+        if (renamedSelection) {
+          setSelectedFilePath(renamedSelection);
+          setPreviewCollapsed(false);
+          return;
+        }
+      }
+    }
   }
 
   function selectRoot(rootId: string) {
@@ -779,6 +857,8 @@ export function App() {
         onGoToBreadcrumb={goToBreadcrumb}
         onOpenEntry={openEntry}
         onOpenEditor={setEditorMeta}
+        onRequestRename={(entry, targetName) => requestFileRename(entry, targetName)}
+        onRequestTrash={(entry) => requestFileTrash(entry)}
         onTogglePreviewCollapsed={() => setPreviewCollapsed((collapsed) => !collapsed)}
         onRollback={(operation) => void handleRollback(operation)}
       />
@@ -819,4 +899,18 @@ export function App() {
       ) : null}
     </main>
   );
+}
+
+function pathContains(containerPath: string, candidatePath: string): boolean {
+  return candidatePath === containerPath || candidatePath.startsWith(`${containerPath}/`);
+}
+
+function renamedPath(candidatePath: string, sourcePath: string, targetPath: string): string | null {
+  if (candidatePath === sourcePath) {
+    return targetPath;
+  }
+  if (candidatePath.startsWith(`${sourcePath}/`)) {
+    return `${targetPath}${candidatePath.slice(sourcePath.length)}`;
+  }
+  return null;
 }

@@ -474,6 +474,103 @@ describe("API server", () => {
     await server.close();
   });
 
+  it("creates approval-gated rename proposals without changing files", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const server = await buildServer({ config: testConfig(tempDir), db });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/files/proposals",
+      payload: {
+        sessionId: session.id,
+        rootId: "local",
+        operation: "rename",
+        sourcePath: "hello.txt",
+        targetName: "renamed.txt"
+      }
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({
+      job: {
+        sessionId: session.id,
+        status: "waiting_approval"
+      },
+      approval: {
+        sessionId: session.id,
+        kind: "file_operation",
+        status: "pending",
+        proposal: [
+          {
+            operation: "rename",
+            rootId: "local",
+            sourcePath: "hello.txt",
+            targetPath: "renamed.txt"
+          }
+        ]
+      }
+    });
+    await expect(readFile(path.join(rootDir, "hello.txt"), "utf8")).resolves.toBe("hello");
+    await expect(stat(path.join(rootDir, "renamed.txt"))).rejects.toThrow();
+    const approval = getApproval(db, response.json().approval.id);
+    expect(approval?.status).toBe("pending");
+    expect(getJob(db, response.json().job.id)?.status).toBe("waiting_approval");
+    await server.close();
+  });
+
+  it("creates approval-gated trash proposals without moving files", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const server = await buildServer({ config: testConfig(tempDir), db });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/files/proposals",
+      payload: {
+        sessionId: session.id,
+        rootId: "local",
+        operation: "trash",
+        sourcePath: "hello.txt"
+      }
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({
+      approval: {
+        kind: "file_operation",
+        status: "pending",
+        proposal: [
+          {
+            operation: "trash",
+            rootId: "local",
+            sourcePath: "hello.txt"
+          }
+        ]
+      }
+    });
+    await expect(readFile(path.join(rootDir, "hello.txt"), "utf8")).resolves.toBe("hello");
+    await server.close();
+  });
+
+  it("refuses file operation proposals against the NAS root itself", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const server = await buildServer({ config: testConfig(tempDir), db });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/files/proposals",
+      payload: {
+        sessionId: session.id,
+        rootId: "local",
+        operation: "trash",
+        sourcePath: "."
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "Cannot mutate the NAS root" });
+    await server.close();
+  });
+
   it("refuses stale editable text saves", async () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const editable = await server.inject({

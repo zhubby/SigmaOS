@@ -114,14 +114,33 @@ export const en = {
       name: "Name",
       type: "Type",
       size: "Size",
-      modified: "Modified"
+      modified: "Modified",
+      actions: "Actions"
     },
     preview: "Preview",
     selectFile: "Select a file",
     collapsePreview: "Collapse preview",
     expandPreview: "Expand preview",
     recentOperations: "Recent operations",
-    activity: "Activity"
+    activity: "Activity",
+    actions: {
+      rename: "Rename",
+      renameEntry: "Rename {{name}}",
+      delete: "Delete",
+      deleteEntry: "Delete {{name}}",
+      newName: "New name",
+      renameHint: "Renaming stays in the current folder and creates an approval request.",
+      requestRename: "Request rename",
+      deleteTitle: "Delete this file?",
+      deleteBody: "{{name}} will be moved to SigmaOS trash after approval.",
+      deleteFolderTitle: "Delete this folder?",
+      deleteFolderBody: "{{name}} is a folder. Continue to the second confirmation before creating the approval request.",
+      deleteFolderFinalTitle: "Confirm folder delete",
+      deleteFolderFinalBody: "{{name}} and its contents will be moved to SigmaOS trash after approval.",
+      continueDelete: "Continue",
+      requestDelete: "Request delete",
+      noSession: "No active session"
+    }
   },
   editor: {
     eyebrow: "Editor",
@@ -570,14 +589,33 @@ export const zhCN = {
       name: "名称",
       type: "类型",
       size: "大小",
-      modified: "修改时间"
+      modified: "修改时间",
+      actions: "操作"
     },
     preview: "预览",
     selectFile: "选择文件",
     collapsePreview: "收起预览",
     expandPreview: "展开预览",
     recentOperations: "最近操作",
-    activity: "活动"
+    activity: "活动",
+    actions: {
+      rename: "重命名",
+      renameEntry: "重命名 {{name}}",
+      delete: "删除",
+      deleteEntry: "删除 {{name}}",
+      newName: "新名称",
+      renameHint: "重命名仅限当前文件夹，并会创建审批请求。",
+      requestRename: "请求重命名",
+      deleteTitle: "删除这个文件？",
+      deleteBody: "{{name}} 会在审批通过后移动到 SigmaOS 回收站。",
+      deleteFolderTitle: "删除这个文件夹？",
+      deleteFolderBody: "{{name}} 是文件夹。继续后还需要再确认一次，才会创建审批请求。",
+      deleteFolderFinalTitle: "确认删除文件夹",
+      deleteFolderFinalBody: "{{name}} 及其内容会在审批通过后移动到 SigmaOS 回收站。",
+      continueDelete: "继续",
+      requestDelete: "请求删除",
+      noSession: "没有活动会话"
+    }
   },
   editor: {
     eyebrow: "编辑器",
