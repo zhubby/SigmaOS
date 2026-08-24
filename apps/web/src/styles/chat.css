@@ -325,7 +325,7 @@
 
 .composer textarea,
 .search input,
-.root-control select {
+.root-control .custom-select-trigger {
   width: 100%;
   border: 1px solid var(--line-soft);
   border-radius: 5px;
@@ -351,5 +351,4 @@
   justify-content: flex-end;
   gap: 8px;
 }
-
 

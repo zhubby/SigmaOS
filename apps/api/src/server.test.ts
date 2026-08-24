@@ -1,14 +1,17 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   appendEvent,
   createPendingApproval,
+  createPiToolCallApproval,
   createSession,
   createUserMessageAndJob,
   ensureNasRoots,
+  getApproval,
   getFileOperation,
+  getJob,
   getTrashEntry,
   listFileOperations,
   openSigmaDb,
@@ -120,8 +123,8 @@ describe("API server", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       settings: {
-        provider: "pi",
-        displayName: "Pi",
+        providerName: "google",
+        displayName: "Google",
         baseUrl: null,
         model: "",
         apiKeyConfigured: false
@@ -137,7 +140,7 @@ describe("API server", () => {
       method: "PATCH",
       url: "/api/settings/model-provider",
       payload: {
-        provider: "openai-compatible",
+        providerName: "openrouter",
         displayName: "OpenRouter",
         baseUrl: "https://openrouter.ai/api/v1",
         model: "anthropic/claude-sonnet-4",
@@ -152,7 +155,7 @@ describe("API server", () => {
     expect(saved.statusCode).toBe(200);
     expect(saved.json()).toMatchObject({
       settings: {
-        provider: "openai-compatible",
+        providerName: "openrouter",
         displayName: "OpenRouter",
         baseUrl: "https://openrouter.ai/api/v1",
         model: "anthropic/claude-sonnet-4",
@@ -174,7 +177,7 @@ describe("API server", () => {
       method: "PATCH",
       url: "/api/settings/model-provider",
       payload: {
-        provider: "anthropic-compatible",
+        providerName: "anthropic",
         apiKey: "secret-token"
       }
     });
@@ -190,10 +193,55 @@ describe("API server", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       settings: {
-        provider: "anthropic-compatible",
+        providerName: "anthropic",
         apiKeyConfigured: false
       }
     });
+    await server.close();
+  });
+
+  it("saves Pi tool policy settings and rejects dangerous auto mode", async () => {
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    const defaults = await server.inject({
+      method: "GET",
+      url: "/api/settings/pi-tool-policy"
+    });
+    const saved = await server.inject({
+      method: "PATCH",
+      url: "/api/settings/pi-tool-policy",
+      payload: {
+        read: "ask",
+        bash: "disabled"
+      }
+    });
+    const invalid = await server.inject({
+      method: "PATCH",
+      url: "/api/settings/pi-tool-policy",
+      payload: {
+        bash: "auto"
+      }
+    });
+
+    expect(defaults.statusCode).toBe(200);
+    expect(defaults.json()).toMatchObject({
+      settings: {
+        read: "auto",
+        grep: "auto",
+        find: "auto",
+        ls: "auto",
+        bash: "ask",
+        edit: "ask",
+        write: "ask"
+      }
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json()).toMatchObject({
+      settings: {
+        read: "ask",
+        bash: "disabled"
+      }
+    });
+    expect(invalid.statusCode).toBe(400);
     await server.close();
   });
 
@@ -355,6 +403,111 @@ describe("API server", () => {
       truncated: true,
       maxBytes: 3
     });
+    await server.close();
+  });
+
+  it("previews generic octet-stream files as text", async () => {
+    await writeFile(path.join(rootDir, "payload.bin"), "raw payload");
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    const metaResponse = await server.inject({
+      method: "GET",
+      url: "/api/files/meta?rootId=local&path=payload.bin"
+    });
+    const textResponse = await server.inject({
+      method: "GET",
+      url: "/api/files/text?rootId=local&path=payload.bin&maxBytes=64"
+    });
+
+    expect(metaResponse.statusCode).toBe(200);
+    expect(metaResponse.json()).toMatchObject({
+      meta: {
+        name: "payload.bin",
+        mimeType: "application/octet-stream",
+        previewKind: "text"
+      }
+    });
+    expect(textResponse.statusCode).toBe(200);
+    expect(textResponse.json()).toMatchObject({
+      path: "payload.bin",
+      content: "raw payload",
+      truncated: false
+    });
+    await server.close();
+  });
+
+  it("writes editable text without edit approval", async () => {
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    const editable = await server.inject({
+      method: "GET",
+      url: "/api/files/edit-text?rootId=local&path=hello.txt"
+    });
+    const save = await server.inject({
+      method: "PUT",
+      url: "/api/files/edit-text",
+      payload: {
+        rootId: "local",
+        path: "hello.txt",
+        content: "changed",
+        expectedModifiedAt: editable.json().modifiedAt
+      }
+    });
+
+    expect(save.statusCode).toBe(200);
+    expect(save.json()).toMatchObject({
+      meta: {
+        path: "hello.txt",
+        previewKind: "text"
+      },
+      textPreview: {
+        path: "hello.txt",
+        content: "changed",
+        truncated: false
+      },
+      operation: {
+        operation: "edit",
+        approvalId: null,
+        status: "applied",
+        sourcePath: "hello.txt"
+      }
+    });
+    await expect(readFile(path.join(rootDir, "hello.txt"), "utf8")).resolves.toBe("changed");
+    await server.close();
+  });
+
+  it("refuses stale editable text saves", async () => {
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    const editable = await server.inject({
+      method: "GET",
+      url: "/api/files/edit-text?rootId=local&path=hello.txt"
+    });
+    await writeFile(path.join(rootDir, "hello.txt"), "external");
+
+    const save = await server.inject({
+      method: "PUT",
+      url: "/api/files/edit-text",
+      payload: {
+        rootId: "local",
+        path: "hello.txt",
+        content: "changed",
+        expectedModifiedAt: editable.json().modifiedAt
+      }
+    });
+
+    expect(save.statusCode).toBe(409);
+    await expect(readFile(path.join(rootDir, "hello.txt"), "utf8")).resolves.toBe("external");
+    await server.close();
+  });
+
+  it("refuses editable text access through symlinks", async () => {
+    await symlink(path.join(rootDir, "hello.txt"), path.join(rootDir, "hello-link.txt"));
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/files/edit-text?rootId=local&path=hello-link.txt"
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "Refusing to edit through a symlink" });
     await server.close();
   });
 
@@ -660,6 +813,38 @@ describe("API server", () => {
 
     expect(response.statusCode).toBe(202);
     await expect(readFile(path.join(rootDir, "hello.txt"), "utf8")).resolves.toBe("hello");
+    await server.close();
+  });
+
+  it("resolves Pi tool approvals without applying file operations or completing the job", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const { job } = createUserMessageAndJob(db, {
+      sessionId: session.id,
+      content: "run ls"
+    });
+    updateJobStatus(db, job.id, "waiting_approval");
+    const approval = createPiToolCallApproval(db, {
+      jobId: job.id,
+      proposal: {
+        toolCallId: "tool-1",
+        toolName: "bash",
+        args: { command: "ls" },
+        cwd: rootDir,
+        risk: "medium",
+        summary: "Run shell command: ls"
+      }
+    });
+    const server = await buildServer({ config: testConfig(tempDir), db });
+
+    const response = await server.inject({
+      method: "POST",
+      url: `/api/approvals/${approval.id}/approve`
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(getApproval(db, approval.id)?.status).toBe("approved");
+    expect(getJob(db, job.id)?.status).toBe("waiting_approval");
+    expect(listFileOperations(db, { approvalId: approval.id })).toEqual([]);
     await server.close();
   });
 });

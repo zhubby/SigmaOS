@@ -1,0 +1,233 @@
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
+import { AlertTriangle, CheckCircle2, FilePenLine, LoaderCircle, RotateCcw, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import {
+  getEditableText,
+  saveEditableText,
+  type FileMeta,
+  type SaveEditableTextResult
+} from "../../api.js";
+import { formatBytes, formatTime } from "../../i18n/format.js";
+import type { SupportedLocale } from "../../i18n/locale.js";
+import { toErrorMessage } from "../../lib/format.js";
+
+type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "conflict" | "error";
+
+export function FileEditorModal({
+  rootId,
+  meta,
+  locale,
+  onClose,
+  onSaved
+}: {
+  rootId: string;
+  meta: FileMeta;
+  locale: SupportedLocale;
+  onClose: () => void;
+  onSaved: (result: SaveEditableTextResult) => void;
+}) {
+  const { t } = useTranslation();
+  const [content, setContent] = useState("");
+  const [savedContent, setSavedContent] = useState("");
+  const [modifiedAt, setModifiedAt] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const onSavedRef = useRef(onSaved);
+
+  const dirty = content !== savedContent;
+  const blocked = saveStatus === "conflict";
+  const contentBytes = useMemo(() => new TextEncoder().encode(content).length, [content]);
+  const status = useMemo(
+    () => editorStatusLabel({ dirty, error, loading, saveStatus, t }),
+    [dirty, error, loading, saveStatus, t]
+  );
+
+  useEffect(() => {
+    onSavedRef.current = onSaved;
+  }, [onSaved]);
+
+  const loadEditor = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setSaveStatus("idle");
+    setLastSavedAt(null);
+
+    try {
+      const editable = await getEditableText(rootId, meta.path);
+      setContent(editable.content);
+      setSavedContent(editable.content);
+      setModifiedAt(editable.modifiedAt);
+      setLastSavedAt(editable.modifiedAt);
+      setSaveStatus("saved");
+    } catch (nextError) {
+      setError(toErrorMessage(nextError));
+      setSaveStatus("error");
+    } finally {
+      setLoading(false);
+    }
+  }, [meta.path, rootId]);
+
+  useEffect(() => {
+    void loadEditor();
+  }, [loadEditor]);
+
+  const saveNow = useCallback(
+    async (nextContent: string) => {
+      if (loading) {
+        return false;
+      }
+
+      setSaveStatus("saving");
+      setError(null);
+      try {
+        const result = await saveEditableText({
+          rootId,
+          currentPath: meta.path,
+          content: nextContent,
+          expectedModifiedAt: modifiedAt
+        });
+        setSavedContent(nextContent);
+        setModifiedAt(result.meta.modifiedAt);
+        setLastSavedAt(result.meta.modifiedAt);
+        setSaveStatus("saved");
+        onSavedRef.current(result);
+        return true;
+      } catch (nextError) {
+        const message = toErrorMessage(nextError);
+        setError(message);
+        setSaveStatus(message.includes("changed since") ? "conflict" : "error");
+        return false;
+      }
+    },
+    [loading, meta.path, modifiedAt, rootId]
+  );
+
+  useEffect(() => {
+    if (loading || blocked || !dirty || saveStatus === "saving" || saveStatus === "error") {
+      return;
+    }
+
+    setSaveStatus("dirty");
+    const timer = window.setTimeout(() => {
+      void saveNow(content);
+    }, 700);
+
+    return () => window.clearTimeout(timer);
+  }, [blocked, content, dirty, loading, saveNow, saveStatus]);
+
+  async function closeEditor() {
+    if (saveStatus === "saving") {
+      return;
+    }
+    if (dirty && !blocked) {
+      const saved = await saveNow(content);
+      if (!saved) {
+        return;
+      }
+    }
+    onClose();
+  }
+
+  function changeContent(nextContent: string) {
+    setContent(nextContent);
+    if (saveStatus !== "conflict") {
+      setError(null);
+      setSaveStatus("dirty");
+    }
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      void saveNow(content);
+    }
+  }
+
+  return (
+    <div className="editor-backdrop">
+      <section className="editor-modal" role="dialog" aria-modal="true" aria-labelledby="file-editor-title">
+        <header className="editor-header">
+          <div>
+            <span className="eyebrow">{t("editor.eyebrow")}</span>
+            <h2 id="file-editor-title">{meta.name}</h2>
+            <small>{meta.path}</small>
+          </div>
+          <span className="editor-status" data-state={status.state}>
+            {status.icon}
+            {status.label}
+          </span>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => void closeEditor()}
+            disabled={saveStatus === "saving"}
+            title={t("editor.close")}
+          >
+            <X aria-hidden="true" size={18} />
+          </button>
+        </header>
+
+        {error ? (
+          <div className="editor-alert" role="alert">
+            <AlertTriangle aria-hidden="true" size={17} />
+            <span>{error}</span>
+            {saveStatus === "conflict" ? (
+              <button type="button" onClick={() => void loadEditor()}>
+                <RotateCcw aria-hidden="true" size={14} />
+                {t("editor.reload")}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        <textarea
+          className="editor-textarea"
+          value={content}
+          onChange={(event) => changeContent(event.target.value)}
+          onKeyDown={handleKeyDown}
+          aria-label={t("editor.textarea")}
+          disabled={loading}
+          spellCheck={false}
+        />
+
+        <footer className="editor-footer">
+          <span>{formatBytes(contentBytes, locale)}</span>
+          <span>{lastSavedAt ? t("editor.savedAt", { time: formatTime(lastSavedAt, locale) }) : t("editor.notSaved")}</span>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function editorStatusLabel({
+  dirty,
+  error,
+  loading,
+  saveStatus,
+  t
+}: {
+  dirty: boolean;
+  error: string | null;
+  loading: boolean;
+  saveStatus: SaveStatus;
+  t: ReturnType<typeof useTranslation>["t"];
+}): { icon: ReactElement; label: string; state: string } {
+  if (loading) {
+    return { icon: <LoaderCircle aria-hidden="true" size={14} />, label: t("editor.states.loading"), state: "loading" };
+  }
+  if (saveStatus === "conflict") {
+    return { icon: <AlertTriangle aria-hidden="true" size={14} />, label: t("editor.states.conflict"), state: "error" };
+  }
+  if (error) {
+    return { icon: <AlertTriangle aria-hidden="true" size={14} />, label: t("editor.states.error"), state: "error" };
+  }
+  if (saveStatus === "saving") {
+    return { icon: <LoaderCircle aria-hidden="true" size={14} />, label: t("editor.states.saving"), state: "saving" };
+  }
+  if (dirty) {
+    return { icon: <FilePenLine aria-hidden="true" size={14} />, label: t("editor.states.unsaved"), state: "dirty" };
+  }
+  return { icon: <CheckCircle2 aria-hidden="true" size={14} />, label: t("editor.states.saved"), state: "saved" };
+}

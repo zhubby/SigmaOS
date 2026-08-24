@@ -1,5 +1,5 @@
 import type { TFunction } from "i18next";
-import type { ModelProviderKind, ModelProviderSettings } from "../api.js";
+import type { ModelProviderSettings, PiDangerousToolPolicyMode, PiToolPolicyMode, PiToolPolicySettings } from "../api.js";
 import { formatDate } from "../i18n/format.js";
 import type { SupportedLocale } from "../i18n/locale.js";
 
@@ -19,7 +19,7 @@ export type SettingsState = "ready" | "planned" | "missing";
 type Translate = TFunction<"translation">;
 
 export interface ModelProviderFormState {
-  provider: ModelProviderKind;
+  providerName: string;
   displayName: string;
   baseUrl: string;
   model: string;
@@ -46,6 +46,11 @@ export interface SettingsBlueprintBlock {
   items: SettingsBlueprintItem[];
 }
 
+export type ToolPolicyFormState = PiToolPolicySettings;
+
+export const READ_ONLY_TOOL_POLICY_OPTIONS: PiToolPolicyMode[] = ["auto", "ask", "disabled"];
+export const DANGEROUS_TOOL_POLICY_OPTIONS: PiDangerousToolPolicyMode[] = ["ask", "disabled"];
+
 export const SETTINGS_SECTIONS: SettingsSection[] = [
   {
     id: "overview",
@@ -60,12 +65,12 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   {
     id: "agents",
     group: "ai",
-    status: "planned"
+    status: "configured"
   },
   {
     id: "files",
     group: "workspace",
-    status: "planned"
+    status: "configured"
   },
   {
     id: "security",
@@ -168,12 +173,6 @@ export function settingsBlueprints(t: Translate): Record<SettingsBlueprintSectio
         title: t("settings.blueprints.files.browserTitle"),
         description: t("settings.blueprints.files.browserDescription"),
         items: [
-          {
-            label: t("settings.blueprints.files.textPreviewCap"),
-            detail: t("settings.blueprints.files.textPreviewCapDetail"),
-            value: "64 KB",
-            state: "planned"
-          },
           {
             label: t("settings.blueprints.files.pdfHandler"),
             detail: t("settings.blueprints.files.pdfHandlerDetail"),
@@ -368,8 +367,8 @@ export function settingsBlueprints(t: Translate): Record<SettingsBlueprintSectio
 
 export function modelSettingsToForm(settings: ModelProviderSettings | null): ModelProviderFormState {
   return {
-    provider: settings?.provider ?? "pi",
-    displayName: settings?.displayName ?? "Pi",
+    providerName: settings?.providerName ?? "google",
+    displayName: settings?.displayName ?? "Google",
     baseUrl: settings?.baseUrl ?? "",
     model: settings?.model ?? "",
     apiKey: "",
@@ -435,15 +434,32 @@ export function settingsSectionLabel(
   return t("common.states.planned");
 }
 
-export function providerLabel(provider: ModelProviderKind, t: Translate): string {
-  switch (provider) {
-    case "openai-compatible":
-      return t("settings.modelProvider.providers.openaiCompatible");
-    case "anthropic-compatible":
-      return t("settings.modelProvider.providers.anthropicCompatible");
+export function providerLabel(providerName: string, t: Translate): string {
+  switch (providerName) {
+    case "google":
+      return t("settings.modelProvider.providers.google");
+    case "openai":
+      return t("settings.modelProvider.providers.openai");
+    case "anthropic":
+      return t("settings.modelProvider.providers.anthropic");
+    case "openrouter":
+      return t("settings.modelProvider.providers.openrouter");
     case "local":
       return t("settings.modelProvider.providers.local");
-    case "pi":
-      return t("settings.modelProvider.providers.pi");
+    default:
+      return providerName;
   }
+}
+
+export function defaultToolPolicyForm(): ToolPolicyFormState {
+  return {
+    read: "auto",
+    grep: "auto",
+    find: "auto",
+    ls: "auto",
+    bash: "ask",
+    edit: "ask",
+    write: "ask",
+    updatedAt: new Date(0).toISOString()
+  };
 }

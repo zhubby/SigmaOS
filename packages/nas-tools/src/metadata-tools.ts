@@ -133,6 +133,22 @@ export function inferMimeType(filePath: string): string {
       return "video/quicktime";
     case ".pdf":
       return "application/pdf";
+    case ".zip":
+      return "application/zip";
+    case ".gz":
+      return "application/gzip";
+    case ".tar":
+      return "application/x-tar";
+    case ".tgz":
+      return "application/gzip";
+    case ".7z":
+      return "application/x-7z-compressed";
+    case ".rar":
+      return "application/vnd.rar";
+    case ".dmg":
+      return "application/x-apple-diskimage";
+    case ".exe":
+      return "application/vnd.microsoft.portable-executable";
     default:
       return "application/octet-stream";
   }
@@ -176,6 +192,9 @@ export function inferPreviewKind(mimeType: string): FilePreviewKind {
   }
   if (mimeType === "application/pdf") {
     return "pdf";
+  }
+  if (mimeType === "application/octet-stream") {
+    return "text";
   }
   return "unsupported";
 }

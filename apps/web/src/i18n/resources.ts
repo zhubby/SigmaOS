@@ -106,8 +106,27 @@ export const en = {
     },
     preview: "Preview",
     selectFile: "Select a file",
+    collapsePreview: "Collapse preview",
+    expandPreview: "Expand preview",
     recentOperations: "Recent operations",
     activity: "Activity"
+  },
+  editor: {
+    eyebrow: "Editor",
+    open: "Edit file",
+    close: "Close editor",
+    textarea: "File contents",
+    reload: "Reload",
+    savedAt: "saved {{time}}",
+    notSaved: "not saved",
+    states: {
+      loading: "Loading",
+      error: "Error",
+      conflict: "Changed elsewhere",
+      saving: "Saving",
+      unsaved: "Unsaved",
+      saved: "Saved"
+    }
   },
   settings: {
     sectionsLabel: "Settings sections",
@@ -186,10 +205,38 @@ export const en = {
       configuredPlaceholder: "Configured",
       notConfiguredPlaceholder: "Not configured",
       providers: {
-        pi: "Pi",
-        openaiCompatible: "OpenAI compatible",
-        anthropicCompatible: "Anthropic compatible",
+        google: "Google",
+        openai: "OpenAI",
+        anthropic: "Anthropic",
+        openrouter: "OpenRouter",
         local: "Local endpoint"
+      }
+    },
+    toolPolicy: {
+      readOnlyTitle: "Read-Only Tools",
+      readOnlyDescription: "Tools that can run automatically while staying inside the NAS root.",
+      dangerousTitle: "Approval Tools",
+      dangerousDescription: "Mutating or shell tools always require approval or can be disabled.",
+      auditTitle: "Approval Flow",
+      auditDescription: "Pi waits for the SigmaOS approval decision before the same turn continues.",
+      askOnly: "Ask or disabled",
+      pendingMode: "Pending calls",
+      workerWaits: "Worker holds the Pi turn",
+      saved: "Tool policy saved",
+      defaultsActive: "Default tool policy active",
+      modes: {
+        auto: "Auto",
+        ask: "Ask",
+        disabled: "Disabled"
+      },
+      tools: {
+        read: "Read text files through NAS path safety.",
+        grep: "Search file contents inside the selected NAS root.",
+        find: "Find matching files and folders inside the NAS root.",
+        ls: "List directory entries inside the NAS root.",
+        bash: "Run a shell command from the safe workspace cwd.",
+        edit: "Apply oldText/newText replacements to an existing file.",
+        write: "Write or replace a file inside the NAS root."
       }
     },
     overview: {
@@ -208,6 +255,13 @@ export const en = {
       languageDescription: "Choose the interface language for this browser.",
       languageField: "Interface language",
       languageHelp: "System default follows your browser preference."
+    },
+    files: {
+      previewTitle: "Preview Limits",
+      previewDescription: "Control which files can open in the preview pane.",
+      previewFileSizeLimit: "Max preview file size",
+      previewFileSizeLimitHelp: "Files above {{limit}} show metadata only and are not opened inline.",
+      megabytes: "MB"
     },
     blueprints: {
       agents: {
@@ -328,8 +382,9 @@ export const en = {
   },
   preview: {
     loading: "Loading preview...",
-    chooseFile: "Choose a text, image, audio, video, or PDF file.",
+    chooseFile: "Choose a previewable file.",
     cannotPreview: "{{size}} cannot be previewed inline.",
+    tooLarge: "This file is {{size}}. Preview limit is {{limit}}, so it was not opened.",
     truncated: "Preview truncated",
     modeAria: "Text preview mode",
     modes: {
@@ -488,8 +543,27 @@ export const zhCN = {
     },
     preview: "预览",
     selectFile: "选择文件",
+    collapsePreview: "收起预览",
+    expandPreview: "展开预览",
     recentOperations: "最近操作",
     activity: "活动"
+  },
+  editor: {
+    eyebrow: "编辑器",
+    open: "编辑文件",
+    close: "关闭编辑器",
+    textarea: "文件内容",
+    reload: "重新加载",
+    savedAt: "已保存 {{time}}",
+    notSaved: "未保存",
+    states: {
+      loading: "加载中",
+      error: "错误",
+      conflict: "外部已修改",
+      saving: "保存中",
+      unsaved: "未保存",
+      saved: "已保存"
+    }
   },
   settings: {
     sectionsLabel: "设置分区",
@@ -568,10 +642,38 @@ export const zhCN = {
       configuredPlaceholder: "已配置",
       notConfiguredPlaceholder: "未配置",
       providers: {
-        pi: "Pi",
-        openaiCompatible: "OpenAI compatible",
-        anthropicCompatible: "Anthropic compatible",
+        google: "Google",
+        openai: "OpenAI",
+        anthropic: "Anthropic",
+        openrouter: "OpenRouter",
         local: "本地端点"
+      }
+    },
+    toolPolicy: {
+      readOnlyTitle: "只读工具",
+      readOnlyDescription: "只读工具可自动运行，但始终受 NAS root 路径保护。",
+      dangerousTitle: "审批工具",
+      dangerousDescription: "会修改文件或执行 shell 的工具必须审批，或直接禁用。",
+      auditTitle: "审批流",
+      auditDescription: "Pi 会等待 SigmaOS 审批结果，再继续同一轮对话。",
+      askOnly: "审批或禁用",
+      pendingMode: "等待调用",
+      workerWaits: "Worker 保持 Pi turn",
+      saved: "工具策略已保存",
+      defaultsActive: "默认工具策略生效",
+      modes: {
+        auto: "自动",
+        ask: "审批",
+        disabled: "禁用"
+      },
+      tools: {
+        read: "通过 NAS 路径安全读取文本文件。",
+        grep: "在选中的 NAS root 内搜索文件内容。",
+        find: "在 NAS root 内查找匹配的文件和文件夹。",
+        ls: "列出 NAS root 内的目录项。",
+        bash: "从安全工作目录执行 shell 命令。",
+        edit: "对已有文件应用 oldText/newText 替换。",
+        write: "在 NAS root 内写入或替换文件。"
       }
     },
     overview: {
@@ -590,6 +692,13 @@ export const zhCN = {
       languageDescription: "选择此浏览器的界面语言。",
       languageField: "界面语言",
       languageHelp: "跟随系统会使用浏览器语言偏好。"
+    },
+    files: {
+      previewTitle: "预览限制",
+      previewDescription: "控制哪些文件可以在预览面板中打开。",
+      previewFileSizeLimit: "最大预览文件大小",
+      previewFileSizeLimitHelp: "超过 {{limit}} 的文件只显示元数据，不会内联打开。",
+      megabytes: "MB"
     },
     blueprints: {
       agents: {
@@ -710,8 +819,9 @@ export const zhCN = {
   },
   preview: {
     loading: "正在加载预览...",
-    chooseFile: "选择文本、图片、音频、视频或 PDF 文件。",
+    chooseFile: "选择可预览文件。",
     cannotPreview: "{{size}} 无法内联预览。",
+    tooLarge: "此文件大小为 {{size}}。当前预览上限是 {{limit}}，因此未打开。",
     truncated: "预览已截断",
     modeAria: "文本预览模式",
     modes: {

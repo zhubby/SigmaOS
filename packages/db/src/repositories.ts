@@ -1,10 +1,18 @@
 import { randomUUID } from "node:crypto";
 import type {
+  AgentProviderSessionRecord,
   ApprovalStatus,
   FileMutationOperation,
   FileOperationProposal,
   FileOperationRecord,
   FileOperationStatus,
+  PendingApprovalKind,
+  PendingApprovalProposal,
+  PiDangerousToolPolicyMode,
+  PiToolCallApproval,
+  PiToolName,
+  PiToolPolicyMode,
+  PiToolPolicySettingsRecord,
   NasRootConfig,
   AgentEventRecord,
   AgentEventType,
@@ -66,11 +74,23 @@ type DbNasRootRow = {
 type DbApprovalRow = {
   id: string;
   job_id: string;
+  kind: PendingApprovalKind;
   status: ApprovalStatus;
   proposal_json: string;
   created_at: string;
   updated_at: string;
   session_id: string;
+};
+
+type DbProviderSessionRow = {
+  session_id: string;
+  provider_session_id: string;
+  session_file: string | null;
+  provider_name: string;
+  model: string;
+  settings_snapshot_json: string;
+  created_at: string;
+  updated_at: string;
 };
 
 type DbOperationRow = {
@@ -102,6 +122,21 @@ type DbSystemSettingRow = {
 };
 
 const MODEL_PROVIDER_SETTING_KEY = "model_provider";
+const PI_TOOL_POLICY_SETTING_KEY = "pi_tool_policy";
+const READ_ONLY_PI_TOOLS = ["read", "grep", "find", "ls"] as const satisfies PiToolName[];
+const DANGEROUS_PI_TOOLS = ["bash", "edit", "write"] as const satisfies PiToolName[];
+const PI_TOOL_POLICY_MODES = ["auto", "ask", "disabled"] as const satisfies PiToolPolicyMode[];
+const DANGEROUS_PI_TOOL_POLICY_MODES = ["ask", "disabled"] as const satisfies PiDangerousToolPolicyMode[];
+
+export const DEFAULT_PI_TOOL_POLICY_SETTINGS: Omit<PiToolPolicySettingsRecord, "updatedAt"> = {
+  read: "auto",
+  grep: "auto",
+  find: "auto",
+  ls: "auto",
+  bash: "ask",
+  edit: "ask",
+  write: "ask"
+};
 
 export function ensureNasRoots(db: SigmaDatabase, roots: NasRootConfig[]): void {
   const now = new Date().toISOString();
@@ -222,6 +257,69 @@ export function updateSessionPath(
   return row ? mapSession(row) : null;
 }
 
+export function getAgentProviderSession(
+  db: SigmaDatabase,
+  sessionId: string
+): AgentProviderSessionRecord | null {
+  const row = db
+    .prepare(`
+      SELECT session_id, provider_session_id, session_file, provider_name, model,
+        settings_snapshot_json, created_at, updated_at
+      FROM agent_provider_sessions
+      WHERE session_id = ?
+    `)
+    .get(sessionId) as DbProviderSessionRow | undefined;
+  return row ? mapProviderSession(row) : null;
+}
+
+export function saveAgentProviderSession(
+  db: SigmaDatabase,
+  input: {
+    sessionId: string;
+    providerSessionId: string;
+    sessionFile?: string | null;
+    providerName: string;
+    model: string;
+    settingsSnapshot: Record<string, unknown>;
+  }
+): AgentProviderSessionRecord {
+  const existing = getAgentProviderSession(db, input.sessionId);
+  const now = new Date().toISOString();
+  const record: AgentProviderSessionRecord = {
+    sessionId: input.sessionId,
+    providerSessionId: input.providerSessionId,
+    sessionFile: input.sessionFile ?? null,
+    providerName: input.providerName,
+    model: input.model,
+    settingsSnapshot: input.settingsSnapshot,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now
+  };
+
+  db.prepare(`
+    INSERT INTO agent_provider_sessions (
+      session_id, provider_session_id, session_file, provider_name, model,
+      settings_snapshot_json, created_at, updated_at
+    )
+    VALUES (
+      @sessionId, @providerSessionId, @sessionFile, @providerName, @model,
+      @settingsSnapshotJson, @createdAt, @updatedAt
+    )
+    ON CONFLICT(session_id) DO UPDATE SET
+      provider_session_id = excluded.provider_session_id,
+      session_file = excluded.session_file,
+      provider_name = excluded.provider_name,
+      model = excluded.model,
+      settings_snapshot_json = excluded.settings_snapshot_json,
+      updated_at = excluded.updated_at
+  `).run({
+    ...record,
+    settingsSnapshotJson: JSON.stringify(record.settingsSnapshot)
+  });
+
+  return record;
+}
+
 export function listMessages(
   db: SigmaDatabase,
   input: { sessionId: string; limit?: number }
@@ -252,8 +350,14 @@ export function saveModelProviderSettings(
   settings: Omit<ModelProviderSettingsRecord, "updatedAt">
 ): ModelProviderSettingsRecord {
   const updatedAt = new Date().toISOString();
+  const providerName = normalizeProviderName(settings.providerName);
   const record: ModelProviderSettingsRecord = {
     ...settings,
+    providerName,
+    displayName: settings.displayName.trim() || providerDisplayName(providerName),
+    baseUrl: settings.baseUrl?.trim() || null,
+    model: settings.model.trim(),
+    apiKey: settings.apiKey?.trim() || null,
     updatedAt
   };
 
@@ -268,9 +372,42 @@ export function saveModelProviderSettings(
   return record;
 }
 
+export function defaultPiToolPolicySettings(): PiToolPolicySettingsRecord {
+  return {
+    ...DEFAULT_PI_TOOL_POLICY_SETTINGS,
+    updatedAt: new Date(0).toISOString()
+  };
+}
+
+export function getPiToolPolicySettings(db: SigmaDatabase): PiToolPolicySettingsRecord | null {
+  const row = db
+    .prepare("SELECT key, value_json, updated_at FROM system_settings WHERE key = ?")
+    .get(PI_TOOL_POLICY_SETTING_KEY) as DbSystemSettingRow | undefined;
+
+  return row ? mapPiToolPolicySettings(row) : null;
+}
+
+export function savePiToolPolicySettings(
+  db: SigmaDatabase,
+  settings: Omit<PiToolPolicySettingsRecord, "updatedAt">
+): PiToolPolicySettingsRecord {
+  const updatedAt = new Date().toISOString();
+  const record = normalizePiToolPolicySettings(settings, updatedAt);
+
+  db.prepare(`
+    INSERT INTO system_settings (key, value_json, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET
+      value_json = excluded.value_json,
+      updated_at = excluded.updated_at
+  `).run(PI_TOOL_POLICY_SETTING_KEY, JSON.stringify(record), updatedAt);
+
+  return record;
+}
+
 export function createUserMessageAndJob(
   db: SigmaDatabase,
-  input: { sessionId: string; content: string }
+  input: { sessionId: string; content: string; status?: JobStatus }
 ): { message: AgentMessageRecord; job: JobRecord } {
   const now = new Date().toISOString();
   const message: AgentMessageRecord = {
@@ -284,7 +421,7 @@ export function createUserMessageAndJob(
     id: randomUUID(),
     sessionId: input.sessionId,
     messageId: message.id,
-    status: "queued",
+    status: input.status ?? "queued",
     createdAt: now,
     updatedAt: now,
     error: null
@@ -572,6 +709,7 @@ export function createPendingApproval(
     id: randomUUID(),
     jobId: input.jobId,
     sessionId: job.sessionId,
+    kind: "file_operation",
     status: "pending",
     proposal: input.proposal,
     createdAt: now,
@@ -580,8 +718,8 @@ export function createPendingApproval(
 
   const tx = db.transaction(() => {
     db.prepare(`
-      INSERT INTO pending_approvals (id, job_id, status, proposal_json, created_at, updated_at)
-      VALUES (?, ?, 'pending', ?, ?, ?)
+      INSERT INTO pending_approvals (id, job_id, kind, status, proposal_json, created_at, updated_at)
+      VALUES (?, ?, 'file_operation', 'pending', ?, ?, ?)
     `).run(approval.id, approval.jobId, JSON.stringify(approval.proposal), now, now);
 
     const insertOperation = db.prepare(`
@@ -609,10 +747,39 @@ export function createPendingApproval(
   return approval;
 }
 
+export function createPiToolCallApproval(
+  db: SigmaDatabase,
+  input: { jobId: string; proposal: PiToolCallApproval }
+): PendingApprovalRecord {
+  const job = getJob(db, input.jobId);
+  if (!job) {
+    throw new Error("Job not found");
+  }
+
+  const now = new Date().toISOString();
+  const approval: PendingApprovalRecord = {
+    id: randomUUID(),
+    jobId: input.jobId,
+    sessionId: job.sessionId,
+    kind: "pi_tool_call",
+    status: "pending",
+    proposal: [input.proposal],
+    createdAt: now,
+    updatedAt: now
+  };
+
+  db.prepare(`
+    INSERT INTO pending_approvals (id, job_id, kind, status, proposal_json, created_at, updated_at)
+    VALUES (?, ?, 'pi_tool_call', 'pending', ?, ?, ?)
+  `).run(approval.id, approval.jobId, JSON.stringify(approval.proposal), now, now);
+
+  return approval;
+}
+
 export function getApproval(db: SigmaDatabase, approvalId: string): PendingApprovalRecord | null {
   const row = db
     .prepare(`
-      SELECT a.id, a.job_id, a.status, a.proposal_json, a.created_at, a.updated_at, j.session_id
+      SELECT a.id, a.job_id, a.kind, a.status, a.proposal_json, a.created_at, a.updated_at, j.session_id
       FROM pending_approvals a
       JOIN jobs j ON j.id = a.job_id
       WHERE a.id = ?
@@ -624,7 +791,7 @@ export function getApproval(db: SigmaDatabase, approvalId: string): PendingAppro
 export function listPendingApprovals(db: SigmaDatabase): PendingApprovalRecord[] {
   const rows = db
     .prepare(`
-      SELECT a.id, a.job_id, a.status, a.proposal_json, a.created_at, a.updated_at, j.session_id
+      SELECT a.id, a.job_id, a.kind, a.status, a.proposal_json, a.created_at, a.updated_at, j.session_id
       FROM pending_approvals a
       JOIN jobs j ON j.id = a.job_id
       WHERE a.status = 'pending'
@@ -851,14 +1018,101 @@ function mapEvent(row: DbEventRow): AgentEventRecord {
 }
 
 function mapModelProviderSettings(row: DbSystemSettingRow): ModelProviderSettingsRecord {
-  const parsed = JSON.parse(row.value_json) as Partial<ModelProviderSettingsRecord>;
+  const parsed = JSON.parse(row.value_json) as Partial<ModelProviderSettingsRecord> & { provider?: string };
+  const providerName = normalizeProviderName(parsed.providerName ?? legacyProviderName(parsed.provider));
   return {
-    provider: parsed.provider ?? "pi",
-    displayName: parsed.displayName ?? "Pi",
+    providerName,
+    displayName: parsed.displayName ?? providerDisplayName(providerName),
     baseUrl: parsed.baseUrl ?? null,
     model: parsed.model ?? "",
     apiKey: parsed.apiKey ?? null,
     updatedAt: parsed.updatedAt ?? row.updated_at
+  };
+}
+
+function mapPiToolPolicySettings(row: DbSystemSettingRow): PiToolPolicySettingsRecord {
+  const parsed = JSON.parse(row.value_json) as Partial<PiToolPolicySettingsRecord>;
+  return normalizePiToolPolicySettings(parsed, parsed.updatedAt ?? row.updated_at);
+}
+
+function normalizePiToolPolicySettings(
+  settings: Partial<PiToolPolicySettingsRecord>,
+  updatedAt: string
+): PiToolPolicySettingsRecord {
+  const normalized: PiToolPolicySettingsRecord = {
+    ...DEFAULT_PI_TOOL_POLICY_SETTINGS,
+    updatedAt
+  };
+
+  for (const tool of READ_ONLY_PI_TOOLS) {
+    const mode = settings[tool] ?? DEFAULT_PI_TOOL_POLICY_SETTINGS[tool];
+    if (!isPiToolPolicyMode(mode)) {
+      throw new Error(`Invalid policy mode for ${tool}`);
+    }
+    normalized[tool] = mode;
+  }
+
+  for (const tool of DANGEROUS_PI_TOOLS) {
+    const mode = settings[tool] ?? DEFAULT_PI_TOOL_POLICY_SETTINGS[tool];
+    if (!isDangerousPiToolPolicyMode(mode)) {
+      throw new Error(`Dangerous tool ${tool} cannot use policy mode ${String(mode)}`);
+    }
+    normalized[tool] = mode;
+  }
+
+  return normalized;
+}
+
+function isPiToolPolicyMode(value: unknown): value is PiToolPolicyMode {
+  return typeof value === "string" && PI_TOOL_POLICY_MODES.includes(value as PiToolPolicyMode);
+}
+
+function isDangerousPiToolPolicyMode(value: unknown): value is PiDangerousToolPolicyMode {
+  return typeof value === "string" && DANGEROUS_PI_TOOL_POLICY_MODES.includes(value as PiDangerousToolPolicyMode);
+}
+
+function normalizeProviderName(value: unknown): string {
+  return typeof value === "string" && value.trim() ? value.trim() : "google";
+}
+
+function legacyProviderName(provider: string | undefined): string | undefined {
+  switch (provider) {
+    case "openai-compatible":
+      return "openai";
+    case "anthropic-compatible":
+      return "anthropic";
+    case "local":
+      return "openai";
+    case "pi":
+      return "google";
+    default:
+      return provider;
+  }
+}
+
+function providerDisplayName(providerName: string): string {
+  switch (providerName) {
+    case "google":
+      return "Google";
+    case "openai":
+      return "OpenAI";
+    case "anthropic":
+      return "Anthropic";
+    default:
+      return providerName;
+  }
+}
+
+function mapProviderSession(row: DbProviderSessionRow): AgentProviderSessionRecord {
+  return {
+    sessionId: row.session_id,
+    providerSessionId: row.provider_session_id,
+    sessionFile: row.session_file,
+    providerName: row.provider_name,
+    model: row.model,
+    settingsSnapshot: JSON.parse(row.settings_snapshot_json) as Record<string, unknown>,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
   };
 }
 
@@ -878,8 +1132,9 @@ function mapApproval(row: DbApprovalRow): PendingApprovalRecord {
     id: row.id,
     jobId: row.job_id,
     sessionId: row.session_id,
+    kind: row.kind,
     status: row.status,
-    proposal: JSON.parse(row.proposal_json) as FileOperationProposal[],
+    proposal: JSON.parse(row.proposal_json) as PendingApprovalProposal[],
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };

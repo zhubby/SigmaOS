@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { cp, mkdir, rename, stat } from "node:fs/promises";
+import { cp, lstat, mkdir, rename, stat } from "node:fs/promises";
 import path from "node:path";
 import type { FileOperationProposal, FileOperationRecord, NasRootRecord } from "@sigmaos/shared";
 import { isPathInside, resolveSafeExistingPath, toRootRelative, PathSafetyError } from "./path-safety.js";
@@ -37,6 +37,8 @@ export async function applyFileMutation(
       return applyCopy(root, proposal);
     case "trash":
       return applyTrash(root, proposal, trashRootPath);
+    case "edit":
+      return applyEditAuthorization(root, proposal);
     case "restore":
       throw new Error("Restore must use restoreTrashEntry with a persisted trash entry");
     case "tag":
@@ -100,6 +102,8 @@ export async function rollbackFileMutation(
       return rollbackByTrashingTarget(root, operation, trashRootPath);
     case "trash":
       throw new Error("Trash rollback must restore the persisted trash entry");
+    case "edit":
+      throw new Error("Edit operations cannot be rolled back");
     case "tag":
       return {
         operation: "tag",
@@ -211,6 +215,36 @@ async function applyCopy(root: NasRootRecord, proposal: FileOperationProposal): 
     metadata: {
       absoluteSourcePath: source.realPath,
       absoluteTargetPath: target.absolutePath
+    }
+  };
+}
+
+async function applyEditAuthorization(
+  root: NasRootRecord,
+  proposal: FileOperationProposal
+): Promise<AppliedMutation> {
+  if (!proposal.sourcePath) {
+    throw new Error("edit requires sourcePath");
+  }
+
+  const source = await resolveSafeExistingPath(root.path, proposal.sourcePath);
+  const sourceLinkStat = await lstat(source.absolutePath);
+  if (sourceLinkStat.isSymbolicLink()) {
+    throw new Error("Refusing to edit through a symlink");
+  }
+
+  const sourceStat = await stat(source.realPath);
+  if (!sourceStat.isFile()) {
+    throw new Error("Edit target must be a file");
+  }
+
+  return {
+    proposal,
+    sourcePath: source.relativePath,
+    targetPath: null,
+    metadata: {
+      absoluteSourcePath: source.realPath,
+      authorizationOnly: true
     }
   };
 }

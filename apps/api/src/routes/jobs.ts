@@ -17,7 +17,7 @@ export function registerJobRoutes(server: FastifyInstance, { db }: ApiRouteConte
       return;
     }
 
-    if (!updateJobStatus(db, request.params.id, "cancelled", null, ["queued", "running"])) {
+    if (!updateJobStatus(db, request.params.id, "cancelled", null, ["queued", "running", "waiting_approval"])) {
       reply.status(409).send({
         error: `Job is already ${job.status}`,
         status: job.status

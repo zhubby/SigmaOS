@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AlertTriangle,
@@ -15,8 +15,10 @@ import {
   Wrench,
   X
 } from "lucide-react";
-import type { ModelProviderKind, ModelProviderSettings } from "../../api.js";
+import type { ModelProviderSettings, PiToolPolicySettings } from "../../api.js";
 import {
+  DANGEROUS_TOOL_POLICY_OPTIONS,
+  READ_ONLY_TOOL_POLICY_OPTIONS,
   SETTINGS_SECTIONS,
   providerLabel,
   settingsBlueprints,
@@ -30,10 +32,16 @@ import {
   type ModelProviderFormState,
   type SettingsBlueprintBlock,
   type SettingsSectionId,
-  type SettingsState
+  type SettingsState,
+  type ToolPolicyFormState
 } from "../../config/settings.js";
-import { formatLocaleNumber } from "../../i18n/format.js";
-import { normalizeLanguagePreference, type LanguagePreference, type SupportedLocale } from "../../i18n/locale.js";
+import { formatBytes, formatDate, formatLocaleNumber } from "../../i18n/format.js";
+import type { LanguagePreference, SupportedLocale } from "../../i18n/locale.js";
+import {
+  previewFileSizeLimitBytesToMiB,
+  previewFileSizeLimitMiBToBytes
+} from "../../lib/preview-settings.js";
+import { CustomSelect } from "../common/CustomSelect.js";
 
 interface SettingsModalProps {
   activeSection: SettingsSectionId;
@@ -42,16 +50,23 @@ interface SettingsModalProps {
   loading: boolean;
   saving: boolean;
   settings: ModelProviderSettings | null;
+  toolPolicySettings: PiToolPolicySettings | null;
+  toolPolicyForm: ToolPolicyFormState;
   languagePreference: LanguagePreference;
+  previewFileSizeLimitBytes: number;
   resolvedLocale: SupportedLocale;
   onClose: () => void;
   onFormChange: (form: ModelProviderFormState) => void;
+  onToolPolicyFormChange: (form: ToolPolicyFormState) => void;
   onLanguagePreferenceChange: (preference: LanguagePreference) => void;
+  onPreviewFileSizeLimitChange: (bytes: number) => void;
   onSectionChange: (section: SettingsSectionId) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }
 
-const PROVIDER_OPTIONS: ModelProviderKind[] = ["pi", "openai-compatible", "anthropic-compatible", "local"];
+const PROVIDER_OPTIONS = ["google", "openai", "anthropic", "openrouter", "local"];
+const READ_ONLY_TOOLS = ["read", "grep", "find", "ls"] as const;
+const DANGEROUS_TOOLS = ["bash", "edit", "write"] as const;
 
 export function SettingsModal({
   activeSection,
@@ -60,11 +75,16 @@ export function SettingsModal({
   loading,
   saving,
   settings,
+  toolPolicySettings,
+  toolPolicyForm,
   languagePreference,
+  previewFileSizeLimitBytes,
   resolvedLocale,
   onClose,
   onFormChange,
+  onToolPolicyFormChange,
   onLanguagePreferenceChange,
+  onPreviewFileSizeLimitChange,
   onSectionChange,
   onSubmit
 }: SettingsModalProps) {
@@ -84,6 +104,10 @@ export function SettingsModal({
     : SETTINGS_SECTIONS;
   const groups = [...new Set(visibleSections.map((section) => section.group))];
   const currentState = settingsSectionState(currentSection, settings);
+  const providerOptions = PROVIDER_OPTIONS.map((provider) => ({
+    value: provider,
+    label: providerLabel(provider, t)
+  }));
 
   return (
     <div className="settings-backdrop" role="presentation" onMouseDown={onClose}>
@@ -196,21 +220,24 @@ export function SettingsModal({
                       <fieldset className="settings-field-grid" disabled={loading || saving}>
                         <label>
                           <span>{t("settings.modelProvider.provider")}</span>
-                          <select
-                            value={form.provider}
+                          <input
+                            list="model-provider-options"
+                            value={form.providerName}
                             onChange={(event) =>
                               onFormChange({
                                 ...form,
-                                provider: event.target.value as ModelProviderKind
+                                providerName: event.target.value
                               })
                             }
-                          >
-                            {PROVIDER_OPTIONS.map((provider) => (
-                              <option key={provider} value={provider}>
-                                {providerLabel(provider, t)}
+                            placeholder="google"
+                          />
+                          <datalist id="model-provider-options">
+                            {providerOptions.map((provider) => (
+                              <option key={provider.value} value={provider.value}>
+                                {provider.label}
                               </option>
                             ))}
-                          </select>
+                          </datalist>
                         </label>
 
                         <label>
@@ -323,7 +350,7 @@ export function SettingsModal({
                       <dl className="settings-summary-list">
                         <div>
                           <dt>{t("settings.modelProvider.provider")}</dt>
-                          <dd>{providerLabel(form.provider, t)}</dd>
+                          <dd>{providerLabel(form.providerName, t)}</dd>
                         </div>
                         <div>
                           <dt>{t("settings.modelProvider.endpoint")}</dt>
@@ -352,7 +379,7 @@ export function SettingsModal({
                         <div className="settings-config-row">
                           <span>
                             <strong>{t("settings.modelProvider.primary")}</strong>
-                            <small>{form.displayName || providerLabel(form.provider, t)}</small>
+                            <small>{form.displayName || providerLabel(form.providerName, t)}</small>
                           </span>
                           <em data-state={settings?.apiKeyConfigured ? "ready" : "missing"}>
                             {settings?.apiKeyConfigured ? t("common.states.ready") : t("common.states.missing")}
@@ -401,7 +428,33 @@ export function SettingsModal({
             />
           ) : null}
 
-          {activeSection !== "overview" && activeSection !== "model-providers" && activeSection !== "appearance" ? (
+          {activeSection === "agents" ? (
+            <SettingsToolPolicyPage
+              form={toolPolicyForm}
+              settings={toolPolicySettings}
+              loading={loading}
+              saving={saving}
+              locale={resolvedLocale}
+              onChange={onToolPolicyFormChange}
+              onSubmit={onSubmit}
+              onClose={onClose}
+            />
+          ) : null}
+
+          {activeSection === "files" ? (
+            <SettingsFilesPage
+              blocks={blueprints.files}
+              previewFileSizeLimitBytes={previewFileSizeLimitBytes}
+              locale={resolvedLocale}
+              onPreviewFileSizeLimitChange={onPreviewFileSizeLimitChange}
+            />
+          ) : null}
+
+          {activeSection !== "overview" &&
+          activeSection !== "model-providers" &&
+          activeSection !== "agents" &&
+          activeSection !== "appearance" &&
+          activeSection !== "files" ? (
             <SettingsPlannedPage blocks={blueprints[activeSection]} />
           ) : null}
         </section>
@@ -472,7 +525,7 @@ function SettingsOverview({
           <dl className="settings-summary-list">
             <div>
               <dt>{t("settings.modelProvider.provider")}</dt>
-              <dd>{settings ? providerLabel(settings.provider, t) : t("settings.modelProvider.notLoaded")}</dd>
+              <dd>{settings ? providerLabel(settings.providerName, t) : t("settings.modelProvider.notLoaded")}</dd>
             </div>
             <div>
               <dt>{t("settings.modelProvider.endpoint")}</dt>
@@ -528,6 +581,13 @@ function SettingsAppearancePage({
   onLanguagePreferenceChange: (preference: LanguagePreference) => void;
 }) {
   const { t } = useTranslation();
+  const languageOptions: { value: LanguagePreference; label: string }[] = [
+    { value: "system", label: t("common.language.system") },
+    { value: "en", label: t("common.language.english") },
+    { value: "zh-CN", label: t("common.language.chineseSimplified") }
+  ];
+  const selectedLanguageLabel =
+    languageOptions.find((option) => option.value === languagePreference)?.label ?? languagePreference;
 
   return (
     <div className="settings-content-body">
@@ -542,20 +602,224 @@ function SettingsAppearancePage({
           </header>
           <label className="settings-preference-field">
             <span>{t("settings.appearance.languageField")}</span>
-            <select
+            <CustomSelect
+              id="language-select"
               value={languagePreference}
-              onChange={(event) => onLanguagePreferenceChange(normalizeLanguagePreference(event.target.value))}
-            >
-              <option value="system">{t("common.language.system")}</option>
-              <option value="en">{t("common.language.english")}</option>
-              <option value="zh-CN">{t("common.language.chineseSimplified")}</option>
-            </select>
+              options={languageOptions}
+              ariaLabel={`${t("settings.appearance.languageField")}: ${selectedLanguageLabel}`}
+              onChange={onLanguagePreferenceChange}
+            />
             <small>{t("settings.appearance.languageHelp")}</small>
           </label>
         </section>
         <SettingsBlueprintCards blocks={blocks} />
       </div>
     </div>
+  );
+}
+
+function SettingsFilesPage({
+  blocks,
+  previewFileSizeLimitBytes,
+  locale,
+  onPreviewFileSizeLimitChange
+}: {
+  blocks: SettingsBlueprintBlock[];
+  previewFileSizeLimitBytes: number;
+  locale: SupportedLocale;
+  onPreviewFileSizeLimitChange: (bytes: number) => void;
+}) {
+  const { t } = useTranslation();
+  const previewFileSizeLimitMiB = previewFileSizeLimitBytesToMiB(previewFileSizeLimitBytes);
+  const [draftLimitMiB, setDraftLimitMiB] = useState(String(previewFileSizeLimitMiB));
+
+  useEffect(() => {
+    setDraftLimitMiB(String(previewFileSizeLimitMiB));
+  }, [previewFileSizeLimitMiB]);
+
+  function changeDraftLimit(value: string) {
+    setDraftLimitMiB(value);
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      onPreviewFileSizeLimitChange(previewFileSizeLimitMiBToBytes(parsed));
+    }
+  }
+
+  return (
+    <div className="settings-content-body">
+      <div className="settings-page-grid">
+        <section className="settings-section-card">
+          <header>
+            <div>
+              <h3>{t("settings.files.previewTitle")}</h3>
+              <p>{t("settings.files.previewDescription")}</p>
+            </div>
+            <span data-state="ready">{formatBytes(previewFileSizeLimitBytes, locale)}</span>
+          </header>
+          <label className="settings-preference-field settings-size-field">
+            <span>{t("settings.files.previewFileSizeLimit")}</span>
+            <div className="settings-unit-input">
+              <input
+                id="preview-file-size-limit"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={draftLimitMiB}
+                aria-describedby="preview-file-size-limit-help"
+                onBlur={() => setDraftLimitMiB(String(previewFileSizeLimitMiB))}
+                onChange={(event) => changeDraftLimit(event.target.value)}
+              />
+              <span>{t("settings.files.megabytes")}</span>
+            </div>
+            <small id="preview-file-size-limit-help">
+              {t("settings.files.previewFileSizeLimitHelp", {
+                limit: formatBytes(previewFileSizeLimitBytes, locale)
+              })}
+            </small>
+          </label>
+        </section>
+        <SettingsBlueprintCards blocks={blocks} />
+      </div>
+    </div>
+  );
+}
+
+function SettingsToolPolicyPage({
+  form,
+  settings,
+  loading,
+  saving,
+  locale,
+  onChange,
+  onSubmit,
+  onClose
+}: {
+  form: ToolPolicyFormState;
+  settings: PiToolPolicySettings | null;
+  loading: boolean;
+  saving: boolean;
+  locale: SupportedLocale;
+  onChange: (form: ToolPolicyFormState) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const readOnlyOptions = READ_ONLY_TOOL_POLICY_OPTIONS.map((mode) => ({
+    value: mode,
+    label: toolPolicyModeLabel(mode, t)
+  }));
+  const dangerousOptions = DANGEROUS_TOOL_POLICY_OPTIONS.map((mode) => ({
+    value: mode,
+    label: toolPolicyModeLabel(mode, t)
+  }));
+
+  return (
+    <form className="settings-form" onSubmit={onSubmit}>
+      <div className="settings-content-body">
+        <div className="settings-page-grid">
+          <section className="settings-section-card">
+            <header>
+              <div>
+                <h3>{t("settings.toolPolicy.readOnlyTitle")}</h3>
+                <p>{t("settings.toolPolicy.readOnlyDescription")}</p>
+              </div>
+              <span data-state="ready">{t("common.states.configured")}</span>
+            </header>
+            <div className="settings-tool-policy-list">
+              {READ_ONLY_TOOLS.map((tool) => (
+                <label key={tool} className="settings-policy-row">
+                  <span>
+                    <strong>{tool}</strong>
+                    <small>{t(`settings.toolPolicy.tools.${tool}`)}</small>
+                  </span>
+                  <CustomSelect
+                    id={`tool-policy-${tool}`}
+                    value={form[tool]}
+                    options={readOnlyOptions}
+                    ariaLabel={`${tool}: ${toolPolicyModeLabel(form[tool], t)}`}
+                    onChange={(mode) =>
+                      onChange({
+                        ...form,
+                        [tool]: mode
+                      })
+                    }
+                    disabled={loading || saving}
+                  />
+                </label>
+              ))}
+            </div>
+          </section>
+
+          <section className="settings-section-card">
+            <header>
+              <div>
+                <h3>{t("settings.toolPolicy.dangerousTitle")}</h3>
+                <p>{t("settings.toolPolicy.dangerousDescription")}</p>
+              </div>
+              <span data-state="missing">{t("settings.toolPolicy.askOnly")}</span>
+            </header>
+            <div className="settings-tool-policy-list">
+              {DANGEROUS_TOOLS.map((tool) => (
+                <label key={tool} className="settings-policy-row">
+                  <span>
+                    <strong>{tool}</strong>
+                    <small>{t(`settings.toolPolicy.tools.${tool}`)}</small>
+                  </span>
+                  <CustomSelect
+                    id={`tool-policy-${tool}`}
+                    value={form[tool]}
+                    options={dangerousOptions}
+                    ariaLabel={`${tool}: ${toolPolicyModeLabel(form[tool], t)}`}
+                    onChange={(mode) =>
+                      onChange({
+                        ...form,
+                        [tool]: mode
+                      })
+                    }
+                    disabled={loading || saving}
+                  />
+                </label>
+              ))}
+            </div>
+          </section>
+
+          <section className="settings-section-card">
+            <header>
+              <div>
+                <h3>{t("settings.toolPolicy.auditTitle")}</h3>
+                <p>{t("settings.toolPolicy.auditDescription")}</p>
+              </div>
+            </header>
+            <dl className="settings-summary-list">
+              <div>
+                <dt>{t("settings.toolPolicy.pendingMode")}</dt>
+                <dd>{t("settings.toolPolicy.workerWaits")}</dd>
+              </div>
+              <div>
+                <dt>{t("settings.modelProvider.updated")}</dt>
+                <dd>{settings ? formatDate(settings.updatedAt, locale) : t("settings.modelProvider.notSaved")}</dd>
+              </div>
+            </dl>
+          </section>
+        </div>
+      </div>
+
+      <footer className="settings-actions">
+        <span>
+          {settings
+            ? t("settings.toolPolicy.saved")
+            : t("settings.toolPolicy.defaultsActive")}
+        </span>
+        <div>
+          <button className="secondary-button" type="button" onClick={onClose}>
+            {t("common.actions.cancel")}
+          </button>
+          <button className="primary-button" type="submit" disabled={loading || saving}>
+            {saving ? t("common.actions.saving") : t("common.actions.saveChanges")}
+          </button>
+        </div>
+      </footer>
+    </form>
   );
 }
 
@@ -631,4 +895,14 @@ function settingsStateIcon(state: SettingsState) {
 
 function languageLocaleLabel(locale: SupportedLocale, t: ReturnType<typeof useTranslation>["t"]): string {
   return locale === "zh-CN" ? t("common.language.chineseSimplified") : t("common.language.english");
+}
+
+function toolPolicyModeLabel(mode: string, t: ReturnType<typeof useTranslation>["t"]): string {
+  if (mode === "auto") {
+    return t("settings.toolPolicy.modes.auto");
+  }
+  if (mode === "ask") {
+    return t("settings.toolPolicy.modes.ask");
+  }
+  return t("settings.toolPolicy.modes.disabled");
 }

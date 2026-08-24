@@ -169,11 +169,12 @@ export function ChatPane({
           {activeApprovals.length ? (
             activeApprovals.map((approval) => {
               const risk = approval.proposal[0]?.risk ?? "low";
+              const summary = approvalSummary(approval);
               return (
                 <article key={approval.id} className="approval-item">
                   <div>
-                    <strong>{approval.proposal.map((item) => item.operation).join(", ")}</strong>
-                    <span>{approval.proposal.map((item) => item.summary).join("; ")}</span>
+                    <strong>{summary.title}</strong>
+                    <span>{summary.detail}</span>
                   </div>
                   <span className="risk-pill" data-risk={risk}>
                     {t("chat.risk", { risk: approvalRiskLabel(risk, t) })}
@@ -226,4 +227,40 @@ function approvalRiskLabel(risk: ApprovalRisk, t: ReturnType<typeof useTranslati
     return t("chat.risks.medium");
   }
   return t("chat.risks.low");
+}
+
+function approvalSummary(approval: PendingApproval): { title: string; detail: string } {
+  if (approval.kind === "pi_tool_call") {
+    const toolCall = approval.proposal.find((proposal) => "toolName" in proposal);
+    if (!toolCall || !("toolName" in toolCall)) {
+      return {
+        title: "Pi tool",
+        detail: "Tool approval"
+      };
+    }
+    return {
+      title: `Pi ${toolCall.toolName}`,
+      detail: `${toolCall.summary} | cwd ${toolCall.cwd} | ${summarizeArgs(toolCall.args)}`
+    };
+  }
+
+  const fileOperations = approval.proposal.filter((proposal) => "operation" in proposal);
+  return {
+    title: fileOperations.map((item) => ("operation" in item ? item.operation : "")).join(", "),
+    detail: fileOperations.map((item) => ("summary" in item ? item.summary : "")).join("; ")
+  };
+}
+
+function summarizeArgs(args: Record<string, unknown>): string {
+  return Object.entries(args)
+    .slice(0, 4)
+    .map(([key, value]) => `${key}=${formatArgValue(value)}`)
+    .join(", ");
+}
+
+function formatArgValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value.length > 42 ? `${value.slice(0, 39)}...` : value;
+  }
+  return JSON.stringify(value);
 }

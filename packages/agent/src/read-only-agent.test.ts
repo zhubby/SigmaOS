@@ -122,6 +122,7 @@ describe("read-only agent fallback", () => {
       id: "approval-1",
       jobId: "job-1",
       sessionId: session.id,
+      kind: "file_operation",
       status: "pending",
       proposal: [],
       createdAt: new Date().toISOString(),

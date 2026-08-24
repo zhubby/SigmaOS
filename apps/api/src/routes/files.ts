@@ -1,7 +1,16 @@
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { lstat, stat, writeFile } from "node:fs/promises";
 import type { FastifyInstance } from "fastify";
-import { inferMimeType, listDir, readText, resolveSafeExistingPath, searchFiles } from "@sigmaos/nas-tools";
+import {
+  inferMimeType,
+  inferPreviewKind,
+  listDir,
+  readText,
+  resolveSafeExistingPath,
+  searchFiles
+} from "@sigmaos/nas-tools";
+import { recordAppliedOperation } from "@sigmaos/db";
+import type { NasRootRecord } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
 import {
   clampPreviewBytes,
@@ -11,6 +20,8 @@ import {
   safeQueryIndex
 } from "../lib/files.js";
 import { resolveRoot } from "../lib/roots.js";
+
+const MAX_EDIT_TEXT_BYTES = 1024 * 1024;
 
 export function registerFileRoutes(server: FastifyInstance, { db }: ApiRouteContext): void {
   server.get<{
@@ -66,6 +77,95 @@ export function registerFileRoutes(server: FastifyInstance, { db }: ApiRouteCont
     reply.send({
       ...preview,
       maxBytes
+    });
+  });
+
+  server.get<{
+    Querystring: { rootId?: string; path?: string };
+  }>("/api/files/edit-text", async (request, reply) => {
+    const root = resolveRoot(db, request.query.rootId);
+    if (!root) {
+      reply.status(404).send({ error: "NAS root not found" });
+      return;
+    }
+
+    const target = await getEditableTextTarget(root, request.query.path ?? ".");
+    if ("error" in target) {
+      reply.status(target.statusCode).send({ error: target.error });
+      return;
+    }
+
+    const preview = await readText(root, target.meta.path, MAX_EDIT_TEXT_BYTES);
+    reply.send({
+      ...preview,
+      modifiedAt: target.meta.modifiedAt,
+      sizeBytes: target.meta.sizeBytes,
+      maxBytes: MAX_EDIT_TEXT_BYTES
+    });
+  });
+
+  server.put<{
+    Body: {
+      rootId?: string;
+      path?: string;
+      content?: string;
+      expectedModifiedAt?: string | null;
+    };
+  }>("/api/files/edit-text", async (request, reply) => {
+    const root = resolveRoot(db, request.body?.rootId);
+    if (!root) {
+      reply.status(404).send({ error: "NAS root not found" });
+      return;
+    }
+
+    const content = request.body?.content;
+    if (typeof content !== "string") {
+      reply.status(400).send({ error: "Content is required" });
+      return;
+    }
+    if (Buffer.byteLength(content, "utf8") > MAX_EDIT_TEXT_BYTES) {
+      reply.status(413).send({ error: "Edited content is too large" });
+      return;
+    }
+
+    const target = await getEditableTextTarget(root, request.body?.path ?? ".");
+    if ("error" in target) {
+      reply.status(target.statusCode).send({ error: target.error });
+      return;
+    }
+
+    const expectedModifiedAt = request.body?.expectedModifiedAt;
+    if (expectedModifiedAt && expectedModifiedAt !== target.meta.modifiedAt) {
+      reply.status(409).send({
+        error: "File changed since the editor loaded",
+        modifiedAt: target.meta.modifiedAt
+      });
+      return;
+    }
+
+    await writeFile(target.safe.realPath, content, "utf8");
+    const meta = await getFilePreviewMeta(root.path, target.meta.path);
+    const preview = await readText(root, meta.path, MAX_EDIT_TEXT_BYTES);
+    const operation = recordAppliedOperation(db, {
+      approvalId: null,
+      operation: "edit",
+      sourcePath: meta.path,
+      status: "applied",
+      metadata: {
+        rootId: root.id,
+        reversible: false,
+        realtimeSave: true,
+        sizeBytes: meta.sizeBytes
+      }
+    });
+
+    reply.send({
+      meta,
+      textPreview: {
+        ...preview,
+        maxBytes: MAX_EDIT_TEXT_BYTES
+      },
+      operation
     });
   });
 
@@ -137,4 +237,34 @@ export function registerFileRoutes(server: FastifyInstance, { db }: ApiRouteCont
       files
     });
   });
+}
+
+async function getEditableTextTarget(
+  root: NasRootRecord,
+  requestedPath: string
+): Promise<
+  | {
+      safe: Awaited<ReturnType<typeof resolveSafeExistingPath>>;
+      meta: Awaited<ReturnType<typeof getFilePreviewMeta>>;
+    }
+  | { statusCode: number; error: string }
+> {
+  const safe = await resolveSafeExistingPath(root.path, requestedPath);
+  const linkStat = await lstat(safe.absolutePath);
+  if (linkStat.isSymbolicLink()) {
+    return { statusCode: 400, error: "Refusing to edit through a symlink" };
+  }
+
+  const meta = await getFilePreviewMeta(root.path, safe.relativePath);
+  if (meta.kind !== "file") {
+    return { statusCode: 400, error: "Edit target must be a file" };
+  }
+  if (meta.previewKind !== "text" || inferPreviewKind(inferMimeType(safe.realPath)) !== "text") {
+    return { statusCode: 415, error: "File is not text-editable" };
+  }
+  if (meta.sizeBytes > MAX_EDIT_TEXT_BYTES) {
+    return { statusCode: 413, error: "File is too large to edit inline" };
+  }
+
+  return { safe, meta };
 }

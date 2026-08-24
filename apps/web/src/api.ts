@@ -55,12 +55,24 @@ export interface FileOperationProposal {
   summary: string;
 }
 
+export interface PiToolCallApproval {
+  toolCallId: string;
+  toolName: "read" | "bash" | "edit" | "write" | "grep" | "find" | "ls";
+  args: Record<string, unknown>;
+  cwd: string;
+  risk: "low" | "medium" | "high";
+  summary: string;
+}
+
+export type PendingApprovalProposal = FileOperationProposal | PiToolCallApproval;
+
 export interface PendingApproval {
   id: string;
   jobId: string;
   sessionId: string;
+  kind: "file_operation" | "pi_tool_call";
   status: string;
-  proposal: FileOperationProposal[];
+  proposal: PendingApprovalProposal[];
   createdAt: string;
 }
 
@@ -85,9 +97,11 @@ export interface AgentEvent {
 export type FilePreviewKind = "directory" | "text" | "image" | "audio" | "video" | "pdf" | "unsupported";
 
 export type ModelProviderKind = "pi" | "openai-compatible" | "anthropic-compatible" | "local";
+export type PiToolPolicyMode = "auto" | "ask" | "disabled";
+export type PiDangerousToolPolicyMode = "ask" | "disabled";
 
 export interface ModelProviderSettings {
-  provider: ModelProviderKind;
+  providerName: string;
   displayName: string;
   baseUrl: string | null;
   model: string;
@@ -96,12 +110,23 @@ export interface ModelProviderSettings {
 }
 
 export interface ModelProviderSettingsInput {
-  provider?: ModelProviderKind;
+  providerName?: string;
   displayName?: string;
   baseUrl?: string | null;
   model?: string;
   apiKey?: string;
   clearApiKey?: boolean;
+}
+
+export interface PiToolPolicySettings {
+  read: PiToolPolicyMode;
+  grep: PiToolPolicyMode;
+  find: PiToolPolicyMode;
+  ls: PiToolPolicyMode;
+  bash: PiDangerousToolPolicyMode;
+  edit: PiDangerousToolPolicyMode;
+  write: PiDangerousToolPolicyMode;
+  updatedAt: string;
 }
 
 export interface FileMeta {
@@ -120,6 +145,19 @@ export interface TextPreview {
   truncated: boolean;
   maxBytes: number;
 }
+
+export interface EditableText extends TextPreview {
+  modifiedAt: string;
+  sizeBytes: number;
+}
+
+export interface SaveEditableTextResult {
+  meta: FileMeta;
+  textPreview: TextPreview;
+  operation: FileOperation;
+}
+
+export const MAX_EDIT_TEXT_BYTES = 1024 * 1024;
 
 export async function getRoots(): Promise<NasRoot[]> {
   const response = await fetch("/api/roots");
@@ -147,6 +185,28 @@ export async function saveModelProviderSettings(
   });
   await ensureOk(response);
   const body = (await response.json()) as { settings: ModelProviderSettings };
+  return body.settings;
+}
+
+export async function getPiToolPolicySettings(): Promise<PiToolPolicySettings> {
+  const response = await fetch("/api/settings/pi-tool-policy");
+  await ensureOk(response);
+  const body = (await response.json()) as { settings: PiToolPolicySettings };
+  return body.settings;
+}
+
+export async function savePiToolPolicySettings(
+  input: Partial<PiToolPolicySettings>
+): Promise<PiToolPolicySettings> {
+  const response = await fetch("/api/settings/pi-tool-policy", {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(input)
+  });
+  await ensureOk(response);
+  const body = (await response.json()) as { settings: PiToolPolicySettings };
   return body.settings;
 }
 
@@ -242,6 +302,38 @@ export async function getTextPreview(rootId: string, currentPath: string, maxByt
   const response = await fetch(`/api/files/text?${params.toString()}`);
   await ensureOk(response);
   return (await response.json()) as TextPreview;
+}
+
+export async function getEditableText(rootId: string, currentPath: string): Promise<EditableText> {
+  const params = new URLSearchParams({
+    rootId,
+    path: currentPath
+  });
+  const response = await fetch(`/api/files/edit-text?${params.toString()}`);
+  await ensureOk(response);
+  return (await response.json()) as EditableText;
+}
+
+export async function saveEditableText(input: {
+  rootId: string;
+  currentPath: string;
+  content: string;
+  expectedModifiedAt: string | null;
+}): Promise<SaveEditableTextResult> {
+  const response = await fetch("/api/files/edit-text", {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      rootId: input.rootId,
+      path: input.currentPath,
+      content: input.content,
+      expectedModifiedAt: input.expectedModifiedAt
+    })
+  });
+  await ensureOk(response);
+  return (await response.json()) as SaveEditableTextResult;
 }
 
 export function getFileBlobUrl(rootId: string, currentPath: string): string {

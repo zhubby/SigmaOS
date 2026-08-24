@@ -11,6 +11,7 @@ import {
   updateJobStatus
 } from "@sigmaos/db";
 import { applyFileMutation } from "@sigmaos/nas-tools";
+import type { FileOperationProposal, PendingApprovalRecord } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
 
 export function registerApprovalRoutes(server: FastifyInstance, { config, db }: ApiRouteContext): void {
@@ -27,6 +28,18 @@ export function registerApprovalRoutes(server: FastifyInstance, { config, db }: 
       return;
     }
 
+    if (approval.kind === "pi_tool_call") {
+      if (!updateApprovalStatus(db, approval.id, "approved", ["pending"])) {
+        reply.status(409).send({ error: `Approval is already ${approval.status}` });
+        return;
+      }
+      reply.status(202).send({
+        approvalId: approval.id,
+        status: "approved"
+      });
+      return;
+    }
+
     if (!updateApprovalStatus(db, approval.id, "approved", ["pending"])) {
       reply.status(409).send({ error: `Approval is already ${approval.status}` });
       return;
@@ -34,7 +47,7 @@ export function registerApprovalRoutes(server: FastifyInstance, { config, db }: 
 
     const applied: ReturnType<typeof recordAppliedOperation>[] = [];
     try {
-      for (const proposal of approval.proposal) {
+      for (const proposal of fileOperationProposals(approval)) {
         const root = getNasRoot(db, proposal.rootId);
         if (!root) {
           throw new Error(`NAS root ${proposal.rootId} is not configured`);
@@ -108,6 +121,18 @@ export function registerApprovalRoutes(server: FastifyInstance, { config, db }: 
       return;
     }
 
+    if (approval.kind === "pi_tool_call") {
+      if (!updateApprovalStatus(db, approval.id, "rejected", ["pending"])) {
+        reply.status(409).send({ error: `Approval is already ${approval.status}` });
+        return;
+      }
+      reply.status(202).send({
+        approvalId: approval.id,
+        status: "rejected"
+      });
+      return;
+    }
+
     if (!updateApprovalStatus(db, approval.id, "rejected", ["pending"])) {
       reply.status(409).send({ error: `Approval is already ${approval.status}` });
       return;
@@ -129,4 +154,22 @@ export function registerApprovalRoutes(server: FastifyInstance, { config, db }: 
       status: "rejected"
     });
   });
+}
+
+function fileOperationProposals(approval: PendingApprovalRecord): FileOperationProposal[] {
+  if (approval.kind !== "file_operation") {
+    return [];
+  }
+  return approval.proposal.filter(isFileOperationProposal);
+}
+
+function isFileOperationProposal(proposal: unknown): proposal is FileOperationProposal {
+  return (
+    typeof proposal === "object" &&
+    proposal !== null &&
+    "operation" in proposal &&
+    "rootId" in proposal &&
+    typeof (proposal as { operation?: unknown }).operation === "string" &&
+    typeof (proposal as { rootId?: unknown }).rootId === "string"
+  );
 }

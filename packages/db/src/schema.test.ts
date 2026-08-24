@@ -5,12 +5,19 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   appendEvent,
   claimNextJob,
+  createPiToolCallApproval,
   createSession,
   createUserMessageAndJob,
+  defaultPiToolPolicySettings,
   ensureNasRoots,
+  getAgentProviderSession,
+  getApproval,
+  getPiToolPolicySettings,
   listEvents,
   listNasRoots,
   openSigmaDb,
+  saveAgentProviderSession,
+  savePiToolPolicySettings,
   updateJobStatus,
   type SigmaDatabase
 } from "./index.js";
@@ -87,5 +94,93 @@ describe("SQLite schema and repositories", () => {
 
     expect(updateJobStatus(db, job.id, "cancelled", null, ["queued", "running"])).toBe(true);
     expect(updateJobStatus(db, job.id, "completed", null, ["running"])).toBe(false);
+  });
+
+  it("persists Pi provider sessions by SigmaOS session id", () => {
+    const session = createSession(db, { rootId: "local" });
+
+    saveAgentProviderSession(db, {
+      sessionId: session.id,
+      providerSessionId: "pi-1",
+      sessionFile: path.join(tempDir, "pi-sessions", "pi-1.jsonl"),
+      providerName: "google",
+      model: "",
+      settingsSnapshot: { providerName: "google", apiKeyConfigured: true }
+    });
+
+    expect(getAgentProviderSession(db, session.id)).toMatchObject({
+      sessionId: session.id,
+      providerSessionId: "pi-1",
+      providerName: "google",
+      settingsSnapshot: {
+        providerName: "google",
+        apiKeyConfigured: true
+      }
+    });
+  });
+
+  it("stores Pi tool policies and rejects auto mode for dangerous tools", () => {
+    expect(getPiToolPolicySettings(db)).toBeNull();
+    expect(defaultPiToolPolicySettings()).toMatchObject({
+      read: "auto",
+      bash: "ask"
+    });
+
+    const saved = savePiToolPolicySettings(db, {
+      read: "ask",
+      grep: "auto",
+      find: "auto",
+      ls: "disabled",
+      bash: "disabled",
+      edit: "ask",
+      write: "ask"
+    });
+
+    expect(saved).toMatchObject({
+      read: "ask",
+      ls: "disabled",
+      bash: "disabled"
+    });
+    expect(() =>
+      savePiToolPolicySettings(db, {
+        read: "auto",
+        grep: "auto",
+        find: "auto",
+        ls: "auto",
+        bash: "auto" as never,
+        edit: "ask",
+        write: "ask"
+      })
+    ).toThrow(/Dangerous tool bash/);
+  });
+
+  it("creates Pi tool approvals without file operation rows", () => {
+    const session = createSession(db, { rootId: "local" });
+    const { job } = createUserMessageAndJob(db, {
+      sessionId: session.id,
+      content: "run ls"
+    });
+
+    const approval = createPiToolCallApproval(db, {
+      jobId: job.id,
+      proposal: {
+        toolCallId: "tool-1",
+        toolName: "bash",
+        args: { command: "ls" },
+        cwd: tempDir,
+        risk: "medium",
+        summary: "Run shell command: ls"
+      }
+    });
+
+    expect(getApproval(db, approval.id)).toMatchObject({
+      kind: "pi_tool_call",
+      proposal: [
+        {
+          toolName: "bash",
+          summary: "Run shell command: ls"
+        }
+      ]
+    });
   });
 });

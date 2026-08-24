@@ -1,8 +1,10 @@
 @import "./styles/base.css";
+@import "./styles/select.css";
 @import "./styles/layout.css";
 @import "./styles/chat.css";
 @import "./styles/settings.css";
 @import "./styles/workspace.css";
 @import "./styles/preview.css";
+@import "./styles/editor.css";
 @import "./styles/activity.css";
 @import "./styles/responsive.css";

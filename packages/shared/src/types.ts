@@ -16,7 +16,23 @@ export type ApprovalStatus =
 
 export type FileOperationStatus = "proposed" | "applied" | "rolled_back" | "failed";
 
-export type FileMutationOperation = "mkdir" | "move" | "copy" | "rename" | "tag" | "trash" | "restore";
+export type FileMutationOperation =
+  | "mkdir"
+  | "move"
+  | "copy"
+  | "rename"
+  | "tag"
+  | "trash"
+  | "restore"
+  | "edit";
+
+export type PendingApprovalKind = "file_operation" | "pi_tool_call";
+
+export type PiToolName = "read" | "bash" | "edit" | "write" | "grep" | "find" | "ls";
+
+export type PiToolPolicyMode = "auto" | "ask" | "disabled";
+
+export type PiDangerousToolPolicyMode = Exclude<PiToolPolicyMode, "auto">;
 
 export type AgentEventType =
   | "agent.started"
@@ -64,7 +80,7 @@ export interface SigmaConfig {
 export type ModelProviderKind = "pi" | "openai-compatible" | "anthropic-compatible" | "local";
 
 export interface ModelProviderSettingsRecord {
-  provider: ModelProviderKind;
+  providerName: string;
   displayName: string;
   baseUrl: string | null;
   model: string;
@@ -73,7 +89,7 @@ export interface ModelProviderSettingsRecord {
 }
 
 export interface PublicModelProviderSettings {
-  provider: ModelProviderKind;
+  providerName: string;
   displayName: string;
   baseUrl: string | null;
   model: string;
@@ -81,10 +97,34 @@ export interface PublicModelProviderSettings {
   updatedAt: string;
 }
 
+export interface PiToolPolicySettingsRecord {
+  read: PiToolPolicyMode;
+  grep: PiToolPolicyMode;
+  find: PiToolPolicyMode;
+  ls: PiToolPolicyMode;
+  bash: PiDangerousToolPolicyMode;
+  edit: PiDangerousToolPolicyMode;
+  write: PiDangerousToolPolicyMode;
+  updatedAt: string;
+}
+
+export type PublicPiToolPolicySettings = PiToolPolicySettingsRecord;
+
 export interface AgentSessionRecord {
   id: string;
   rootId: string;
   currentPath: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentProviderSessionRecord {
+  sessionId: string;
+  providerSessionId: string;
+  sessionFile: string | null;
+  providerName: string;
+  model: string;
+  settingsSnapshot: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }
@@ -144,12 +184,24 @@ export interface FileOperationProposal {
   summary: string;
 }
 
+export interface PiToolCallApproval {
+  toolCallId: string;
+  toolName: PiToolName;
+  args: Record<string, unknown>;
+  cwd: string;
+  risk: "low" | "medium" | "high";
+  summary: string;
+}
+
+export type PendingApprovalProposal = FileOperationProposal | PiToolCallApproval;
+
 export interface PendingApprovalRecord {
   id: string;
   jobId: string;
   sessionId: string;
+  kind: PendingApprovalKind;
   status: ApprovalStatus;
-  proposal: FileOperationProposal[];
+  proposal: PendingApprovalProposal[];
   createdAt: string;
   updatedAt: string;
 }

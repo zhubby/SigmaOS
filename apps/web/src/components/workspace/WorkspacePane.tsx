@@ -1,11 +1,12 @@
 import { FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronLeft, Home, RefreshCw, Search } from "lucide-react";
+import { ChevronLeft, Home, PanelRightClose, PanelRightOpen, PencilLine, RefreshCw, Search } from "lucide-react";
 import type { FileEntry, FileMeta, FileOperation, NasRoot, TextPreview } from "../../api.js";
 import { describeFileVisual } from "../../file-type-utils.js";
 import { formatBytes, formatDate, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
 import { ActivityStrip } from "../activity/ActivityStrip.js";
+import { CustomSelect } from "../common/CustomSelect.js";
 import { FileTypeIcon } from "../file/FileTypeIcon.js";
 import { PreviewContent, previewIcon } from "../preview/PreviewContent.js";
 
@@ -28,6 +29,8 @@ export function WorkspacePane({
   previewError,
   textPreview,
   blobUrl,
+  previewFileSizeLimitBytes,
+  previewCollapsed,
   searchQuery,
   operations,
   locale,
@@ -39,6 +42,8 @@ export function WorkspacePane({
   onSearchQueryChange,
   onGoToBreadcrumb,
   onOpenEntry,
+  onOpenEditor,
+  onTogglePreviewCollapsed,
   onRollback
 }: {
   active: boolean;
@@ -57,6 +62,8 @@ export function WorkspacePane({
   previewError: string | null;
   textPreview: TextPreview | null;
   blobUrl: string;
+  previewFileSizeLimitBytes: number;
+  previewCollapsed: boolean;
   searchQuery: string;
   operations: FileOperation[];
   locale: SupportedLocale;
@@ -68,12 +75,25 @@ export function WorkspacePane({
   onSearchQueryChange: (query: string) => void;
   onGoToBreadcrumb: (index: number) => void;
   onOpenEntry: (entry: FileEntry) => void;
+  onOpenEditor: (meta: FileMeta) => void;
+  onTogglePreviewCollapsed: () => void;
   onRollback: (operation: FileOperation) => void;
 }) {
   const { t } = useTranslation();
   const displayTitle = displayPath === "." ? t("common.root") : displayPath;
   const entryCount = formatLocaleNumber(entries.length, locale);
   const safeEntryCount = formatLocaleNumber(safeEntries, locale);
+  const rootOptions = roots.map((root) => ({
+    value: root.id,
+    label: root.name
+  }));
+  const selectedRootLabel = rootOptions.find((root) => root.value === selectedRootId)?.label ?? selectedRootId;
+  const hasPreview = Boolean(selectedFilePath);
+  const selectedFileName = selectedFilePath?.split("/").pop() ?? "";
+  const previewTitle = previewMeta?.name ?? selectedFileName;
+  const isPreviewLoading = previewLoading || (hasPreview && !previewMeta && !previewError);
+  const canEditPreview = previewMeta?.kind === "file" && previewMeta.previewKind === "text";
+  const isPreviewCollapsed = hasPreview && previewCollapsed;
 
   return (
     <section className={`workspace-pane ${active ? "is-mobile-active" : ""}`} aria-label={t("workspace.label")}>
@@ -81,17 +101,13 @@ export function WorkspacePane({
         {hasRootSwitcher ? (
           <div className="root-control">
             <label htmlFor="root-select">{t("workspace.rootLabel")}</label>
-            <select
+            <CustomSelect
               id="root-select"
               value={selectedRootId}
-              onChange={(event) => onSelectRoot(event.target.value)}
-            >
-              {roots.map((root) => (
-                <option key={root.id} value={root.id}>
-                  {root.name}
-                </option>
-              ))}
-            </select>
+              options={rootOptions}
+              ariaLabel={`${t("workspace.rootLabel")}: ${selectedRootLabel}`}
+              onChange={onSelectRoot}
+            />
           </div>
         ) : null}
 
@@ -136,7 +152,7 @@ export function WorkspacePane({
         </form>
       </header>
 
-      <div className="workspace-grid">
+      <div className={`workspace-grid${hasPreview ? " has-preview" : ""}${isPreviewCollapsed ? " is-preview-collapsed" : ""}`}>
         <section className="file-browser" aria-label={t("workspace.fileBrowser")}>
           <div className="panel-heading">
             <div>
@@ -188,28 +204,74 @@ export function WorkspacePane({
           </div>
         </section>
 
-        <section className="preview-pane" aria-label={t("workspace.preview")}>
-          <div className="panel-heading">
-            <div>
-              <span className="eyebrow">{t("workspace.preview")}</span>
-              <h2>{previewMeta?.name ?? t("workspace.selectFile")}</h2>
-            </div>
-            {previewMeta ? (
-              <span className="preview-kind">
-                {previewIcon(previewMeta.previewKind)}
-                {t(`preview.kind.${previewMeta.previewKind}`)}
-              </span>
-            ) : null}
-          </div>
+        <section
+          className={`preview-pane${hasPreview ? " is-open" : " is-collapsed"}${isPreviewCollapsed ? " is-manual-collapsed" : ""}`}
+          aria-label={t("workspace.preview")}
+          aria-hidden={!hasPreview}
+        >
+          {hasPreview && isPreviewCollapsed ? (
+            <button
+              type="button"
+              className="preview-expand-button"
+              onClick={onTogglePreviewCollapsed}
+              title={t("workspace.expandPreview")}
+              aria-label={t("workspace.expandPreview")}
+              aria-expanded="false"
+            >
+              <PanelRightOpen aria-hidden="true" size={17} />
+              <span>{previewTitle || t("workspace.preview")}</span>
+            </button>
+          ) : hasPreview ? (
+            <>
+              <div className="panel-heading">
+                <div>
+                  <span className="eyebrow">{t("workspace.preview")}</span>
+                  <div className="preview-title-row">
+                    <h2>{previewTitle || t("workspace.selectFile")}</h2>
+                  </div>
+                </div>
+                <div className="preview-heading-actions">
+                  {previewMeta ? (
+                    <span className="preview-kind">
+                      {previewIcon(previewMeta.previewKind)}
+                      {t(`preview.kind.${previewMeta.previewKind}`)}
+                    </span>
+                  ) : null}
+                  {canEditPreview && previewMeta ? (
+                    <button
+                      type="button"
+                      className="preview-tool-button"
+                      onClick={() => onOpenEditor(previewMeta)}
+                      title={t("editor.open")}
+                      aria-label={t("editor.open")}
+                    >
+                      <PencilLine aria-hidden="true" size={14} />
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="preview-tool-button"
+                    onClick={onTogglePreviewCollapsed}
+                    title={t("workspace.collapsePreview")}
+                    aria-label={t("workspace.collapsePreview")}
+                    aria-expanded="true"
+                  >
+                    <PanelRightClose aria-hidden="true" size={14} />
+                  </button>
+                </div>
+              </div>
 
-          <PreviewContent
-            blobUrl={blobUrl}
-            loading={previewLoading}
-            meta={previewMeta}
-            error={previewError}
-            textPreview={textPreview}
-            locale={locale}
-          />
+              <PreviewContent
+                blobUrl={blobUrl}
+                loading={isPreviewLoading}
+                meta={previewMeta}
+                error={previewError}
+                textPreview={textPreview}
+                previewFileSizeLimitBytes={previewFileSizeLimitBytes}
+                locale={locale}
+              />
+            </>
+          ) : null}
         </section>
       </div>
 

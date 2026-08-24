@@ -351,8 +351,7 @@
   font-weight: 800;
 }
 
-.settings-form input,
-.settings-form select {
+.settings-form input {
   width: 100%;
   height: 40px;
   border: 1px solid var(--line-soft);
@@ -373,20 +372,49 @@
   min-width: 0;
 }
 
+.settings-size-field {
+  max-width: 280px;
+}
+
 .settings-preference-field > span {
   color: var(--muted);
   font-size: 11.5px;
   font-weight: 800;
 }
 
-.settings-preference-field select {
-  width: 100%;
-  height: 40px;
+.settings-unit-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  overflow: hidden;
   border: 1px solid var(--line-soft);
   border-radius: 5px;
+  background: var(--surface);
+}
+
+.settings-unit-input:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.settings-unit-input input {
+  width: 100%;
+  height: 40px;
+  border: 0;
   padding: 0 10px;
   color: var(--text);
-  background: var(--surface);
+  background: transparent;
+}
+
+.settings-unit-input input:focus-visible {
+  outline: 0;
+}
+
+.settings-unit-input > span {
+  padding: 0 10px;
+  color: var(--muted-2);
+  font-size: 11.5px;
+  font-weight: 800;
 }
 
 .settings-preference-field small {
@@ -522,13 +550,15 @@
 }
 
 .settings-area-list,
-.settings-config-list {
+.settings-config-list,
+.settings-tool-policy-list {
   display: grid;
   gap: 8px;
 }
 
 .settings-area-list button,
-.settings-config-row {
+.settings-config-row,
+.settings-policy-row {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr) auto;
   align-items: center;
@@ -581,4 +611,30 @@
 
 .settings-config-row {
   grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.settings-policy-row {
+  grid-template-columns: minmax(0, 1fr) 160px;
+}
+
+.settings-policy-row > span,
+.settings-policy-row strong,
+.settings-policy-row small {
+  display: block;
+  min-width: 0;
+}
+
+.settings-policy-row strong {
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.settings-policy-row small {
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

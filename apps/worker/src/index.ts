@@ -14,7 +14,7 @@ async function tick(): Promise<void> {
   }
 
   try {
-    await processNextJob({ db });
+    await processNextJob({ db, config });
   } catch (error) {
     console.error(error);
   }
@@ -34,4 +34,3 @@ function shutdown(): void {
   clearInterval(timer);
   db.close();
 }
-

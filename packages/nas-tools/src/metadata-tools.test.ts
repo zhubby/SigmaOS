@@ -31,4 +31,9 @@ describe("metadata tools", () => {
     expect(inferPreviewKind(inferMimeType("document.pdf"))).toBe("pdf");
     expect(inferPreviewKind(inferMimeType("archive.zip"))).toBe("unsupported");
   });
+
+  it("allows generic octet-stream files to use text preview", () => {
+    expect(inferMimeType("unknown.bin")).toBe("application/octet-stream");
+    expect(inferPreviewKind(inferMimeType("unknown.bin"))).toBe("text");
+  });
 });

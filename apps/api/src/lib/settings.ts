@@ -1,16 +1,17 @@
-import type { ModelProviderKind, ModelProviderSettingsRecord, SigmaConfig } from "@sigmaos/shared";
+import type { ModelProviderSettingsRecord, SigmaConfig } from "@sigmaos/shared";
+import { defaultPiToolPolicySettings } from "@sigmaos/db";
 
 export function defaultModelProviderSettings(config: SigmaConfig): ModelProviderSettingsRecord {
-  const provider =
+  const providerName =
     config.model.provider === "local"
-      ? "local"
+      ? "openai"
       : config.model.provider === "cloud"
-        ? "openai-compatible"
-        : "pi";
+        ? "openai"
+        : "google";
 
   return {
-    provider,
-    displayName: modelProviderLabel(provider),
+    providerName,
+    displayName: modelProviderLabel(providerName),
     baseUrl: config.model.localEndpoint,
     model: "",
     apiKey: null,
@@ -20,7 +21,7 @@ export function defaultModelProviderSettings(config: SigmaConfig): ModelProvider
 
 export function toPublicModelProviderSettings(settings: ModelProviderSettingsRecord) {
   return {
-    provider: settings.provider,
+    providerName: settings.providerName,
     displayName: settings.displayName,
     baseUrl: settings.baseUrl,
     model: settings.model,
@@ -29,8 +30,8 @@ export function toPublicModelProviderSettings(settings: ModelProviderSettingsRec
   };
 }
 
-export function isModelProviderKind(value: string): value is ModelProviderKind {
-  return ["pi", "openai-compatible", "anthropic-compatible", "local"].includes(value);
+export function isProviderName(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0 && value.trim().length <= 80;
 }
 
 export function normalizeOptionalText(value: string | null | undefined): string | null {
@@ -41,15 +42,19 @@ export function normalizeOptionalText(value: string | null | undefined): string 
   return trimmed ? trimmed : null;
 }
 
-function modelProviderLabel(provider: ModelProviderKind): string {
-  switch (provider) {
-    case "openai-compatible":
-      return "OpenAI Compatible";
-    case "anthropic-compatible":
-      return "Anthropic Compatible";
-    case "local":
-      return "Local Endpoint";
-    case "pi":
-      return "Pi";
+export function toPublicPiToolPolicySettings(settings = defaultPiToolPolicySettings()) {
+  return settings;
+}
+
+function modelProviderLabel(providerName: string): string {
+  switch (providerName) {
+    case "google":
+      return "Google";
+    case "openai":
+      return "OpenAI";
+    case "anthropic":
+      return "Anthropic";
+    default:
+      return providerName;
   }
 }

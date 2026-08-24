@@ -65,7 +65,35 @@
 @media (max-width: 1180px) {
   .workspace-grid {
     grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 0fr);
+  }
+
+  .workspace-grid.has-preview {
+    grid-template-columns: 1fr;
     grid-template-rows: minmax(280px, 0.9fr) minmax(320px, 1.1fr);
+  }
+
+  .workspace-grid.has-preview.is-preview-collapsed {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) 44px;
+  }
+
+  .preview-pane {
+    transform: translateY(14px) scaleY(0.97);
+    transform-origin: center top;
+  }
+
+  .preview-expand-button {
+    grid-template-columns: 34px minmax(0, 1fr);
+    grid-template-rows: 1fr;
+    justify-items: start;
+    padding: 0 12px;
+  }
+
+  .preview-expand-button span {
+    max-width: 100%;
+    transform: none;
+    writing-mode: horizontal-tb;
   }
 
   .workspace-header {
@@ -183,12 +211,22 @@
     overflow: visible;
   }
 
+  .workspace-grid.has-preview {
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+  }
+
   .file-browser {
     height: 280px;
   }
 
-  .preview-pane {
+  .workspace-grid.has-preview .preview-pane {
     min-height: 340px;
+  }
+
+  .workspace-grid.has-preview.is-preview-collapsed .preview-pane {
+    min-height: 44px;
+    height: 44px;
   }
 
   .file-row {

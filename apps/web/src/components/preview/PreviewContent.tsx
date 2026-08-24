@@ -7,6 +7,7 @@ import type { TFunction } from "i18next";
 import type { FileMeta, FilePreviewKind, TextPreview } from "../../api.js";
 import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
+import { isPreviewOverFileSizeLimit } from "../../lib/preview-settings.js";
 import {
   describeTextPreview,
   highlightSource,
@@ -21,6 +22,7 @@ export function PreviewContent({
   meta,
   error,
   textPreview,
+  previewFileSizeLimitBytes,
   locale
 }: {
   blobUrl: string;
@@ -28,6 +30,7 @@ export function PreviewContent({
   meta: FileMeta | null;
   error: string | null;
   textPreview: TextPreview | null;
+  previewFileSizeLimitBytes: number;
   locale: SupportedLocale;
 }) {
   const { t } = useTranslation();
@@ -48,6 +51,20 @@ export function PreviewContent({
       <div className="preview-empty">
         <PanelRight aria-hidden="true" size={24} />
         <span>{t("preview.chooseFile")}</span>
+      </div>
+    );
+  }
+  if (isPreviewOverFileSizeLimit(meta, previewFileSizeLimitBytes)) {
+    return (
+      <div className="preview-empty">
+        <AlertTriangle aria-hidden="true" size={24} />
+        <strong>{meta.mimeType}</strong>
+        <span>
+          {t("preview.tooLarge", {
+            size: formatBytes(meta.sizeBytes, locale),
+            limit: formatBytes(previewFileSizeLimitBytes, locale)
+          })}
+        </span>
       </div>
     );
   }

@@ -150,6 +150,28 @@ export const migrations: Migration[] = [
         updated_at TEXT NOT NULL
       );
     `
+  },
+  {
+    id: "004_pi_sessions_and_tool_approvals",
+    sql: `
+      CREATE TABLE IF NOT EXISTS agent_provider_sessions (
+        session_id TEXT PRIMARY KEY REFERENCES agent_sessions(id) ON DELETE CASCADE,
+        provider_session_id TEXT NOT NULL,
+        session_file TEXT,
+        provider_name TEXT NOT NULL,
+        model TEXT NOT NULL,
+        settings_snapshot_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      ALTER TABLE pending_approvals
+        ADD COLUMN kind TEXT NOT NULL DEFAULT 'file_operation'
+        CHECK (kind IN ('file_operation', 'pi_tool_call'));
+
+      CREATE INDEX IF NOT EXISTS idx_pending_approvals_kind_status_created_at
+        ON pending_approvals(kind, status, created_at);
+    `
   }
 ];
 

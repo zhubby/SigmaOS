@@ -15,9 +15,11 @@ import {
   getTextPreview,
   getTranscript,
   getModelProviderSettings,
+  getPiToolPolicySettings,
   rejectRequest,
   rollbackOperation,
   saveModelProviderSettings,
+  savePiToolPolicySettings,
   searchFiles,
   sendMessage,
   updateSessionPath,
@@ -25,18 +27,27 @@ import {
   type FileEntry,
   type FileMeta,
   type FileOperation,
+  type SaveEditableTextResult,
   type ModelProviderSettings,
   type NasRoot,
   type PendingApproval,
+  type PiToolPolicySettings,
   type Session,
   type SessionSummary,
   type TextPreview,
   type TranscriptMessage
 } from "./api.js";
 import { ChatPane } from "./components/chat/ChatPane.js";
+import { FileEditorModal } from "./components/editor/FileEditorModal.js";
 import { SettingsModal } from "./components/settings/SettingsModal.js";
 import { WorkspacePane } from "./components/workspace/WorkspacePane.js";
-import { modelSettingsToForm, type ModelProviderFormState, type SettingsSectionId } from "./config/settings.js";
+import {
+  defaultToolPolicyForm,
+  modelSettingsToForm,
+  type ModelProviderFormState,
+  type SettingsSectionId,
+  type ToolPolicyFormState
+} from "./config/settings.js";
 import type { AppStatus } from "./config/status.js";
 import {
   readStoredLanguagePreference,
@@ -49,6 +60,12 @@ import { eventToTranscriptMessage, getEventJobId } from "./lib/events.js";
 import { i18n } from "./i18n/index.js";
 import { toErrorMessage } from "./lib/format.js";
 import { clampSplitWidth, readStoredSplitWidth, writeStoredSplitWidth } from "./lib/layout.js";
+import {
+  clampPreviewFileSizeLimitBytes,
+  isPreviewOverFileSizeLimit,
+  readStoredPreviewFileSizeLimitBytes,
+  writeStoredPreviewFileSizeLimitBytes
+} from "./lib/preview-settings.js";
 import { loadEntriesForSession } from "./lib/session.js";
 
 type MobileView = "chat" | "workspace";
@@ -71,6 +88,8 @@ export function App() {
   const [textPreview, setTextPreview] = useState<TextPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewCollapsed, setPreviewCollapsed] = useState(false);
+  const [editorMeta, setEditorMeta] = useState<FileMeta | null>(null);
   const [message, setMessage] = useState("");
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -82,13 +101,18 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSectionId>("model-providers");
   const [modelSettings, setModelSettings] = useState<ModelProviderSettings | null>(null);
+  const [toolPolicySettings, setToolPolicySettings] = useState<PiToolPolicySettings | null>(null);
   const [modelSettingsForm, setModelSettingsForm] = useState<ModelProviderFormState>(() =>
     modelSettingsToForm(null)
   );
+  const [toolPolicyForm, setToolPolicyForm] = useState<ToolPolicyFormState>(() => defaultToolPolicyForm());
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [languagePreference, setLanguagePreference] = useState<LanguagePreference>(() => readStoredLanguagePreference());
+  const [previewFileSizeLimitBytes, setPreviewFileSizeLimitBytes] = useState(() =>
+    readStoredPreviewFileSizeLimitBytes()
+  );
   const seenEvents = useRef(new Set<number>());
   const transcriptRef = useRef<HTMLDivElement | null>(null);
 
@@ -162,6 +186,7 @@ export function App() {
       setPreviewMeta(null);
       setTextPreview(null);
       setPreviewError(null);
+      setPreviewCollapsed(false);
       setStatus("ready");
       void refreshWorkQueues();
     }
@@ -277,7 +302,9 @@ export function App() {
       setPreviewError(null);
       setTextPreview(null);
       const meta = await getFileMeta(rootId, filePath);
-      const nextTextPreview = meta.previewKind === "text" ? await getTextPreview(rootId, filePath) : null;
+      const withinPreviewLimit = !isPreviewOverFileSizeLimit(meta, previewFileSizeLimitBytes);
+      const nextTextPreview =
+        meta.previewKind === "text" && withinPreviewLimit ? await getTextPreview(rootId, filePath) : null;
       if (!active) {
         return;
       }
@@ -297,7 +324,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [selectedRootId, selectedFilePath]);
+  }, [previewFileSizeLimitBytes, selectedRootId, selectedFilePath]);
 
   useEffect(() => {
     if (!resizing) {
@@ -337,9 +364,11 @@ export function App() {
     setSettingsLoading(true);
     setSettingsError(null);
     try {
-      const settings = await getModelProviderSettings();
+      const [settings, toolPolicy] = await Promise.all([getModelProviderSettings(), getPiToolPolicySettings()]);
       setModelSettings(settings);
+      setToolPolicySettings(toolPolicy);
       setModelSettingsForm(modelSettingsToForm(settings));
+      setToolPolicyForm(toolPolicy);
     } catch (nextError) {
       setSettingsError(toErrorMessage(nextError));
     } finally {
@@ -352,16 +381,21 @@ export function App() {
     setSettingsSaving(true);
     setSettingsError(null);
     try {
-      const settings = await saveModelProviderSettings({
-        provider: modelSettingsForm.provider,
-        displayName: modelSettingsForm.displayName,
-        baseUrl: modelSettingsForm.baseUrl || null,
-        model: modelSettingsForm.model,
-        ...(modelSettingsForm.apiKey ? { apiKey: modelSettingsForm.apiKey } : {}),
-        clearApiKey: modelSettingsForm.clearApiKey
-      });
+      const [settings, toolPolicy] = await Promise.all([
+        saveModelProviderSettings({
+          providerName: modelSettingsForm.providerName,
+          displayName: modelSettingsForm.displayName,
+          baseUrl: modelSettingsForm.baseUrl || null,
+          model: modelSettingsForm.model,
+          ...(modelSettingsForm.apiKey ? { apiKey: modelSettingsForm.apiKey } : {}),
+          clearApiKey: modelSettingsForm.clearApiKey
+        }),
+        savePiToolPolicySettings(toolPolicyForm)
+      ]);
       setModelSettings(settings);
+      setToolPolicySettings(toolPolicy);
       setModelSettingsForm(modelSettingsToForm(settings));
+      setToolPolicyForm(toolPolicy);
     } catch (nextError) {
       setSettingsError(toErrorMessage(nextError));
     } finally {
@@ -385,6 +419,7 @@ export function App() {
       setSelectedFilePath(null);
       setPreviewMeta(null);
       setTextPreview(null);
+      setPreviewCollapsed(false);
       const [loaded, nextTranscript] = await Promise.all([
         loadEntriesForSession(nextSession.rootId, nextSession),
         getTranscript(nextSession.id)
@@ -443,6 +478,7 @@ export function App() {
     setStatus("searching");
     setEntries(await searchFiles(selectedRootId, currentPath, searchQuery.trim()));
     setSelectedFilePath(null);
+    setPreviewCollapsed(false);
     setStatus("ready");
   }
 
@@ -456,6 +492,7 @@ export function App() {
     setSelectedFilePath(null);
     setPreviewMeta(null);
     setTextPreview(null);
+    setPreviewCollapsed(false);
     const [nextEntries, updatedSession] = await Promise.all([
       getFiles(selectedRootId, pathname),
       session ? updateSessionPath(session.id, pathname) : Promise.resolve(null)
@@ -539,6 +576,31 @@ export function App() {
     void i18n.changeLanguage(preference === "system" ? resolveBrowserLocale() : preference);
   }
 
+  function changePreviewFileSizeLimit(bytes: number) {
+    const nextLimit = clampPreviewFileSizeLimitBytes(bytes);
+    writeStoredPreviewFileSizeLimitBytes(nextLimit);
+    setPreviewFileSizeLimitBytes(nextLimit);
+  }
+
+  function handleEditorSaved(result: SaveEditableTextResult) {
+    if (result.meta.path === selectedFilePath) {
+      setPreviewMeta(result.meta);
+      setTextPreview(result.textPreview);
+    }
+    setEntries((current) =>
+      current.map((entry) =>
+        entry.path === result.meta.path
+          ? {
+              ...entry,
+              sizeBytes: result.meta.sizeBytes,
+              modifiedAt: result.meta.modifiedAt
+            }
+          : entry
+      )
+    );
+    setOperations((current) => [result.operation, ...current.filter((operation) => operation.id !== result.operation.id)].slice(0, 100));
+  }
+
   function selectRoot(rootId: string) {
     setSelectedRootId(rootId);
     setCurrentPath(".");
@@ -554,6 +616,7 @@ export function App() {
     }
     if (entry.kind === "file") {
       setSelectedFilePath(entry.path);
+      setPreviewCollapsed(false);
       setMobileView("workspace");
     }
   }
@@ -679,6 +742,8 @@ export function App() {
         previewError={previewError}
         textPreview={textPreview}
         blobUrl={blobUrl}
+        previewFileSizeLimitBytes={previewFileSizeLimitBytes}
+        previewCollapsed={previewCollapsed}
         searchQuery={searchQuery}
         operations={operations}
         locale={resolvedLocale}
@@ -690,8 +755,20 @@ export function App() {
         onSearchQueryChange={setSearchQuery}
         onGoToBreadcrumb={goToBreadcrumb}
         onOpenEntry={openEntry}
+        onOpenEditor={setEditorMeta}
+        onTogglePreviewCollapsed={() => setPreviewCollapsed((collapsed) => !collapsed)}
         onRollback={(operation) => void handleRollback(operation)}
       />
+
+      {editorMeta ? (
+        <FileEditorModal
+          rootId={selectedRootId}
+          meta={editorMeta}
+          locale={resolvedLocale}
+          onClose={() => setEditorMeta(null)}
+          onSaved={handleEditorSaved}
+        />
+      ) : null}
 
       {settingsOpen ? (
         <SettingsModal
@@ -701,11 +778,16 @@ export function App() {
           loading={settingsLoading}
           saving={settingsSaving}
           settings={modelSettings}
+          toolPolicySettings={toolPolicySettings}
+          toolPolicyForm={toolPolicyForm}
           languagePreference={languagePreference}
+          previewFileSizeLimitBytes={previewFileSizeLimitBytes}
           resolvedLocale={resolvedLocale}
           onClose={() => setSettingsOpen(false)}
           onFormChange={setModelSettingsForm}
+          onToolPolicyFormChange={setToolPolicyForm}
           onLanguagePreferenceChange={changeLanguagePreference}
+          onPreviewFileSizeLimitChange={changePreviewFileSizeLimit}
           onSectionChange={setActiveSettingsSection}
           onSubmit={(event) => void saveSettings(event)}
         />
