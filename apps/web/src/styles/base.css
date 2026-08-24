@@ -21,6 +21,8 @@
   --yellow: #f0b232;
   --red: #da373c;
   --shadow: 0 18px 60px rgb(0 0 0 / 28%);
+  --code-font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --code-font-size: 12px;
 }
 
 * {

@@ -269,11 +269,18 @@ export const en = {
       languageHelp: "System default follows your browser preference."
     },
     files: {
+      editorTitle: "Editor Typography",
+      editorDescription: "Code font used by text preview, code blocks, tables, and the live editor.",
+      monoFont: "Mono font",
+      monoFontHelp: "Choose an installed monospace face; each option falls back to a safe system mono stack.",
+      fontSize: "Font size",
+      fontSizeHelp: "Applies immediately in this browser.",
       previewTitle: "Preview Limits",
       previewDescription: "Control which files can open in the preview pane.",
       previewFileSizeLimit: "Max preview file size",
       previewFileSizeLimitHelp: "Files above {{limit}} show metadata only and are not opened inline.",
-      megabytes: "MB"
+      megabytes: "MB",
+      pixels: "px"
     },
     blueprints: {
       agents: {
@@ -718,11 +725,18 @@ export const zhCN = {
       languageHelp: "跟随系统会使用浏览器语言偏好。"
     },
     files: {
+      editorTitle: "编辑器字体",
+      editorDescription: "用于文本预览、代码块、表格和实时编辑器的代码字体。",
+      monoFont: "Mono 字体",
+      monoFontHelp: "选择已安装的等宽字体；每个选项都会回退到安全的系统等宽字体。",
+      fontSize: "字体大小",
+      fontSizeHelp: "在当前浏览器中立即生效。",
       previewTitle: "预览限制",
       previewDescription: "控制哪些文件可以在预览面板中打开。",
       previewFileSizeLimit: "最大预览文件大小",
       previewFileSizeLimitHelp: "超过 {{limit}} 的文件只显示元数据，不会内联打开。",
-      megabytes: "MB"
+      megabytes: "MB",
+      pixels: "px"
     },
     blueprints: {
       agents: {

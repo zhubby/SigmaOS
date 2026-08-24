@@ -10,6 +10,7 @@ import {
 import { formatBytes, formatTime } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
 import { toErrorMessage } from "../../lib/format.js";
+import { describeTextPreview, highlightSource } from "../../preview-utils.js";
 
 type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "conflict" | "error";
 
@@ -35,10 +36,16 @@ export function FileEditorModal({
   const [error, setError] = useState<string | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const onSavedRef = useRef(onSaved);
+  const highlightRef = useRef<HTMLPreElement>(null);
 
   const dirty = content !== savedContent;
   const blocked = saveStatus === "conflict";
   const contentBytes = useMemo(() => new TextEncoder().encode(content).length, [content]);
+  const descriptor = useMemo(() => describeTextPreview(meta.name, meta.mimeType), [meta.mimeType, meta.name]);
+  const highlighted = useMemo(
+    () => highlightSource(editorHighlightContent(content), descriptor.language),
+    [content, descriptor.language]
+  );
   const status = useMemo(
     () => editorStatusLabel({ dirty, error, loading, saveStatus, t }),
     [dirty, error, loading, saveStatus, t]
@@ -145,6 +152,14 @@ export function FileEditorModal({
     }
   }
 
+  function syncHighlightScroll(source: HTMLTextAreaElement) {
+    if (!highlightRef.current) {
+      return;
+    }
+    highlightRef.current.scrollTop = source.scrollTop;
+    highlightRef.current.scrollLeft = source.scrollLeft;
+  }
+
   return (
     <div className="editor-backdrop">
       <section className="editor-modal" role="dialog" aria-modal="true" aria-labelledby="file-editor-title">
@@ -182,17 +197,25 @@ export function FileEditorModal({
           </div>
         ) : null}
 
-        <textarea
-          className="editor-textarea"
-          value={content}
-          onChange={(event) => changeContent(event.target.value)}
-          onKeyDown={handleKeyDown}
-          aria-label={t("editor.textarea")}
-          disabled={loading}
-          spellCheck={false}
-        />
+        <div className={`editor-code-surface${loading ? " is-loading" : ""}`}>
+          <pre ref={highlightRef} className={`editor-highlight language-${highlighted.language}`} aria-hidden="true">
+            <code dangerouslySetInnerHTML={{ __html: highlighted.html }} />
+          </pre>
+          <textarea
+            className="editor-textarea"
+            value={content}
+            onChange={(event) => changeContent(event.target.value)}
+            onKeyDown={handleKeyDown}
+            onScroll={(event) => syncHighlightScroll(event.currentTarget)}
+            aria-label={t("editor.textarea")}
+            disabled={loading}
+            spellCheck={false}
+            wrap="off"
+          />
+        </div>
 
         <footer className="editor-footer">
+          <span>{descriptor.languageLabel}</span>
           <span>{formatBytes(contentBytes, locale)}</span>
           <span>{lastSavedAt ? t("editor.savedAt", { time: formatTime(lastSavedAt, locale) }) : t("editor.notSaved")}</span>
         </footer>
@@ -230,4 +253,11 @@ function editorStatusLabel({
     return { icon: <FilePenLine aria-hidden="true" size={14} />, label: t("editor.states.unsaved"), state: "dirty" };
   }
   return { icon: <CheckCircle2 aria-hidden="true" size={14} />, label: t("editor.states.saved"), state: "saved" };
+}
+
+function editorHighlightContent(content: string): string {
+  if (content.length === 0) {
+    return " ";
+  }
+  return content.endsWith("\n") ? `${content} ` : content;
 }

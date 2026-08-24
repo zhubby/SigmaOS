@@ -57,6 +57,13 @@ import {
   type LanguagePreference
 } from "./i18n/locale.js";
 import { eventToTranscriptMessage, getEventJobId } from "./lib/events.js";
+import {
+  codeFontFamilyValue,
+  normalizeCodeFontSettings,
+  readStoredCodeFontSettings,
+  writeStoredCodeFontSettings,
+  type CodeFontSettings
+} from "./lib/editor-settings.js";
 import { i18n } from "./i18n/index.js";
 import { toErrorMessage } from "./lib/format.js";
 import { clampSplitWidth, readStoredSplitWidth, writeStoredSplitWidth } from "./lib/layout.js";
@@ -113,6 +120,7 @@ export function App() {
   const [previewFileSizeLimitBytes, setPreviewFileSizeLimitBytes] = useState(() =>
     readStoredPreviewFileSizeLimitBytes()
   );
+  const [codeFontSettings, setCodeFontSettings] = useState<CodeFontSettings>(() => readStoredCodeFontSettings());
   const seenEvents = useRef(new Set<number>());
   const transcriptRef = useRef<HTMLDivElement | null>(null);
 
@@ -125,6 +133,15 @@ export function App() {
   const displayPath = currentPath;
   const safeEntries = entries.filter((entry) => entry.isSafe).length;
   const breadcrumbs = useMemo(() => (currentPath === "." ? [] : currentPath.split("/").filter(Boolean)), [currentPath]);
+  const appStyle = useMemo(
+    () =>
+      ({
+        "--chat-pane-width": `${splitWidth}px`,
+        "--code-font-family": codeFontFamilyValue(codeFontSettings.familyId),
+        "--code-font-size": `${codeFontSettings.fontSizePx}px`
+      }) as CSSProperties,
+    [codeFontSettings.familyId, codeFontSettings.fontSizePx, splitWidth]
+  );
 
   useEffect(() => {
     let active = true;
@@ -582,6 +599,12 @@ export function App() {
     setPreviewFileSizeLimitBytes(nextLimit);
   }
 
+  function changeCodeFontSettings(nextSettings: CodeFontSettings) {
+    const normalized = normalizeCodeFontSettings(nextSettings);
+    writeStoredCodeFontSettings(normalized);
+    setCodeFontSettings(normalized);
+  }
+
   function handleEditorSaved(result: SaveEditableTextResult) {
     if (result.meta.path === selectedFilePath) {
       setPreviewMeta(result.meta);
@@ -661,7 +684,7 @@ export function App() {
   return (
     <main
       className={`app-shell${resizing ? " is-resizing" : ""}`}
-      style={{ "--chat-pane-width": `${splitWidth}px` } as CSSProperties}
+      style={appStyle}
     >
       <div className="mobile-tabs">
         <div className="mobile-tab-buttons" role="tablist" aria-label={t("chat.primaryViews")}>
@@ -782,12 +805,14 @@ export function App() {
           toolPolicyForm={toolPolicyForm}
           languagePreference={languagePreference}
           previewFileSizeLimitBytes={previewFileSizeLimitBytes}
+          codeFontSettings={codeFontSettings}
           resolvedLocale={resolvedLocale}
           onClose={() => setSettingsOpen(false)}
           onFormChange={setModelSettingsForm}
           onToolPolicyFormChange={setToolPolicyForm}
           onLanguagePreferenceChange={changeLanguagePreference}
           onPreviewFileSizeLimitChange={changePreviewFileSizeLimit}
+          onCodeFontSettingsChange={changeCodeFontSettings}
           onSectionChange={setActiveSettingsSection}
           onSubmit={(event) => void saveSettings(event)}
         />

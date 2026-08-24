@@ -80,8 +80,8 @@
   padding: 16px;
   color: #e7eaf0;
   background: #181a22;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 12.5px;
+  font-family: var(--code-font-family);
+  font-size: var(--code-font-size);
   line-height: 1.52;
   white-space: pre;
 }
@@ -102,7 +102,7 @@
 .markdown-preview {
   padding: 18px;
   color: #e7eaf0;
-  font-size: 13px;
+  font-size: 12.5px;
   line-height: 1.62;
 }
 
@@ -157,8 +157,8 @@
   padding: 2px 5px;
   color: #f2d58a;
   background: rgb(0 0 0 / 25%);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
+  font-family: var(--code-font-family);
+  font-size: var(--code-font-size);
 }
 
 .markdown-code-block {
@@ -187,7 +187,8 @@
   min-width: 100%;
   border-collapse: collapse;
   color: #e7eaf0;
-  font-size: 12.5px;
+  font-family: var(--code-font-family);
+  font-size: var(--code-font-size);
 }
 
 .markdown-preview th,
@@ -336,4 +337,3 @@
 .preview-error {
   color: #ffb3b6;
 }
-

@@ -112,33 +112,76 @@
   cursor: pointer;
 }
 
-.editor-textarea {
+.editor-code-surface {
   grid-row: 3;
+  position: relative;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
+  background: #171922;
+}
+
+.editor-code-surface:focus-within {
+  box-shadow: inset 0 0 0 1px rgb(142 161 255 / 38%);
+}
+
+.editor-highlight,
+.editor-textarea {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
-  resize: none;
-  border: 0;
-  border-radius: 0;
   padding: 16px 18px;
-  color: #f2f5f8;
-  background: #171922;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 13px;
+  font-family: var(--code-font-family);
+  font-size: var(--code-font-size);
   line-height: 1.55;
-  outline: none;
   tab-size: 2;
   white-space: pre;
 }
 
+.editor-highlight {
+  margin: 0;
+  overflow: hidden;
+  border: 0;
+  color: #f2f5f8;
+  pointer-events: none;
+}
+
+.editor-highlight code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+}
+
+.editor-code-surface.is-loading .editor-highlight {
+  color: var(--muted);
+}
+
+.editor-textarea {
+  z-index: 1;
+  resize: none;
+  overflow: auto;
+  border: 0;
+  border-radius: 0;
+  color: transparent;
+  background: transparent;
+  caret-color: #f2f5f8;
+  outline: none;
+  -webkit-text-fill-color: transparent;
+}
+
 .editor-textarea:focus {
-  box-shadow: inset 0 0 0 1px rgb(142 161 255 / 38%);
+  box-shadow: none;
 }
 
 .editor-textarea:disabled {
-  color: var(--muted);
+  caret-color: transparent;
   cursor: wait;
+}
+
+.editor-textarea::selection {
+  color: transparent;
+  background: rgb(88 101 242 / 36%);
 }
 
 .editor-footer {

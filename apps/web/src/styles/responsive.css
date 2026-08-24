@@ -60,6 +60,10 @@
   .settings-overview-grid {
     grid-template-columns: 1fr;
   }
+
+  .settings-editor-font-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 1180px) {
