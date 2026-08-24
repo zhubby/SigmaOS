@@ -300,7 +300,7 @@ export function App() {
       top: transcriptRef.current.scrollHeight,
       behavior: "smooth"
     });
-  }, [transcript.length]);
+  }, [activeApprovals.length, transcript.length]);
 
   useEffect(() => {
     if (!selectedRootId || !selectedFilePath) {

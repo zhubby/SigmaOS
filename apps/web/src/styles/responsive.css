@@ -363,10 +363,6 @@
     flex-direction: column;
   }
 
-  .approval-dock.has-approvals {
-    min-height: min(300px, 42vh);
-  }
-
   .approval-card {
     grid-template-columns: 36px minmax(0, 1fr);
   }

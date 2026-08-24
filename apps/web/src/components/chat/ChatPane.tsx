@@ -82,8 +82,70 @@ export function ChatPane({
 }) {
   const { t } = useTranslation();
   const rootAgentTitle = t("chat.rootAgent");
-  const messageCount = formatLocaleNumber(transcript.length, locale);
+  const visibleMessageCount = transcript.length + activeApprovals.length;
+  const messageCount = formatLocaleNumber(visibleMessageCount, locale);
   const eventCount = formatLocaleNumber(events.length, locale);
+  const hasConversationContent = transcript.length > 0 || activeApprovals.length > 0;
+
+  const renderApprovalCard = (approval: PendingApproval) => {
+    const risk = approval.proposal[0]?.risk ?? "low";
+    const card = approvalCard(approval, t);
+    const CardIcon = card.kind === "tool" ? TerminalSquare : FileCog;
+
+    return (
+      <article className="approval-card" aria-label={t("chat.pendingApprovals")}>
+        <div className="approval-card-icon" aria-hidden="true" data-kind={card.kind}>
+          <CardIcon size={18} />
+        </div>
+
+        <div className="approval-card-body">
+          <div className="approval-card-head">
+            <div>
+              <span className="approval-card-kicker">{card.meta}</span>
+              <strong>{card.title}</strong>
+            </div>
+            <span className="risk-pill" data-risk={risk}>
+              {t("chat.risk", { risk: approvalRiskLabel(risk, t) })}
+            </span>
+          </div>
+
+          <p>{card.detail}</p>
+
+          {card.items.length ? (
+            <dl className="approval-card-details">
+              {card.items.map((item) => (
+                <div key={`${item.label}-${item.value}`}>
+                  <dt>{item.label}</dt>
+                  <dd title={item.value}>{item.value}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+        </div>
+
+        <div className="approval-actions">
+          <button
+            type="button"
+            className="approval-approve"
+            onClick={() => onApprove(approval.id)}
+            title={t("common.actions.approve")}
+          >
+            <Check aria-hidden="true" size={15} />
+            <span>{t("common.actions.approve")}</span>
+          </button>
+          <button
+            type="button"
+            className="approval-reject"
+            onClick={() => onReject(approval.id)}
+            title={t("common.actions.reject")}
+          >
+            <X aria-hidden="true" size={15} />
+            <span>{t("common.actions.reject")}</span>
+          </button>
+        </div>
+      </article>
+    );
+  };
 
   return (
     <section className={`chat-pane ${active ? "is-mobile-active" : ""}`} aria-label={t("chat.agents")}>
@@ -135,7 +197,7 @@ export function ChatPane({
             <h2>{activeSessionSummary ? sessionTitle(activeSessionSummary, rootAgentTitle) : t("chat.agent")}</h2>
           </div>
           <div className="chat-stats" aria-label={t("chat.sessionMetrics")}>
-            <span>{t("chat.metrics.messages", { count: transcript.length, formattedCount: messageCount })}</span>
+            <span>{t("chat.metrics.messages", { count: visibleMessageCount, formattedCount: messageCount })}</span>
             <span>{t("chat.metrics.events", { count: events.length, formattedCount: eventCount })}</span>
           </div>
         </header>
@@ -148,21 +210,37 @@ export function ChatPane({
         ) : null}
 
         <div ref={transcriptRef} className="transcript" aria-label={t("chat.transcript")}>
-          {transcript.length ? (
-            transcript.map((item) => (
-              <article key={item.id} className={`message message-${item.role}`}>
-                <div className="avatar" aria-hidden="true">
-                  {item.role === "assistant" ? <Bot size={17} /> : <MessageSquare size={17} />}
-                </div>
-                <div>
-                  <header>
-                    <strong>{item.role === "assistant" ? t("chat.sigmaAgent") : t("chat.you")}</strong>
-                    <time>{formatTime(item.createdAt, locale)}</time>
-                  </header>
-                  <p>{item.content}</p>
-                </div>
-              </article>
-            ))
+          {hasConversationContent ? (
+            <>
+              {transcript.map((item) => (
+                <article key={item.id} className={`message message-${item.role}`}>
+                  <div className="avatar" aria-hidden="true">
+                    {item.role === "assistant" ? <Bot size={17} /> : <MessageSquare size={17} />}
+                  </div>
+                  <div>
+                    <header>
+                      <strong>{item.role === "assistant" ? t("chat.sigmaAgent") : t("chat.you")}</strong>
+                      <time>{formatTime(item.createdAt, locale)}</time>
+                    </header>
+                    <p>{item.content}</p>
+                  </div>
+                </article>
+              ))}
+              {activeApprovals.map((approval) => (
+                <article key={`approval-${approval.id}`} className="message message-assistant message-approval">
+                  <div className="avatar" aria-hidden="true">
+                    <Bot size={17} />
+                  </div>
+                  <div>
+                    <header>
+                      <strong>{t("chat.sigmaAgent")}</strong>
+                      <span className="message-meta">{t("chat.approvals")}</span>
+                    </header>
+                    {renderApprovalCard(approval)}
+                  </div>
+                </article>
+              ))}
+            </>
           ) : (
             <div className="empty-state">
               <Bot aria-hidden="true" size={22} />
@@ -171,81 +249,6 @@ export function ChatPane({
             </div>
           )}
         </div>
-
-        <section
-          className={activeApprovals.length ? "approval-dock has-approvals" : "approval-dock"}
-          aria-label={t("chat.pendingApprovals")}
-        >
-          <div className="dock-title">
-            <span>
-              <ShieldCheck aria-hidden="true" size={16} />
-              {t("chat.approvals")}
-            </span>
-            {activeApprovals.length ? <strong>{formatLocaleNumber(activeApprovals.length, locale)}</strong> : null}
-          </div>
-          {activeApprovals.length ? (
-            activeApprovals.map((approval) => {
-              const risk = approval.proposal[0]?.risk ?? "low";
-              const card = approvalCard(approval, t);
-              const CardIcon = card.kind === "tool" ? TerminalSquare : FileCog;
-              return (
-                <article key={approval.id} className="approval-card">
-                  <div className="approval-card-icon" aria-hidden="true" data-kind={card.kind}>
-                    <CardIcon size={18} />
-                  </div>
-
-                  <div className="approval-card-body">
-                    <div className="approval-card-head">
-                      <div>
-                        <span className="approval-card-kicker">{card.meta}</span>
-                        <strong>{card.title}</strong>
-                      </div>
-                      <span className="risk-pill" data-risk={risk}>
-                        {t("chat.risk", { risk: approvalRiskLabel(risk, t) })}
-                      </span>
-                    </div>
-
-                    <p>{card.detail}</p>
-
-                    {card.items.length ? (
-                      <dl className="approval-card-details">
-                        {card.items.map((item) => (
-                          <div key={`${item.label}-${item.value}`}>
-                            <dt>{item.label}</dt>
-                            <dd title={item.value}>{item.value}</dd>
-                          </div>
-                        ))}
-                      </dl>
-                    ) : null}
-                  </div>
-
-                  <div className="approval-actions">
-                    <button
-                      type="button"
-                      className="approval-approve"
-                      onClick={() => onApprove(approval.id)}
-                      title={t("common.actions.approve")}
-                    >
-                      <Check aria-hidden="true" size={15} />
-                      <span>{t("common.actions.approve")}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="approval-reject"
-                      onClick={() => onReject(approval.id)}
-                      title={t("common.actions.reject")}
-                    >
-                      <X aria-hidden="true" size={15} />
-                      <span>{t("common.actions.reject")}</span>
-                    </button>
-                  </div>
-                </article>
-              );
-            })
-          ) : (
-            <p>{t("chat.noApprovals")}</p>
-          )}
-        </section>
 
         <form className="composer" onSubmit={onSubmitMessage}>
           <textarea
