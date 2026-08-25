@@ -91,7 +91,6 @@
 
 :root[data-theme="light"] .settings-error,
 :root[data-theme="light"] .settings-inline-error,
-:root[data-theme="light"] .error-banner,
 :root[data-theme="light"] .file-action-error {
   border-color: var(--danger-border);
   color: var(--danger-text);

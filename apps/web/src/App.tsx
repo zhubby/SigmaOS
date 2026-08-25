@@ -1,6 +1,6 @@
 import { FormEvent, KeyboardEvent, PointerEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
-import { GripVertical, MessageSquare, PanelRight, Settings } from "lucide-react";
+import { AlertTriangle, GripVertical, MessageSquare, PanelRight, Settings, X } from "lucide-react";
 import {
   approveRequest,
   cancelJob,
@@ -908,7 +908,6 @@ export function App() {
         sessions={sessions}
         activeSessionId={activeSessionId}
         transcript={transcript}
-        error={error}
         activeApprovals={activeApprovals}
         message={message}
         status={status}
@@ -926,6 +925,26 @@ export function App() {
         onMessageChange={setMessage}
         onCancelActiveJob={() => void cancelActiveJob()}
       />
+
+      {error ? (
+        <div className="app-notification-region" aria-live="assertive">
+          <section className="app-notification" role="alert">
+            <AlertTriangle aria-hidden="true" size={18} />
+            <div>
+              <strong>{t("notifications.errorTitle")}</strong>
+              <span>{error}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              aria-label={t("common.actions.dismissNotification")}
+              title={t("common.actions.dismissNotification")}
+            >
+              <X aria-hidden="true" size={15} />
+            </button>
+          </section>
+        </div>
+      ) : null}
 
       <button
         className="split-handle"

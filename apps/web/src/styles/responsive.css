@@ -159,6 +159,12 @@
     min-height: 100vh;
   }
 
+  .app-notification-region {
+    top: 64px;
+    right: 8px;
+    width: calc(100vw - 16px);
+  }
+
   .mobile-tabs {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 40px;

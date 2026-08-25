@@ -1,7 +1,6 @@
 import { FormEvent, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  AlertTriangle,
   Bot,
   Check,
   CircleStop,
@@ -10,7 +9,6 @@ import {
   Plus,
   Send,
   Settings,
-  ShieldCheck,
   TerminalSquare,
   Trash2,
   X
@@ -39,7 +37,6 @@ export function ChatPane({
   sessions,
   activeSessionId,
   transcript,
-  error,
   activeApprovals,
   message,
   status,
@@ -63,7 +60,6 @@ export function ChatPane({
   sessions: SessionSummary[];
   activeSessionId: string;
   transcript: TranscriptMessage[];
-  error: string | null;
   activeApprovals: PendingApproval[];
   message: string;
   status: AppStatus;
@@ -87,6 +83,7 @@ export function ChatPane({
   const hasConversationContent = transcript.length > 0 || activeApprovals.length > 0;
   const activeSessionTitle = activeSessionSummary ? sessionTitle(activeSessionSummary, rootAgentTitle) : t("chat.agent");
   const deleteDisabled = !activeSessionSummary || Boolean(activeJobId);
+  const showAgentStatus = status !== "ready" && status !== "error" && status !== "offline";
 
   const renderApprovalCard = (approval: PendingApproval) => {
     const risk = approval.proposal[0]?.risk ?? "low";
@@ -153,6 +150,14 @@ export function ChatPane({
       <aside className="agent-list" aria-label={t("chat.agentSessions")}>
         <div className="brand">
           <img className="brand-banner" src="/sigmaos-banner.svg" alt="" aria-hidden="true" />
+          <button
+            className="settings-button brand-settings-button"
+            type="button"
+            onClick={onOpenSettings}
+            title={t("common.actions.systemSettings")}
+          >
+            <Settings aria-hidden="true" size={17} />
+          </button>
           <h1 className="visually-hidden">{t("common.appName")}</h1>
         </div>
 
@@ -180,15 +185,13 @@ export function ChatPane({
           ))}
         </nav>
 
-        <div className="agent-footer">
-          <button className="settings-button" type="button" onClick={onOpenSettings} title={t("common.actions.systemSettings")}>
-            <Settings aria-hidden="true" size={17} />
-          </button>
-          <div className="agent-status" data-state={status}>
-            <span>{t(`status.${status}`)}</span>
-            <ShieldCheck aria-hidden="true" size={15} />
+        {showAgentStatus ? (
+          <div className="agent-footer">
+            <div className="agent-status" data-state={status}>
+              <span>{t(`status.${status}`)}</span>
+            </div>
           </div>
-        </div>
+        ) : null}
       </aside>
 
       <section className="chat-main" aria-label={t("chat.agentChat")}>
@@ -208,13 +211,6 @@ export function ChatPane({
             <Trash2 aria-hidden="true" size={17} />
           </button>
         </header>
-
-        {error ? (
-          <div className="error-banner" role="alert">
-            <AlertTriangle aria-hidden="true" size={18} />
-            <span>{error}</span>
-          </div>
-        ) : null}
 
         <div ref={transcriptRef} className="transcript" aria-label={t("chat.transcript")}>
           {hasConversationContent ? (

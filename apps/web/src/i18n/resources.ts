@@ -7,6 +7,7 @@ export const en = {
       approve: "Approve",
       cancel: "Cancel",
       closeSettings: "Close settings",
+      dismissNotification: "Dismiss notification",
       reject: "Reject",
       rollback: "Rollback",
       saveChanges: "Save Changes",
@@ -34,6 +35,9 @@ export const en = {
       english: "English",
       chineseSimplified: "Simplified Chinese"
     }
+  },
+  notifications: {
+    errorTitle: "Error"
   },
   status: {
     starting: "Starting",
@@ -663,6 +667,7 @@ export const zhCN = {
       approve: "批准",
       cancel: "取消",
       closeSettings: "关闭设置",
+      dismissNotification: "关闭通知",
       reject: "拒绝",
       rollback: "回滚",
       saveChanges: "保存更改",
@@ -690,6 +695,9 @@ export const zhCN = {
       english: "English",
       chineseSimplified: "简体中文"
     }
+  },
+  notifications: {
+    errorTitle: "错误"
   },
   status: {
     starting: "启动中",

@@ -14,6 +14,72 @@
   user-select: none;
 }
 
+.app-notification-region {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 80;
+  display: grid;
+  gap: 8px;
+  width: min(420px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.app-notification {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 28px;
+  align-items: start;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--danger-border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--dialog-bg);
+  box-shadow: var(--shadow), inset 3px 0 0 var(--red);
+  pointer-events: auto;
+}
+
+.app-notification > svg {
+  margin-top: 1px;
+  color: var(--danger-text);
+}
+
+.app-notification strong,
+.app-notification span {
+  display: block;
+  min-width: 0;
+}
+
+.app-notification strong {
+  color: var(--danger-text);
+  font-size: 12.5px;
+}
+
+.app-notification span {
+  margin-top: 3px;
+  color: var(--message-text);
+  font-size: 12.5px;
+  line-height: 1.42;
+  overflow-wrap: anywhere;
+}
+
+.app-notification button {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 5px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.app-notification button:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
 .mobile-tabs {
   display: none;
 }
@@ -33,4 +99,3 @@
   color: var(--text);
   background: var(--accent);
 }
-
