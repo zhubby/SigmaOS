@@ -63,7 +63,12 @@ export const en = {
     noRoot: "No root",
     agent: "Agent",
     rootAgent: "Root agent",
-    sessionMetrics: "Session metrics",
+    deleteSession: "Delete session",
+    deleteSessionBusy: "Stop active work before deleting this session.",
+    deleteSessionEyebrow: "Session",
+    deleteSessionTitle: "Delete this session?",
+    deleteSessionBody: "{{title}} and its chat history will be removed from SigmaOS.",
+    confirmDeleteSession: "Delete session",
     transcript: "Transcript",
     sigmaAgent: "Sigma Agent",
     you: "You",
@@ -91,13 +96,7 @@ export const en = {
       args: "Args"
     },
     messagePlaceholder: "Message Sigma Agent",
-    messageAria: "Agent message",
-    metrics: {
-      messages_one: "{{formattedCount}} message",
-      messages_other: "{{formattedCount}} messages",
-      events_one: "{{formattedCount}} event",
-      events_other: "{{formattedCount}} events"
-    }
+    messageAria: "Agent message"
   },
   workspace: {
     label: "Workspace",
@@ -539,7 +538,12 @@ export const zhCN = {
     noRoot: "无根目录",
     agent: "Agent",
     rootAgent: "根目录 agent",
-    sessionMetrics: "会话指标",
+    deleteSession: "删除会话",
+    deleteSessionBusy: "请先停止当前任务，再删除这个会话。",
+    deleteSessionEyebrow: "会话",
+    deleteSessionTitle: "删除这个会话？",
+    deleteSessionBody: "{{title}} 及其聊天记录将从 SigmaOS 中移除。",
+    confirmDeleteSession: "删除会话",
     transcript: "转录",
     sigmaAgent: "Sigma Agent",
     you: "你",
@@ -567,13 +571,7 @@ export const zhCN = {
       args: "参数"
     },
     messagePlaceholder: "给 Sigma Agent 发消息",
-    messageAria: "Agent 消息",
-    metrics: {
-      messages_one: "{{formattedCount}} 条消息",
-      messages_other: "{{formattedCount}} 条消息",
-      events_one: "{{formattedCount}} 个事件",
-      events_other: "{{formattedCount}} 个事件"
-    }
+    messageAria: "Agent 消息"
   },
   workspace: {
     label: "工作区",

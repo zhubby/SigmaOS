@@ -257,6 +257,24 @@ export function updateSessionPath(
   return row ? mapSession(row) : null;
 }
 
+export function hasActiveJobsForSession(db: SigmaDatabase, sessionId: string): boolean {
+  const row = db
+    .prepare(`
+      SELECT 1 AS marker
+      FROM jobs
+      WHERE session_id = ?
+        AND status IN ('queued', 'running')
+      LIMIT 1
+    `)
+    .get(sessionId) as { marker: number } | undefined;
+  return Boolean(row);
+}
+
+export function deleteSession(db: SigmaDatabase, sessionId: string): boolean {
+  const result = db.prepare("DELETE FROM agent_sessions WHERE id = ?").run(sessionId);
+  return result.changes === 1;
+}
+
 export function getAgentProviderSession(
   db: SigmaDatabase,
   sessionId: string

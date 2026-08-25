@@ -5,6 +5,7 @@ import {
   approveRequest,
   cancelJob,
   createSession,
+  deleteSession,
   getApprovals,
   getFileBlobUrl,
   getFileMeta,
@@ -86,7 +87,6 @@ export function App() {
   const [activeSessionId, setActiveSessionId] = useState("");
   const [session, setSession] = useState<Session | null>(null);
   const [transcript, setTranscript] = useState<TranscriptMessage[]>([]);
-  const [events, setEvents] = useState<AgentEvent[]>([]);
   const [approvals, setApprovals] = useState<PendingApproval[]>([]);
   const [operations, setOperations] = useState<FileOperation[]>([]);
   const [operationsReady, setOperationsReady] = useState(false);
@@ -194,7 +194,6 @@ export function App() {
       }
 
       seenEvents.current.clear();
-      setEvents([]);
       setSessions(nextSessionList);
       setSession(loaded.session);
       setActiveSessionId(loaded.session.id);
@@ -235,7 +234,6 @@ export function App() {
         return;
       }
       seenEvents.current.add(parsed.id);
-      setEvents((current) => [...current, parsed]);
 
       const transcriptMessage = eventToTranscriptMessage(parsed);
       if (transcriptMessage) {
@@ -431,7 +429,6 @@ export function App() {
       setStatus("loading");
       setError(null);
       seenEvents.current.clear();
-      setEvents([]);
       setSession(nextSession);
       setActiveSessionId(nextSession.id);
       setCurrentPath(nextSession.currentPath);
@@ -469,13 +466,58 @@ export function App() {
       getTranscript(nextSession.id)
     ]);
     seenEvents.current.clear();
-    setEvents([]);
     setSessions(nextSessions);
     setSession(nextSession);
     setActiveSessionId(nextSession.id);
     setTranscript(nextTranscript);
     setStatus("ready");
     setMobileView("chat");
+  }
+
+  async function loadSessionIntoView(nextSession: Session | SessionSummary): Promise<void> {
+    seenEvents.current.clear();
+    setSession(nextSession);
+    setActiveSessionId(nextSession.id);
+    setCurrentPath(nextSession.currentPath);
+    setSelectedFilePath(null);
+    setPreviewMeta(null);
+    setTextPreview(null);
+    setPreviewError(null);
+    setPreviewCollapsed(false);
+    const [loaded, nextTranscript] = await Promise.all([
+      loadEntriesForSession(nextSession.rootId, nextSession),
+      getTranscript(nextSession.id)
+    ]);
+    setSession(loaded.session);
+    setCurrentPath(loaded.session.currentPath);
+    setEntries(loaded.entries);
+    setTranscript(nextTranscript);
+  }
+
+  async function deleteActiveSession() {
+    if (!activeSessionId || !selectedRootId) {
+      return;
+    }
+
+    setStatus("loading");
+    setError(null);
+    try {
+      await deleteSession(activeSessionId);
+      const remainingSessions = await getSessions(selectedRootId);
+      const nextSession = remainingSessions[0] ?? (await createSession(selectedRootId, "."));
+      const nextSessions = remainingSessions.length ? remainingSessions : await getSessions(selectedRootId);
+      setSessions(nextSessions);
+      setActiveJobId(null);
+      setMessage("");
+      await loadSessionIntoView(nextSession);
+      await refreshWorkQueues();
+      setStatus("ready");
+      setMobileView("chat");
+    } catch (nextError) {
+      setError(toErrorMessage(nextError));
+      setStatus("error");
+      void reloadSessions();
+    }
   }
 
   async function refreshFiles() {
@@ -797,7 +839,6 @@ export function App() {
         sessions={sessions}
         activeSessionId={activeSessionId}
         transcript={transcript}
-        events={events}
         error={error}
         activeApprovals={activeApprovals}
         message={message}
@@ -807,6 +848,7 @@ export function App() {
         hasSession={Boolean(session)}
         transcriptRef={transcriptRef}
         onCreateAgent={() => void createAgent()}
+        onDeleteSession={() => void deleteActiveSession()}
         onOpenSettings={() => void openSettings()}
         onSelectSession={(nextSession) => void selectSession(nextSession)}
         onApprove={(approvalId) => void handleApprove(approvalId)}

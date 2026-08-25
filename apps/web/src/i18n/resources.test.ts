@@ -7,7 +7,7 @@ describe("i18n resources", () => {
     expect(flattenKeys(zhCN)).toEqual(flattenKeys(en));
   });
 
-  it("translates pluralized counts and interpolated preview text", async () => {
+  it("translates interpolated action text", async () => {
     const instance = i18next.createInstance();
     await instance.init({
       resources,
@@ -19,16 +19,14 @@ describe("i18n resources", () => {
       }
     });
 
-    expect(instance.t("chat.metrics.messages", { count: 1, formattedCount: "1" })).toBe("1 message");
-    expect(instance.t("chat.metrics.messages", { count: 2, formattedCount: "2" })).toBe("2 messages");
-    expect(instance.t("chat.metrics.events", { count: 1, formattedCount: "1" })).toBe("1 event");
-    expect(instance.t("chat.metrics.events", { count: 2, formattedCount: "2" })).toBe("2 events");
+    expect(instance.t("chat.deleteSessionBody", { title: "Root agent" })).toBe(
+      "Root agent and its chat history will be removed from SigmaOS."
+    );
 
     await instance.changeLanguage("zh-CN");
-    expect(instance.t("chat.metrics.messages", { count: 1, formattedCount: "1" })).toBe("1 条消息");
-    expect(instance.t("chat.metrics.messages", { count: 2, formattedCount: "2" })).toBe("2 条消息");
-    expect(instance.t("chat.metrics.events", { count: 1, formattedCount: "1" })).toBe("1 个事件");
-    expect(instance.t("chat.metrics.events", { count: 2, formattedCount: "2" })).toBe("2 个事件");
+    expect(instance.t("chat.deleteSessionBody", { title: "根目录 agent" })).toBe(
+      "根目录 agent 及其聊天记录将从 SigmaOS 中移除。"
+    );
     expect(instance.t("preview.cannotPreview", { size: "8 KB" })).toBe("8 KB 无法内联预览。");
   });
 });

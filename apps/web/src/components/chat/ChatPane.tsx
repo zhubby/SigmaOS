@@ -1,4 +1,4 @@
-import { FormEvent, type RefObject } from "react";
+import { FormEvent, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AlertTriangle,
@@ -12,11 +12,12 @@ import {
   Settings,
   ShieldCheck,
   TerminalSquare,
+  Trash2,
   X
 } from "lucide-react";
-import type { AgentEvent, NasRoot, PendingApproval, SessionSummary, TranscriptMessage } from "../../api.js";
+import type { NasRoot, PendingApproval, SessionSummary, TranscriptMessage } from "../../api.js";
 import type { AppStatus } from "../../config/status.js";
-import { formatLocaleNumber, formatTime } from "../../i18n/format.js";
+import { formatTime } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
 import { sessionTitle } from "../../lib/session.js";
 
@@ -38,7 +39,6 @@ export function ChatPane({
   sessions,
   activeSessionId,
   transcript,
-  events,
   error,
   activeApprovals,
   message,
@@ -48,6 +48,7 @@ export function ChatPane({
   hasSession,
   transcriptRef,
   onCreateAgent,
+  onDeleteSession,
   onOpenSettings,
   onSelectSession,
   onApprove,
@@ -62,7 +63,6 @@ export function ChatPane({
   sessions: SessionSummary[];
   activeSessionId: string;
   transcript: TranscriptMessage[];
-  events: AgentEvent[];
   error: string | null;
   activeApprovals: PendingApproval[];
   message: string;
@@ -72,6 +72,7 @@ export function ChatPane({
   hasSession: boolean;
   transcriptRef: RefObject<HTMLDivElement | null>;
   onCreateAgent: () => void;
+  onDeleteSession: () => void;
   onOpenSettings: () => void;
   onSelectSession: (session: SessionSummary) => void;
   onApprove: (approvalId: string) => void;
@@ -81,11 +82,11 @@ export function ChatPane({
   onCancelActiveJob: () => void;
 }) {
   const { t } = useTranslation();
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const rootAgentTitle = t("chat.rootAgent");
-  const visibleMessageCount = transcript.length + activeApprovals.length;
-  const messageCount = formatLocaleNumber(visibleMessageCount, locale);
-  const eventCount = formatLocaleNumber(events.length, locale);
   const hasConversationContent = transcript.length > 0 || activeApprovals.length > 0;
+  const activeSessionTitle = activeSessionSummary ? sessionTitle(activeSessionSummary, rootAgentTitle) : t("chat.agent");
+  const deleteDisabled = !activeSessionSummary || Boolean(activeJobId);
 
   const renderApprovalCard = (approval: PendingApproval) => {
     const risk = approval.proposal[0]?.risk ?? "low";
@@ -194,12 +195,18 @@ export function ChatPane({
         <header className="chat-header">
           <div>
             <span className="eyebrow">{selectedRoot?.name ?? t("chat.noRoot")}</span>
-            <h2>{activeSessionSummary ? sessionTitle(activeSessionSummary, rootAgentTitle) : t("chat.agent")}</h2>
+            <h2>{activeSessionTitle}</h2>
           </div>
-          <div className="chat-stats" aria-label={t("chat.sessionMetrics")}>
-            <span>{t("chat.metrics.messages", { count: visibleMessageCount, formattedCount: messageCount })}</span>
-            <span>{t("chat.metrics.events", { count: events.length, formattedCount: eventCount })}</span>
-          </div>
+          <button
+            type="button"
+            className="icon-button chat-delete-session-button"
+            onClick={() => setDeleteConfirmOpen(true)}
+            disabled={deleteDisabled}
+            title={deleteDisabled && activeSessionSummary ? t("chat.deleteSessionBusy") : t("chat.deleteSession")}
+            aria-label={t("chat.deleteSession")}
+          >
+            <Trash2 aria-hidden="true" size={17} />
+          </button>
         </header>
 
         {error ? (
@@ -270,6 +277,40 @@ export function ChatPane({
           </div>
         </form>
       </section>
+
+      {deleteConfirmOpen ? (
+        <div className="session-delete-backdrop" role="presentation">
+          <section
+            className="session-delete-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="session-delete-title"
+          >
+            <header>
+              <span className="eyebrow">{t("chat.deleteSessionEyebrow")}</span>
+              <h2 id="session-delete-title">{t("chat.deleteSessionTitle")}</h2>
+            </header>
+            <p>{t("chat.deleteSessionBody", { title: activeSessionTitle })}</p>
+            <footer>
+              <button type="button" className="secondary-button" onClick={() => setDeleteConfirmOpen(false)}>
+                {t("common.actions.cancel")}
+              </button>
+              <button
+                type="button"
+                className="danger-button"
+                disabled={deleteDisabled}
+                onClick={() => {
+                  setDeleteConfirmOpen(false);
+                  onDeleteSession();
+                }}
+              >
+                <Trash2 aria-hidden="true" size={15} />
+                <span>{t("chat.confirmDeleteSession")}</span>
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }

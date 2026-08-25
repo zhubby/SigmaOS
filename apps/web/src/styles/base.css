@@ -162,7 +162,6 @@ button:disabled {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.chat-stats span,
 .preview-kind,
 .risk-pill {
   display: inline-flex;
@@ -195,7 +194,8 @@ button:disabled {
 }
 
 .primary-button,
-.secondary-button {
+.secondary-button,
+.danger-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -224,4 +224,13 @@ button:disabled {
 
 .secondary-button:hover:not(:disabled) {
   background: var(--surface-hover);
+}
+
+.danger-button {
+  color: white;
+  background: var(--red);
+}
+
+.danger-button:hover:not(:disabled) {
+  background: #b92f34;
 }

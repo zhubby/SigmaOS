@@ -266,6 +266,13 @@ export async function updateSessionPath(sessionId: string, currentPath: string):
   return body.session;
 }
 
+export async function deleteSession(sessionId: string): Promise<void> {
+  const response = await fetch(`/api/sessions/${sessionId}`, {
+    method: "DELETE"
+  });
+  await ensureOk(response);
+}
+
 export async function getTranscript(sessionId: string): Promise<TranscriptMessage[]> {
   const response = await fetch(`/api/sessions/${sessionId}/transcript`);
   await ensureOk(response);

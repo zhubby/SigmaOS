@@ -3,8 +3,10 @@ import type { FastifyInstance } from "fastify";
 import {
   createSession,
   createUserMessageAndJob,
+  deleteSession,
   getNasRoot,
   getSession,
+  hasActiveJobsForSession,
   listEvents,
   listMessages,
   listNasRoots,
@@ -92,6 +94,23 @@ export function registerSessionRoutes(server: FastifyInstance, { db }: ApiRouteC
       currentPath: safePath.relativePath
     });
     reply.send({ session: updated });
+  });
+
+  server.delete<{
+    Params: { id: string };
+  }>("/api/sessions/:id", async (request, reply) => {
+    const session = getSession(db, request.params.id);
+    if (!session) {
+      reply.status(404).send({ error: "Session not found" });
+      return;
+    }
+    if (hasActiveJobsForSession(db, session.id)) {
+      reply.status(409).send({ error: "Session has active work" });
+      return;
+    }
+
+    deleteSession(db, session.id);
+    reply.status(204).send();
   });
 
   server.get<{

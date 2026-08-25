@@ -12,8 +12,12 @@ import {
   getApproval,
   getFileOperation,
   getJob,
+  getSession,
   getTrashEntry,
+  listEvents,
   listFileOperations,
+  listMessages,
+  listPendingApprovals,
   openSigmaDb,
   updateJobStatus,
   type SigmaDatabase
@@ -327,6 +331,69 @@ describe("API server", () => {
       }
     });
     expect(escaped.statusCode).toBe(400);
+    await server.close();
+  });
+
+  it("deletes sessions waiting for approval and cascades session-owned rows", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const { job } = createUserMessageAndJob(db, {
+      sessionId: session.id,
+      content: "Summarize downloads"
+    });
+    appendEvent(db, {
+      sessionId: session.id,
+      jobId: job.id,
+      type: "agent.completed",
+      payload: { summary: "done" }
+    });
+    createPendingApproval(db, {
+      jobId: job.id,
+      proposal: [
+        {
+          operation: "rename",
+          rootId: "local",
+          sourcePath: "hello.txt",
+          targetPath: "renamed.txt",
+          risk: "low",
+          reversible: true,
+          summary: "Rename hello.txt"
+        }
+      ]
+    });
+    updateJobStatus(db, job.id, "waiting_approval");
+    const server = await buildServer({ config: testConfig(tempDir), db });
+
+    const response = await server.inject({
+      method: "DELETE",
+      url: `/api/sessions/${session.id}`
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(getSession(db, session.id)).toBeNull();
+    expect(listMessages(db, { sessionId: session.id })).toEqual([]);
+    expect(listEvents(db, { sessionId: session.id })).toEqual([]);
+    expect(getJob(db, job.id)).toBeNull();
+    expect(listPendingApprovals(db)).toEqual([]);
+    expect(listFileOperations(db)).toHaveLength(1);
+    await server.close();
+  });
+
+  it("rejects deleting sessions with active work", async () => {
+    const session = createSession(db, { rootId: "local" });
+    createUserMessageAndJob(db, {
+      sessionId: session.id,
+      content: "Summarize downloads"
+    });
+    const server = await buildServer({ config: testConfig(tempDir), db });
+
+    const response = await server.inject({
+      method: "DELETE",
+      url: `/api/sessions/${session.id}`
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ error: "Session has active work" });
+    expect(getSession(db, session.id)).toMatchObject({ id: session.id });
     await server.close();
   });
 
