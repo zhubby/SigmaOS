@@ -59,6 +59,7 @@ import {
   previewFileSizeLimitBytesToMiB,
   previewFileSizeLimitMiBToBytes
 } from "../../lib/preview-settings.js";
+import type { ResolvedTheme, ThemePreference } from "../../lib/theme-settings.js";
 import { CustomSelect } from "../common/CustomSelect.js";
 
 interface SettingsModalProps {
@@ -76,6 +77,8 @@ interface SettingsModalProps {
   toolPolicySettings: PiToolPolicySettings | null;
   toolPolicyForm: ToolPolicyFormState;
   languagePreference: LanguagePreference;
+  themePreference: ThemePreference;
+  resolvedTheme: ResolvedTheme;
   previewFileSizeLimitBytes: number;
   codeFontSettings: CodeFontSettings;
   splitWidth: number;
@@ -84,6 +87,7 @@ interface SettingsModalProps {
   onFormChange: (form: ModelProviderFormState) => void;
   onToolPolicyFormChange: (form: ToolPolicyFormState) => void;
   onLanguagePreferenceChange: (preference: LanguagePreference) => void;
+  onThemePreferenceChange: (preference: ThemePreference) => void;
   onPreviewFileSizeLimitChange: (bytes: number) => void;
   onCodeFontSettingsChange: (settings: CodeFontSettings) => void;
   onSectionChange: (section: SettingsSectionId) => void;
@@ -110,6 +114,8 @@ export function SettingsModal({
   toolPolicySettings,
   toolPolicyForm,
   languagePreference,
+  themePreference,
+  resolvedTheme,
   previewFileSizeLimitBytes,
   codeFontSettings,
   splitWidth,
@@ -118,6 +124,7 @@ export function SettingsModal({
   onFormChange,
   onToolPolicyFormChange,
   onLanguagePreferenceChange,
+  onThemePreferenceChange,
   onPreviewFileSizeLimitChange,
   onCodeFontSettingsChange,
   onSectionChange,
@@ -423,9 +430,12 @@ export function SettingsModal({
           {activeSection === "appearance" ? (
             <SettingsAppearancePage
               languagePreference={languagePreference}
+              themePreference={themePreference}
+              resolvedTheme={resolvedTheme}
               resolvedLocale={resolvedLocale}
               splitWidth={splitWidth}
               onLanguagePreferenceChange={onLanguagePreferenceChange}
+              onThemePreferenceChange={onThemePreferenceChange}
             />
           ) : null}
 
@@ -1088,29 +1098,38 @@ function SettingsStorageRow({
 
 function SettingsAppearancePage({
   languagePreference,
+  themePreference,
+  resolvedTheme,
   resolvedLocale,
   splitWidth,
-  onLanguagePreferenceChange
+  onLanguagePreferenceChange,
+  onThemePreferenceChange
 }: {
   languagePreference: LanguagePreference;
+  themePreference: ThemePreference;
+  resolvedTheme: ResolvedTheme;
   resolvedLocale: SupportedLocale;
   splitWidth: number;
   onLanguagePreferenceChange: (preference: LanguagePreference) => void;
+  onThemePreferenceChange: (preference: ThemePreference) => void;
 }) {
   const { t } = useTranslation();
+  const themeOptions: { value: ThemePreference; label: string }[] = [
+    { value: "system", label: t("settings.appearance.systemTheme") },
+    { value: "light", label: t("settings.appearance.lightTheme") },
+    { value: "dark", label: t("settings.appearance.darkTheme") }
+  ];
   const languageOptions: { value: LanguagePreference; label: string }[] = [
     { value: "system", label: t("common.language.system") },
     { value: "en", label: t("common.language.english") },
     { value: "zh-CN", label: t("common.language.chineseSimplified") }
   ];
+  const selectedThemeLabel =
+    themeOptions.find((option) => option.value === themePreference)?.label ?? themePreference;
   const selectedLanguageLabel =
     languageOptions.find((option) => option.value === languagePreference)?.label ?? languagePreference;
+  const activeThemeLabel = themeResolvedLabel(resolvedTheme, t);
   const interfaceRows: SettingsConfigRowItem[] = [
-    {
-      label: t("settings.appearance.theme"),
-      detail: t("settings.appearance.themeDetail"),
-      value: t("settings.appearance.darkTheme")
-    },
     {
       label: t("settings.appearance.density"),
       detail: t("settings.appearance.densityDetail"),
@@ -1133,6 +1152,31 @@ function SettingsAppearancePage({
   return (
     <div className="settings-content-body">
       <div className="settings-page-grid">
+        <section className="settings-section-card">
+          <header>
+            <div>
+              <h3>{t("settings.appearance.themeTitle")}</h3>
+              <p>{t("settings.appearance.themeDescription")}</p>
+            </div>
+            <span data-state="ready">
+              {t("settings.appearance.activeTheme", {
+                theme: activeThemeLabel
+              })}
+            </span>
+          </header>
+          <label className="settings-preference-field">
+            <span>{t("settings.appearance.themeField")}</span>
+            <CustomSelect
+              id="theme-select"
+              value={themePreference}
+              options={themeOptions}
+              ariaLabel={`${t("settings.appearance.themeField")}: ${selectedThemeLabel}`}
+              onChange={onThemePreferenceChange}
+            />
+            <small>{t("settings.appearance.themeHelp")}</small>
+          </label>
+        </section>
+
         <section className="settings-section-card">
           <header>
             <div>
@@ -1933,6 +1977,10 @@ function settingsStateIcon(state: SettingsState) {
 
 function languageLocaleLabel(locale: SupportedLocale, t: ReturnType<typeof useTranslation>["t"]): string {
   return locale === "zh-CN" ? t("common.language.chineseSimplified") : t("common.language.english");
+}
+
+function themeResolvedLabel(theme: ResolvedTheme, t: ReturnType<typeof useTranslation>["t"]): string {
+  return theme === "light" ? t("settings.appearance.lightTheme") : t("settings.appearance.darkTheme");
 }
 
 function toolPolicyModeLabel(mode: string, t: ReturnType<typeof useTranslation>["t"]): string {

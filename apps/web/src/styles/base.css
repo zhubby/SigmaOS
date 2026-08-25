@@ -1,8 +1,6 @@
 :root {
   color-scheme: dark;
   font-family: "gg sans", "Noto Sans SC", "Noto Sans", "Helvetica Neue", Arial, sans-serif;
-  background: #0f1015;
-  color: #f2f3f5;
   --app-bg: #0f1015;
   --server-bg: #17181f;
   --channel-bg: #1e2029;
@@ -20,9 +18,175 @@
   --green: #23a559;
   --yellow: #f0b232;
   --red: #da373c;
+  --red-hover: #b92f34;
   --shadow: 0 18px 60px rgb(0 0 0 / 28%);
+  --body-gradient: linear-gradient(180deg, rgb(88 101 242 / 8%), transparent 34%);
+  --header-border: rgb(0 0 0 / 24%);
+  --rail-border: rgb(0 0 0 / 34%);
+  --split-bg: #111217;
+  --split-border-left: rgb(0 0 0 / 40%);
+  --split-border-right: rgb(255 255 255 / 4%);
+  --modal-backdrop: rgb(0 0 0 / 62%);
+  --editor-backdrop: rgb(0 0 0 / 64%);
+  --modal-bg: #242631;
+  --dialog-bg: #232631;
+  --footer-bg: #20222c;
+  --input-deep-bg: #111219;
+  --preview-bg: #181a22;
+  --preview-toolbar-bg: #1d202b;
+  --row-head-bg: #222530;
+  --table-head-bg: #242735;
+  --code-bg: #171922;
+  --code-text: #f2f5f8;
+  --preview-text: #e7eaf0;
+  --message-text: #dbdee1;
+  --subtle-bg: rgb(0 0 0 / 12%);
+  --subtle-bg-strong: rgb(0 0 0 / 14%);
+  --subtle-bg-inverse: rgb(255 255 255 / 4%);
+  --subtle-border-inverse: rgb(255 255 255 / 5%);
+  --table-border: rgb(255 255 255 / 7%);
+  --hover-wash: rgb(255 255 255 / 2%);
+  --control-overlay: rgb(0 0 0 / 18%);
+  --code-inline-bg: rgb(0 0 0 / 25%);
+  --code-block-bg: rgb(0 0 0 / 22%);
+  --approval-bg: #292b37;
+  --approval-bg-hover: #2e3140;
+  --approval-gradient: linear-gradient(135deg, rgb(255 255 255 / 5%), transparent 56%);
+  --approval-gradient-hover: linear-gradient(135deg, rgb(255 255 255 / 7%), transparent 56%);
+  --approval-border-hover: rgb(255 255 255 / 14%);
+  --accent-soft-text: #d8defc;
+  --accent-soft-bg: rgb(88 101 242 / 18%);
+  --teal-text: #78d8c8;
+  --teal-bg: rgb(35 165 135 / 16%);
+  --success-text: #78d89d;
+  --success-bg: rgb(35 165 89 / 14%);
+  --warning-text: #ffd37a;
+  --warning-bg: rgb(240 178 50 / 15%);
+  --danger-text: #ffb3b6;
+  --danger-strong-text: #ff8a8e;
+  --danger-ui-text: #ff9da1;
+  --danger-bg: rgb(218 55 60 / 13%);
+  --danger-bg-soft: rgb(218 55 60 / 10%);
+  --danger-border: rgb(218 55 60 / 36%);
+  --danger-border-hover: rgb(218 55 60 / 42%);
+  --neutral-status-text: #aeb4c0;
+  --neutral-status-bg: rgb(255 255 255 / 7%);
+  --link: #8ea1ff;
+  --selection-bg: rgb(88 101 242 / 36%);
+  --focus-ring-soft: rgb(142 161 255 / 72%);
+  --focus-ring-inset: rgb(142 161 255 / 38%);
+  --alert-danger-text: #ffced0;
+  --alert-danger-bg: rgb(94 30 38 / 34%);
+  --alert-danger-border: rgb(255 179 182 / 18%);
+  --syntax-comment: #8d95a6;
+  --syntax-keyword: #ff8aa1;
+  --syntax-number: #f2c16b;
+  --syntax-string: #8ddc9a;
+  --syntax-title: #8ea1ff;
+  --syntax-type: #6ed3f5;
+  --syntax-tag: #78d8c8;
+  --syntax-regexp: #cfa8ff;
+  --syntax-symbol: #f2d58a;
+  --syntax-meta: #a8b0ff;
+  --syntax-deletion: #ffb3b6;
+  --syntax-addition: #9fe6af;
   --code-font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   --code-font-size: 12px;
+  background: var(--app-bg);
+  color: var(--text);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --app-bg: #eef2f7;
+  --server-bg: #f6f8fb;
+  --channel-bg: #ffffff;
+  --chat-bg: #f9fafc;
+  --surface: #eef2f6;
+  --surface-hover: #e3e9f2;
+  --surface-strong: #d8e0ea;
+  --line: #c8d2df;
+  --line-soft: #dde5ef;
+  --text: #182232;
+  --muted: #526174;
+  --muted-2: #748095;
+  --accent: #4353d8;
+  --accent-hover: #3342b9;
+  --green: #187a42;
+  --yellow: #9a6700;
+  --red: #c7353c;
+  --red-hover: #a92c33;
+  --shadow: 0 18px 48px rgb(31 45 68 / 14%);
+  --body-gradient: linear-gradient(180deg, rgb(67 83 216 / 7%), transparent 34%);
+  --header-border: rgb(24 34 50 / 9%);
+  --rail-border: rgb(24 34 50 / 10%);
+  --split-bg: #e6ebf2;
+  --split-border-left: rgb(24 34 50 / 8%);
+  --split-border-right: rgb(255 255 255 / 80%);
+  --modal-backdrop: rgb(15 23 42 / 42%);
+  --editor-backdrop: rgb(15 23 42 / 46%);
+  --modal-bg: #ffffff;
+  --dialog-bg: #ffffff;
+  --footer-bg: #f5f7fa;
+  --input-deep-bg: #ffffff;
+  --preview-bg: #ffffff;
+  --preview-toolbar-bg: #f4f7fb;
+  --row-head-bg: #eef3f8;
+  --table-head-bg: #edf2f7;
+  --code-bg: #fbfcfe;
+  --code-text: #1f2a3a;
+  --preview-text: #263244;
+  --message-text: #324154;
+  --subtle-bg: rgb(15 23 42 / 4%);
+  --subtle-bg-strong: rgb(15 23 42 / 6%);
+  --subtle-bg-inverse: rgb(15 23 42 / 4%);
+  --subtle-border-inverse: rgb(15 23 42 / 8%);
+  --table-border: rgb(15 23 42 / 10%);
+  --hover-wash: rgb(67 83 216 / 4%);
+  --control-overlay: rgb(15 23 42 / 5%);
+  --code-inline-bg: rgb(15 23 42 / 6%);
+  --code-block-bg: #f6f8fb;
+  --approval-bg: #ffffff;
+  --approval-bg-hover: #f7faff;
+  --approval-gradient: linear-gradient(135deg, rgb(67 83 216 / 5%), transparent 56%);
+  --approval-gradient-hover: linear-gradient(135deg, rgb(67 83 216 / 8%), transparent 56%);
+  --approval-border-hover: rgb(67 83 216 / 24%);
+  --accent-soft-text: #3342b9;
+  --accent-soft-bg: rgb(67 83 216 / 10%);
+  --teal-text: #08766b;
+  --teal-bg: rgb(8 118 107 / 10%);
+  --success-text: #14743f;
+  --success-bg: rgb(20 116 63 / 10%);
+  --warning-text: #875a00;
+  --warning-bg: rgb(154 103 0 / 12%);
+  --danger-text: #a92c33;
+  --danger-strong-text: #b32831;
+  --danger-ui-text: #b32831;
+  --danger-bg: rgb(199 53 60 / 10%);
+  --danger-bg-soft: rgb(199 53 60 / 8%);
+  --danger-border: rgb(199 53 60 / 26%);
+  --danger-border-hover: rgb(199 53 60 / 38%);
+  --neutral-status-text: #5d6a7d;
+  --neutral-status-bg: rgb(15 23 42 / 6%);
+  --link: #334bd2;
+  --selection-bg: rgb(67 83 216 / 20%);
+  --focus-ring-soft: rgb(67 83 216 / 45%);
+  --focus-ring-inset: rgb(67 83 216 / 25%);
+  --alert-danger-text: #8f252c;
+  --alert-danger-bg: rgb(199 53 60 / 9%);
+  --alert-danger-border: rgb(199 53 60 / 20%);
+  --syntax-comment: #667085;
+  --syntax-keyword: #a9274e;
+  --syntax-number: #875a00;
+  --syntax-string: #1d7338;
+  --syntax-title: #334bd2;
+  --syntax-type: #08759b;
+  --syntax-tag: #08766b;
+  --syntax-regexp: #7340a0;
+  --syntax-symbol: #7a6000;
+  --syntax-meta: #4755b8;
+  --syntax-deletion: #a92c33;
+  --syntax-addition: #16733b;
 }
 
 * {
@@ -39,9 +203,7 @@ body,
 
 body {
   overflow: hidden;
-  background:
-    linear-gradient(180deg, rgb(88 101 242 / 8%), transparent 34%),
-    var(--app-bg);
+  background: var(--body-gradient), var(--app-bg);
   font-size: 13px;
 }
 
@@ -150,7 +312,7 @@ button:disabled {
 
 .chat-header,
 .workspace-header {
-  border-bottom: 1px solid rgb(0 0 0 / 24%);
+  border-bottom: 1px solid var(--header-border);
 }
 
 .chat-header h2,
@@ -232,5 +394,5 @@ button:disabled {
 }
 
 .danger-button:hover:not(:disabled) {
-  background: #b92f34;
+  background: var(--red-hover);
 }

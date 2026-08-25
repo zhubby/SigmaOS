@@ -77,6 +77,14 @@ import {
   readStoredPreviewFileSizeLimitBytes,
   writeStoredPreviewFileSizeLimitBytes
 } from "./lib/preview-settings.js";
+import {
+  readStoredThemePreference,
+  readSystemTheme,
+  resolveThemePreference,
+  writeStoredThemePreference,
+  type ResolvedTheme,
+  type ThemePreference
+} from "./lib/theme-settings.js";
 import { loadEntriesForSession } from "./lib/session.js";
 
 type MobileView = "chat" | "workspace";
@@ -123,6 +131,8 @@ export function App() {
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [languagePreference, setLanguagePreference] = useState<LanguagePreference>(() => readStoredLanguagePreference());
+  const [themePreference, setThemePreference] = useState<ThemePreference>(() => readStoredThemePreference());
+  const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(() => readSystemTheme());
   const [previewFileSizeLimitBytes, setPreviewFileSizeLimitBytes] = useState(() =>
     readStoredPreviewFileSizeLimitBytes()
   );
@@ -136,6 +146,7 @@ export function App() {
   const activeApprovals = approvals.filter((approval) => !session || approval.sessionId === session.id);
   const blobUrl = selectedRootId && selectedFilePath ? getFileBlobUrl(selectedRootId, selectedFilePath) : "";
   const resolvedLocale = resolveSupportedLocale(i18n.resolvedLanguage ?? i18n.language);
+  const resolvedTheme = resolveThemePreference(themePreference, systemTheme);
   const displayPath = currentPath;
   const safeEntries = entries.filter((entry) => entry.isSafe).length;
   const breadcrumbs = useMemo(() => (currentPath === "." ? [] : currentPath.split("/").filter(Boolean)), [currentPath]);
@@ -371,6 +382,27 @@ export function App() {
   useEffect(() => {
     writeStoredSplitWidth(splitWidth);
   }, [splitWidth]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function" || themePreference !== "system") {
+      return;
+    }
+
+    const media = window.matchMedia("(prefers-color-scheme: light)");
+    const syncSystemTheme = () => setSystemTheme(media.matches ? "light" : "dark");
+    syncSystemTheme();
+    media.addEventListener("change", syncSystemTheme);
+    return () => media.removeEventListener("change", syncSystemTheme);
+  }, [themePreference]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = resolvedTheme;
+    document.documentElement.dataset.themePreference = themePreference;
+    return () => {
+      delete document.documentElement.dataset.theme;
+      delete document.documentElement.dataset.themePreference;
+    };
+  }, [resolvedTheme, themePreference]);
 
   async function reloadSessions() {
     if (!selectedRootId) {
@@ -669,6 +701,12 @@ export function App() {
     void i18n.changeLanguage(preference === "system" ? resolveBrowserLocale() : preference);
   }
 
+  function changeThemePreference(preference: ThemePreference) {
+    writeStoredThemePreference(preference);
+    setSystemTheme(readSystemTheme());
+    setThemePreference(preference);
+  }
+
   function changePreviewFileSizeLimit(bytes: number) {
     const nextLimit = clampPreviewFileSizeLimitBytes(bytes);
     writeStoredPreviewFileSizeLimitBytes(nextLimit);
@@ -835,6 +873,8 @@ export function App() {
   return (
     <main
       className={`app-shell${resizing ? " is-resizing" : ""}`}
+      data-theme={resolvedTheme}
+      data-theme-preference={themePreference}
       style={appStyle}
     >
       <div className="mobile-tabs">
@@ -963,6 +1003,8 @@ export function App() {
           toolPolicySettings={toolPolicySettings}
           toolPolicyForm={toolPolicyForm}
           languagePreference={languagePreference}
+          themePreference={themePreference}
+          resolvedTheme={resolvedTheme}
           previewFileSizeLimitBytes={previewFileSizeLimitBytes}
           codeFontSettings={codeFontSettings}
           splitWidth={splitWidth}
@@ -971,6 +1013,7 @@ export function App() {
           onFormChange={setModelSettingsForm}
           onToolPolicyFormChange={setToolPolicyForm}
           onLanguagePreferenceChange={changeLanguagePreference}
+          onThemePreferenceChange={changeThemePreference}
           onPreviewFileSizeLimitChange={changePreviewFileSizeLimit}
           onCodeFontSettingsChange={changeCodeFontSettings}
           onSectionChange={setActiveSettingsSection}
