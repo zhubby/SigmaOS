@@ -58,6 +58,13 @@ provider = "$MODEL_PROVIDER"
 pi_command = "$PI_COMMAND"
 local_endpoint = "$LOCAL_ENDPOINT"
 
+[docker]
+enabled = false
+socket_path = "/var/run/docker.sock"
+compose_command = "docker"
+operation_timeout_ms = 120000
+console_shells = ["/bin/sh", "/bin/bash"]
+
 [[nas_roots]]
 id = "$NAS_ROOT_ID"
 name = "$NAS_ROOT_NAME"

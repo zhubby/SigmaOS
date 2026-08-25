@@ -4,6 +4,7 @@ import {
   Bot,
   Check,
   CircleStop,
+  Container,
   FileCog,
   MessageSquare,
   Plus,
@@ -20,7 +21,7 @@ import type { SupportedLocale } from "../../i18n/locale.js";
 import { sessionTitle } from "../../lib/session.js";
 
 type ApprovalRisk = PendingApproval["proposal"][number]["risk"];
-type ApprovalCardKind = "file" | "tool";
+type ApprovalCardKind = "file" | "tool" | "docker";
 
 interface ApprovalCard {
   kind: ApprovalCardKind;
@@ -88,7 +89,7 @@ export function ChatPane({
   const renderApprovalCard = (approval: PendingApproval) => {
     const risk = approval.proposal[0]?.risk ?? "low";
     const card = approvalCard(approval, t);
-    const CardIcon = card.kind === "tool" ? TerminalSquare : FileCog;
+    const CardIcon = card.kind === "tool" ? TerminalSquare : card.kind === "docker" ? Container : FileCog;
 
     return (
       <article className="approval-card" aria-label={t("chat.pendingApprovals")}>
@@ -345,6 +346,52 @@ function approvalCard(approval: PendingApproval, t: ReturnType<typeof useTransla
     };
   }
 
+  if (approval.kind === "docker_operation") {
+    const dockerOperation = approval.proposal.find((proposal) => "action" in proposal);
+    if (!dockerOperation || !("action" in dockerOperation)) {
+      return {
+        kind: "docker",
+        title: t("chat.approvalCards.dockerTitle"),
+        detail: t("chat.approvalCards.dockerApproval"),
+        meta: t("chat.approvalCards.dockerOperation"),
+        items: []
+      };
+    }
+    return {
+      kind: "docker",
+      title: dockerActionLabel(dockerOperation.action, t),
+      detail: dockerOperation.summary,
+      meta: t("chat.approvalCards.dockerOperation"),
+      items: [
+        {
+          label: t("chat.approvalCards.targetType"),
+          value: dockerTargetTypeLabel(dockerOperation.targetType, t)
+        },
+        {
+          label: t("chat.approvalCards.target"),
+          value:
+            dockerOperation.containerName ??
+            dockerOperation.composeProjectName ??
+            dockerOperation.containerId ??
+            dockerOperation.composeProjectId ??
+            t("common.dash")
+        },
+        ...(dockerOperation.shell
+          ? [{ label: t("chat.approvalCards.shell"), value: dockerOperation.shell }]
+          : []),
+        ...(dockerOperation.service
+          ? [{ label: t("chat.approvalCards.service"), value: dockerOperation.service }]
+          : []),
+        ...(dockerOperation.composeRootId
+          ? [{ label: t("chat.approvalCards.root"), value: dockerOperation.composeRootId }]
+          : []),
+        ...(dockerOperation.composeFilePath
+          ? [{ label: t("chat.approvalCards.composeFile"), value: dockerOperation.composeFilePath }]
+          : [])
+      ]
+    };
+  }
+
   const fileOperations = approval.proposal.filter((proposal) => "operation" in proposal);
   const firstOperation = fileOperations[0];
   const affectedPaths = Array.from(
@@ -370,6 +417,48 @@ function approvalCard(approval: PendingApproval, t: ReturnType<typeof useTransla
         : [])
     ]
   };
+}
+
+function dockerActionLabel(
+  action: string,
+  t: ReturnType<typeof useTranslation>["t"]
+): string {
+  switch (action) {
+    case "start":
+      return t("workspace.management.actions.start");
+    case "stop":
+    case "compose_down":
+      return t("workspace.management.actions.stop");
+    case "restart":
+    case "compose_restart":
+      return t("workspace.management.actions.restart");
+    case "remove":
+      return t("workspace.management.actions.remove");
+    case "console":
+      return t("workspace.management.actions.console");
+    case "compose_up":
+      return t("workspace.management.actions.deploy");
+    case "compose_pull":
+      return t("workspace.management.actions.pull");
+    default:
+      return action;
+  }
+}
+
+function dockerTargetTypeLabel(
+  targetType: string,
+  t: ReturnType<typeof useTranslation>["t"]
+): string {
+  switch (targetType) {
+    case "container":
+      return t("chat.approvalCards.containerTarget");
+    case "compose_project":
+      return t("chat.approvalCards.composeTarget");
+    case "console":
+      return t("chat.approvalCards.consoleTarget");
+    default:
+      return targetType;
+  }
 }
 
 function summarizeArgs(args: Record<string, unknown>): string {

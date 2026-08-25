@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { ApiRouteContext } from "../context.js";
 import { registerApprovalRoutes } from "./approvals.js";
+import { registerDockerRoutes } from "./docker.js";
 import { registerFileRoutes } from "./files.js";
 import { registerHealthRoutes } from "./health.js";
 import { registerJobRoutes } from "./jobs.js";
@@ -18,4 +19,5 @@ export function registerApiRoutes(server: FastifyInstance, context: ApiRouteCont
   registerFileRoutes(server, context);
   registerApprovalRoutes(server, context);
   registerOperationRoutes(server, context);
+  registerDockerRoutes(server, context);
 }

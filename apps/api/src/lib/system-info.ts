@@ -87,6 +87,8 @@ export async function collectSystemInfo(config: SigmaConfig): Promise<PublicSyst
       workerPollMs: config.worker.pollMs,
       modelProvider: config.model.provider,
       localEndpointConfigured: Boolean(config.model.localEndpoint),
+      dockerEnabled: config.docker.enabled,
+      dockerComposeRootCount: config.docker.composeRoots.length,
       nasRoots: config.nasRoots
     }
   };

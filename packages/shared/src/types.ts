@@ -26,7 +26,7 @@ export type FileMutationOperation =
   | "restore"
   | "edit";
 
-export type PendingApprovalKind = "file_operation" | "pi_tool_call";
+export type PendingApprovalKind = "file_operation" | "pi_tool_call" | "docker_operation";
 
 export type PiToolName = "read" | "bash" | "edit" | "write" | "grep" | "find" | "ls";
 
@@ -54,6 +54,21 @@ export interface NasRootConfig {
   path: string;
 }
 
+export interface DockerComposeRootConfig {
+  id: string;
+  name: string;
+  path: string;
+}
+
+export interface DockerConfig {
+  enabled: boolean;
+  socketPath: string;
+  composeCommand: string;
+  operationTimeoutMs: number;
+  consoleShells: string[];
+  composeRoots: DockerComposeRootConfig[];
+}
+
 export interface SigmaConfig {
   dataDir: string;
   databasePath: string;
@@ -74,6 +89,7 @@ export interface SigmaConfig {
     piCommand: string;
     localEndpoint: string | null;
   };
+  docker: DockerConfig;
   nasRoots: NasRootConfig[];
 }
 
@@ -148,6 +164,8 @@ export interface PublicSystemInfo {
     workerPollMs: number;
     modelProvider: "pi" | "cloud" | "local";
     localEndpointConfigured: boolean;
+    dockerEnabled: boolean;
+    dockerComposeRootCount: number;
     nasRoots: NasRootConfig[];
   };
 }
@@ -302,7 +320,128 @@ export interface PiToolCallApproval {
   summary: string;
 }
 
-export type PendingApprovalProposal = FileOperationProposal | PiToolCallApproval;
+export type DockerContainerState = "created" | "running" | "paused" | "restarting" | "removing" | "exited" | "dead" | "unknown";
+
+export type DockerEngineStatus = "disabled" | "ready" | "unavailable";
+
+export type DockerOperationTargetType = "container" | "compose_project" | "console";
+
+export type DockerOperationAction =
+  | "start"
+  | "stop"
+  | "restart"
+  | "remove"
+  | "compose_up"
+  | "compose_down"
+  | "compose_pull"
+  | "compose_restart"
+  | "console";
+
+export type DockerOperationStatus = "proposed" | "approved" | "applied" | "failed";
+
+export interface DockerEngineSummary {
+  status: DockerEngineStatus;
+  version: string | null;
+  apiVersion: string | null;
+  operatingSystem: string | null;
+  architecture: string | null;
+  dockerRootDir: string | null;
+  error: string | null;
+}
+
+export interface DockerContainerSummary {
+  id: string;
+  shortId: string;
+  name: string;
+  image: string;
+  state: DockerContainerState;
+  status: string;
+  ports: string[];
+  composeProject: string | null;
+  composeService: string | null;
+  cpuPercent: number | null;
+  memoryUsageBytes: number | null;
+  memoryLimitBytes: number | null;
+  memoryPercent: number | null;
+  createdAt: string | null;
+}
+
+export interface DockerComposeProjectSummary {
+  id: string;
+  name: string;
+  rootId: string;
+  rootName: string;
+  filePath: string;
+  workingDir: string;
+  services: string[];
+  containerCount: number;
+  runningCount: number;
+  status: "configured" | "running" | "partial" | "stopped";
+}
+
+export interface DockerSummary {
+  collectedAt: string;
+  enabled: boolean;
+  engine: DockerEngineSummary;
+  metrics: {
+    containers: {
+      total: number;
+      running: number;
+      paused: number;
+      stopped: number;
+    };
+    images: number;
+    networks: number;
+    volumes: number;
+    cpuPercent: number | null;
+    memoryUsageBytes: number | null;
+    memoryLimitBytes: number | null;
+    memoryPercent: number | null;
+  };
+  containers: DockerContainerSummary[];
+  composeProjects: DockerComposeProjectSummary[];
+}
+
+export interface DockerOperationProposal {
+  action: DockerOperationAction;
+  targetType: DockerOperationTargetType;
+  containerId?: string;
+  containerName?: string;
+  composeProjectId?: string;
+  composeProjectName?: string;
+  composeRootId?: string;
+  composeFilePath?: string;
+  service?: string;
+  shell?: string;
+  risk: "low" | "medium" | "high";
+  summary: string;
+}
+
+export interface DockerOperationRecord {
+  id: string;
+  approvalId: string | null;
+  action: DockerOperationAction;
+  targetType: DockerOperationTargetType;
+  targetId: string;
+  status: DockerOperationStatus;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DockerConsoleAuthorizationRecord {
+  id: string;
+  operationId: string;
+  approvalId: string;
+  containerId: string;
+  shell: string;
+  status: "active" | "used" | "expired" | "failed";
+  createdAt: string;
+  expiresAt: string;
+  usedAt: string | null;
+}
+
+export type PendingApprovalProposal = FileOperationProposal | PiToolCallApproval | DockerOperationProposal;
 
 export interface PendingApprovalRecord {
   id: string;

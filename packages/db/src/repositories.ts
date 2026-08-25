@@ -2,6 +2,12 @@ import { randomUUID } from "node:crypto";
 import type {
   AgentProviderSessionRecord,
   ApprovalStatus,
+  DockerConsoleAuthorizationRecord,
+  DockerOperationAction,
+  DockerOperationProposal,
+  DockerOperationRecord,
+  DockerOperationStatus,
+  DockerOperationTargetType,
   FileMutationOperation,
   FileOperationProposal,
   FileOperationRecord,
@@ -103,6 +109,30 @@ type DbOperationRow = {
   metadata_json: string;
   created_at: string;
   updated_at: string;
+};
+
+type DbDockerOperationRow = {
+  id: string;
+  approval_id: string | null;
+  action: DockerOperationAction;
+  target_type: DockerOperationTargetType;
+  target_id: string;
+  status: DockerOperationStatus;
+  metadata_json: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type DbDockerConsoleAuthorizationRow = {
+  id: string;
+  operation_id: string;
+  approval_id: string;
+  container_id: string;
+  shell: string;
+  status: DockerConsoleAuthorizationRecord["status"];
+  created_at: string;
+  expires_at: string;
+  used_at: string | null;
 };
 
 type DbTrashEntryRow = {
@@ -794,6 +824,61 @@ export function createPiToolCallApproval(
   return approval;
 }
 
+export function createDockerOperationApproval(
+  db: SigmaDatabase,
+  input: { jobId: string; proposal: DockerOperationProposal }
+): { approval: PendingApprovalRecord; operation: DockerOperationRecord } {
+  const job = getJob(db, input.jobId);
+  if (!job) {
+    throw new Error("Job not found");
+  }
+
+  const now = new Date().toISOString();
+  const approval: PendingApprovalRecord = {
+    id: randomUUID(),
+    jobId: input.jobId,
+    sessionId: job.sessionId,
+    kind: "docker_operation",
+    status: "pending",
+    proposal: [input.proposal],
+    createdAt: now,
+    updatedAt: now
+  };
+  const operation: DockerOperationRecord = {
+    id: randomUUID(),
+    approvalId: approval.id,
+    action: input.proposal.action,
+    targetType: input.proposal.targetType,
+    targetId: dockerProposalTargetId(input.proposal),
+    status: "proposed",
+    metadata: {
+      proposal: input.proposal
+    },
+    createdAt: now,
+    updatedAt: now
+  };
+
+  const tx = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO pending_approvals (id, job_id, kind, status, proposal_json, created_at, updated_at)
+      VALUES (?, ?, 'docker_operation', 'pending', ?, ?, ?)
+    `).run(approval.id, approval.jobId, JSON.stringify(approval.proposal), now, now);
+
+    db.prepare(`
+      INSERT INTO docker_operations (
+        id, approval_id, action, target_type, target_id, status, metadata_json, created_at, updated_at
+      )
+      VALUES (@id, @approvalId, @action, @targetType, @targetId, @status, @metadataJson, @createdAt, @updatedAt)
+    `).run({
+      ...operation,
+      metadataJson: JSON.stringify(operation.metadata)
+    });
+  });
+
+  tx();
+  return { approval, operation };
+}
+
 export function getApproval(db: SigmaDatabase, approvalId: string): PendingApprovalRecord | null {
   const row = db
     .prepare(`
@@ -804,6 +889,172 @@ export function getApproval(db: SigmaDatabase, approvalId: string): PendingAppro
     `)
     .get(approvalId) as DbApprovalRow | undefined;
   return row ? mapApproval(row) : null;
+}
+
+export function getDockerOperation(db: SigmaDatabase, operationId: string): DockerOperationRecord | null {
+  const row = db
+    .prepare(`
+      SELECT id, approval_id, action, target_type, target_id, status, metadata_json, created_at, updated_at
+      FROM docker_operations
+      WHERE id = ?
+    `)
+    .get(operationId) as DbDockerOperationRow | undefined;
+  return row ? mapDockerOperation(row) : null;
+}
+
+export function getDockerOperationByApproval(
+  db: SigmaDatabase,
+  approvalId: string
+): DockerOperationRecord | null {
+  const row = db
+    .prepare(`
+      SELECT id, approval_id, action, target_type, target_id, status, metadata_json, created_at, updated_at
+      FROM docker_operations
+      WHERE approval_id = ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `)
+    .get(approvalId) as DbDockerOperationRow | undefined;
+  return row ? mapDockerOperation(row) : null;
+}
+
+export function listDockerOperations(
+  db: SigmaDatabase,
+  input: { sessionId?: string; limit?: number } = {}
+): DockerOperationRecord[] {
+  const rows = db
+    .prepare(`
+      SELECT o.id, o.approval_id, o.action, o.target_type, o.target_id, o.status, o.metadata_json, o.created_at, o.updated_at
+      FROM docker_operations o
+      LEFT JOIN pending_approvals a ON a.id = o.approval_id
+      LEFT JOIN jobs j ON j.id = a.job_id
+      WHERE (? IS NULL OR j.session_id = ?)
+      ORDER BY o.created_at DESC
+      LIMIT ?
+    `)
+    .all(input.sessionId ?? null, input.sessionId ?? null, input.limit ?? 100) as DbDockerOperationRow[];
+  return rows.map(mapDockerOperation);
+}
+
+export function updateDockerOperationStatus(
+  db: SigmaDatabase,
+  operationId: string,
+  status: DockerOperationStatus,
+  metadata: Record<string, unknown> = {}
+): DockerOperationRecord | null {
+  const existing = getDockerOperation(db, operationId);
+  if (!existing) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  const nextMetadata = {
+    ...existing.metadata,
+    ...metadata
+  };
+  const row = db
+    .prepare(`
+      UPDATE docker_operations
+      SET status = ?, metadata_json = ?, updated_at = ?
+      WHERE id = ?
+      RETURNING id, approval_id, action, target_type, target_id, status, metadata_json, created_at, updated_at
+    `)
+    .get(status, JSON.stringify(nextMetadata), now, operationId) as DbDockerOperationRow | undefined;
+  return row ? mapDockerOperation(row) : null;
+}
+
+export function createDockerConsoleAuthorization(
+  db: SigmaDatabase,
+  input: {
+    operationId: string;
+    approvalId: string;
+    containerId: string;
+    shell: string;
+    ttlMs?: number;
+  }
+): DockerConsoleAuthorizationRecord {
+  const approvedOperation = db
+    .prepare(`
+      SELECT 1
+      FROM docker_operations o
+      JOIN pending_approvals a ON a.id = o.approval_id
+      WHERE o.id = ?
+        AND o.approval_id = ?
+        AND o.action = 'console'
+        AND o.status = 'approved'
+        AND a.status = 'approved'
+      LIMIT 1
+    `)
+    .get(input.operationId, input.approvalId);
+  if (!approvedOperation) {
+    throw new Error("Approved console operation not found");
+  }
+
+  const now = new Date();
+  const authorization: DockerConsoleAuthorizationRecord = {
+    id: randomUUID(),
+    operationId: input.operationId,
+    approvalId: input.approvalId,
+    containerId: input.containerId,
+    shell: input.shell,
+    status: "active",
+    createdAt: now.toISOString(),
+    expiresAt: new Date(now.getTime() + (input.ttlMs ?? 5 * 60_000)).toISOString(),
+    usedAt: null
+  };
+
+  db.prepare(`
+    INSERT INTO docker_console_authorizations (
+      id, operation_id, approval_id, container_id, shell, status, created_at, expires_at, used_at
+    )
+    VALUES (@id, @operationId, @approvalId, @containerId, @shell, @status, @createdAt, @expiresAt, @usedAt)
+  `).run(authorization);
+
+  return authorization;
+}
+
+export function consumeDockerConsoleAuthorization(
+  db: SigmaDatabase,
+  authorizationId: string
+): DockerConsoleAuthorizationRecord | null {
+  const row = db
+    .prepare(`
+      SELECT id, operation_id, approval_id, container_id, shell, status, created_at, expires_at, used_at
+      FROM docker_console_authorizations
+      WHERE id = ?
+    `)
+    .get(authorizationId) as DbDockerConsoleAuthorizationRow | undefined;
+  if (!row) {
+    return null;
+  }
+
+  const authorization = mapDockerConsoleAuthorization(row);
+  const now = new Date();
+  if (authorization.status !== "active") {
+    return null;
+  }
+  if (Date.parse(authorization.expiresAt) <= now.getTime()) {
+    db.prepare("UPDATE docker_console_authorizations SET status = 'expired' WHERE id = ?").run(authorization.id);
+    return null;
+  }
+
+  const usedAt = now.toISOString();
+  const updated = db
+    .prepare(`
+      UPDATE docker_console_authorizations
+      SET status = 'used', used_at = ?
+      WHERE id = ? AND status = 'active'
+      RETURNING id, operation_id, approval_id, container_id, shell, status, created_at, expires_at, used_at
+    `)
+    .get(usedAt, authorization.id) as DbDockerConsoleAuthorizationRow | undefined;
+  return updated ? mapDockerConsoleAuthorization(updated) : null;
+}
+
+export function markDockerConsoleAuthorizationFailed(db: SigmaDatabase, authorizationId: string): boolean {
+  const result = db
+    .prepare("UPDATE docker_console_authorizations SET status = 'failed' WHERE id = ? AND status IN ('active', 'used')")
+    .run(authorizationId);
+  return result.changes === 1;
 }
 
 export function listPendingApprovals(db: SigmaDatabase): PendingApprovalRecord[] {
@@ -1158,6 +1409,36 @@ function mapApproval(row: DbApprovalRow): PendingApprovalRecord {
   };
 }
 
+function mapDockerOperation(row: DbDockerOperationRow): DockerOperationRecord {
+  return {
+    id: row.id,
+    approvalId: row.approval_id,
+    action: row.action,
+    targetType: row.target_type,
+    targetId: row.target_id,
+    status: row.status,
+    metadata: JSON.parse(row.metadata_json) as Record<string, unknown>,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function mapDockerConsoleAuthorization(
+  row: DbDockerConsoleAuthorizationRow
+): DockerConsoleAuthorizationRecord {
+  return {
+    id: row.id,
+    operationId: row.operation_id,
+    approvalId: row.approval_id,
+    containerId: row.container_id,
+    shell: row.shell,
+    status: row.status,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    usedAt: row.used_at
+  };
+}
+
 function mapOperation(row: DbOperationRow): FileOperationRecord {
   return {
     id: row.id,
@@ -1170,6 +1451,16 @@ function mapOperation(row: DbOperationRow): FileOperationRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
+}
+
+function dockerProposalTargetId(proposal: DockerOperationProposal): string {
+  return (
+    proposal.containerId ??
+    proposal.composeProjectId ??
+    proposal.composeProjectName ??
+    proposal.composeFilePath ??
+    "docker"
+  );
 }
 
 function mapTrashEntry(row: DbTrashEntryRow): TrashEntryRecord {

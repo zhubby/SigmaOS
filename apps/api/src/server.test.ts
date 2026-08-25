@@ -10,6 +10,7 @@ import {
   createUserMessageAndJob,
   ensureNasRoots,
   getApproval,
+  getDockerOperationByApproval,
   getFileOperation,
   getJob,
   getSession,
@@ -22,7 +23,9 @@ import {
   updateJobStatus,
   type SigmaDatabase
 } from "@sigmaos/db";
-import type { SigmaConfig } from "@sigmaos/shared";
+import type { DockerComposeProjectSummary, DockerContainerSummary, DockerOperationProposal, SigmaConfig } from "@sigmaos/shared";
+import type { DockerComposeRuntime } from "./lib/docker-compose.js";
+import type { DockerEngineRuntime, DockerExecStream } from "./lib/docker-client.js";
 import { buildServer } from "./server.js";
 
 let tempDir: string;
@@ -186,6 +189,275 @@ describe("API server", () => {
       delete process.env.SIGMAOS_TEST_SECRET;
       await server.close();
     }
+  });
+
+  it("returns a stable disabled Docker summary", async () => {
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/docker/summary"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      summary: {
+        enabled: false,
+        engine: {
+          status: "disabled",
+          error: null
+        },
+        metrics: {
+          containers: {
+            total: 0
+          }
+        },
+        containers: [],
+        composeProjects: []
+      }
+    });
+    await server.close();
+  });
+
+  it("reports unavailable Docker sockets without failing the route", async () => {
+    const config = dockerEnabledConfig(tempDir, {
+      socketPath: path.join(tempDir, "missing-docker.sock")
+    });
+    const server = await buildServer({ config, db });
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/docker/summary"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      summary: {
+        enabled: true,
+        engine: {
+          status: "unavailable",
+          error: expect.any(String)
+        }
+      }
+    });
+    await server.close();
+  });
+
+  it("creates Docker container approvals without running the action before approval", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const engine = new FakeDockerEngine();
+    const server = await buildServer({
+      config: dockerEnabledConfig(tempDir),
+      db,
+      docker: {
+        engine,
+        compose: new FakeDockerCompose()
+      }
+    });
+
+    const proposed = await server.inject({
+      method: "POST",
+      url: "/api/docker/proposals",
+      payload: {
+        sessionId: session.id,
+        action: "start",
+        containerId: "container-1"
+      }
+    });
+
+    expect(proposed.statusCode).toBe(202);
+    expect(engine.calls).toEqual([]);
+    expect(proposed.json()).toMatchObject({
+      approval: {
+        kind: "docker_operation",
+        status: "pending",
+        proposal: [
+          {
+            action: "start",
+            containerId: "container-1"
+          }
+        ]
+      },
+      operation: {
+        action: "start",
+        targetType: "container",
+        status: "proposed"
+      }
+    });
+
+    const approved = await server.inject({
+      method: "POST",
+      url: `/api/approvals/${proposed.json().approval.id}/approve`
+    });
+
+    expect(approved.statusCode).toBe(202);
+    expect(engine.calls).toEqual(["start:container-1"]);
+    expect(getDockerOperationByApproval(db, proposed.json().approval.id)).toMatchObject({
+      action: "start",
+      status: "applied"
+    });
+    await server.close();
+  });
+
+  it("marks Docker approvals and jobs failed when execution fails", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const engine = new FakeDockerEngine();
+    engine.failStart = true;
+    const server = await buildServer({
+      config: dockerEnabledConfig(tempDir),
+      db,
+      docker: {
+        engine,
+        compose: new FakeDockerCompose()
+      }
+    });
+    const proposed = await server.inject({
+      method: "POST",
+      url: "/api/docker/proposals",
+      payload: {
+        sessionId: session.id,
+        action: "start",
+        containerId: "container-1"
+      }
+    });
+
+    const approved = await server.inject({
+      method: "POST",
+      url: `/api/approvals/${proposed.json().approval.id}/approve`
+    });
+
+    expect(approved.statusCode).toBe(400);
+    expect(getApproval(db, proposed.json().approval.id)?.status).toBe("failed");
+    expect(getDockerOperationByApproval(db, proposed.json().approval.id)).toMatchObject({
+      status: "failed"
+    });
+    expect(getJob(db, proposed.json().job.id)).toMatchObject({
+      status: "failed",
+      error: "start failed"
+    });
+    await server.close();
+  });
+
+  it("rejects Compose proposals outside configured projects", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const server = await buildServer({
+      config: dockerEnabledConfig(tempDir),
+      db,
+      docker: {
+        engine: new FakeDockerEngine(),
+        compose: new FakeDockerCompose([])
+      }
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/docker/proposals",
+      payload: {
+        sessionId: session.id,
+        action: "compose_up",
+        composeProjectId: "missing"
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "Compose project is not configured" });
+    await server.close();
+  });
+
+  it("rejects Compose service targets that are not part of the configured project", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const server = await buildServer({
+      config: dockerEnabledConfig(tempDir),
+      db,
+      docker: {
+        engine: new FakeDockerEngine(),
+        compose: new FakeDockerCompose()
+      }
+    });
+
+    const unknownService = await server.inject({
+      method: "POST",
+      url: "/api/docker/proposals",
+      payload: {
+        sessionId: session.id,
+        action: "compose_restart",
+        composeProjectId: "compose-root:compose.yml",
+        service: "missing"
+      }
+    });
+    const optionLikeService = await server.inject({
+      method: "POST",
+      url: "/api/docker/proposals",
+      payload: {
+        sessionId: session.id,
+        action: "compose_restart",
+        composeProjectId: "compose-root:compose.yml",
+        service: "--profile"
+      }
+    });
+
+    expect(unknownService.statusCode).toBe(400);
+    expect(unknownService.json()).toEqual({ error: "Compose service is not part of the configured project" });
+    expect(optionLikeService.statusCode).toBe(400);
+    expect(optionLikeService.json()).toEqual({ error: "Compose service name is not allowed" });
+    await server.close();
+  });
+
+  it("requires approved Docker console operations before creating console sessions", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const server = await buildServer({
+      config: dockerEnabledConfig(tempDir),
+      db,
+      docker: {
+        engine: new FakeDockerEngine(),
+        compose: new FakeDockerCompose()
+      }
+    });
+    const proposed = await server.inject({
+      method: "POST",
+      url: "/api/docker/proposals",
+      payload: {
+        sessionId: session.id,
+        action: "console",
+        containerId: "container-1",
+        shell: "/bin/sh"
+      }
+    });
+    const operationId = proposed.json().operation.id;
+    const beforeApproval = await server.inject({
+      method: "POST",
+      url: "/api/docker/console-sessions",
+      payload: {
+        operationId
+      }
+    });
+    await server.inject({
+      method: "POST",
+      url: `/api/approvals/${proposed.json().approval.id}/approve`
+    });
+    const afterApproval = await server.inject({
+      method: "POST",
+      url: "/api/docker/console-sessions",
+      payload: {
+        operationId
+      }
+    });
+
+    expect(beforeApproval.statusCode).toBe(404);
+    expect(afterApproval.statusCode).toBe(201);
+    expect(afterApproval.json()).toMatchObject({
+      consoleSession: {
+        operationId,
+        containerId: "container-1",
+        shell: "/bin/sh",
+        websocketUrl: expect.stringContaining("/api/docker/console/")
+      }
+    });
+    expect(getDockerOperationByApproval(db, proposed.json().approval.id)).toMatchObject({
+      status: "approved",
+      metadata: {
+        consoleSessionId: afterApproval.json().consoleSession.id
+      }
+    });
+    await server.close();
   });
 
   it("saves and masks third-party model provider settings", async () => {
@@ -1084,6 +1356,141 @@ function testConfig(dataDir: string): SigmaConfig {
       piCommand: "pi",
       localEndpoint: null
     },
+    docker: {
+      enabled: false,
+      socketPath: "/var/run/docker.sock",
+      composeCommand: "docker",
+      operationTimeoutMs: 120_000,
+      consoleShells: ["/bin/sh", "/bin/bash"],
+      composeRoots: []
+    },
     nasRoots: [{ id: "local", name: "Local", path: rootDir }]
   };
+}
+
+function dockerEnabledConfig(dataDir: string, overrides: Partial<SigmaConfig["docker"]> = {}): SigmaConfig {
+  const config = testConfig(dataDir);
+  return {
+    ...config,
+    docker: {
+      ...config.docker,
+      enabled: true,
+      ...overrides
+    }
+  };
+}
+
+class FakeDockerEngine implements DockerEngineRuntime {
+  calls: string[] = [];
+  failStart = false;
+
+  async getInfo() {
+    return {
+      version: "27.1.0",
+      apiVersion: "1.55",
+      operatingSystem: "Test Linux",
+      architecture: "amd64",
+      dockerRootDir: "/var/lib/docker"
+    };
+  }
+
+  async getCounts() {
+    return {
+      images: 2,
+      networks: 1,
+      volumes: 3
+    };
+  }
+
+  async listContainers(): Promise<DockerContainerSummary[]> {
+    return [
+      {
+        id: "container-1",
+        shortId: "container-1",
+        name: "media",
+        image: "jellyfin:latest",
+        state: "running",
+        status: "Up",
+        ports: ["8096/tcp"],
+        composeProject: "media",
+        composeService: "jellyfin",
+        cpuPercent: 10,
+        memoryUsageBytes: 1024,
+        memoryLimitBytes: 4096,
+        memoryPercent: 25,
+        createdAt: new Date(0).toISOString()
+      }
+    ];
+  }
+
+  async getContainerLogs(containerId: string): Promise<string> {
+    this.calls.push(`logs:${containerId}`);
+    return "hello";
+  }
+
+  async startContainer(containerId: string): Promise<void> {
+    this.calls.push(`start:${containerId}`);
+    if (this.failStart) {
+      throw new Error("start failed");
+    }
+  }
+
+  async stopContainer(containerId: string): Promise<void> {
+    this.calls.push(`stop:${containerId}`);
+  }
+
+  async restartContainer(containerId: string): Promise<void> {
+    this.calls.push(`restart:${containerId}`);
+  }
+
+  async removeContainer(containerId: string): Promise<void> {
+    this.calls.push(`remove:${containerId}`);
+  }
+
+  async createExec(containerId: string): Promise<string> {
+    this.calls.push(`exec:${containerId}`);
+    return "exec-1";
+  }
+
+  async startExec(): Promise<DockerExecStream> {
+    throw new Error("not implemented in API tests");
+  }
+
+  async resizeExec(): Promise<void> {
+    this.calls.push("resize");
+  }
+}
+
+class FakeDockerCompose implements DockerComposeRuntime {
+  calls: string[] = [];
+
+  constructor(
+    private readonly projects: DockerComposeProjectSummary[] = [
+      {
+        id: "compose-root:compose.yml",
+        name: "media",
+        rootId: "compose-root",
+        rootName: "Compose",
+        filePath: "/srv/compose/compose.yml",
+        workingDir: "/srv/compose",
+        services: ["jellyfin"],
+        containerCount: 1,
+        runningCount: 1,
+        status: "running"
+      }
+    ]
+  ) {}
+
+  async listProjects(): Promise<DockerComposeProjectSummary[]> {
+    return this.projects;
+  }
+
+  async getProject(projectId: string): Promise<DockerComposeProjectSummary | null> {
+    return this.projects.find((project) => project.id === projectId) ?? null;
+  }
+
+  async runProjectAction(proposal: DockerOperationProposal): Promise<{ output: string }> {
+    this.calls.push(`${proposal.action}:${proposal.composeProjectId}`);
+    return { output: "done" };
+  }
 }

@@ -7,6 +7,7 @@ import {
   createSession,
   deleteSession,
   getApprovals,
+  getDockerOperations,
   getFileBlobUrl,
   getFileMeta,
   getFiles,
@@ -30,6 +31,7 @@ import {
   type FileEntry,
   type FileMeta,
   type FileOperation,
+  type DockerOperation,
   type SaveEditableTextResult,
   type ModelProviderSettings,
   type NasRoot,
@@ -99,6 +101,7 @@ export function App() {
   const [transcript, setTranscript] = useState<TranscriptMessage[]>([]);
   const [approvals, setApprovals] = useState<PendingApproval[]>([]);
   const [operations, setOperations] = useState<FileOperation[]>([]);
+  const [dockerOperations, setDockerOperations] = useState<DockerOperation[]>([]);
   const [operationsReady, setOperationsReady] = useState(false);
   const [currentPath, setCurrentPath] = useState(".");
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -308,7 +311,7 @@ export function App() {
 
   useEffect(() => {
     void refreshWorkQueues();
-  }, []);
+  }, [session?.id]);
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({
@@ -663,9 +666,14 @@ export function App() {
 
   async function refreshWorkQueues() {
     try {
-      const [nextApprovals, nextOperations] = await Promise.all([getApprovals(), getOperations()]);
+      const [nextApprovals, nextOperations, nextDockerOperations] = await Promise.all([
+        getApprovals(),
+        getOperations(),
+        getDockerOperations(session?.id ?? null)
+      ]);
       setApprovals(nextApprovals);
       setOperations(nextOperations);
+      setDockerOperations(nextDockerOperations);
       setOperationsReady(true);
     } catch (nextError) {
       setError(toErrorMessage(nextError));
@@ -979,7 +987,10 @@ export function App() {
         previewCollapsed={previewCollapsed}
         searchQuery={searchQuery}
         operations={operations}
+        dockerOperations={dockerOperations}
         operationsReady={operationsReady}
+        sessionId={session?.id ?? null}
+        pendingApprovals={activeApprovals}
         locale={resolvedLocale}
         onSelectRoot={selectRoot}
         onGoHome={goHome}
@@ -992,6 +1003,7 @@ export function App() {
         onOpenEditor={setEditorMeta}
         onRequestRename={(entry, targetName) => requestFileRename(entry, targetName)}
         onRequestTrash={(entry) => requestFileTrash(entry)}
+        onWorkQueuesChanged={refreshWorkQueues}
         onTogglePreviewCollapsed={() => setPreviewCollapsed((collapsed) => !collapsed)}
         onRollback={(operation) => void handleRollback(operation)}
       />

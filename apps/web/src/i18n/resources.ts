@@ -94,8 +94,19 @@ export const en = {
       toolCall: "Tool call",
       toolTitle: "Pi {{tool}}",
       toolApproval: "Review the requested tool call.",
+      dockerOperation: "Docker operation",
+      dockerTitle: "Docker work",
+      dockerApproval: "Review the requested Docker operation.",
       root: "Root",
       paths: "Paths",
+      targetType: "Target type",
+      target: "Target",
+      service: "Service",
+      shell: "Shell",
+      containerTarget: "Container",
+      composeTarget: "Compose project",
+      consoleTarget: "Console",
+      composeFile: "Compose file",
       cwd: "CWD",
       args: "Args"
     },
@@ -160,12 +171,17 @@ export const en = {
         label: "Management actions",
         disabledReason: "Backend integration is not connected yet.",
         start: "Start",
+        stop: "Stop",
         restart: "Restart",
         deploy: "Deploy",
+        pull: "Pull",
+        remove: "Remove",
         pause: "Pause",
         snapshot: "Snapshot",
         console: "Console",
+        openConsole: "Open console",
         logs: "Logs",
+        pendingApproval: "Pending approval",
         resume: "Resume"
       },
       columns: {
@@ -200,8 +216,30 @@ export const en = {
         eyebrow: "Containers",
         title: "Docker",
         description: "Container runtime, Compose stacks, ports, and resource pressure in one operational view.",
-        enginePreview: "Engine placeholder",
-        engineDetail: "Designed for Docker or compatible runtimes; current values are static until backend wiring lands.",
+        enginePreview: "Engine status",
+        engineDetail: "Live Docker Engine data from the configured local socket.",
+        loading: "Loading Docker runtime state.",
+        disabledDetail: "Docker management is disabled in SigmaOS config.",
+        disabledEmpty: "Enable Docker management and configure compose roots to use this panel.",
+        noContainers: "No Docker containers are visible.",
+        noComposeProjects: "No configured Compose projects were found.",
+        proposalCreated: "Approval requested. Review it in the agent chat before SigmaOS runs Docker.",
+        logsEyebrow: "Container logs",
+        noLogs: "No logs returned.",
+        consoleConnecting: "Connecting to approved Docker console...",
+        consoleReady: "Console connected.",
+        consoleClosed: "Console closed.",
+        consoleDisconnected: "Console disconnected.",
+        states: {
+          disabled: "Disabled"
+        },
+        errors: {
+          noSession: "Open an agent session before requesting Docker changes."
+        },
+        units: {
+          networks: "networks",
+          volumes: "volumes"
+        },
         facts: {
           runtime: "Runtime",
           storage: "Storage",
@@ -223,11 +261,11 @@ export const en = {
           ports: "Ports"
         },
         containersTitle: "Containers",
-        containersDescription: "Preview rows for common NAS service workloads and their exposed ports.",
+        containersDescription: "Live containers from the configured Docker Engine socket.",
         composeTitle: "Compose projects",
-        composeDescription: "Grouped service stacks prepared for future deploy and health actions.",
+        composeDescription: "Whitelisted Compose files available for approval-gated deploy actions.",
         resourcesTitle: "Runtime pressure",
-        resourcesDescription: "Static gauges showing how the live resource panel will read."
+        resourcesDescription: "Aggregated CPU, memory, network, and volume signals from the Docker runtime."
       },
       virtualMachines: {
         eyebrow: "Virtualization",
@@ -754,8 +792,19 @@ export const zhCN = {
       toolCall: "工具调用",
       toolTitle: "Pi {{tool}}",
       toolApproval: "请确认请求的工具调用。",
+      dockerOperation: "Docker 操作",
+      dockerTitle: "Docker 任务",
+      dockerApproval: "请确认请求的 Docker 操作。",
       root: "根目录",
       paths: "路径",
+      targetType: "目标类型",
+      target: "目标",
+      service: "服务",
+      shell: "Shell",
+      containerTarget: "容器",
+      composeTarget: "Compose 项目",
+      consoleTarget: "控制台",
+      composeFile: "Compose 文件",
       cwd: "工作目录",
       args: "参数"
     },
@@ -820,12 +869,17 @@ export const zhCN = {
         label: "管理操作",
         disabledReason: "后端集成尚未接入。",
         start: "启动",
+        stop: "停止",
         restart: "重启",
         deploy: "部署",
+        pull: "拉取",
+        remove: "移除",
         pause: "暂停",
         snapshot: "快照",
         console: "控制台",
+        openConsole: "打开控制台",
         logs: "日志",
+        pendingApproval: "等待审批",
         resume: "恢复"
       },
       columns: {
@@ -860,8 +914,30 @@ export const zhCN = {
         eyebrow: "容器",
         title: "Docker",
         description: "集中查看容器运行时、Compose 栈、端口和资源压力。",
-        enginePreview: "Engine 占位",
-        engineDetail: "为 Docker 或兼容运行时预留；后端接入前这里展示静态状态。",
+        enginePreview: "Engine 状态",
+        engineDetail: "来自已配置本机 socket 的 Docker Engine 实时数据。",
+        loading: "正在加载 Docker 运行时状态。",
+        disabledDetail: "SigmaOS 配置中未启用 Docker 管理。",
+        disabledEmpty: "启用 Docker 管理并配置 Compose 根目录后可使用此面板。",
+        noContainers: "当前没有可见 Docker 容器。",
+        noComposeProjects: "未找到已配置的 Compose 项目。",
+        proposalCreated: "已创建审批请求。请在 agent 聊天中确认后，SigmaOS 才会执行 Docker 操作。",
+        logsEyebrow: "容器日志",
+        noLogs: "没有返回日志。",
+        consoleConnecting: "正在连接已审批的 Docker 控制台...",
+        consoleReady: "控制台已连接。",
+        consoleClosed: "控制台已关闭。",
+        consoleDisconnected: "控制台连接已断开。",
+        states: {
+          disabled: "已禁用"
+        },
+        errors: {
+          noSession: "请先打开一个 agent 会话，再请求 Docker 变更。"
+        },
+        units: {
+          networks: "个网络",
+          volumes: "个卷"
+        },
         facts: {
           runtime: "运行时",
           storage: "存储",
@@ -883,11 +959,11 @@ export const zhCN = {
           ports: "端口"
         },
         containersTitle: "容器",
-        containersDescription: "常见 NAS 服务负载和暴露端口的预览列表。",
+        containersDescription: "来自已配置 Docker Engine socket 的实时容器列表。",
         composeTitle: "Compose 项目",
-        composeDescription: "为后续部署和健康检查操作预留的服务组。",
+        composeDescription: "白名单 Compose 文件，可发起审批式部署操作。",
         resourcesTitle: "运行时压力",
-        resourcesDescription: "展示未来实时资源面板的静态仪表。"
+        resourcesDescription: "汇总 Docker 运行时的 CPU、内存、网络和卷信号。"
       },
       virtualMachines: {
         eyebrow: "虚拟化",

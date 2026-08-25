@@ -4,17 +4,21 @@ import {
   appendEvent,
   createTrashEntry,
   getApproval,
+  getDockerOperationByApproval,
   getNasRoot,
   listPendingApprovals,
   recordAppliedOperation,
+  updateDockerOperationStatus,
   updateApprovalStatus,
   updateJobStatus
 } from "@sigmaos/db";
 import { applyFileMutation } from "@sigmaos/nas-tools";
-import type { FileOperationProposal, PendingApprovalRecord } from "@sigmaos/shared";
+import type { DockerOperationProposal, FileOperationProposal, PendingApprovalRecord } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
+import { applyDockerOperation, safeDockerMessage } from "../lib/docker-service.js";
 
-export function registerApprovalRoutes(server: FastifyInstance, { config, db }: ApiRouteContext): void {
+export function registerApprovalRoutes(server: FastifyInstance, context: ApiRouteContext): void {
+  const { config, db } = context;
   server.get("/api/approvals", async () => ({
     approvals: listPendingApprovals(db)
   }));
@@ -38,6 +42,73 @@ export function registerApprovalRoutes(server: FastifyInstance, { config, db }: 
         status: "approved"
       });
       return;
+    }
+
+    if (approval.kind === "docker_operation") {
+      const operation = getDockerOperationByApproval(db, approval.id);
+      const proposal = dockerOperationProposal(approval);
+      if (!operation || !proposal) {
+        reply.status(400).send({ error: "Docker approval is missing operation metadata" });
+        return;
+      }
+      if (!updateApprovalStatus(db, approval.id, "approved", ["pending"])) {
+        reply.status(409).send({ error: `Approval is already ${approval.status}` });
+        return;
+      }
+
+      if (proposal.action === "console") {
+        const approved = updateDockerOperationStatus(db, operation.id, "approved", {
+          approvedAt: new Date().toISOString()
+        });
+        reply.status(202).send({
+          approvalId: approval.id,
+          status: "approved",
+          operation: approved
+        });
+        return;
+      }
+
+      try {
+        const metadata = await applyDockerOperation(config, operation, proposal, context.docker);
+        const applied = updateDockerOperationStatus(db, operation.id, "applied", {
+          ...metadata,
+          appliedAt: new Date().toISOString()
+        });
+        updateApprovalStatus(db, approval.id, "applied", ["approved"]);
+        updateJobStatus(db, approval.jobId, "completed", null, ["waiting_approval"]);
+        appendEvent(db, {
+          sessionId: approval.sessionId,
+          jobId: approval.jobId,
+          type: "job.completed",
+          payload: {
+            jobId: approval.jobId,
+            approvalId: approval.id,
+            dockerOperation: applied
+          }
+        });
+        reply.status(202).send({
+          approvalId: approval.id,
+          status: "applied",
+          operation: applied
+        });
+        return;
+      } catch (error) {
+        const message = safeDockerMessage(error);
+        updateDockerOperationStatus(db, operation.id, "failed", {
+          error: message,
+          failedAt: new Date().toISOString()
+        });
+        updateApprovalStatus(db, approval.id, "failed", ["approved"]);
+        updateJobStatus(db, approval.jobId, "failed", message, ["waiting_approval"]);
+        appendEvent(db, {
+          sessionId: approval.sessionId,
+          jobId: approval.jobId,
+          type: "job.failed",
+          payload: { error: message }
+        });
+        reply.status(400).send({ error: message });
+        return;
+      }
     }
 
     if (!updateApprovalStatus(db, approval.id, "approved", ["pending"])) {
@@ -133,6 +204,36 @@ export function registerApprovalRoutes(server: FastifyInstance, { config, db }: 
       return;
     }
 
+    if (approval.kind === "docker_operation") {
+      if (!updateApprovalStatus(db, approval.id, "rejected", ["pending"])) {
+        reply.status(409).send({ error: `Approval is already ${approval.status}` });
+        return;
+      }
+      const operation = getDockerOperationByApproval(db, approval.id);
+      if (operation) {
+        updateDockerOperationStatus(db, operation.id, "failed", {
+          rejected: true,
+          rejectedAt: new Date().toISOString()
+        });
+      }
+      updateJobStatus(db, approval.jobId, "completed", null, ["waiting_approval"]);
+      appendEvent(db, {
+        sessionId: approval.sessionId,
+        jobId: approval.jobId,
+        type: "job.completed",
+        payload: {
+          jobId: approval.jobId,
+          approvalId: approval.id,
+          rejected: true
+        }
+      });
+      reply.status(202).send({
+        approvalId: approval.id,
+        status: "rejected"
+      });
+      return;
+    }
+
     if (!updateApprovalStatus(db, approval.id, "rejected", ["pending"])) {
       reply.status(409).send({ error: `Approval is already ${approval.status}` });
       return;
@@ -154,6 +255,22 @@ export function registerApprovalRoutes(server: FastifyInstance, { config, db }: 
       status: "rejected"
     });
   });
+}
+
+function dockerOperationProposal(approval: PendingApprovalRecord): DockerOperationProposal | null {
+  if (approval.kind !== "docker_operation") {
+    return null;
+  }
+  const proposal = approval.proposal[0];
+  if (
+    typeof proposal === "object" &&
+    proposal !== null &&
+    "action" in proposal &&
+    typeof (proposal as { action?: unknown }).action === "string"
+  ) {
+    return proposal as DockerOperationProposal;
+  }
+  return null;
 }
 
 function fileOperationProposals(approval: PendingApprovalRecord): FileOperationProposal[] {

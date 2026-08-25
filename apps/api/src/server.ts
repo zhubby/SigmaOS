@@ -1,4 +1,5 @@
 import cors from "@fastify/cors";
+import fastifyWebsocket from "@fastify/websocket";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { ServerDependencies } from "./context.js";
 import { registerErrorHandler } from "./errors.js";
@@ -6,7 +7,7 @@ import { registerApiRoutes } from "./routes/index.js";
 
 export type { ServerDependencies } from "./context.js";
 
-export async function buildServer({ config, db }: ServerDependencies): Promise<FastifyInstance> {
+export async function buildServer({ config, db, docker }: ServerDependencies): Promise<FastifyInstance> {
   const server = Fastify({
     logger: {
       level: process.env.LOG_LEVEL ?? "info"
@@ -20,7 +21,12 @@ export async function buildServer({ config, db }: ServerDependencies): Promise<F
   }
 
   registerErrorHandler(server);
-  registerApiRoutes(server, { config, db });
+  await server.register(fastifyWebsocket);
+  registerApiRoutes(server, {
+    config,
+    db,
+    ...(docker ? { docker } : {})
+  });
 
   return server;
 }

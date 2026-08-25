@@ -14,7 +14,7 @@ import {
   Trash2,
   type LucideIcon
 } from "lucide-react";
-import type { FileEntry, FileMeta, FileOperation, NasRoot, TextPreview } from "../../api.js";
+import type { DockerOperation, FileEntry, FileMeta, FileOperation, NasRoot, PendingApproval, TextPreview } from "../../api.js";
 import { describeFileVisual } from "../../file-type-utils.js";
 import { formatBytes, formatDate, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
@@ -74,7 +74,10 @@ export function WorkspacePane({
   previewCollapsed,
   searchQuery,
   operations,
+  dockerOperations,
   operationsReady,
+  sessionId,
+  pendingApprovals,
   locale,
   onSelectRoot,
   onGoHome,
@@ -87,6 +90,7 @@ export function WorkspacePane({
   onOpenEditor,
   onRequestRename,
   onRequestTrash,
+  onWorkQueuesChanged,
   onTogglePreviewCollapsed,
   onRollback
 }: {
@@ -110,7 +114,10 @@ export function WorkspacePane({
   previewCollapsed: boolean;
   searchQuery: string;
   operations: FileOperation[];
+  dockerOperations: DockerOperation[];
   operationsReady: boolean;
+  sessionId: string | null;
+  pendingApprovals: PendingApproval[];
   locale: SupportedLocale;
   onSelectRoot: (rootId: string) => void;
   onGoHome: () => void;
@@ -123,6 +130,7 @@ export function WorkspacePane({
   onOpenEditor: (meta: FileMeta) => void;
   onRequestRename: (entry: FileEntry, targetName: string) => Promise<void>;
   onRequestTrash: (entry: FileEntry) => Promise<void>;
+  onWorkQueuesChanged: () => void | Promise<void>;
   onTogglePreviewCollapsed: () => void;
   onRollback: (operation: FileOperation) => void;
 }) {
@@ -471,7 +479,14 @@ export function WorkspacePane({
               </div>
             </>
           ) : (
-            <WorkspaceManagementPanel panel={activePanel} />
+            <WorkspaceManagementPanel
+              panel={activePanel}
+              sessionId={sessionId}
+              pendingApprovals={pendingApprovals}
+              dockerOperations={dockerOperations}
+              locale={locale}
+              onWorkQueuesChanged={onWorkQueuesChanged}
+            />
           )}
         </div>
 

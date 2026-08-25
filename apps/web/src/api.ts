@@ -1,4 +1,10 @@
-import type { PublicSystemInfo } from "@sigmaos/shared";
+import type {
+  DockerOperationAction,
+  DockerOperationRecord,
+  DockerOperationTargetType,
+  DockerSummary as PublicDockerSummary,
+  PublicSystemInfo
+} from "@sigmaos/shared";
 
 export interface NasRoot {
   id: string;
@@ -74,13 +80,28 @@ export interface PiToolCallApproval {
   summary: string;
 }
 
-export type PendingApprovalProposal = FileOperationProposal | PiToolCallApproval;
+export interface DockerOperationProposal {
+  action: DockerOperationAction;
+  targetType: DockerOperationTargetType;
+  containerId?: string;
+  containerName?: string;
+  composeProjectId?: string;
+  composeProjectName?: string;
+  composeRootId?: string;
+  composeFilePath?: string;
+  service?: string;
+  shell?: string;
+  risk: "low" | "medium" | "high";
+  summary: string;
+}
+
+export type PendingApprovalProposal = FileOperationProposal | PiToolCallApproval | DockerOperationProposal;
 
 export interface PendingApproval {
   id: string;
   jobId: string;
   sessionId: string;
-  kind: "file_operation" | "pi_tool_call";
+  kind: "file_operation" | "pi_tool_call" | "docker_operation";
   status: string;
   proposal: PendingApprovalProposal[];
   createdAt: string;
@@ -141,6 +162,10 @@ export interface PiToolPolicySettings {
 
 export type SystemInfo = PublicSystemInfo;
 export type SystemInfoStorageVolume = PublicSystemInfo["storage"]["volumes"][number];
+export type DockerSummary = PublicDockerSummary;
+export type DockerContainer = DockerSummary["containers"][number];
+export type DockerComposeProject = DockerSummary["composeProjects"][number];
+export type DockerOperation = DockerOperationRecord;
 
 export interface FileMeta {
   path: string;
@@ -176,6 +201,22 @@ export interface FileProposalResult {
   approval: PendingApproval;
 }
 
+export interface DockerProposalResult {
+  message: AgentMessage;
+  job: Job;
+  approval: PendingApproval;
+  operation: DockerOperation;
+}
+
+export interface DockerConsoleSession {
+  id: string;
+  operationId: string;
+  containerId: string;
+  shell: string;
+  expiresAt: string;
+  websocketUrl: string;
+}
+
 export const MAX_EDIT_TEXT_BYTES = 1024 * 1024;
 
 export async function getRoots(): Promise<NasRoot[]> {
@@ -197,6 +238,67 @@ export async function getSystemInfo(): Promise<SystemInfo> {
   await ensureOk(response);
   const body = (await response.json()) as { info: SystemInfo };
   return body.info;
+}
+
+export async function getDockerSummary(): Promise<DockerSummary> {
+  const response = await fetch("/api/docker/summary");
+  await ensureOk(response);
+  const body = (await response.json()) as { summary: DockerSummary };
+  return body.summary;
+}
+
+export async function getDockerContainerLogs(containerId: string, tail = 200): Promise<string> {
+  const params = new URLSearchParams({
+    tail: String(tail)
+  });
+  const response = await fetch(`/api/docker/containers/${encodeURIComponent(containerId)}/logs?${params.toString()}`);
+  await ensureOk(response);
+  const body = (await response.json()) as { logs: string };
+  return body.logs;
+}
+
+export async function getDockerOperations(sessionId?: string | null): Promise<DockerOperation[]> {
+  const params = new URLSearchParams();
+  if (sessionId) {
+    params.set("sessionId", sessionId);
+  }
+  const response = await fetch(`/api/docker/operations${params.size ? `?${params.toString()}` : ""}`);
+  await ensureOk(response);
+  const body = (await response.json()) as { operations: DockerOperation[] };
+  return body.operations;
+}
+
+export async function proposeDockerOperation(input: {
+  sessionId: string;
+  action: DockerOperationAction;
+  targetType?: DockerOperationTargetType;
+  containerId?: string;
+  composeProjectId?: string;
+  service?: string;
+  shell?: string;
+}): Promise<DockerProposalResult> {
+  const response = await fetch("/api/docker/proposals", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(input)
+  });
+  await ensureOk(response);
+  return (await response.json()) as DockerProposalResult;
+}
+
+export async function createDockerConsoleSession(operationId: string): Promise<DockerConsoleSession> {
+  const response = await fetch("/api/docker/console-sessions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ operationId })
+  });
+  await ensureOk(response);
+  const body = (await response.json()) as { consoleSession: DockerConsoleSession };
+  return body.consoleSession;
 }
 
 export async function saveModelProviderSettings(

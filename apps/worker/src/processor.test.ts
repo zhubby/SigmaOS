@@ -184,6 +184,14 @@ function testConfig(): SigmaConfig {
       piCommand: "pi",
       localEndpoint: null
     },
+    docker: {
+      enabled: false,
+      socketPath: "/var/run/docker.sock",
+      composeCommand: "docker",
+      operationTimeoutMs: 120_000,
+      consoleShells: ["/bin/sh", "/bin/bash"],
+      composeRoots: []
+    },
     nasRoots: [{ id: "local", name: "Local", path: rootDir }]
   };
 }

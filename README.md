@@ -8,6 +8,7 @@ SigmaOS 是一个面向个人 NAS 的 Linux appliance 项目。它提供网页�
 - AI agent 会话与事件流
 - 路径安全校验与只读 NAS 工具
 - 审批后执行的文件移动、重命名、归档和恢复
+- 可选 Docker 管理面板，支持本机 Engine 状态、容器操作、Compose 项目和审批式控制台
 - SQLite 存储、索引器、调度器和 systemd 打包草案
 
 ## 开发
@@ -27,6 +28,11 @@ npm run build
 ```
 
 本地配置可从 `.env.example` 和 `config.example.toml` 开始。
+
+Docker 管理默认关闭。启用 `[docker] enabled = true` 后，SigmaOS API 需要访问
+`/var/run/docker.sock`；Docker 官方将 docker 组/socket 访问视为 root-equivalent 权限，
+只应在受信任的单用户 NAS appliance 上显式授予。SigmaOS 自身仍按 systemd 服务部署，
+不是用 Docker 部署。
 
 ## 结构
 

@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Activity,
@@ -11,16 +11,38 @@ import {
   Database,
   HardDrive,
   Layers,
+  LoaderCircle,
   MonitorCog,
   Network,
   Pause,
   Play,
   Power,
+  RefreshCw,
   RotateCw,
+  ScrollText,
   Server,
   TerminalSquare,
+  Trash2,
+  X,
   type LucideIcon
 } from "lucide-react";
+import { FitAddon } from "@xterm/addon-fit";
+import { Terminal } from "@xterm/xterm";
+import "@xterm/xterm/css/xterm.css";
+import {
+  createDockerConsoleSession,
+  getDockerContainerLogs,
+  getDockerSummary,
+  proposeDockerOperation,
+  type DockerConsoleSession,
+  type DockerComposeProject,
+  type DockerContainer,
+  type DockerOperation,
+  type DockerSummary,
+  type PendingApproval
+} from "../../api.js";
+import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
+import type { SupportedLocale } from "../../i18n/locale.js";
 import type { en } from "../../i18n/resources.js";
 
 export type ManagementPanelId = "docker" | "virtualMachines";
@@ -106,16 +128,6 @@ interface ManagementPanelConfig {
   gauges: ManagementGauge[];
 }
 
-const DOCKER_COLUMNS: ManagementColumn[] = [
-  { id: "name", labelKey: "workspace.management.columns.name" },
-  { id: "status", labelKey: "workspace.management.columns.status" },
-  { id: "image", labelKey: "workspace.management.docker.columns.image" },
-  { id: "cpu", labelKey: "workspace.management.columns.cpu" },
-  { id: "memory", labelKey: "workspace.management.columns.memory" },
-  { id: "ports", labelKey: "workspace.management.docker.columns.ports" },
-  { id: "actions", labelKey: "workspace.management.columns.actions" }
-];
-
 const VM_COLUMNS: ManagementColumn[] = [
   { id: "name", labelKey: "workspace.management.columns.name" },
   { id: "status", labelKey: "workspace.management.columns.status" },
@@ -127,150 +139,7 @@ const VM_COLUMNS: ManagementColumn[] = [
   { id: "actions", labelKey: "workspace.management.columns.actions" }
 ];
 
-const MANAGEMENT_PANELS: Record<ManagementPanelId, ManagementPanelConfig> = {
-  docker: {
-    Icon: Container,
-    eyebrowKey: "workspace.management.docker.eyebrow",
-    titleKey: "workspace.management.docker.title",
-    descriptionKey: "workspace.management.docker.description",
-    statusKey: "workspace.management.docker.enginePreview",
-    statusDetailKey: "workspace.management.docker.engineDetail",
-    statusState: "warning",
-    actions: [
-      { labelKey: "workspace.management.actions.start", Icon: Play },
-      { labelKey: "workspace.management.actions.restart", Icon: RotateCw },
-      { labelKey: "workspace.management.actions.deploy", Icon: Power }
-    ],
-    facts: [
-      { labelKey: "workspace.management.docker.facts.runtime", value: "Docker Engine 27.x" },
-      { labelKey: "workspace.management.docker.facts.storage", value: "/var/lib/docker" },
-      { labelKey: "workspace.management.docker.facts.network", value: "sigma0 bridge" },
-      { labelKey: "workspace.management.docker.facts.compose", value: "3 projects" }
-    ],
-    metrics: [
-      {
-        labelKey: "workspace.management.docker.metrics.containers",
-        value: "5 / 8",
-        detailKey: "workspace.management.docker.metrics.containersDetail",
-        state: "ready",
-        Icon: Boxes
-      },
-      {
-        labelKey: "workspace.management.docker.metrics.images",
-        value: "21",
-        detailKey: "workspace.management.docker.metrics.imagesDetail",
-        state: "neutral",
-        Icon: Box
-      },
-      {
-        labelKey: "workspace.management.docker.metrics.networks",
-        value: "4",
-        detailKey: "workspace.management.docker.metrics.networksDetail",
-        state: "ready",
-        Icon: Network
-      },
-      {
-        labelKey: "workspace.management.docker.metrics.volumes",
-        value: "12",
-        detailKey: "workspace.management.docker.metrics.volumesDetail",
-        state: "warning",
-        Icon: Database
-      }
-    ],
-    tableTitleKey: "workspace.management.docker.containersTitle",
-    tableDescriptionKey: "workspace.management.docker.containersDescription",
-    columns: DOCKER_COLUMNS,
-    rows: [
-      {
-        id: "media-jellyfin",
-        state: "ready",
-        statusKey: "workspace.management.states.running",
-        actionKey: "workspace.management.actions.console",
-        cells: {
-          name: "media-jellyfin",
-          image: "lscr.io/linuxserver/jellyfin:latest",
-          cpu: "12%",
-          memory: "1.8 GiB",
-          ports: "8096/tcp"
-        }
-      },
-      {
-        id: "photos-immich",
-        state: "warning",
-        statusKey: "workspace.management.states.degraded",
-        actionKey: "workspace.management.actions.logs",
-        cells: {
-          name: "photos-immich",
-          image: "ghcr.io/immich-app/immich-server:v1.112",
-          cpu: "34%",
-          memory: "3.2 GiB",
-          ports: "2283/tcp"
-        }
-      },
-      {
-        id: "paperless",
-        state: "neutral",
-        statusKey: "workspace.management.states.paused",
-        actionKey: "workspace.management.actions.start",
-        cells: {
-          name: "paperless",
-          image: "ghcr.io/paperless-ngx/paperless-ngx:latest",
-          cpu: "-",
-          memory: "-",
-          ports: "8000/tcp"
-        }
-      },
-      {
-        id: "backup-restic",
-        state: "offline",
-        statusKey: "workspace.management.states.exited",
-        actionKey: "workspace.management.actions.restart",
-        cells: {
-          name: "backup-restic",
-          image: "restic/restic:latest",
-          cpu: "-",
-          memory: "128 MiB",
-          ports: "-"
-        }
-      }
-    ],
-    listTitleKey: "workspace.management.docker.composeTitle",
-    listDescriptionKey: "workspace.management.docker.composeDescription",
-    listItems: [
-      {
-        id: "media-stack",
-        title: "media-stack",
-        detail: "jellyfin, sabnzbd, sonarr, radarr",
-        meta: "4 services",
-        state: "ready",
-        statusKey: "workspace.management.states.healthy"
-      },
-      {
-        id: "photo-library",
-        title: "photo-library",
-        detail: "immich-server, machine-learning, postgres, redis",
-        meta: "4 services",
-        state: "warning",
-        statusKey: "workspace.management.states.attention"
-      },
-      {
-        id: "paperless-office",
-        title: "paperless-office",
-        detail: "paperless, broker, tika, gotenberg",
-        meta: "4 services",
-        state: "neutral",
-        statusKey: "workspace.management.states.staged"
-      }
-    ],
-    gaugeTitleKey: "workspace.management.docker.resourcesTitle",
-    gaugeDescriptionKey: "workspace.management.docker.resourcesDescription",
-    gauges: [
-      { id: "cpu", labelKey: "workspace.management.gauges.cpu", value: 38, display: "38%", tone: "ready" },
-      { id: "memory", labelKey: "workspace.management.gauges.memory", value: 62, display: "9.6 / 16 GiB", tone: "warning" },
-      { id: "network", labelKey: "workspace.management.gauges.network", value: 44, display: "124 MB/s", tone: "neutral" },
-      { id: "storage", labelKey: "workspace.management.gauges.storage", value: 28, display: "2.1 TB", tone: "ready" }
-    ]
-  },
+const MANAGEMENT_PANELS: Record<Exclude<ManagementPanelId, "docker">, ManagementPanelConfig> = {
   virtualMachines: {
     Icon: MonitorCog,
     eyebrowKey: "workspace.management.virtualMachines.eyebrow",
@@ -406,7 +275,33 @@ const MANAGEMENT_PANELS: Record<ManagementPanelId, ManagementPanelConfig> = {
   }
 };
 
-export function WorkspaceManagementPanel({ panel }: { panel: ManagementPanelId }) {
+export function WorkspaceManagementPanel({
+  panel,
+  sessionId,
+  pendingApprovals,
+  dockerOperations,
+  locale,
+  onWorkQueuesChanged
+}: {
+  panel: ManagementPanelId;
+  sessionId: string | null;
+  pendingApprovals: PendingApproval[];
+  dockerOperations: DockerOperation[];
+  locale: SupportedLocale;
+  onWorkQueuesChanged: () => void | Promise<void>;
+}) {
+  if (panel === "docker") {
+    return (
+      <DockerManagementPanel
+        sessionId={sessionId}
+        pendingApprovals={pendingApprovals}
+        dockerOperations={dockerOperations}
+        locale={locale}
+        onWorkQueuesChanged={onWorkQueuesChanged}
+      />
+    );
+  }
+
   const { t } = useTranslation();
   const config = MANAGEMENT_PANELS[panel];
   const HeaderIcon = config.Icon;
@@ -533,6 +428,854 @@ export function WorkspaceManagementPanel({ panel }: { panel: ManagementPanelId }
       </div>
     </section>
   );
+}
+
+function DockerManagementPanel({
+  sessionId,
+  pendingApprovals,
+  dockerOperations,
+  locale,
+  onWorkQueuesChanged
+}: {
+  sessionId: string | null;
+  pendingApprovals: PendingApproval[];
+  dockerOperations: DockerOperation[];
+  locale: SupportedLocale;
+  onWorkQueuesChanged: () => void | Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const [summary, setSummary] = useState<DockerSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [logsState, setLogsState] = useState<{
+    container: DockerContainer;
+    content: string;
+    loading: boolean;
+    error: string | null;
+  } | null>(null);
+  const [consoleSession, setConsoleSession] = useState<DockerConsoleSession | null>(null);
+  const dockerState = error ? "unavailable" : (summary?.engine.status ?? (loading ? "unavailable" : "disabled"));
+  const containers = summary?.containers ?? [];
+  const composeProjects = summary?.composeProjects ?? [];
+  const dockerEnabled = Boolean(summary?.enabled);
+  const canUseDocker = dockerEnabled && summary?.engine.status === "ready" && !error;
+
+  useEffect(() => {
+    let active = true;
+    loadSummary();
+    return () => {
+      active = false;
+    };
+
+    async function loadSummary() {
+      setLoading(true);
+      setError(null);
+      try {
+        const nextSummary = await getDockerSummary();
+        if (!active) {
+          return;
+        }
+        setSummary(nextSummary);
+      } catch (nextError) {
+        if (!active) {
+          return;
+        }
+        setError(errorMessage(nextError));
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+  }, []);
+
+  async function refreshSummary() {
+    setLoading(true);
+    setError(null);
+    try {
+      setSummary(await getDockerSummary());
+    } catch (nextError) {
+      setError(errorMessage(nextError));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function openLogs(container: DockerContainer) {
+    setLogsState({ container, content: "", loading: true, error: null });
+    try {
+      const content = await getDockerContainerLogs(container.id);
+      setLogsState({ container, content, loading: false, error: null });
+    } catch (nextError) {
+      setLogsState({ container, content: "", loading: false, error: errorMessage(nextError) });
+    }
+  }
+
+  async function requestContainerAction(container: DockerContainer, action: "start" | "stop" | "restart" | "remove") {
+    await requestDockerProposal(`${action}:${container.id}`, {
+      action,
+      targetType: "container",
+      containerId: container.id
+    });
+  }
+
+  async function requestConsole(container: DockerContainer) {
+    const approvedOperation = approvedConsoleOperation(container, dockerOperations);
+    if (approvedOperation) {
+      setPendingAction(`console-open:${container.id}`);
+      setError(null);
+      try {
+        setConsoleSession(await createDockerConsoleSession(approvedOperation.id));
+        await onWorkQueuesChanged();
+      } catch (nextError) {
+        setError(errorMessage(nextError));
+      } finally {
+        setPendingAction(null);
+      }
+      return;
+    }
+
+    await requestDockerProposal(`console:${container.id}`, {
+      action: "console",
+      targetType: "console",
+      containerId: container.id,
+      shell: "/bin/sh"
+    });
+  }
+
+  async function requestComposeAction(
+    project: DockerComposeProject,
+    action: "compose_up" | "compose_down" | "compose_pull" | "compose_restart"
+  ) {
+    await requestDockerProposal(`${action}:${project.id}`, {
+      action,
+      targetType: "compose_project",
+      composeProjectId: project.id
+    });
+  }
+
+  async function requestDockerProposal(
+    actionId: string,
+    input: Omit<Parameters<typeof proposeDockerOperation>[0], "sessionId">
+  ): Promise<Awaited<ReturnType<typeof proposeDockerOperation>> | null> {
+    if (!sessionId) {
+      setError(t("workspace.management.docker.errors.noSession"));
+      return null;
+    }
+    setPendingAction(actionId);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await proposeDockerOperation({
+        ...input,
+        sessionId
+      });
+      setNotice(t("workspace.management.docker.proposalCreated"));
+      await onWorkQueuesChanged();
+      return result;
+    } catch (nextError) {
+      setError(errorMessage(nextError));
+      return null;
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  return (
+    <section className="workspace-management" aria-label={t("workspace.management.docker.title")}>
+      <header className="management-header">
+        <div className="management-title-block">
+          <span className="eyebrow">{t("workspace.management.docker.eyebrow")}</span>
+          <h2>{t("workspace.management.docker.title")}</h2>
+          <p>{t("workspace.management.docker.description")}</p>
+        </div>
+        <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
+          <span className="management-status-pill" data-state={dockerStatusTone(dockerState)}>
+            {dockerStatusLabel(summary, loading, error, t)}
+          </span>
+          <button type="button" onClick={refreshSummary} disabled={loading}>
+            {loading ? <LoaderCircle aria-hidden="true" size={15} /> : <RefreshCw aria-hidden="true" size={15} />}
+            <span>{t("common.actions.refresh")}</span>
+          </button>
+        </div>
+      </header>
+
+      <div className="management-body">
+        <section className="management-command-panel">
+          <div className="management-emblem" aria-hidden="true">
+            <Container size={31} />
+          </div>
+          <div className="management-command-copy">
+            <div>
+              <span className="management-status-pill" data-state={dockerStatusTone(dockerState)}>
+                {dockerStatusLabel(summary, loading, error, t)}
+              </span>
+              <h3>{t("workspace.management.docker.title")}</h3>
+              <p>{dockerStatusDetail(summary, loading, error, t)}</p>
+            </div>
+            <dl className="management-fact-list">
+              <div>
+                <dt>{t("workspace.management.docker.facts.runtime")}</dt>
+                <dd>{summary?.engine.version ?? t("common.dash")}</dd>
+              </div>
+              <div>
+                <dt>{t("workspace.management.docker.facts.storage")}</dt>
+                <dd>{summary?.engine.dockerRootDir ?? t("common.dash")}</dd>
+              </div>
+              <div>
+                <dt>{t("workspace.management.docker.facts.network")}</dt>
+                <dd>{summary?.engine.apiVersion ?? t("common.dash")}</dd>
+              </div>
+              <div>
+                <dt>{t("workspace.management.docker.facts.compose")}</dt>
+                <dd>{formatLocaleNumber(composeProjects.length, locale)}</dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+
+        {notice || error ? (
+          <div className={error ? "management-inline-message is-error" : "management-inline-message"} role="status">
+            {error ? <CircleAlert aria-hidden="true" size={15} /> : <CircleCheck aria-hidden="true" size={15} />}
+            <span>{error ?? notice}</span>
+          </div>
+        ) : null}
+
+        <div className="management-metric-grid">
+          {dockerMetrics(summary, locale, t).map((metric) => {
+            const MetricIcon = metric.Icon;
+            return (
+              <article key={metric.label} className="management-metric" data-state={metric.state}>
+                <MetricIcon aria-hidden="true" size={18} />
+                <span>{metric.label}</span>
+                <strong>{metric.value}</strong>
+                <small>{metric.detail}</small>
+              </article>
+            );
+          })}
+        </div>
+
+        <section className="management-section management-table-section">
+          <SectionHeader
+            title={t("workspace.management.docker.containersTitle")}
+            description={t("workspace.management.docker.containersDescription")}
+          />
+          {containers.length ? (
+            <div className="management-table-wrap">
+              <table className="management-table management-table-docker">
+                <thead>
+                  <tr>
+                    <th>{t("workspace.management.columns.name")}</th>
+                    <th>{t("workspace.management.columns.status")}</th>
+                    <th>{t("workspace.management.docker.columns.image")}</th>
+                    <th>{t("workspace.management.columns.cpu")}</th>
+                    <th>{t("workspace.management.columns.memory")}</th>
+                    <th>{t("workspace.management.docker.columns.ports")}</th>
+                    <th>{t("workspace.management.columns.actions")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {containers.map((container) => (
+                    <tr key={container.id}>
+                      <td title={container.name}>{container.name}</td>
+                      <td>
+                        <span className="management-row-status" data-state={containerTone(container)}>
+                          {container.status || container.state}
+                        </span>
+                      </td>
+                      <td title={container.image}>{container.image}</td>
+                      <td>{formatPercent(container.cpuPercent, locale)}</td>
+                      <td>{formatContainerMemory(container, locale)}</td>
+                      <td title={container.ports.join(", ")}>{container.ports.join(", ") || t("common.dash")}</td>
+                      <td>{renderDockerContainerActions(container)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="management-empty management-table-empty-state">{dockerEmptyState(dockerEnabled, loading, t)}</p>
+          )}
+        </section>
+
+        <div className="management-lower-grid">
+          <section className="management-section">
+            <SectionHeader
+              title={t("workspace.management.docker.composeTitle")}
+              description={t("workspace.management.docker.composeDescription")}
+            />
+            <div className="management-workload-list">
+              {composeProjects.length ? (
+                composeProjects.map((project) => (
+                  <article key={project.id} className="management-workload management-workload-docker">
+                    {statusIcon(composeTone(project))}
+                    <div>
+                      <strong>{project.name}</strong>
+                      <span>{project.services.join(", ") || project.filePath}</span>
+                    </div>
+                    <em data-state={composeTone(project)}>{composeStatusLabel(project, t)}</em>
+                    <div className="management-action-cluster">
+                      {renderComposeButton(project, "compose_up", Play, t("workspace.management.actions.deploy"))}
+                      {renderComposeButton(project, "compose_pull", RefreshCw, t("workspace.management.actions.pull"))}
+                      {renderComposeButton(project, "compose_restart", RotateCw, t("workspace.management.actions.restart"))}
+                      {renderComposeButton(project, "compose_down", Power, t("workspace.management.actions.stop"))}
+                    </div>
+                  </article>
+                ))
+              ) : (
+                <p className="management-empty">{dockerComposeEmptyState(dockerEnabled, loading, t)}</p>
+              )}
+            </div>
+          </section>
+
+          <section className="management-section">
+            <SectionHeader
+              title={t("workspace.management.docker.resourcesTitle")}
+              description={t("workspace.management.docker.resourcesDescription")}
+            />
+            <div className="management-resource-list">
+              {dockerGauges(summary, locale, t).map((gauge) => (
+                <ResourceGauge key={gauge.id} gauge={gauge} />
+              ))}
+            </div>
+          </section>
+        </div>
+      </div>
+
+      {logsState ? <DockerLogsDialog state={logsState} onClose={() => setLogsState(null)} /> : null}
+      {consoleSession ? <DockerConsoleDialog session={consoleSession} onClose={() => setConsoleSession(null)} /> : null}
+    </section>
+  );
+
+  function renderDockerContainerActions(container: DockerContainer) {
+    const isRunning = container.state === "running";
+    const pendingApproval = pendingDockerApprovalForTarget(pendingApprovals, container.id);
+    const approvedOperation = approvedConsoleOperation(container, dockerOperations);
+    const mutationDisabled = !canUseDocker || Boolean(pendingAction) || Boolean(pendingApproval);
+    const readDisabled = !canUseDocker || Boolean(pendingAction);
+    const pendingLabel = t("workspace.management.actions.pendingApproval");
+    return (
+      <div className="management-action-cluster">
+        <ActionIconButton
+          label={pendingApproval ? pendingLabel : isRunning ? t("workspace.management.actions.stop") : t("workspace.management.actions.start")}
+          disabled={mutationDisabled}
+          pending={pendingAction === `${isRunning ? "stop" : "start"}:${container.id}` || Boolean(pendingApproval)}
+          Icon={isRunning ? Pause : Play}
+          onClick={() => requestContainerAction(container, isRunning ? "stop" : "start")}
+        />
+        <ActionIconButton
+          label={pendingApproval ? pendingLabel : t("workspace.management.actions.restart")}
+          disabled={mutationDisabled}
+          pending={pendingAction === `restart:${container.id}` || Boolean(pendingApproval)}
+          Icon={RotateCw}
+          onClick={() => requestContainerAction(container, "restart")}
+        />
+        <ActionIconButton
+          label={t("workspace.management.actions.logs")}
+          disabled={readDisabled}
+          Icon={ScrollText}
+          onClick={() => void openLogs(container)}
+        />
+        <ActionIconButton
+          label={
+            pendingApproval
+              ? pendingLabel
+              : approvedOperation
+              ? t("workspace.management.actions.openConsole")
+              : t("workspace.management.actions.console")
+          }
+          disabled={mutationDisabled}
+          pending={pendingAction === `console:${container.id}` || pendingAction === `console-open:${container.id}` || Boolean(pendingApproval)}
+          Icon={TerminalSquare}
+          onClick={() => requestConsole(container)}
+        />
+        <ActionIconButton
+          label={pendingApproval ? pendingLabel : t("workspace.management.actions.remove")}
+          disabled={mutationDisabled}
+          pending={pendingAction === `remove:${container.id}` || Boolean(pendingApproval)}
+          Icon={Trash2}
+          danger
+          onClick={() => requestContainerAction(container, "remove")}
+        />
+      </div>
+    );
+  }
+
+  function renderComposeButton(
+    project: DockerComposeProject,
+    action: "compose_up" | "compose_down" | "compose_pull" | "compose_restart",
+    Icon: LucideIcon,
+    label: string
+  ) {
+    const pendingApproval = pendingDockerApprovalForTarget(pendingApprovals, project.id);
+    return (
+      <ActionIconButton
+        label={pendingApproval ? t("workspace.management.actions.pendingApproval") : label}
+        disabled={!canUseDocker || Boolean(pendingAction) || Boolean(pendingApproval)}
+        pending={pendingAction === `${action}:${project.id}` || Boolean(pendingApproval)}
+        Icon={Icon}
+        danger={action === "compose_down"}
+        onClick={() => requestComposeAction(project, action)}
+      />
+    );
+  }
+}
+
+function ActionIconButton({
+  label,
+  disabled,
+  pending,
+  Icon,
+  danger,
+  onClick
+}: {
+  label: string;
+  disabled?: boolean;
+  pending?: boolean;
+  Icon: LucideIcon;
+  danger?: boolean;
+  onClick: () => void | Promise<void>;
+}) {
+  const ButtonIcon = pending ? LoaderCircle : Icon;
+  return (
+    <button
+      type="button"
+      className={danger ? "management-icon-action is-danger" : "management-icon-action"}
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      onClick={() => void onClick()}
+    >
+      <ButtonIcon aria-hidden="true" size={13} />
+    </button>
+  );
+}
+
+function DockerLogsDialog({
+  state,
+  onClose
+}: {
+  state: { container: DockerContainer; content: string; loading: boolean; error: string | null };
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="management-modal-backdrop" role="presentation">
+      <section className="management-modal" role="dialog" aria-modal="true" aria-labelledby="docker-logs-title">
+        <header>
+          <div>
+            <span className="eyebrow">{t("workspace.management.docker.logsEyebrow")}</span>
+            <h2 id="docker-logs-title">{state.container.name}</h2>
+          </div>
+          <button type="button" className="management-icon-action" onClick={onClose} title={t("common.actions.dismissNotification")}>
+            <X aria-hidden="true" size={14} />
+          </button>
+        </header>
+        <pre className="management-log-output">
+          {state.loading
+            ? t("common.states.loading")
+            : state.error
+              ? state.error
+              : state.content || t("workspace.management.docker.noLogs")}
+        </pre>
+      </section>
+    </div>
+  );
+}
+
+function DockerConsoleDialog({ session, onClose }: { session: DockerConsoleSession; onClose: () => void }) {
+  const { t } = useTranslation();
+  const terminalRef = useRef<HTMLDivElement | null>(null);
+  const messagesRef = useRef({
+    connecting: t("workspace.management.docker.consoleConnecting"),
+    ready: t("workspace.management.docker.consoleReady"),
+    closed: t("workspace.management.docker.consoleClosed"),
+    disconnected: t("workspace.management.docker.consoleDisconnected")
+  });
+
+  useEffect(() => {
+    messagesRef.current = {
+      connecting: t("workspace.management.docker.consoleConnecting"),
+      ready: t("workspace.management.docker.consoleReady"),
+      closed: t("workspace.management.docker.consoleClosed"),
+      disconnected: t("workspace.management.docker.consoleDisconnected")
+    };
+  }, [t]);
+
+  useEffect(() => {
+    if (!terminalRef.current) {
+      return;
+    }
+    let disposed = false;
+    let terminal: Terminal | null = null;
+    let socket: WebSocket | null = null;
+    let resizeObserver: ResizeObserver | null = null;
+    let disposable: { dispose(): void } | null = null;
+    const openTimer = window.setTimeout(() => {
+      if (disposed || !terminalRef.current) {
+        return;
+      }
+      terminal = new Terminal({
+        cursorBlink: true,
+        convertEol: true,
+        fontFamily: "var(--code-font-family)",
+        fontSize: 12,
+        theme: {
+          background: "#05070a",
+          foreground: "#d9e2ef",
+          cursor: "#f5b84b"
+        }
+      });
+      const fitAddon = new FitAddon();
+      terminal.loadAddon(fitAddon);
+      terminal.open(terminalRef.current);
+      fitAddon.fit();
+
+      socket = new WebSocket(consoleWebSocketUrl(session.websocketUrl));
+      const writeLine = (value: string) => {
+        if (!disposed) {
+          terminal?.writeln(value);
+        }
+      };
+      const sendResize = () => {
+        if (socket?.readyState === WebSocket.OPEN && terminal) {
+          socket.send(JSON.stringify({ type: "resize", cols: terminal.cols, rows: terminal.rows }));
+        }
+      };
+      resizeObserver = new ResizeObserver(() => {
+        fitAddon.fit();
+        sendResize();
+      });
+      resizeObserver.observe(terminalRef.current);
+      disposable = terminal.onData((data) => {
+        if (socket?.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: "input", data }));
+        }
+      });
+      socket.addEventListener("open", () => {
+        writeLine(messagesRef.current.connecting);
+        sendResize();
+      });
+      socket.addEventListener("message", (event) => {
+        if (disposed) {
+          return;
+        }
+        const message = parseConsoleMessage(event.data);
+        if (message?.type === "output") {
+          terminal?.write(message.data);
+        }
+        if (message?.type === "ready") {
+          writeLine(messagesRef.current.ready);
+        }
+        if (message?.type === "error") {
+          writeLine(`\r\n${message.error}`);
+        }
+        if (message?.type === "exit") {
+          writeLine(`\r\n${messagesRef.current.closed}`);
+        }
+      });
+      socket.addEventListener("close", () => {
+        writeLine(`\r\n${messagesRef.current.disconnected}`);
+      });
+    }, 0);
+
+    return () => {
+      disposed = true;
+      window.clearTimeout(openTimer);
+      resizeObserver?.disconnect();
+      disposable?.dispose();
+      socket?.close();
+      terminal?.dispose();
+    };
+  }, [session.websocketUrl]);
+
+  return (
+    <div className="management-modal-backdrop" role="presentation">
+      <section className="management-modal management-console-modal" role="dialog" aria-modal="true" aria-labelledby="docker-console-title">
+        <header>
+          <div>
+            <span className="eyebrow">{t("workspace.management.actions.console")}</span>
+            <h2 id="docker-console-title">{session.containerId}</h2>
+          </div>
+          <button type="button" className="management-icon-action" onClick={onClose} title={t("common.actions.dismissNotification")}>
+            <X aria-hidden="true" size={14} />
+          </button>
+        </header>
+        <div ref={terminalRef} className="management-terminal" />
+      </section>
+    </div>
+  );
+}
+
+function dockerMetrics(summary: DockerSummary | null, locale: SupportedLocale, t: ReturnType<typeof useTranslation>["t"]) {
+  const metrics = summary?.metrics;
+  return [
+    {
+      label: t("workspace.management.docker.metrics.containers"),
+      value: metrics ? `${formatLocaleNumber(metrics.containers.running, locale)} / ${formatLocaleNumber(metrics.containers.total, locale)}` : "-",
+      detail: t("workspace.management.docker.metrics.containersDetail"),
+      state: metrics?.containers.running ? ("ready" as const) : ("neutral" as const),
+      Icon: Boxes
+    },
+    {
+      label: t("workspace.management.docker.metrics.images"),
+      value: metrics ? formatLocaleNumber(metrics.images, locale) : "-",
+      detail: t("workspace.management.docker.metrics.imagesDetail"),
+      state: "neutral" as const,
+      Icon: Box
+    },
+    {
+      label: t("workspace.management.docker.metrics.networks"),
+      value: metrics ? formatLocaleNumber(metrics.networks, locale) : "-",
+      detail: t("workspace.management.docker.metrics.networksDetail"),
+      state: "ready" as const,
+      Icon: Network
+    },
+    {
+      label: t("workspace.management.docker.metrics.volumes"),
+      value: metrics ? formatLocaleNumber(metrics.volumes, locale) : "-",
+      detail: t("workspace.management.docker.metrics.volumesDetail"),
+      state: metrics?.volumes ? ("warning" as const) : ("neutral" as const),
+      Icon: Database
+    }
+  ];
+}
+
+function dockerGauges(summary: DockerSummary | null, locale: SupportedLocale, t: ReturnType<typeof useTranslation>["t"]): ManagementGauge[] {
+  const metrics = summary?.metrics;
+  return [
+    {
+      id: "cpu",
+      labelKey: "workspace.management.gauges.cpu",
+      value: clampGauge(metrics?.cpuPercent ?? 0),
+      display: metrics?.cpuPercent === null || metrics?.cpuPercent === undefined ? t("common.dash") : formatPercent(metrics.cpuPercent, locale),
+      tone: gaugeTone(metrics?.cpuPercent ?? 0)
+    },
+    {
+      id: "memory",
+      labelKey: "workspace.management.gauges.memory",
+      value: clampGauge(metrics?.memoryPercent ?? 0),
+      display:
+        metrics?.memoryUsageBytes === null || metrics?.memoryUsageBytes === undefined
+          ? t("common.dash")
+          : `${formatBytes(metrics.memoryUsageBytes, locale)}${
+              metrics.memoryLimitBytes ? ` / ${formatBytes(metrics.memoryLimitBytes, locale)}` : ""
+            }`,
+      tone: gaugeTone(metrics?.memoryPercent ?? 0)
+    },
+    {
+      id: "network",
+      labelKey: "workspace.management.gauges.network",
+      value: clampGauge((metrics?.networks ?? 0) * 8),
+      display: metrics ? `${formatLocaleNumber(metrics.networks, locale)} ${t("workspace.management.docker.units.networks")}` : t("common.dash"),
+      tone: "neutral"
+    },
+    {
+      id: "storage",
+      labelKey: "workspace.management.gauges.storage",
+      value: clampGauge((metrics?.volumes ?? 0) * 6),
+      display: metrics ? `${formatLocaleNumber(metrics.volumes, locale)} ${t("workspace.management.docker.units.volumes")}` : t("common.dash"),
+      tone: metrics?.volumes ? "warning" : "neutral"
+    }
+  ];
+}
+
+function dockerStatusTone(status: DockerSummary["engine"]["status"]): StatusTone {
+  if (status === "ready") {
+    return "ready";
+  }
+  if (status === "unavailable") {
+    return "warning";
+  }
+  return "offline";
+}
+
+function dockerStatusLabel(
+  summary: DockerSummary | null,
+  loading: boolean,
+  error: string | null,
+  t: ReturnType<typeof useTranslation>["t"]
+): string {
+  if (loading) {
+    return t("common.states.loading");
+  }
+  if (error) {
+    return t("common.states.unavailable");
+  }
+  if (!summary?.enabled) {
+    return t("workspace.management.docker.states.disabled");
+  }
+  if (summary.engine.status === "ready") {
+    return t("workspace.management.states.ready");
+  }
+  return t("common.states.unavailable");
+}
+
+function dockerStatusDetail(
+  summary: DockerSummary | null,
+  loading: boolean,
+  error: string | null,
+  t: ReturnType<typeof useTranslation>["t"]
+): string {
+  if (loading) {
+    return t("workspace.management.docker.loading");
+  }
+  if (error) {
+    return error;
+  }
+  if (!summary?.enabled) {
+    return t("workspace.management.docker.disabledDetail");
+  }
+  return summary.engine.error ?? t("workspace.management.docker.engineDetail");
+}
+
+function dockerEmptyState(enabled: boolean, loading: boolean, t: ReturnType<typeof useTranslation>["t"]): string {
+  if (loading) {
+    return t("common.states.loading");
+  }
+  if (!enabled) {
+    return t("workspace.management.docker.disabledEmpty");
+  }
+  return t("workspace.management.docker.noContainers");
+}
+
+function dockerComposeEmptyState(enabled: boolean, loading: boolean, t: ReturnType<typeof useTranslation>["t"]): string {
+  if (loading) {
+    return t("common.states.loading");
+  }
+  if (!enabled) {
+    return t("workspace.management.docker.disabledEmpty");
+  }
+  return t("workspace.management.docker.noComposeProjects");
+}
+
+function pendingDockerApprovalForTarget(approvals: PendingApproval[], targetId: string): PendingApproval | null {
+  return (
+    approvals.find((approval) => {
+      if (approval.kind !== "docker_operation") {
+        return false;
+      }
+      return approval.proposal.some((proposal) => {
+        if (!("action" in proposal)) {
+          return false;
+        }
+        return proposal.containerId === targetId || proposal.composeProjectId === targetId;
+      });
+    }) ?? null
+  );
+}
+
+function approvedConsoleOperation(container: DockerContainer, operations: DockerOperation[]): DockerOperation | null {
+  return (
+    operations.find(
+      (operation) =>
+        operation.action === "console" &&
+        operation.status === "approved" &&
+        operation.targetId === container.id
+    ) ?? null
+  );
+}
+
+function containerTone(container: DockerContainer): StatusTone {
+  if (container.state === "running") {
+    return "ready";
+  }
+  if (container.state === "paused" || container.state === "restarting") {
+    return "warning";
+  }
+  if (container.state === "exited" || container.state === "dead") {
+    return "offline";
+  }
+  return "neutral";
+}
+
+function composeTone(project: DockerComposeProject): StatusTone {
+  if (project.status === "running") {
+    return "ready";
+  }
+  if (project.status === "partial") {
+    return "warning";
+  }
+  if (project.status === "stopped") {
+    return "offline";
+  }
+  return "neutral";
+}
+
+function composeStatusLabel(project: DockerComposeProject, t: ReturnType<typeof useTranslation>["t"]): string {
+  if (project.status === "configured") {
+    return t("workspace.management.states.staged");
+  }
+  if (project.status === "partial") {
+    return t("workspace.management.states.attention");
+  }
+  if (project.status === "stopped") {
+    return t("workspace.management.states.stopped");
+  }
+  return t("workspace.management.states.running");
+}
+
+function formatContainerMemory(container: DockerContainer, locale: SupportedLocale): string {
+  if (container.memoryUsageBytes === null) {
+    return "-";
+  }
+  return formatBytes(container.memoryUsageBytes, locale);
+}
+
+function formatPercent(value: number | null, locale: SupportedLocale): string {
+  if (value === null) {
+    return "-";
+  }
+  return `${formatLocaleNumber(value, locale, { maximumFractionDigits: 1 })}%`;
+}
+
+function clampGauge(value: number): number {
+  return Math.max(0, Math.min(Math.round(value), 100));
+}
+
+function gaugeTone(value: number): GaugeTone {
+  if (value >= 85) {
+    return "danger";
+  }
+  if (value >= 65) {
+    return "warning";
+  }
+  return "ready";
+}
+
+function consoleWebSocketUrl(pathname: string): string {
+  const url = new URL(pathname, window.location.origin);
+  url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
+}
+
+function parseConsoleMessage(raw: unknown):
+  | { type: "ready" }
+  | { type: "output"; data: string }
+  | { type: "error"; error: string }
+  | { type: "exit" }
+  | null {
+  try {
+    const parsed = JSON.parse(String(raw)) as { type?: unknown; data?: unknown; error?: unknown };
+    if (parsed.type === "ready" || parsed.type === "exit") {
+      return { type: parsed.type };
+    }
+    if (parsed.type === "output" && typeof parsed.data === "string") {
+      return { type: "output", data: parsed.data };
+    }
+    if (parsed.type === "error" && typeof parsed.error === "string") {
+      return { type: "error", error: parsed.error };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function SectionHeader({ title, description }: { title: string; description: string }) {

@@ -17,6 +17,13 @@ provider = "pi"
 pi_command = "pi"
 local_endpoint = ""
 
+[docker]
+enabled = false
+socket_path = "/var/run/docker.sock"
+compose_command = "docker"
+operation_timeout_ms = 120000
+console_shells = ["/bin/sh", "/bin/bash"]
+
 [[nas_roots]]
 id = "primary"
 name = "Primary NAS"
