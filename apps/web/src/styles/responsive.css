@@ -89,6 +89,14 @@
     grid-template-rows: minmax(0, 1fr) minmax(0, 0fr);
   }
 
+  .management-body {
+    grid-template-columns: 1fr;
+  }
+
+  .management-lower-grid {
+    grid-template-columns: 1fr;
+  }
+
   .workspace-grid.has-preview {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(280px, 0.9fr) minmax(320px, 1.1fr);
@@ -202,12 +210,35 @@
   }
 
   .workspace-pane.is-mobile-active {
-    display: block;
-    overflow: auto;
+    display: grid;
+    overflow: hidden;
   }
 
   .split-handle {
     display: none;
+  }
+
+  .workspace-shell {
+    grid-template-columns: minmax(0, 1fr) 52px;
+    height: 100%;
+  }
+
+  .workspace-stage {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .workspace-stage[data-panel="files"] {
+    overflow: auto;
+  }
+
+  .workspace-panel-rail {
+    padding: 8px 6px;
+  }
+
+  .workspace-panel-tab {
+    width: 40px;
+    min-height: 48px;
   }
 
   .workspace-header {
@@ -256,6 +287,31 @@
 
   .file-row > span:nth-child(4) {
     display: none;
+  }
+
+  .management-header {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .management-actions {
+    justify-content: flex-start;
+    overflow: auto;
+    padding-bottom: 2px;
+  }
+
+  .management-body {
+    padding: 10px;
+  }
+
+  .management-command-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .management-emblem {
+    width: 48px;
+    height: 48px;
   }
 }
 
@@ -401,6 +457,52 @@
   .file-row > span:nth-child(3),
   .file-row > span:nth-child(4) {
     display: none;
+  }
+
+  .workspace-shell {
+    grid-template-columns: minmax(0, 1fr) 44px;
+  }
+
+  .workspace-panel-rail {
+    padding: 8px 5px;
+  }
+
+  .workspace-panel-tab {
+    width: 34px;
+    min-height: 38px;
+    padding: 6px 4px;
+  }
+
+  .workspace-panel-tab span {
+    display: none;
+  }
+
+  .management-title-block h2 {
+    font-size: 18px;
+  }
+
+  .management-actions button {
+    width: 34px;
+    padding: 0;
+  }
+
+  .management-actions button span,
+  .management-row-action span {
+    display: none;
+  }
+
+  .management-fact-list,
+  .management-metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .management-workload {
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+  }
+
+  .management-workload small {
+    grid-column: 2 / -1;
+    justify-self: start;
   }
 
   .activity-popover {

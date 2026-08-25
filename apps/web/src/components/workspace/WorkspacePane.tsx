@@ -1,6 +1,19 @@
 import { FormEvent, KeyboardEvent, MouseEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronLeft, Home, PanelRightClose, PanelRightOpen, PencilLine, RefreshCw, Search, Trash2 } from "lucide-react";
+import {
+  ChevronLeft,
+  Container,
+  Files,
+  Home,
+  MonitorCog,
+  PanelRightClose,
+  PanelRightOpen,
+  PencilLine,
+  RefreshCw,
+  Search,
+  Trash2,
+  type LucideIcon
+} from "lucide-react";
 import type { FileEntry, FileMeta, FileOperation, NasRoot, TextPreview } from "../../api.js";
 import { describeFileVisual } from "../../file-type-utils.js";
 import { formatBytes, formatDate, formatLocaleNumber } from "../../i18n/format.js";
@@ -9,8 +22,36 @@ import { ActivityMenu } from "../activity/ActivityMenu.js";
 import { CustomSelect } from "../common/CustomSelect.js";
 import { FileTypeIcon } from "../file/FileTypeIcon.js";
 import { PreviewContent, previewIcon } from "../preview/PreviewContent.js";
+import { WorkspaceManagementPanel, type ManagementPanelId } from "./WorkspaceManagementPanel.js";
 
 const EPOCH_DATE = new Date(0).toISOString();
+type WorkspacePanelId = "files" | ManagementPanelId;
+
+const WORKSPACE_PANELS = [
+  {
+    id: "files",
+    labelKey: "workspace.panels.files",
+    shortLabelKey: "workspace.panels.filesShort",
+    Icon: Files
+  },
+  {
+    id: "docker",
+    labelKey: "workspace.panels.docker",
+    shortLabelKey: "workspace.panels.dockerShort",
+    Icon: Container
+  },
+  {
+    id: "virtualMachines",
+    labelKey: "workspace.panels.virtualMachines",
+    shortLabelKey: "workspace.panels.virtualMachinesShort",
+    Icon: MonitorCog
+  }
+] as const satisfies ReadonlyArray<{
+  id: WorkspacePanelId;
+  labelKey: string;
+  shortLabelKey: string;
+  Icon: LucideIcon;
+}>;
 
 export function WorkspacePane({
   active,
@@ -91,6 +132,7 @@ export function WorkspacePane({
   const [deleteState, setDeleteState] = useState<{ entry: FileEntry; step: "initial" | "final" } | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [operationSubmitting, setOperationSubmitting] = useState(false);
+  const [activePanel, setActivePanel] = useState<WorkspacePanelId>("files");
   const displayTitle = displayPath === "." ? t("common.root") : displayPath;
   const entryCount = formatLocaleNumber(entries.length, locale);
   const safeEntryCount = formatLocaleNumber(safeEntries, locale);
@@ -214,214 +256,245 @@ export function WorkspacePane({
 
   return (
     <section className={`workspace-pane ${active ? "is-mobile-active" : ""}`} aria-label={t("workspace.label")}>
-      <header className={`workspace-header${hasRootSwitcher ? " has-root-switcher" : ""}`}>
-        {hasRootSwitcher ? (
-          <div className="root-control">
-            <label htmlFor="root-select">{t("workspace.rootLabel")}</label>
-            <CustomSelect
-              id="root-select"
-              value={selectedRootId}
-              options={rootOptions}
-              ariaLabel={`${t("workspace.rootLabel")}: ${selectedRootLabel}`}
-              onChange={onSelectRoot}
-            />
-          </div>
-        ) : null}
+      <div className="workspace-shell">
+        <div className="workspace-stage" data-panel={activePanel}>
+          {activePanel === "files" ? (
+            <>
+              <header className={`workspace-header${hasRootSwitcher ? " has-root-switcher" : ""}`}>
+                {hasRootSwitcher ? (
+                  <div className="root-control">
+                    <label htmlFor="root-select">{t("workspace.rootLabel")}</label>
+                    <CustomSelect
+                      id="root-select"
+                      value={selectedRootId}
+                      options={rootOptions}
+                      ariaLabel={`${t("workspace.rootLabel")}: ${selectedRootLabel}`}
+                      onChange={onSelectRoot}
+                    />
+                  </div>
+                ) : null}
 
-        <nav className="breadcrumbs" aria-label={t("workspace.breadcrumbs")}>
-          <button type="button" onClick={() => onGoToBreadcrumb(-1)}>
-            {t("common.root")}
-          </button>
-          {breadcrumbs.map((crumb, index) => (
-            <button key={`${crumb}-${index}`} type="button" onClick={() => onGoToBreadcrumb(index)}>
-              {crumb}
-            </button>
-          ))}
-        </nav>
+                <nav className="breadcrumbs" aria-label={t("workspace.breadcrumbs")}>
+                  <button type="button" onClick={() => onGoToBreadcrumb(-1)}>
+                    {t("common.root")}
+                  </button>
+                  {breadcrumbs.map((crumb, index) => (
+                    <button key={`${crumb}-${index}`} type="button" onClick={() => onGoToBreadcrumb(index)}>
+                      {crumb}
+                    </button>
+                  ))}
+                </nav>
 
-        <div className="workspace-actions">
-          <button
-            className="icon-button"
-            type="button"
-            onClick={onGoHome}
-            disabled={!selectedRoot?.homePath || currentPath === selectedRoot.homePath}
-            title={t("common.actions.homeDirectory")}
-            aria-label={t("common.actions.homeDirectory")}
-          >
-            <Home aria-hidden="true" size={18} />
-          </button>
-          <button className="icon-button" type="button" onClick={onGoUp} disabled={currentPath === "."} title={t("common.actions.up")}>
-            <ChevronLeft aria-hidden="true" size={18} />
-          </button>
-          <button className="icon-button" type="button" onClick={onRefreshFiles} title={t("common.actions.refresh")}>
-            <RefreshCw aria-hidden="true" size={18} />
-          </button>
-          <ActivityMenu operations={operations} operationsReady={operationsReady} onRollback={onRollback} />
+                <div className="workspace-actions">
+                  <button
+                    className="icon-button"
+                    type="button"
+                    onClick={onGoHome}
+                    disabled={!selectedRoot?.homePath || currentPath === selectedRoot.homePath}
+                    title={t("common.actions.homeDirectory")}
+                    aria-label={t("common.actions.homeDirectory")}
+                  >
+                    <Home aria-hidden="true" size={18} />
+                  </button>
+                  <button className="icon-button" type="button" onClick={onGoUp} disabled={currentPath === "."} title={t("common.actions.up")}>
+                    <ChevronLeft aria-hidden="true" size={18} />
+                  </button>
+                  <button className="icon-button" type="button" onClick={onRefreshFiles} title={t("common.actions.refresh")}>
+                    <RefreshCw aria-hidden="true" size={18} />
+                  </button>
+                  <ActivityMenu operations={operations} operationsReady={operationsReady} onRollback={onRollback} />
+                </div>
+
+                <form className="search" onSubmit={onSubmitSearch}>
+                  <Search aria-hidden="true" size={17} />
+                  <input
+                    value={searchQuery}
+                    onChange={(event) => onSearchQueryChange(event.target.value)}
+                    placeholder={t("workspace.searchPlaceholder")}
+                    aria-label={t("workspace.searchAria")}
+                  />
+                </form>
+              </header>
+
+              <div className={`workspace-grid${hasPreview ? " has-preview" : ""}${isPreviewCollapsed ? " is-preview-collapsed" : ""}`}>
+                <section className="file-browser" aria-label={t("workspace.fileBrowser")}>
+                  <div className="panel-heading">
+                    <div>
+                      <span className="eyebrow">{t("workspace.files")}</span>
+                      <h2>{displayTitle}</h2>
+                    </div>
+                    <dl>
+                      <div>
+                        <dt>{t("workspace.items")}</dt>
+                        <dd>{entryCount}</dd>
+                      </div>
+                      <div>
+                        <dt>{t("workspace.safe")}</dt>
+                        <dd>{safeEntryCount}</dd>
+                      </div>
+                    </dl>
+                  </div>
+
+                  <div className="file-list" role="table" aria-label={t("workspace.table.files")}>
+                    <div className="file-row file-row-head" role="row">
+                      <span role="columnheader">{t("workspace.table.name")}</span>
+                      <span role="columnheader">{t("workspace.table.type")}</span>
+                      <span role="columnheader">{t("workspace.table.size")}</span>
+                      <span role="columnheader">{t("workspace.table.modified")}</span>
+                      <span role="columnheader" aria-label={t("workspace.table.actions")} />
+                    </div>
+                    {entries.map((entry) => {
+                      const fileVisual = describeFileVisual(entry);
+                      const displaySize =
+                        entry.kind === "directory"
+                          ? t("common.dash")
+                          : entry.sizeBytes
+                            ? formatBytes(entry.sizeBytes, locale)
+                            : t("common.dash");
+                      return (
+                        <div
+                          key={entry.path}
+                          className={entry.path === selectedFilePath ? "file-row is-selected" : "file-row"}
+                          onClick={() => openEntryFromRow(entry)}
+                          onKeyDown={(event) => handleRowKeyDown(event, entry)}
+                          tabIndex={entry.isSafe ? 0 : -1}
+                          aria-disabled={!entry.isSafe}
+                          aria-selected={entry.path === selectedFilePath}
+                          role="row"
+                        >
+                          <span className="file-name" role="cell">
+                            <FileTypeIcon kind={fileVisual.kind} />
+                            <span>{entry.name}</span>
+                          </span>
+                          <span className={`file-type-label file-type-${fileVisual.kind}`} role="cell">
+                            {t(`files.labels.${fileVisual.kind}`)}
+                          </span>
+                          <span role="cell">{displaySize}</span>
+                          <span role="cell">{entry.modifiedAt === EPOCH_DATE ? t("common.dash") : formatDate(entry.modifiedAt, locale)}</span>
+                          <span className="file-row-actions" role="cell" aria-label={t("workspace.table.actions")}>
+                            <button
+                              type="button"
+                              className="file-action-button"
+                              onClick={(event) => openRenameDialog(event, entry)}
+                              disabled={!entry.isSafe}
+                              title={t("workspace.actions.rename")}
+                              aria-label={t("workspace.actions.renameEntry", { name: entry.name })}
+                            >
+                              <PencilLine aria-hidden="true" size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              className="file-action-button is-danger"
+                              onClick={(event) => openDeleteDialog(event, entry)}
+                              disabled={!entry.isSafe}
+                              title={t("workspace.actions.delete")}
+                              aria-label={t("workspace.actions.deleteEntry", { name: entry.name })}
+                            >
+                              <Trash2 aria-hidden="true" size={14} />
+                            </button>
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <section
+                  className={`preview-pane${hasPreview ? " is-open" : " is-collapsed"}${isPreviewCollapsed ? " is-manual-collapsed" : ""}`}
+                  aria-label={t("workspace.preview")}
+                  aria-hidden={!hasPreview}
+                >
+                  {hasPreview && isPreviewCollapsed ? (
+                    <button
+                      type="button"
+                      className="preview-expand-button"
+                      onClick={onTogglePreviewCollapsed}
+                      title={t("workspace.expandPreview")}
+                      aria-label={t("workspace.expandPreview")}
+                      aria-expanded="false"
+                    >
+                      <PanelRightOpen aria-hidden="true" size={17} />
+                      <span>{previewTitle || t("workspace.preview")}</span>
+                    </button>
+                  ) : hasPreview ? (
+                    <>
+                      <div className="panel-heading">
+                        <div>
+                          <span className="eyebrow">{t("workspace.preview")}</span>
+                          <div className="preview-title-row">
+                            <h2>{previewTitle || t("workspace.selectFile")}</h2>
+                          </div>
+                        </div>
+                        <div className="preview-heading-actions">
+                          {previewMeta ? (
+                            <span className="preview-kind">
+                              {previewIcon(previewMeta.previewKind)}
+                              {t(`preview.kind.${previewMeta.previewKind}`)}
+                            </span>
+                          ) : null}
+                          {canEditPreview && previewMeta ? (
+                            <button
+                              type="button"
+                              className="preview-tool-button"
+                              onClick={() => onOpenEditor(previewMeta)}
+                              title={t("editor.open")}
+                              aria-label={t("editor.open")}
+                            >
+                              <PencilLine aria-hidden="true" size={14} />
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            className="preview-tool-button"
+                            onClick={onTogglePreviewCollapsed}
+                            title={t("workspace.collapsePreview")}
+                            aria-label={t("workspace.collapsePreview")}
+                            aria-expanded="true"
+                          >
+                            <PanelRightClose aria-hidden="true" size={14} />
+                          </button>
+                        </div>
+                      </div>
+
+                      <PreviewContent
+                        blobUrl={blobUrl}
+                        loading={isPreviewLoading}
+                        meta={previewMeta}
+                        error={previewError}
+                        textPreview={textPreview}
+                        previewFileSizeLimitBytes={previewFileSizeLimitBytes}
+                        locale={locale}
+                      />
+                    </>
+                  ) : null}
+                </section>
+              </div>
+            </>
+          ) : (
+            <WorkspaceManagementPanel panel={activePanel} />
+          )}
         </div>
 
-        <form className="search" onSubmit={onSubmitSearch}>
-          <Search aria-hidden="true" size={17} />
-          <input
-            value={searchQuery}
-            onChange={(event) => onSearchQueryChange(event.target.value)}
-            placeholder={t("workspace.searchPlaceholder")}
-            aria-label={t("workspace.searchAria")}
-          />
-        </form>
-      </header>
-
-      <div className={`workspace-grid${hasPreview ? " has-preview" : ""}${isPreviewCollapsed ? " is-preview-collapsed" : ""}`}>
-        <section className="file-browser" aria-label={t("workspace.fileBrowser")}>
-          <div className="panel-heading">
-            <div>
-              <span className="eyebrow">{t("workspace.files")}</span>
-              <h2>{displayTitle}</h2>
-            </div>
-            <dl>
-              <div>
-                <dt>{t("workspace.items")}</dt>
-                <dd>{entryCount}</dd>
-              </div>
-              <div>
-                <dt>{t("workspace.safe")}</dt>
-                <dd>{safeEntryCount}</dd>
-              </div>
-            </dl>
-          </div>
-
-          <div className="file-list" role="table" aria-label={t("workspace.table.files")}>
-            <div className="file-row file-row-head" role="row">
-              <span role="columnheader">{t("workspace.table.name")}</span>
-              <span role="columnheader">{t("workspace.table.type")}</span>
-              <span role="columnheader">{t("workspace.table.size")}</span>
-              <span role="columnheader">{t("workspace.table.modified")}</span>
-              <span role="columnheader" aria-label={t("workspace.table.actions")} />
-            </div>
-            {entries.map((entry) => {
-              const fileVisual = describeFileVisual(entry);
-              const displaySize =
-                entry.kind === "directory"
-                  ? t("common.dash")
-                  : entry.sizeBytes
-                    ? formatBytes(entry.sizeBytes, locale)
-                    : t("common.dash");
-              return (
-                <div
-                  key={entry.path}
-                  className={entry.path === selectedFilePath ? "file-row is-selected" : "file-row"}
-                  onClick={() => openEntryFromRow(entry)}
-                  onKeyDown={(event) => handleRowKeyDown(event, entry)}
-                  tabIndex={entry.isSafe ? 0 : -1}
-                  aria-disabled={!entry.isSafe}
-                  aria-selected={entry.path === selectedFilePath}
-                  role="row"
-                >
-                  <span className="file-name" role="cell">
-                    <FileTypeIcon kind={fileVisual.kind} />
-                    <span>{entry.name}</span>
-                  </span>
-                  <span className={`file-type-label file-type-${fileVisual.kind}`} role="cell">
-                    {t(`files.labels.${fileVisual.kind}`)}
-                  </span>
-                  <span role="cell">{displaySize}</span>
-                  <span role="cell">{entry.modifiedAt === EPOCH_DATE ? t("common.dash") : formatDate(entry.modifiedAt, locale)}</span>
-                  <span className="file-row-actions" role="cell" aria-label={t("workspace.table.actions")}>
-                    <button
-                      type="button"
-                      className="file-action-button"
-                      onClick={(event) => openRenameDialog(event, entry)}
-                      disabled={!entry.isSafe}
-                      title={t("workspace.actions.rename")}
-                      aria-label={t("workspace.actions.renameEntry", { name: entry.name })}
-                    >
-                      <PencilLine aria-hidden="true" size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      className="file-action-button is-danger"
-                      onClick={(event) => openDeleteDialog(event, entry)}
-                      disabled={!entry.isSafe}
-                      title={t("workspace.actions.delete")}
-                      aria-label={t("workspace.actions.deleteEntry", { name: entry.name })}
-                    >
-                      <Trash2 aria-hidden="true" size={14} />
-                    </button>
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
-        <section
-          className={`preview-pane${hasPreview ? " is-open" : " is-collapsed"}${isPreviewCollapsed ? " is-manual-collapsed" : ""}`}
-          aria-label={t("workspace.preview")}
-          aria-hidden={!hasPreview}
-        >
-          {hasPreview && isPreviewCollapsed ? (
-            <button
-              type="button"
-              className="preview-expand-button"
-              onClick={onTogglePreviewCollapsed}
-              title={t("workspace.expandPreview")}
-              aria-label={t("workspace.expandPreview")}
-              aria-expanded="false"
-            >
-              <PanelRightOpen aria-hidden="true" size={17} />
-              <span>{previewTitle || t("workspace.preview")}</span>
-            </button>
-          ) : hasPreview ? (
-            <>
-              <div className="panel-heading">
-                <div>
-                  <span className="eyebrow">{t("workspace.preview")}</span>
-                  <div className="preview-title-row">
-                    <h2>{previewTitle || t("workspace.selectFile")}</h2>
-                  </div>
-                </div>
-                <div className="preview-heading-actions">
-                  {previewMeta ? (
-                    <span className="preview-kind">
-                      {previewIcon(previewMeta.previewKind)}
-                      {t(`preview.kind.${previewMeta.previewKind}`)}
-                    </span>
-                  ) : null}
-                  {canEditPreview && previewMeta ? (
-                    <button
-                      type="button"
-                      className="preview-tool-button"
-                      onClick={() => onOpenEditor(previewMeta)}
-                      title={t("editor.open")}
-                      aria-label={t("editor.open")}
-                    >
-                      <PencilLine aria-hidden="true" size={14} />
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="preview-tool-button"
-                    onClick={onTogglePreviewCollapsed}
-                    title={t("workspace.collapsePreview")}
-                    aria-label={t("workspace.collapsePreview")}
-                    aria-expanded="true"
-                  >
-                    <PanelRightClose aria-hidden="true" size={14} />
-                  </button>
-                </div>
-              </div>
-
-              <PreviewContent
-                blobUrl={blobUrl}
-                loading={isPreviewLoading}
-                meta={previewMeta}
-                error={previewError}
-                textPreview={textPreview}
-                previewFileSizeLimitBytes={previewFileSizeLimitBytes}
-                locale={locale}
-              />
-            </>
-          ) : null}
-        </section>
+        <nav className="workspace-panel-rail" aria-label={t("workspace.panelRail")}>
+          {WORKSPACE_PANELS.map((panel) => {
+            const PanelIcon = panel.Icon;
+            const isActive = activePanel === panel.id;
+            return (
+              <button
+                key={panel.id}
+                type="button"
+                className={isActive ? "workspace-panel-tab is-active" : "workspace-panel-tab"}
+                onClick={() => setActivePanel(panel.id)}
+                title={t(panel.labelKey)}
+                aria-label={t(panel.labelKey)}
+                aria-current={isActive ? "page" : undefined}
+              >
+                <PanelIcon aria-hidden="true" size={19} />
+                <span>{t(panel.shortLabelKey)}</span>
+              </button>
+            );
+          })}
+        </nav>
       </div>
 
       {renameEntry ? (

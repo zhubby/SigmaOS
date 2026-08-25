@@ -140,6 +140,124 @@ export const en = {
       continueDelete: "Continue",
       requestDelete: "Request delete",
       noSession: "No active session"
+    },
+    panelRail: "Workspace panel navigation",
+    panels: {
+      files: "Files",
+      filesShort: "Files",
+      docker: "Docker",
+      dockerShort: "Docker",
+      virtualMachines: "Virtual machines",
+      virtualMachinesShort: "VMs"
+    },
+    management: {
+      previewMode: "Static preview",
+      actions: {
+        label: "Management actions",
+        disabledReason: "Backend integration is not connected yet.",
+        start: "Start",
+        restart: "Restart",
+        deploy: "Deploy",
+        pause: "Pause",
+        snapshot: "Snapshot",
+        console: "Console",
+        logs: "Logs",
+        resume: "Resume"
+      },
+      columns: {
+        name: "Name",
+        status: "Status",
+        cpu: "CPU",
+        memory: "Memory",
+        network: "Network",
+        actions: "Actions"
+      },
+      states: {
+        running: "Running",
+        degraded: "Degraded",
+        paused: "Paused",
+        exited: "Exited",
+        healthy: "Healthy",
+        attention: "Attention",
+        staged: "Staged",
+        suspended: "Suspended",
+        stopped: "Stopped",
+        ready: "Ready",
+        offline: "Offline"
+      },
+      gauges: {
+        cpu: "CPU load",
+        memory: "Memory",
+        network: "Network I/O",
+        storage: "Storage I/O",
+        snapshots: "Snapshot growth"
+      },
+      docker: {
+        eyebrow: "Containers",
+        title: "Docker",
+        description: "Container runtime, Compose stacks, ports, and resource pressure in one operational view.",
+        enginePreview: "Engine placeholder",
+        engineDetail: "Designed for Docker or compatible runtimes; current values are static until backend wiring lands.",
+        facts: {
+          runtime: "Runtime",
+          storage: "Storage",
+          network: "Network",
+          compose: "Compose"
+        },
+        metrics: {
+          containers: "Containers",
+          containersDetail: "Running or staged workloads",
+          images: "Images",
+          imagesDetail: "Cached runtime layers",
+          networks: "Networks",
+          networksDetail: "Bridge and service meshes",
+          volumes: "Volumes",
+          volumesDetail: "Persistent mounts"
+        },
+        columns: {
+          image: "Image",
+          ports: "Ports"
+        },
+        containersTitle: "Containers",
+        containersDescription: "Preview rows for common NAS service workloads and their exposed ports.",
+        composeTitle: "Compose projects",
+        composeDescription: "Grouped service stacks prepared for future deploy and health actions.",
+        resourcesTitle: "Runtime pressure",
+        resourcesDescription: "Static gauges showing how the live resource panel will read."
+      },
+      virtualMachines: {
+        eyebrow: "Virtualization",
+        title: "Virtual machines",
+        description: "KVM-style instance control with compute allocation, storage pools, snapshots, and console entry points.",
+        hypervisorPreview: "Hypervisor placeholder",
+        hypervisorDetail: "Built for KVM/libvirt style hosts; controls remain disabled until system integration is available.",
+        facts: {
+          hypervisor: "Hypervisor",
+          storage: "Storage pool",
+          bridge: "Network bridge",
+          snapshots: "Snapshots"
+        },
+        metrics: {
+          instances: "Instances",
+          instancesDetail: "Running or configured VMs",
+          vcpu: "vCPU",
+          vcpuDetail: "Committed virtual cores",
+          memory: "Memory",
+          memoryDetail: "Allocated guest memory",
+          snapshots: "Snapshots",
+          snapshotsDetail: "Retained restore points"
+        },
+        columns: {
+          os: "OS",
+          disk: "Disk"
+        },
+        instancesTitle: "Instances",
+        instancesDescription: "Static inventory for guest systems, allocation, storage, and attached networks.",
+        poolsTitle: "Pools and bridges",
+        poolsDescription: "Host resources that future VM controls will validate before mutation.",
+        resourcesTitle: "Host capacity",
+        resourcesDescription: "Allocation gauges for compute, memory, storage, and snapshot growth."
+      }
     }
   },
   editor: {
@@ -678,6 +796,124 @@ export const zhCN = {
       continueDelete: "继续",
       requestDelete: "请求删除",
       noSession: "没有活动会话"
+    },
+    panelRail: "工作区面板导航",
+    panels: {
+      files: "文件",
+      filesShort: "文件",
+      docker: "Docker",
+      dockerShort: "Docker",
+      virtualMachines: "虚拟机",
+      virtualMachinesShort: "VM"
+    },
+    management: {
+      previewMode: "静态预览",
+      actions: {
+        label: "管理操作",
+        disabledReason: "后端集成尚未接入。",
+        start: "启动",
+        restart: "重启",
+        deploy: "部署",
+        pause: "暂停",
+        snapshot: "快照",
+        console: "控制台",
+        logs: "日志",
+        resume: "恢复"
+      },
+      columns: {
+        name: "名称",
+        status: "状态",
+        cpu: "CPU",
+        memory: "内存",
+        network: "网络",
+        actions: "操作"
+      },
+      states: {
+        running: "运行中",
+        degraded: "降级",
+        paused: "暂停",
+        exited: "已退出",
+        healthy: "健康",
+        attention: "需关注",
+        staged: "已暂存",
+        suspended: "挂起",
+        stopped: "已停止",
+        ready: "就绪",
+        offline: "离线"
+      },
+      gauges: {
+        cpu: "CPU 负载",
+        memory: "内存",
+        network: "网络 I/O",
+        storage: "存储 I/O",
+        snapshots: "快照增长"
+      },
+      docker: {
+        eyebrow: "容器",
+        title: "Docker",
+        description: "集中查看容器运行时、Compose 栈、端口和资源压力。",
+        enginePreview: "Engine 占位",
+        engineDetail: "为 Docker 或兼容运行时预留；后端接入前这里展示静态状态。",
+        facts: {
+          runtime: "运行时",
+          storage: "存储",
+          network: "网络",
+          compose: "Compose"
+        },
+        metrics: {
+          containers: "容器",
+          containersDetail: "运行中或已编排的负载",
+          images: "镜像",
+          imagesDetail: "本地缓存运行层",
+          networks: "网络",
+          networksDetail: "桥接和服务网格",
+          volumes: "卷",
+          volumesDetail: "持久化挂载"
+        },
+        columns: {
+          image: "镜像",
+          ports: "端口"
+        },
+        containersTitle: "容器",
+        containersDescription: "常见 NAS 服务负载和暴露端口的预览列表。",
+        composeTitle: "Compose 项目",
+        composeDescription: "为后续部署和健康检查操作预留的服务组。",
+        resourcesTitle: "运行时压力",
+        resourcesDescription: "展示未来实时资源面板的静态仪表。"
+      },
+      virtualMachines: {
+        eyebrow: "虚拟化",
+        title: "虚拟机",
+        description: "KVM 风格实例控制台，覆盖算力分配、存储池、快照和控制台入口。",
+        hypervisorPreview: "Hypervisor 占位",
+        hypervisorDetail: "面向 KVM/libvirt 主机预留；系统集成可用前操作保持禁用。",
+        facts: {
+          hypervisor: "Hypervisor",
+          storage: "存储池",
+          bridge: "网络桥接",
+          snapshots: "快照"
+        },
+        metrics: {
+          instances: "实例",
+          instancesDetail: "运行中或已配置的 VM",
+          vcpu: "vCPU",
+          vcpuDetail: "已承诺虚拟核心",
+          memory: "内存",
+          memoryDetail: "已分配客户机内存",
+          snapshots: "快照",
+          snapshotsDetail: "保留的恢复点"
+        },
+        columns: {
+          os: "系统",
+          disk: "磁盘"
+        },
+        instancesTitle: "实例",
+        instancesDescription: "客户机系统、配额、存储和网络的静态清单。",
+        poolsTitle: "资源池与桥接",
+        poolsDescription: "未来 VM 变更操作前需要校验的主机资源。",
+        resourcesTitle: "主机容量",
+        resourcesDescription: "算力、内存、存储和快照增长的分配仪表。"
+      }
     }
   },
   editor: {
