@@ -97,6 +97,115 @@ export interface PublicModelProviderSettings {
   updatedAt: string;
 }
 
+export interface PublicSystemInfo {
+  collectedAt: string;
+  identity: {
+    hostname: string;
+    adminDisplayName: string;
+    authMode: "local-only";
+    timezone: string;
+  };
+  operatingSystem: {
+    type: string;
+    platform: NodeJS.Platform;
+    release: string;
+    version: string;
+    arch: string;
+    machine: string;
+    endianness: "BE" | "LE";
+    uptimeSeconds: number;
+    loadAverage: number[];
+    availableParallelism: number;
+  };
+  hardware: {
+    cpuModel: string | null;
+    cpuSpeedMHz: number | null;
+    cpuThreads: number;
+    cpus: PublicSystemInfoCpu[];
+    memory: PublicSystemInfoMemory;
+  };
+  storage: {
+    volumes: PublicSystemInfoStorageVolume[];
+  };
+  network: {
+    interfaces: PublicSystemInfoNetworkAddress[];
+  };
+  runtime: {
+    nodeVersion: string;
+    versions: Record<string, string>;
+    pid: number;
+    uptimeSeconds: number;
+    cwd: string;
+    execPath: string;
+    memory: PublicSystemInfoProcessMemory;
+  };
+  sigma: {
+    dataDir: string;
+    databasePath: string;
+    apiHost: string;
+    apiPort: number;
+    allowedOriginCount: number;
+    workerPollMs: number;
+    modelProvider: "pi" | "cloud" | "local";
+    localEndpointConfigured: boolean;
+    nasRoots: NasRootConfig[];
+  };
+}
+
+export interface PublicSystemInfoCpu {
+  model: string;
+  speedMHz: number;
+  times: {
+    userMs: number;
+    niceMs: number;
+    systemMs: number;
+    idleMs: number;
+    irqMs: number;
+  };
+}
+
+export interface PublicSystemInfoMemory {
+  totalBytes: number;
+  freeBytes: number;
+  usedBytes: number;
+  usedPercent: number;
+}
+
+export interface PublicSystemInfoProcessMemory {
+  rssBytes: number;
+  heapTotalBytes: number;
+  heapUsedBytes: number;
+  externalBytes: number;
+  arrayBuffersBytes: number;
+}
+
+export interface PublicSystemInfoStorageVolume {
+  id: string;
+  label: string;
+  kind: "data" | "database" | "nas-root";
+  path: string;
+  status: "ready" | "error";
+  blockSizeBytes: number | null;
+  totalBytes: number | null;
+  freeBytes: number | null;
+  availableBytes: number | null;
+  usedBytes: number | null;
+  usedPercent: number | null;
+  rootId: string | null;
+  error: string | null;
+}
+
+export interface PublicSystemInfoNetworkAddress {
+  name: string;
+  address: string;
+  family: string;
+  mac: string;
+  internal: boolean;
+  cidr: string | null;
+  netmask: string;
+  scopeId: number | null;
+}
+
 export interface PiToolPolicySettingsRecord {
   read: PiToolPolicyMode;
   grep: PiToolPolicyMode;

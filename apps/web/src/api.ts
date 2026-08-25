@@ -1,3 +1,5 @@
+import type { PublicSystemInfo } from "@sigmaos/shared";
+
 export interface NasRoot {
   id: string;
   name: string;
@@ -137,6 +139,9 @@ export interface PiToolPolicySettings {
   updatedAt: string;
 }
 
+export type SystemInfo = PublicSystemInfo;
+export type SystemInfoStorageVolume = PublicSystemInfo["storage"]["volumes"][number];
+
 export interface FileMeta {
   path: string;
   name: string;
@@ -185,6 +190,13 @@ export async function getModelProviderSettings(): Promise<ModelProviderSettings>
   await ensureOk(response);
   const body = (await response.json()) as { settings: ModelProviderSettings };
   return body.settings;
+}
+
+export async function getSystemInfo(): Promise<SystemInfo> {
+  const response = await fetch("/api/settings/system-info");
+  await ensureOk(response);
+  const body = (await response.json()) as { info: SystemInfo };
+  return body.info;
 }
 
 export async function saveModelProviderSettings(

@@ -1,13 +1,16 @@
 import type { SupportedLocale } from "./locale.js";
 
 export function formatBytes(value: number, locale: SupportedLocale): string {
-  if (value < 1024) {
-    return `${formatNumber(value, locale, 0)} B`;
+  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+  let size = value;
+  let unitIndex = 0;
+
+  while (Math.abs(size) >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
   }
-  if (value < 1024 * 1024) {
-    return `${formatNumber(value / 1024, locale, 1)} KB`;
-  }
-  return `${formatNumber(value / (1024 * 1024), locale, 1)} MB`;
+
+  return `${formatNumber(size, locale, unitIndex === 0 ? 0 : 1)} ${units[unitIndex] ?? "PB"}`;
 }
 
 export function formatDate(value: string, locale: SupportedLocale): string {

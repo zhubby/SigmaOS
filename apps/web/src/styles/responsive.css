@@ -57,12 +57,29 @@
 
   .settings-page-grid,
   .settings-provider-grid,
-  .settings-overview-grid {
+  .settings-overview-grid,
+  .settings-system-grid {
     grid-template-columns: 1fr;
   }
 
   .settings-editor-font-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settings-system-wide {
+    grid-column: auto;
+  }
+
+  .settings-storage-row {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-storage-row > em {
+    justify-self: start;
+  }
+
+  .settings-storage-row dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

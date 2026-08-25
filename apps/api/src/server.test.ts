@@ -138,6 +138,56 @@ describe("API server", () => {
     await server.close();
   });
 
+  it("returns detailed system information without exposing environment values", async () => {
+    process.env.SIGMAOS_TEST_SECRET = "do-not-leak-from-system-info";
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/api/settings/system-info"
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        info: {
+          identity: {
+            hostname: expect.any(String),
+            adminDisplayName: "Test Admin",
+            authMode: "local-only"
+          },
+          operatingSystem: {
+            platform: expect.any(String),
+            arch: expect.any(String)
+          },
+          hardware: {
+            cpuThreads: expect.any(Number),
+            memory: {
+              totalBytes: expect.any(Number)
+            }
+          },
+          sigma: {
+            dataDir: tempDir,
+            databasePath: path.join(tempDir, "sigmaos.sqlite"),
+            nasRoots: [{ id: "local", name: "Local", path: rootDir }]
+          }
+        }
+      });
+      expect(response.json().info.storage.volumes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: "data-dir" }),
+          expect.objectContaining({ id: "database" }),
+          expect.objectContaining({ id: "nas-root-local", rootId: "local" })
+        ])
+      );
+      expect(response.json().info.hardware.cpuThreads).toBeGreaterThan(0);
+      expect(response.json().info.hardware.memory.totalBytes).toBeGreaterThan(0);
+      expect(response.payload).not.toContain("do-not-leak-from-system-info");
+    } finally {
+      delete process.env.SIGMAOS_TEST_SECRET;
+      await server.close();
+    }
+  });
+
   it("saves and masks third-party model provider settings", async () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const saved = await server.inject({

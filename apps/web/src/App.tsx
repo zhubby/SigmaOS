@@ -13,6 +13,7 @@ import {
   getOperations,
   getRoots,
   getSessions,
+  getSystemInfo,
   getTextPreview,
   getTranscript,
   getModelProviderSettings,
@@ -36,6 +37,7 @@ import {
   type PiToolPolicySettings,
   type Session,
   type SessionSummary,
+  type SystemInfo,
   type TextPreview,
   type TranscriptMessage
 } from "./api.js";
@@ -111,6 +113,8 @@ export function App() {
   const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSectionId>("model-providers");
   const [modelSettings, setModelSettings] = useState<ModelProviderSettings | null>(null);
   const [toolPolicySettings, setToolPolicySettings] = useState<PiToolPolicySettings | null>(null);
+  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
+  const [systemInfoError, setSystemInfoError] = useState<string | null>(null);
   const [modelSettingsForm, setModelSettingsForm] = useState<ModelProviderFormState>(() =>
     modelSettingsToForm(null)
   );
@@ -377,17 +381,42 @@ export function App() {
 
   async function openSettings() {
     setSettingsOpen(true);
-    setActiveSettingsSection("model-providers");
+    setActiveSettingsSection("overview");
     setSettingsLoading(true);
     setSettingsError(null);
+    setSystemInfoError(null);
     try {
-      const [settings, toolPolicy] = await Promise.all([getModelProviderSettings(), getPiToolPolicySettings()]);
-      setModelSettings(settings);
-      setToolPolicySettings(toolPolicy);
-      setModelSettingsForm(modelSettingsToForm(settings));
-      setToolPolicyForm(toolPolicy);
-    } catch (nextError) {
-      setSettingsError(toErrorMessage(nextError));
+      const [settingsResult, toolPolicyResult, systemInfoResult] = await Promise.allSettled([
+        getModelProviderSettings(),
+        getPiToolPolicySettings(),
+        getSystemInfo()
+      ]);
+
+      const errors: string[] = [];
+      if (settingsResult.status === "fulfilled") {
+        setModelSettings(settingsResult.value);
+        setModelSettingsForm(modelSettingsToForm(settingsResult.value));
+      } else {
+        errors.push(toErrorMessage(settingsResult.reason));
+      }
+
+      if (toolPolicyResult.status === "fulfilled") {
+        setToolPolicySettings(toolPolicyResult.value);
+        setToolPolicyForm(toolPolicyResult.value);
+      } else {
+        errors.push(toErrorMessage(toolPolicyResult.reason));
+      }
+
+      if (systemInfoResult.status === "fulfilled") {
+        setSystemInfo(systemInfoResult.value);
+      } else {
+        setSystemInfo(null);
+        setSystemInfoError(toErrorMessage(systemInfoResult.reason));
+      }
+
+      if (errors.length > 0) {
+        setSettingsError(errors.join("\n"));
+      }
     } finally {
       setSettingsLoading(false);
     }
@@ -926,11 +955,17 @@ export function App() {
           loading={settingsLoading}
           saving={settingsSaving}
           settings={modelSettings}
+          systemInfo={systemInfo}
+          systemInfoError={systemInfoError}
+          pendingApprovals={approvals}
+          operations={operations}
+          operationsReady={operationsReady}
           toolPolicySettings={toolPolicySettings}
           toolPolicyForm={toolPolicyForm}
           languagePreference={languagePreference}
           previewFileSizeLimitBytes={previewFileSizeLimitBytes}
           codeFontSettings={codeFontSettings}
+          splitWidth={splitWidth}
           resolvedLocale={resolvedLocale}
           onClose={() => setSettingsOpen(false)}
           onFormChange={setModelSettingsForm}

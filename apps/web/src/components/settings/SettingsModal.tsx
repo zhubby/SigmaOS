@@ -1,27 +1,39 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AlertTriangle,
   Bot,
   Check,
   Clock3,
+  Cpu,
+  Database,
   Folder,
   HardDrive,
   Image as ImageIcon,
   KeyRound,
   Lock,
+  MemoryStick,
+  Network,
   Search,
+  Server,
   ShieldCheck,
   Wrench,
   X
 } from "lucide-react";
-import type { ModelProviderSettings, PiToolPolicySettings } from "../../api.js";
+import type {
+  FileOperation,
+  PendingApproval,
+  ModelProviderSettings,
+  PiToolPolicySettings,
+  SystemInfo,
+  SystemInfoStorageVolume
+} from "../../api.js";
+import { MAX_EDIT_TEXT_BYTES } from "../../api.js";
 import {
   DANGEROUS_TOOL_POLICY_OPTIONS,
   READ_ONLY_TOOL_POLICY_OPTIONS,
   SETTINGS_SECTIONS,
   providerLabel,
-  settingsBlueprints,
   settingsGroupLabel,
   settingsSectionDescription,
   settingsSectionLabel,
@@ -30,7 +42,6 @@ import {
   settingsStatus,
   settingsUpdatedAtLabel,
   type ModelProviderFormState,
-  type SettingsBlueprintBlock,
   type SettingsSectionId,
   type SettingsState,
   type ToolPolicyFormState
@@ -57,11 +68,17 @@ interface SettingsModalProps {
   loading: boolean;
   saving: boolean;
   settings: ModelProviderSettings | null;
+  systemInfo: SystemInfo | null;
+  systemInfoError: string | null;
+  pendingApprovals: PendingApproval[];
+  operations: FileOperation[];
+  operationsReady: boolean;
   toolPolicySettings: PiToolPolicySettings | null;
   toolPolicyForm: ToolPolicyFormState;
   languagePreference: LanguagePreference;
   previewFileSizeLimitBytes: number;
   codeFontSettings: CodeFontSettings;
+  splitWidth: number;
   resolvedLocale: SupportedLocale;
   onClose: () => void;
   onFormChange: (form: ModelProviderFormState) => void;
@@ -76,6 +93,7 @@ interface SettingsModalProps {
 const PROVIDER_OPTIONS = ["google", "openai", "anthropic", "openrouter", "local"];
 const READ_ONLY_TOOLS = ["read", "grep", "find", "ls"] as const;
 const DANGEROUS_TOOLS = ["bash", "edit", "write"] as const;
+const DEFAULT_TEXT_PREVIEW_BYTES = 64 * 1024;
 
 export function SettingsModal({
   activeSection,
@@ -84,11 +102,17 @@ export function SettingsModal({
   loading,
   saving,
   settings,
+  systemInfo,
+  systemInfoError,
+  pendingApprovals,
+  operations,
+  operationsReady,
   toolPolicySettings,
   toolPolicyForm,
   languagePreference,
   previewFileSizeLimitBytes,
   codeFontSettings,
+  splitWidth,
   resolvedLocale,
   onClose,
   onFormChange,
@@ -101,7 +125,6 @@ export function SettingsModal({
 }: SettingsModalProps) {
   const { t } = useTranslation();
   const [settingsSearch, setSettingsSearch] = useState("");
-  const blueprints = useMemo(() => settingsBlueprints(t), [t]);
   const currentSection = SETTINGS_SECTIONS.find((section) => section.id === activeSection) ?? SETTINGS_SECTIONS[0]!;
   const normalizedSearch = settingsSearch.trim().toLowerCase();
   const visibleSections = normalizedSearch
@@ -207,6 +230,8 @@ export function SettingsModal({
             <SettingsOverview
               loading={loading}
               settings={settings}
+              systemInfo={systemInfo}
+              systemInfoError={systemInfoError}
               locale={resolvedLocale}
               onSectionChange={onSectionChange}
             />
@@ -377,41 +402,6 @@ export function SettingsModal({
                         </div>
                       </dl>
                     </section>
-
-                    <section className="settings-section-card">
-                      <header>
-                        <div>
-                          <h3>{t("settings.modelProvider.providerSlots")}</h3>
-                          <p>{t("settings.modelProvider.providerSlotsDescription")}</p>
-                        </div>
-                        <span data-state="planned">{t("common.states.planned")}</span>
-                      </header>
-                      <div className="settings-config-list">
-                        <div className="settings-config-row">
-                          <span>
-                            <strong>{t("settings.modelProvider.primary")}</strong>
-                            <small>{form.displayName || providerLabel(form.providerName, t)}</small>
-                          </span>
-                          <em data-state={settings?.apiKeyConfigured ? "ready" : "missing"}>
-                            {settings?.apiKeyConfigured ? t("common.states.ready") : t("common.states.missing")}
-                          </em>
-                        </div>
-                        <div className="settings-config-row">
-                          <span>
-                            <strong>{t("settings.modelProvider.fallback")}</strong>
-                            <small>{t("settings.modelProvider.fallbackDescription")}</small>
-                          </span>
-                          <em data-state="planned">{t("common.states.planned")}</em>
-                        </div>
-                        <div className="settings-config-row">
-                          <span>
-                            <strong>{t("settings.modelProvider.local")}</strong>
-                            <small>{t("settings.modelProvider.localDescription")}</small>
-                          </span>
-                          <em data-state="planned">{t("common.states.planned")}</em>
-                        </div>
-                      </div>
-                    </section>
                   </aside>
                 </div>
               </div>
@@ -432,9 +422,9 @@ export function SettingsModal({
 
           {activeSection === "appearance" ? (
             <SettingsAppearancePage
-              blocks={blueprints.appearance}
               languagePreference={languagePreference}
               resolvedLocale={resolvedLocale}
+              splitWidth={splitWidth}
               onLanguagePreferenceChange={onLanguagePreferenceChange}
             />
           ) : null}
@@ -454,7 +444,6 @@ export function SettingsModal({
 
           {activeSection === "files" ? (
             <SettingsFilesPage
-              blocks={blueprints.files}
               previewFileSizeLimitBytes={previewFileSizeLimitBytes}
               codeFontSettings={codeFontSettings}
               locale={resolvedLocale}
@@ -463,12 +452,26 @@ export function SettingsModal({
             />
           ) : null}
 
-          {activeSection !== "overview" &&
-          activeSection !== "model-providers" &&
-          activeSection !== "agents" &&
-          activeSection !== "appearance" &&
-          activeSection !== "files" ? (
-            <SettingsPlannedPage blocks={blueprints[activeSection]} />
+          {activeSection === "security" ? (
+            <SettingsSecurityPage
+              settings={settings}
+              systemInfo={systemInfo}
+              loading={loading}
+              toolPolicyForm={toolPolicyForm}
+              pendingApprovals={pendingApprovals}
+              operations={operations}
+              operationsReady={operationsReady}
+              locale={resolvedLocale}
+            />
+          ) : null}
+
+          {activeSection === "advanced" ? (
+            <SettingsAdvancedPage
+              systemInfo={systemInfo}
+              systemInfoError={systemInfoError}
+              loading={loading}
+              locale={resolvedLocale}
+            />
           ) : null}
         </section>
       </section>
@@ -479,24 +482,63 @@ export function SettingsModal({
 function SettingsOverview({
   loading,
   settings,
+  systemInfo,
+  systemInfoError,
   locale,
   onSectionChange
 }: {
   loading: boolean;
   settings: ModelProviderSettings | null;
+  systemInfo: SystemInfo | null;
+  systemInfoError: string | null;
   locale: SupportedLocale;
   onSectionChange: (section: SettingsSectionId) => void;
 }) {
   const { t } = useTranslation();
-  const totalSections = formatLocaleNumber(SETTINGS_SECTIONS.length, locale);
-  const configuredSections = formatLocaleNumber(
-    SETTINGS_SECTIONS.filter((section) => section.status === "configured").length,
-    locale
-  );
-  const plannedSections = formatLocaleNumber(
-    SETTINGS_SECTIONS.filter((section) => section.status === "planned").length,
-    locale
-  );
+  const systemStatus = systemInfo
+    ? t("settings.system.collectedAt", { time: formatDate(systemInfo.collectedAt, locale) })
+    : loading
+      ? t("common.states.loading")
+      : t("common.states.unavailable");
+  const metricItems = systemInfo
+    ? [
+        {
+          value: formatLocaleNumber(systemInfo.hardware.cpuThreads, locale),
+          label: t("settings.system.metrics.logicalCpus")
+        },
+        {
+          value: formatBytes(systemInfo.hardware.memory.totalBytes, locale),
+          label: t("settings.system.metrics.memory")
+        },
+        {
+          value: formatDuration(systemInfo.operatingSystem.uptimeSeconds, locale, t),
+          label: t("settings.system.metrics.uptime")
+        },
+        {
+          value: formatLocaleNumber(systemInfo.sigma.nasRoots.length, locale),
+          label: t("settings.system.metrics.nasRoots")
+        }
+      ]
+    : [
+        {
+          value: formatLocaleNumber(SETTINGS_SECTIONS.length, locale),
+          label: t("settings.overview.sections")
+        },
+        {
+          value: formatLocaleNumber(
+            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings) === "ready").length,
+            locale
+          ),
+          label: t("settings.overview.configured")
+        },
+        {
+          value: formatLocaleNumber(
+            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings) === "missing").length,
+            locale
+          ),
+          label: t("settings.overview.needsAttention")
+        }
+      ];
 
   return (
     <div className="settings-content-body settings-overview">
@@ -507,22 +549,22 @@ function SettingsOverview({
               <h3>{t("settings.overview.systemProfile")}</h3>
               <p>{t("settings.overview.systemProfileDescription")}</p>
             </div>
-            <span data-state="ready">{t("common.states.local")}</span>
+            <span data-state={systemInfo ? "ready" : systemInfoError ? "missing" : "loading"}>{systemStatus}</span>
           </header>
-          <div className="settings-metric-grid">
-            <article>
-              <strong>{totalSections}</strong>
-              <span>{t("settings.overview.sections")}</span>
-            </article>
-            <article>
-              <strong>{configuredSections}</strong>
-              <span>{t("settings.overview.configured")}</span>
-            </article>
-            <article>
-              <strong>{plannedSections}</strong>
-              <span>{t("settings.overview.planned")}</span>
-            </article>
+          <div className="settings-metric-grid settings-system-metric-grid">
+            {metricItems.map((item) => (
+              <article key={item.label}>
+                <strong>{item.value}</strong>
+                <span>{item.label}</span>
+              </article>
+            ))}
           </div>
+          {systemInfoError ? (
+            <div className="settings-inline-error" role="status">
+              <AlertTriangle aria-hidden="true" size={15} />
+              <span>{t("settings.system.loadFailed", { error: systemInfoError })}</span>
+            </div>
+          ) : null}
         </section>
 
         <section className="settings-section-card">
@@ -556,6 +598,8 @@ function SettingsOverview({
         </section>
       </div>
 
+      {systemInfo ? <SettingsSystemDetails systemInfo={systemInfo} locale={locale} /> : null}
+
       <section className="settings-section-card">
         <header>
           <div>
@@ -582,15 +626,475 @@ function SettingsOverview({
   );
 }
 
+interface SettingsInfoRow {
+  label: string;
+  value: string;
+  detail?: string;
+  mono?: boolean;
+}
+
+interface SettingsConfigRowItem {
+  label: string;
+  detail: string;
+  value: string;
+  state?: SettingsState;
+}
+
+function SettingsSystemDetails({
+  systemInfo,
+  locale
+}: {
+  systemInfo: SystemInfo;
+  locale: SupportedLocale;
+}) {
+  const { t } = useTranslation();
+  const memory = systemInfo.hardware.memory;
+  const runtimeMemory = systemInfo.runtime.memory;
+  const osRows: SettingsInfoRow[] = [
+    {
+      label: t("settings.system.labels.hostname"),
+      value: systemInfo.identity.hostname
+    },
+    {
+      label: t("settings.system.labels.admin"),
+      value: systemInfo.identity.adminDisplayName
+    },
+    {
+      label: t("settings.system.labels.timezone"),
+      value: systemInfo.identity.timezone
+    },
+    {
+      label: t("settings.system.labels.os"),
+      value: `${systemInfo.operatingSystem.type} ${systemInfo.operatingSystem.release}`,
+      detail: systemInfo.operatingSystem.version
+    },
+    {
+      label: t("settings.system.labels.platform"),
+      value: `${systemInfo.operatingSystem.platform} / ${systemInfo.operatingSystem.arch}`
+    },
+    {
+      label: t("settings.system.labels.machine"),
+      value: systemInfo.operatingSystem.machine
+    },
+    {
+      label: t("settings.system.labels.endianness"),
+      value: systemInfo.operatingSystem.endianness
+    },
+    {
+      label: t("settings.system.labels.systemUptime"),
+      value: formatDuration(systemInfo.operatingSystem.uptimeSeconds, locale, t)
+    },
+    {
+      label: t("settings.system.labels.loadAverage"),
+      value: formatLoadAverage(systemInfo.operatingSystem.loadAverage, locale)
+    }
+  ];
+  const hardwareRows: SettingsInfoRow[] = [
+    {
+      label: t("settings.system.labels.cpuModel"),
+      value: systemInfo.hardware.cpuModel ?? t("common.dash")
+    },
+    {
+      label: t("settings.system.labels.cpuThreads"),
+      value: formatLocaleNumber(systemInfo.hardware.cpuThreads, locale)
+    },
+    {
+      label: t("settings.system.labels.availableParallelism"),
+      value: formatLocaleNumber(systemInfo.operatingSystem.availableParallelism, locale)
+    },
+    {
+      label: t("settings.system.labels.cpuSpeed"),
+      value: systemInfo.hardware.cpuSpeedMHz
+        ? t("settings.system.values.megahertz", {
+            value: formatLocaleNumber(systemInfo.hardware.cpuSpeedMHz, locale)
+          })
+        : t("common.dash")
+    },
+    {
+      label: t("settings.system.labels.totalMemory"),
+      value: formatBytes(memory.totalBytes, locale)
+    },
+    {
+      label: t("settings.system.labels.usedMemory"),
+      value: `${formatBytes(memory.usedBytes, locale)} (${formatPercent(memory.usedPercent, locale)})`
+    },
+    {
+      label: t("settings.system.labels.freeMemory"),
+      value: formatBytes(memory.freeBytes, locale)
+    }
+  ];
+  const runtimeRows: SettingsInfoRow[] = [
+    {
+      label: t("settings.system.labels.nodeVersion"),
+      value: systemInfo.runtime.nodeVersion
+    },
+    {
+      label: t("settings.system.labels.processUptime"),
+      value: formatDuration(systemInfo.runtime.uptimeSeconds, locale, t)
+    },
+    {
+      label: t("settings.system.labels.pid"),
+      value: formatLocaleNumber(systemInfo.runtime.pid, locale)
+    },
+    {
+      label: t("settings.system.labels.cwd"),
+      value: systemInfo.runtime.cwd,
+      mono: true
+    },
+    {
+      label: t("settings.system.labels.execPath"),
+      value: systemInfo.runtime.execPath,
+      mono: true
+    },
+    {
+      label: t("settings.system.labels.rss"),
+      value: formatBytes(runtimeMemory.rssBytes, locale)
+    },
+    {
+      label: t("settings.system.labels.heapUsed"),
+      value: `${formatBytes(runtimeMemory.heapUsedBytes, locale)} / ${formatBytes(runtimeMemory.heapTotalBytes, locale)}`
+    },
+    {
+      label: t("settings.system.labels.externalMemory"),
+      value: formatBytes(runtimeMemory.externalBytes, locale)
+    },
+    {
+      label: t("settings.system.labels.arrayBuffers"),
+      value: formatBytes(runtimeMemory.arrayBuffersBytes, locale)
+    }
+  ];
+  const sigmaRows: SettingsInfoRow[] = [
+    {
+      label: t("settings.system.labels.dataDir"),
+      value: systemInfo.sigma.dataDir,
+      mono: true
+    },
+    {
+      label: t("settings.system.labels.databasePath"),
+      value: systemInfo.sigma.databasePath,
+      mono: true
+    },
+    {
+      label: t("settings.system.labels.apiBind"),
+      value: `${systemInfo.sigma.apiHost}:${systemInfo.sigma.apiPort}`
+    },
+    {
+      label: t("settings.system.labels.allowedOrigins"),
+      value: formatLocaleNumber(systemInfo.sigma.allowedOriginCount, locale)
+    },
+    {
+      label: t("settings.system.labels.workerPoll"),
+      value: t("settings.system.values.milliseconds", {
+        value: formatLocaleNumber(systemInfo.sigma.workerPollMs, locale)
+      })
+    },
+    {
+      label: t("settings.system.labels.authMode"),
+      value: systemInfo.identity.authMode
+    },
+    {
+      label: t("settings.system.labels.modelMode"),
+      value: systemInfo.sigma.modelProvider
+    },
+    {
+      label: t("settings.system.labels.localEndpoint"),
+      value: systemInfo.sigma.localEndpointConfigured ? t("settings.system.values.configured") : t("settings.system.values.notConfigured")
+    }
+  ];
+
+  return (
+    <div className="settings-system-grid">
+      <SettingsInfoCard
+        icon={<Server aria-hidden="true" size={17} />}
+        title={t("settings.system.cards.operatingSystem")}
+        description={t("settings.system.cards.operatingSystemDescription")}
+        rows={osRows}
+      />
+
+      <SettingsInfoCard
+        icon={<Cpu aria-hidden="true" size={17} />}
+        title={t("settings.system.cards.hardware")}
+        description={t("settings.system.cards.hardwareDescription")}
+        rows={hardwareRows}
+      >
+        <SettingsUsageBar
+          label={t("settings.system.labels.memoryPressure")}
+          value={memory.usedPercent}
+          locale={locale}
+        />
+      </SettingsInfoCard>
+
+      <section className="settings-section-card settings-system-wide">
+        <header>
+          <div className="settings-system-card-heading">
+            <Cpu aria-hidden="true" size={17} />
+            <div>
+              <h3>{t("settings.system.cards.cpuDetails")}</h3>
+              <p>{t("settings.system.cards.cpuDetailsDescription")}</p>
+            </div>
+          </div>
+        </header>
+        <div className="settings-system-table-wrap">
+          <table className="settings-system-table">
+            <thead>
+              <tr>
+                <th>{t("settings.system.table.thread")}</th>
+                <th>{t("settings.system.table.model")}</th>
+                <th>{t("settings.system.table.speed")}</th>
+                <th>{t("settings.system.table.user")}</th>
+                <th>{t("settings.system.table.system")}</th>
+                <th>{t("settings.system.table.idle")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {systemInfo.hardware.cpus.map((cpu, index) => (
+                <tr key={`${cpu.model}-${index}`}>
+                  <td>{formatLocaleNumber(index + 1, locale)}</td>
+                  <td title={cpu.model}>{cpu.model}</td>
+                  <td>
+                    {t("settings.system.values.megahertz", {
+                      value: formatLocaleNumber(cpu.speedMHz, locale)
+                    })}
+                  </td>
+                  <td>{formatDuration(Math.round(cpu.times.userMs / 1000), locale, t)}</td>
+                  <td>{formatDuration(Math.round(cpu.times.systemMs / 1000), locale, t)}</td>
+                  <td>{formatDuration(Math.round(cpu.times.idleMs / 1000), locale, t)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="settings-section-card settings-system-wide">
+        <header>
+          <div className="settings-system-card-heading">
+            <Database aria-hidden="true" size={17} />
+            <div>
+              <h3>{t("settings.system.cards.storage")}</h3>
+              <p>{t("settings.system.cards.storageDescription")}</p>
+            </div>
+          </div>
+        </header>
+        <div className="settings-storage-list">
+          {systemInfo.storage.volumes.map((volume) => (
+            <SettingsStorageRow key={volume.id} volume={volume} locale={locale} />
+          ))}
+        </div>
+      </section>
+
+      <section className="settings-section-card settings-system-wide">
+        <header>
+          <div className="settings-system-card-heading">
+            <Network aria-hidden="true" size={17} />
+            <div>
+              <h3>{t("settings.system.cards.network")}</h3>
+              <p>{t("settings.system.cards.networkDescription")}</p>
+            </div>
+          </div>
+          <span data-state="ready">
+            {formatLocaleNumber(systemInfo.network.interfaces.length, locale)}
+          </span>
+        </header>
+        <div className="settings-system-table-wrap">
+          <table className="settings-system-table settings-network-table">
+            <thead>
+              <tr>
+                <th>{t("settings.system.table.interface")}</th>
+                <th>{t("settings.system.table.family")}</th>
+                <th>{t("settings.system.table.address")}</th>
+                <th>{t("settings.system.table.cidr")}</th>
+                <th>{t("settings.system.table.mac")}</th>
+                <th>{t("settings.system.table.scope")}</th>
+                <th>{t("settings.system.table.type")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {systemInfo.network.interfaces.map((networkInterface, index) => (
+                <tr key={`${networkInterface.name}-${networkInterface.address}-${index}`}>
+                  <td>{networkInterface.name}</td>
+                  <td>{networkInterface.family}</td>
+                  <td className="is-mono">{networkInterface.address}</td>
+                  <td className="is-mono">{networkInterface.cidr ?? t("common.dash")}</td>
+                  <td className="is-mono">{networkInterface.mac}</td>
+                  <td>{networkInterface.scopeId ?? t("common.dash")}</td>
+                  <td>
+                    {networkInterface.internal
+                      ? t("settings.system.values.internal")
+                      : t("settings.system.values.external")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <SettingsInfoCard
+        icon={<MemoryStick aria-hidden="true" size={17} />}
+        title={t("settings.system.cards.runtime")}
+        description={t("settings.system.cards.runtimeDescription")}
+        rows={runtimeRows}
+      >
+        <div className="settings-system-chip-grid" aria-label={t("settings.system.labels.runtimeVersions")}>
+          {Object.entries(systemInfo.runtime.versions).map(([name, value]) => (
+            <span key={name}>
+              <strong>{name}</strong>
+              <em>{value}</em>
+            </span>
+          ))}
+        </div>
+      </SettingsInfoCard>
+
+      <SettingsInfoCard
+        icon={<HardDrive aria-hidden="true" size={17} />}
+        title={t("settings.system.cards.sigma")}
+        description={t("settings.system.cards.sigmaDescription")}
+        rows={sigmaRows}
+      >
+        <div className="settings-root-list" aria-label={t("settings.system.labels.nasRoots")}>
+          {systemInfo.sigma.nasRoots.map((root) => (
+            <div key={root.id}>
+              <strong>{root.name}</strong>
+              <span>{root.id}</span>
+              <small title={root.path}>{root.path}</small>
+            </div>
+          ))}
+        </div>
+      </SettingsInfoCard>
+    </div>
+  );
+}
+
+function SettingsInfoCard({
+  icon,
+  title,
+  description,
+  rows,
+  children
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+  rows: SettingsInfoRow[];
+  children?: ReactNode;
+}) {
+  return (
+    <section className="settings-section-card settings-system-card">
+      <header>
+        <div className="settings-system-card-heading">
+          {icon}
+          <div>
+            <h3>{title}</h3>
+            <p>{description}</p>
+          </div>
+        </div>
+      </header>
+      <SettingsInfoList rows={rows} />
+      {children}
+    </section>
+  );
+}
+
+function SettingsInfoList({ rows }: { rows: SettingsInfoRow[] }) {
+  return (
+    <dl className="settings-summary-list settings-system-list">
+      {rows.map((row, index) => (
+        <div key={`${row.label}-${index}`}>
+          <dt>{row.label}</dt>
+          <dd className={row.mono ? "is-mono" : undefined} title={row.value}>
+            {row.value}
+            {row.detail ? <small>{row.detail}</small> : null}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function SettingsUsageBar({
+  label,
+  value,
+  locale
+}: {
+  label: string;
+  value: number;
+  locale: SupportedLocale;
+}) {
+  const percent = clampPercent(value) * 100;
+
+  return (
+    <div className="settings-usage-bar">
+      <span>
+        <strong>{label}</strong>
+        <em>{formatPercent(value, locale)}</em>
+      </span>
+      <div>
+        <i style={{ width: `${percent}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function SettingsStorageRow({
+  volume,
+  locale
+}: {
+  volume: SystemInfoStorageVolume;
+  locale: SupportedLocale;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="settings-storage-row">
+      <div>
+        <strong>{storageVolumeLabel(volume, t)}</strong>
+        <small title={volume.path}>{volume.path}</small>
+      </div>
+      {volume.status === "ready" && volume.usedPercent !== null ? (
+        <SettingsUsageBar
+          label={t("settings.system.labels.storageUsed")}
+          value={volume.usedPercent}
+          locale={locale}
+        />
+      ) : (
+        <em data-state="missing">{volume.error ?? t("common.states.unavailable")}</em>
+      )}
+      <dl>
+        <div>
+          <dt>{t("settings.system.labels.total")}</dt>
+          <dd>{formatNullableBytes(volume.totalBytes, locale, t)}</dd>
+        </div>
+        <div>
+          <dt>{t("settings.system.labels.available")}</dt>
+          <dd>{formatNullableBytes(volume.availableBytes, locale, t)}</dd>
+        </div>
+        <div>
+          <dt>{t("settings.system.labels.free")}</dt>
+          <dd>{formatNullableBytes(volume.freeBytes, locale, t)}</dd>
+        </div>
+        <div>
+          <dt>{t("settings.system.labels.blockSize")}</dt>
+          <dd>{formatNullableBytes(volume.blockSizeBytes, locale, t)}</dd>
+        </div>
+        <div>
+          <dt>{t("settings.system.labels.rootId")}</dt>
+          <dd>{volume.rootId ?? t("common.dash")}</dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
+
 function SettingsAppearancePage({
-  blocks,
   languagePreference,
   resolvedLocale,
+  splitWidth,
   onLanguagePreferenceChange
 }: {
-  blocks: SettingsBlueprintBlock[];
   languagePreference: LanguagePreference;
   resolvedLocale: SupportedLocale;
+  splitWidth: number;
   onLanguagePreferenceChange: (preference: LanguagePreference) => void;
 }) {
   const { t } = useTranslation();
@@ -601,6 +1105,30 @@ function SettingsAppearancePage({
   ];
   const selectedLanguageLabel =
     languageOptions.find((option) => option.value === languagePreference)?.label ?? languagePreference;
+  const interfaceRows: SettingsConfigRowItem[] = [
+    {
+      label: t("settings.appearance.theme"),
+      detail: t("settings.appearance.themeDetail"),
+      value: t("settings.appearance.darkTheme")
+    },
+    {
+      label: t("settings.appearance.density"),
+      detail: t("settings.appearance.densityDetail"),
+      value: t("settings.appearance.compactDensity")
+    },
+    {
+      label: t("settings.appearance.splitWidth"),
+      detail: t("settings.appearance.splitWidthDetail"),
+      value: t("settings.appearance.pixelValue", {
+        value: formatLocaleNumber(splitWidth, resolvedLocale)
+      })
+    },
+    {
+      label: t("settings.appearance.mobileTabs"),
+      detail: t("settings.appearance.mobileTabsDetail"),
+      value: t("settings.appearance.enabled")
+    }
+  ];
 
   return (
     <div className="settings-content-body">
@@ -625,21 +1153,29 @@ function SettingsAppearancePage({
             <small>{t("settings.appearance.languageHelp")}</small>
           </label>
         </section>
-        <SettingsBlueprintCards blocks={blocks} />
+
+        <section className="settings-section-card">
+          <header>
+            <div>
+              <h3>{t("settings.appearance.interfaceTitle")}</h3>
+              <p>{t("settings.appearance.interfaceDescription")}</p>
+            </div>
+            <span data-state="ready">{t("common.states.configured")}</span>
+          </header>
+          <SettingsConfigRows items={interfaceRows} />
+        </section>
       </div>
     </div>
   );
 }
 
 function SettingsFilesPage({
-  blocks,
   previewFileSizeLimitBytes,
   codeFontSettings,
   locale,
   onPreviewFileSizeLimitChange,
   onCodeFontSettingsChange
 }: {
-  blocks: SettingsBlueprintBlock[];
   previewFileSizeLimitBytes: number;
   codeFontSettings: CodeFontSettings;
   locale: SupportedLocale;
@@ -656,6 +1192,33 @@ function SettingsFilesPage({
   }));
   const selectedFontLabel =
     codeFontOptions.find((option) => option.value === codeFontSettings.familyId)?.label ?? codeFontSettings.familyId;
+  const previewRows: SettingsConfigRowItem[] = [
+    {
+      label: t("settings.files.textPreviewWindow"),
+      detail: t("settings.files.textPreviewWindowDetail"),
+      value: formatBytes(DEFAULT_TEXT_PREVIEW_BYTES, locale)
+    },
+    {
+      label: t("settings.files.editLimit"),
+      detail: t("settings.files.editLimitDetail"),
+      value: formatBytes(MAX_EDIT_TEXT_BYTES, locale)
+    },
+    {
+      label: t("settings.files.previewKinds"),
+      detail: t("settings.files.previewKindsDetail"),
+      value: t("settings.files.previewKindsValue")
+    },
+    {
+      label: t("settings.files.mediaStreaming"),
+      detail: t("settings.files.mediaStreamingDetail"),
+      value: t("settings.files.rangeEnabled")
+    },
+    {
+      label: t("settings.files.sizePolicy"),
+      detail: t("settings.files.sizePolicyDetail"),
+      value: t("settings.files.metadataOnly")
+    }
+  ];
 
   useEffect(() => {
     setDraftLimitMiB(String(previewFileSizeLimitMiB));
@@ -773,7 +1336,17 @@ function SettingsFilesPage({
             </small>
           </label>
         </section>
-        <SettingsBlueprintCards blocks={blocks} />
+
+        <section className="settings-section-card">
+          <header>
+            <div>
+              <h3>{t("settings.files.capabilitiesTitle")}</h3>
+              <p>{t("settings.files.capabilitiesDescription")}</p>
+            </div>
+            <span data-state="ready">{t("common.states.ready")}</span>
+          </header>
+          <SettingsConfigRows items={previewRows} />
+        </section>
       </div>
     </div>
   );
@@ -918,45 +1491,415 @@ function SettingsToolPolicyPage({
   );
 }
 
-function SettingsPlannedPage({ blocks }: { blocks: SettingsBlueprintBlock[] }) {
+function SettingsSecurityPage({
+  settings,
+  systemInfo,
+  loading,
+  toolPolicyForm,
+  pendingApprovals,
+  operations,
+  operationsReady,
+  locale
+}: {
+  settings: ModelProviderSettings | null;
+  systemInfo: SystemInfo | null;
+  loading: boolean;
+  toolPolicyForm: ToolPolicyFormState;
+  pendingApprovals: PendingApproval[];
+  operations: FileOperation[];
+  operationsReady: boolean;
+  locale: SupportedLocale;
+}) {
+  const { t } = useTranslation();
+  const systemState: SettingsState = systemInfo ? "ready" : loading ? "loading" : "missing";
+  const systemValue = systemInfo ? null : loading ? t("common.states.loading") : t("common.states.unavailable");
+  const lastOperation = operations[0] ?? null;
+  const dangerousPolicySummary = DANGEROUS_TOOLS.map(
+    (tool) => `${tool}: ${toolPolicyModeLabel(toolPolicyForm[tool], t)}`
+  ).join(" / ");
+  const secretRows: SettingsConfigRowItem[] = [
+    {
+      label: t("settings.security.apiKeyResponse"),
+      detail: t("settings.security.apiKeyResponseDetail"),
+      value: settings?.apiKeyConfigured
+        ? t("settings.security.maskedBoolean")
+        : t("settings.security.keyNotConfigured"),
+      state: settings?.apiKeyConfigured ? "ready" : "missing"
+    },
+    {
+      label: t("settings.security.clearKey"),
+      detail: t("settings.security.clearKeyDetail"),
+      value: t("common.states.configured")
+    },
+    {
+      label: t("settings.security.publicSettings"),
+      detail: t("settings.security.publicSettingsDetail"),
+      value: t("settings.security.publicOnly")
+    }
+  ];
+  const accessRows: SettingsConfigRowItem[] = [
+    {
+      label: t("settings.security.authMode"),
+      detail: t("settings.security.authModeDetail"),
+      value: systemInfo?.identity.authMode ?? systemValue ?? t("common.states.unavailable"),
+      state: systemState
+    },
+    {
+      label: t("settings.security.allowedOrigins"),
+      detail: t("settings.security.allowedOriginsDetail"),
+      value: systemInfo
+        ? formatLocaleNumber(systemInfo.sigma.allowedOriginCount, locale)
+        : systemValue ?? t("common.states.unavailable"),
+      state: systemState
+    },
+    {
+      label: t("settings.security.nasRoots"),
+      detail: t("settings.security.nasRootsDetail"),
+      value: systemInfo
+        ? formatLocaleNumber(systemInfo.sigma.nasRoots.length, locale)
+        : systemValue ?? t("common.states.unavailable"),
+      state: systemState
+    },
+    {
+      label: t("settings.security.pathSafety"),
+      detail: t("settings.security.pathSafetyDetail"),
+      value: t("settings.security.contained")
+    }
+  ];
+  const approvalRows: SettingsConfigRowItem[] = [
+    {
+      label: t("settings.security.dangerousTools"),
+      detail: t("settings.security.dangerousToolsDetail"),
+      value: dangerousPolicySummary
+    },
+    {
+      label: t("settings.security.pendingApprovals"),
+      detail: t("settings.security.pendingApprovalsDetail"),
+      value: formatLocaleNumber(pendingApprovals.length, locale),
+      state: pendingApprovals.length > 0 ? "missing" : "ready"
+    },
+    {
+      label: t("settings.security.operationAudit"),
+      detail: t("settings.security.operationAuditDetail"),
+      value: operationsReady
+        ? t("settings.security.operationCount", {
+            count: operations.length
+          })
+        : t("common.states.loading"),
+      state: operationsReady ? "ready" : "loading"
+    },
+    {
+      label: t("settings.security.latestOperation"),
+      detail: t("settings.security.latestOperationDetail"),
+      value: lastOperation
+        ? `${lastOperation.operation} / ${formatDate(lastOperation.createdAt, locale)}`
+        : t("settings.security.noOperations"),
+      state: operationsReady ? "ready" : "loading"
+    }
+  ];
+
   return (
     <div className="settings-content-body">
       <div className="settings-page-grid">
-        <SettingsBlueprintCards blocks={blocks} />
+        <section className="settings-section-card">
+          <header>
+            <div>
+              <h3>{t("settings.security.secretsTitle")}</h3>
+              <p>{t("settings.security.secretsDescription")}</p>
+            </div>
+            <span data-state={settings?.apiKeyConfigured ? "ready" : "missing"}>{settingsStatus(settings, t)}</span>
+          </header>
+          <SettingsConfigRows items={secretRows} />
+        </section>
+
+        <section className="settings-section-card">
+          <header>
+            <div>
+              <h3>{t("settings.security.accessTitle")}</h3>
+              <p>{t("settings.security.accessDescription")}</p>
+            </div>
+            <span data-state={systemState}>{systemInfo?.identity.authMode ?? systemValue}</span>
+          </header>
+          <SettingsConfigRows items={accessRows} />
+        </section>
+
+        <section className="settings-section-card">
+          <header>
+            <div>
+              <h3>{t("settings.security.approvalTitle")}</h3>
+              <p>{t("settings.security.approvalDescription")}</p>
+            </div>
+            <span data-state={pendingApprovals.length > 0 ? "missing" : "ready"}>
+              {formatLocaleNumber(pendingApprovals.length, locale)}
+            </span>
+          </header>
+          <SettingsConfigRows items={approvalRows} />
+        </section>
       </div>
     </div>
   );
 }
 
-function SettingsBlueprintCards({ blocks }: { blocks: SettingsBlueprintBlock[] }) {
+function SettingsAdvancedPage({
+  systemInfo,
+  systemInfoError,
+  loading,
+  locale
+}: {
+  systemInfo: SystemInfo | null;
+  systemInfoError: string | null;
+  loading: boolean;
+  locale: SupportedLocale;
+}) {
   const { t } = useTranslation();
+  const statusState: SettingsState = systemInfo ? "ready" : loading ? "loading" : "missing";
+  const statusLabel = systemInfo
+    ? t("settings.system.collectedAt", { time: formatDate(systemInfo.collectedAt, locale) })
+    : loading
+      ? t("common.states.loading")
+      : t("common.states.unavailable");
+
+  if (!systemInfo) {
+    return (
+      <div className="settings-content-body">
+        <div className="settings-page-grid">
+          <section className="settings-section-card">
+            <header>
+              <div>
+                <h3>{t("settings.advanced.runtimeTitle")}</h3>
+                <p>{t("settings.advanced.runtimeDescription")}</p>
+              </div>
+              <span data-state={statusState}>{statusLabel}</span>
+            </header>
+            {systemInfoError ? (
+              <div className="settings-inline-error" role="status">
+                <AlertTriangle aria-hidden="true" size={15} />
+                <span>{t("settings.system.loadFailed", { error: systemInfoError })}</span>
+              </div>
+            ) : null}
+          </section>
+        </div>
+      </div>
+    );
+  }
+
+  const runtimeMemory = systemInfo.runtime.memory;
+  const serviceRows: SettingsInfoRow[] = [
+    {
+      label: t("settings.system.labels.apiBind"),
+      value: `${systemInfo.sigma.apiHost}:${systemInfo.sigma.apiPort}`
+    },
+    {
+      label: t("settings.system.labels.allowedOrigins"),
+      value: formatLocaleNumber(systemInfo.sigma.allowedOriginCount, locale)
+    },
+    {
+      label: t("settings.system.labels.workerPoll"),
+      value: t("settings.system.values.milliseconds", {
+        value: formatLocaleNumber(systemInfo.sigma.workerPollMs, locale)
+      })
+    },
+    {
+      label: t("settings.system.labels.authMode"),
+      value: systemInfo.identity.authMode
+    },
+    {
+      label: t("settings.system.labels.modelMode"),
+      value: systemInfo.sigma.modelProvider
+    },
+    {
+      label: t("settings.system.labels.localEndpoint"),
+      value: systemInfo.sigma.localEndpointConfigured
+        ? t("settings.system.values.configured")
+        : t("settings.system.values.notConfigured")
+    }
+  ];
+  const processRows: SettingsInfoRow[] = [
+    {
+      label: t("settings.system.labels.nodeVersion"),
+      value: systemInfo.runtime.nodeVersion
+    },
+    {
+      label: t("settings.system.labels.pid"),
+      value: formatLocaleNumber(systemInfo.runtime.pid, locale)
+    },
+    {
+      label: t("settings.system.labels.processUptime"),
+      value: formatDuration(systemInfo.runtime.uptimeSeconds, locale, t)
+    },
+    {
+      label: t("settings.system.labels.rss"),
+      value: formatBytes(runtimeMemory.rssBytes, locale)
+    },
+    {
+      label: t("settings.system.labels.heapUsed"),
+      value: `${formatBytes(runtimeMemory.heapUsedBytes, locale)} / ${formatBytes(runtimeMemory.heapTotalBytes, locale)}`
+    },
+    {
+      label: t("settings.system.labels.cwd"),
+      value: systemInfo.runtime.cwd,
+      mono: true
+    },
+    {
+      label: t("settings.system.labels.execPath"),
+      value: systemInfo.runtime.execPath,
+      mono: true
+    }
+  ];
+  const pathRows: SettingsInfoRow[] = [
+    {
+      label: t("settings.system.labels.dataDir"),
+      value: systemInfo.sigma.dataDir,
+      mono: true
+    },
+    {
+      label: t("settings.system.labels.databasePath"),
+      value: systemInfo.sigma.databasePath,
+      mono: true
+    },
+    {
+      label: t("settings.system.labels.nasRoots"),
+      value: formatLocaleNumber(systemInfo.sigma.nasRoots.length, locale)
+    }
+  ];
 
   return (
-    <>
-      {blocks.map((block) => (
-        <section key={block.title} className="settings-section-card">
-          <header>
-            <div>
-              <h3>{block.title}</h3>
-              <p>{block.description}</p>
-            </div>
-            <span data-state="planned">{t("common.states.planned")}</span>
-          </header>
-          <div className="settings-config-list">
-            {block.items.map((item) => (
-              <div key={item.label} className="settings-config-row">
-                <span>
-                  <strong>{item.label}</strong>
-                  <small>{item.detail}</small>
-                </span>
-                <em data-state={item.state ?? "planned"}>{item.value}</em>
+    <div className="settings-content-body">
+      <div className="settings-page-grid">
+        <SettingsInfoCard
+          icon={<Server aria-hidden="true" size={17} />}
+          title={t("settings.advanced.serviceTitle")}
+          description={t("settings.advanced.serviceDescription")}
+          rows={serviceRows}
+        />
+
+        <SettingsInfoCard
+          icon={<MemoryStick aria-hidden="true" size={17} />}
+          title={t("settings.advanced.processTitle")}
+          description={t("settings.advanced.processDescription")}
+          rows={processRows}
+        >
+          <div className="settings-system-chip-grid" aria-label={t("settings.system.labels.runtimeVersions")}>
+            {Object.entries(systemInfo.runtime.versions).map(([name, value]) => (
+              <span key={name}>
+                <strong>{name}</strong>
+                <em>{value}</em>
+              </span>
+            ))}
+          </div>
+        </SettingsInfoCard>
+
+        <SettingsInfoCard
+          icon={<HardDrive aria-hidden="true" size={17} />}
+          title={t("settings.advanced.pathsTitle")}
+          description={t("settings.advanced.pathsDescription")}
+          rows={pathRows}
+        >
+          <div className="settings-root-list" aria-label={t("settings.system.labels.nasRoots")}>
+            {systemInfo.sigma.nasRoots.map((root) => (
+              <div key={root.id}>
+                <strong>{root.name}</strong>
+                <span>{root.id}</span>
+                <small title={root.path}>{root.path}</small>
               </div>
             ))}
           </div>
-        </section>
-      ))}
-    </>
+        </SettingsInfoCard>
+      </div>
+    </div>
   );
+}
+
+function SettingsConfigRows({ items }: { items: SettingsConfigRowItem[] }) {
+  return (
+    <div className="settings-config-list">
+      {items.map((item, index) => (
+        <div key={`${item.label}-${index}`} className="settings-config-row">
+          <span>
+            <strong>{item.label}</strong>
+            <small>{item.detail}</small>
+          </span>
+          <em data-state={item.state ?? "ready"}>{item.value}</em>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function storageVolumeLabel(
+  volume: SystemInfoStorageVolume,
+  t: ReturnType<typeof useTranslation>["t"]
+): string {
+  if (volume.kind === "nas-root") {
+    return volume.label;
+  }
+  return t(`settings.system.storageKinds.${volume.kind}`);
+}
+
+function formatNullableBytes(
+  value: number | null,
+  locale: SupportedLocale,
+  t: ReturnType<typeof useTranslation>["t"]
+): string {
+  return value === null ? t("common.dash") : formatBytes(value, locale);
+}
+
+function formatDuration(
+  seconds: number,
+  locale: SupportedLocale,
+  t: ReturnType<typeof useTranslation>["t"]
+): string {
+  const totalSeconds = Math.max(Math.round(seconds), 0);
+  const days = Math.floor(totalSeconds / 86_400);
+  const hours = Math.floor((totalSeconds % 86_400) / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const remainingSeconds = totalSeconds % 60;
+
+  if (days > 0) {
+    return t("settings.system.duration.daysHours", {
+      days: formatLocaleNumber(days, locale),
+      hours: formatLocaleNumber(hours, locale)
+    });
+  }
+  if (hours > 0) {
+    return t("settings.system.duration.hoursMinutes", {
+      hours: formatLocaleNumber(hours, locale),
+      minutes: formatLocaleNumber(minutes, locale)
+    });
+  }
+  if (minutes > 0) {
+    return t("settings.system.duration.minutesSeconds", {
+      minutes: formatLocaleNumber(minutes, locale),
+      seconds: formatLocaleNumber(remainingSeconds, locale)
+    });
+  }
+  return t("settings.system.duration.seconds", {
+    seconds: formatLocaleNumber(remainingSeconds, locale)
+  });
+}
+
+function formatLoadAverage(values: number[], locale: SupportedLocale): string {
+  return values
+    .map((value) =>
+      formatLocaleNumber(value, locale, {
+        maximumFractionDigits: 2
+      })
+    )
+    .join(" / ");
+}
+
+function formatPercent(value: number, locale: SupportedLocale): string {
+  return new Intl.NumberFormat(locale, {
+    style: "percent",
+    maximumFractionDigits: 1
+  }).format(clampPercent(value));
+}
+
+function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.min(Math.max(value, 0), 1);
 }
 
 function settingsSectionIcon(section: SettingsSectionId) {

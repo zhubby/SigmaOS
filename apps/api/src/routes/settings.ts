@@ -16,8 +16,13 @@ import {
   toPublicModelProviderSettings,
   toPublicPiToolPolicySettings
 } from "../lib/settings.js";
+import { collectSystemInfo } from "../lib/system-info.js";
 
 export function registerSettingsRoutes(server: FastifyInstance, { config, db }: ApiRouteContext): void {
+  server.get("/api/settings/system-info", async () => ({
+    info: await collectSystemInfo(config)
+  }));
+
   server.get("/api/settings/model-provider", async () => ({
     settings: toPublicModelProviderSettings(getModelProviderSettings(db) ?? defaultModelProviderSettings(config))
   }));
