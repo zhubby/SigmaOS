@@ -10,6 +10,7 @@ import {
   createUserMessageAndJob,
   ensureNasRoots,
   getApproval,
+  getDockerSettings,
   getDockerOperationByApproval,
   getFileOperation,
   getJob,
@@ -189,6 +190,84 @@ describe("API server", () => {
       delete process.env.SIGMAOS_TEST_SECRET;
       await server.close();
     }
+  });
+
+  it("returns and stores Docker settings through the settings API", async () => {
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    const initial = await server.inject({
+      method: "GET",
+      url: "/api/settings/docker"
+    });
+    const composeRootPath = path.resolve(process.cwd(), "compose/apps");
+    const saved = await server.inject({
+      method: "PATCH",
+      url: "/api/settings/docker",
+      payload: {
+        enabled: true,
+        socketPath: "/tmp/docker.sock",
+        composeCommand: "/usr/bin/docker",
+        operationTimeoutMs: 90_000,
+        consoleShells: ["/bin/sh"],
+        composeRoots: [
+          {
+            id: "apps",
+            name: "Apps",
+            path: "compose/apps"
+          }
+        ]
+      }
+    });
+    const loaded = await server.inject({
+      method: "GET",
+      url: "/api/settings/docker"
+    });
+
+    expect(initial.statusCode).toBe(200);
+    expect(initial.json()).toMatchObject({
+      settings: {
+        enabled: false,
+        socketPath: "/var/run/docker.sock",
+        composeCommand: "docker",
+        operationTimeoutMs: 120_000,
+        consoleShells: ["/bin/sh", "/bin/bash"],
+        composeRoots: []
+      }
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json()).toMatchObject({
+      settings: {
+        enabled: true,
+        socketPath: "/tmp/docker.sock",
+        composeCommand: "/usr/bin/docker",
+        operationTimeoutMs: 90_000,
+        consoleShells: ["/bin/sh"],
+        composeRoots: [
+          {
+            id: "apps",
+            name: "Apps",
+            path: composeRootPath
+          }
+        ]
+      }
+    });
+    expect(loaded.json()).toMatchObject({
+      settings: {
+        enabled: true,
+        socketPath: "/tmp/docker.sock",
+        composeCommand: "/usr/bin/docker"
+      }
+    });
+    expect(getDockerSettings(db)).toMatchObject({
+      enabled: true,
+      composeRoots: [
+        {
+          id: "apps",
+          name: "Apps",
+          path: composeRootPath
+        }
+      ]
+    });
+    await server.close();
   });
 
   it("returns a stable disabled Docker summary", async () => {

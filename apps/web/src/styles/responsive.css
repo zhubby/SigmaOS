@@ -57,9 +57,18 @@
 
   .settings-page-grid,
   .settings-provider-grid,
+  .settings-docker-grid,
   .settings-overview-grid,
   .settings-system-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settings-docker-runtime-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-docker-root-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .settings-editor-font-grid {

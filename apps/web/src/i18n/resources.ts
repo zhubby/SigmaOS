@@ -346,6 +346,10 @@ export const en = {
         title: "Agents",
         description: "Tool execution policy and approval behavior."
       },
+      docker: {
+        title: "Docker",
+        description: "Local Engine access, Compose whitelist roots, and approval-gated console access."
+      },
       files: {
         title: "Files & Preview",
         description: "Preview limits, inline media behavior, and editor defaults."
@@ -395,6 +399,35 @@ export const en = {
         openrouter: "OpenRouter",
         local: "Local endpoint"
       }
+    },
+    docker: {
+      runtimeTitle: "Runtime Access",
+      runtimeDescription: "Enable local Docker Engine control and set the Unix socket, Compose command, and console shells.",
+      enabledField: "Enable Docker management",
+      enabled: "Enabled",
+      disabled: "Disabled",
+      notLoaded: "Not loaded",
+      socketPath: "Socket path",
+      composeCommand: "Compose command",
+      operationTimeout: "Operation timeout (ms)",
+      consoleShells: "Console shells",
+      consoleShellsHelp: "Enter one absolute shell path per line or separate them with commas.",
+      socketNote: "Docker socket access is root-equivalent. Only enable this on a trusted appliance.",
+      composeTitle: "Compose Roots",
+      composeDescription: "Only projects inside these whitelist roots are scanned for Compose operations.",
+      rootId: "Root id",
+      rootName: "Root name",
+      rootNamePlaceholder: "Compose root",
+      rootPath: "Root path",
+      rootPathPlaceholder: "/srv/compose",
+      removeRoot: "Remove root",
+      noComposeRoots: "No Compose roots are configured.",
+      addRoot: "Add compose root",
+      summaryTitle: "Docker summary",
+      summaryDescription: "Saved settings and compose whitelist coverage.",
+      composeRootsCount: "Compose roots",
+      consoleShellsCount: "Console shells",
+      newRootName: "Compose root {{index}}"
     },
     toolPolicy: {
       readOnlyTitle: "Read-Only Tools",
@@ -1044,6 +1077,10 @@ export const zhCN = {
         title: "Agents",
         description: "工具执行策略和审批行为。"
       },
+      docker: {
+        title: "Docker",
+        description: "本机 Engine 访问、Compose 白名单根目录和审批式控制台访问。"
+      },
       files: {
         title: "文件与预览",
         description: "预览限制、内联媒体行为和编辑器默认值。"
@@ -1093,6 +1130,35 @@ export const zhCN = {
         openrouter: "OpenRouter",
         local: "本地端点"
       }
+    },
+    docker: {
+      runtimeTitle: "运行时访问",
+      runtimeDescription: "启用本机 Docker Engine 控制，并设置 Unix socket、Compose 命令和控制台 shell。",
+      enabledField: "启用 Docker 管理",
+      enabled: "已启用",
+      disabled: "已禁用",
+      notLoaded: "未加载",
+      socketPath: "Socket 路径",
+      composeCommand: "Compose 命令",
+      operationTimeout: "操作超时（毫秒）",
+      consoleShells: "控制台 shell",
+      consoleShellsHelp: "每行输入一个绝对 shell 路径，或用逗号分隔。",
+      socketNote: "Docker socket 访问等同 root 权限。仅应在受信任的设备上启用。",
+      composeTitle: "Compose 根目录",
+      composeDescription: "只扫描这些白名单根目录中的 Compose 项目。",
+      rootId: "根目录 id",
+      rootName: "根目录名称",
+      rootNamePlaceholder: "Compose 根目录",
+      rootPath: "根目录路径",
+      rootPathPlaceholder: "/srv/compose",
+      removeRoot: "移除根目录",
+      noComposeRoots: "尚未配置 Compose 根目录。",
+      addRoot: "添加 Compose 根目录",
+      summaryTitle: "Docker 摘要",
+      summaryDescription: "已保存设置和 Compose 白名单覆盖范围。",
+      composeRootsCount: "Compose 根目录",
+      consoleShellsCount: "控制台 shell",
+      newRootName: "Compose 根目录 {{index}}"
     },
     toolPolicy: {
       readOnlyTitle: "只读工具",

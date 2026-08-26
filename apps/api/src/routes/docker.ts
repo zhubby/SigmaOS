@@ -5,6 +5,7 @@ import {
   createDockerOperationApproval,
   createUserMessageAndJob,
   consumeDockerConsoleAuthorization,
+  getDockerSettings,
   getApproval,
   getDockerOperation,
   getSession,
@@ -22,6 +23,7 @@ import type {
   DockerOperationTargetType
 } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
+import { effectiveDockerConfig } from "../lib/settings.js";
 import { dockerCompose, dockerEngine, collectDockerSummary, safeDockerMessage } from "../lib/docker-service.js";
 
 type DockerProposalBody = {
@@ -36,9 +38,10 @@ type DockerProposalBody = {
 
 export function registerDockerRoutes(server: FastifyInstance, context: ApiRouteContext): void {
   const { config, db, docker } = context;
+  const currentConfig = () => effectiveDockerConfig(config, getDockerSettings(db));
 
   server.get("/api/docker/summary", async () => ({
-    summary: await collectDockerSummary(config, docker)
+    summary: await collectDockerSummary(currentConfig(), docker)
   }));
 
   server.get<{
@@ -54,13 +57,14 @@ export function registerDockerRoutes(server: FastifyInstance, context: ApiRouteC
     Params: { id: string };
     Querystring: { tail?: string };
   }>("/api/docker/containers/:id/logs", async (request, reply) => {
-    if (!config.docker.enabled) {
+    const nextConfig = currentConfig();
+    if (!nextConfig.docker.enabled) {
       reply.status(503).send({ error: "Docker management is disabled" });
       return;
     }
     const tail = Number.parseInt(request.query.tail ?? "200", 10);
     try {
-      const logs = await dockerEngine(config.docker, docker).getContainerLogs(
+      const logs = await dockerEngine(nextConfig.docker, docker).getContainerLogs(
         request.params.id,
         Number.isInteger(tail) ? tail : 200
       );
@@ -73,7 +77,8 @@ export function registerDockerRoutes(server: FastifyInstance, context: ApiRouteC
   server.post<{
     Body: DockerProposalBody;
   }>("/api/docker/proposals", async (request, reply) => {
-    if (!config.docker.enabled) {
+    const nextConfig = currentConfig();
+    if (!nextConfig.docker.enabled) {
       reply.status(503).send({ error: "Docker management is disabled" });
       return;
     }
@@ -85,7 +90,7 @@ export function registerDockerRoutes(server: FastifyInstance, context: ApiRouteC
     }
 
     try {
-      const proposal = await buildDockerProposal(request.body ?? {}, context);
+      const proposal = await buildDockerProposal(request.body ?? {}, { ...context, config: nextConfig });
       const { message, job } = createUserMessageAndJob(db, {
         sessionId: session.id,
         content: proposal.summary,
@@ -120,7 +125,8 @@ export function registerDockerRoutes(server: FastifyInstance, context: ApiRouteC
   server.post<{
     Body: { operationId?: string };
   }>("/api/docker/console-sessions", async (request, reply) => {
-    if (!config.docker.enabled) {
+    const nextConfig = currentConfig();
+    if (!nextConfig.docker.enabled) {
       reply.status(503).send({ error: "Docker management is disabled" });
       return;
     }
@@ -167,7 +173,8 @@ export function registerDockerRoutes(server: FastifyInstance, context: ApiRouteC
   server.get<{
     Params: { id: string };
   }>("/api/docker/console/:id", { websocket: true }, async (socket, request) => {
-    if (!config.docker.enabled) {
+    const nextConfig = currentConfig();
+    if (!nextConfig.docker.enabled) {
       sendSocket(socket, { type: "error", error: "Docker management is disabled" });
       socket.close();
       return;
@@ -180,7 +187,7 @@ export function registerDockerRoutes(server: FastifyInstance, context: ApiRouteC
       return;
     }
 
-    const engine = dockerEngine(config.docker, docker);
+    const engine = dockerEngine(nextConfig.docker, docker);
     let execId: string | null = null;
     try {
       execId = await engine.createExec(authorization.containerId, authorization.shell);

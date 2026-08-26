@@ -8,6 +8,7 @@ import type {
   DockerOperationRecord,
   DockerOperationStatus,
   DockerOperationTargetType,
+  DockerSettingsRecord,
   FileMutationOperation,
   FileOperationProposal,
   FileOperationRecord,
@@ -153,6 +154,7 @@ type DbSystemSettingRow = {
 
 const MODEL_PROVIDER_SETTING_KEY = "model_provider";
 const PI_TOOL_POLICY_SETTING_KEY = "pi_tool_policy";
+const DOCKER_SETTING_KEY = "docker_settings";
 const READ_ONLY_PI_TOOLS = ["read", "grep", "find", "ls"] as const satisfies PiToolName[];
 const DANGEROUS_PI_TOOLS = ["bash", "edit", "write"] as const satisfies PiToolName[];
 const PI_TOOL_POLICY_MODES = ["auto", "ask", "disabled"] as const satisfies PiToolPolicyMode[];
@@ -449,6 +451,40 @@ export function savePiToolPolicySettings(
       value_json = excluded.value_json,
       updated_at = excluded.updated_at
   `).run(PI_TOOL_POLICY_SETTING_KEY, JSON.stringify(record), updatedAt);
+
+  return record;
+}
+
+export function getDockerSettings(db: SigmaDatabase): DockerSettingsRecord | null {
+  const row = db
+    .prepare("SELECT key, value_json, updated_at FROM system_settings WHERE key = ?")
+    .get(DOCKER_SETTING_KEY) as DbSystemSettingRow | undefined;
+
+  return row ? mapDockerSettings(row) : null;
+}
+
+export function saveDockerSettings(
+  db: SigmaDatabase,
+  settings: Omit<DockerSettingsRecord, "updatedAt">
+): DockerSettingsRecord {
+  const updatedAt = new Date().toISOString();
+  const record: DockerSettingsRecord = {
+    enabled: settings.enabled,
+    socketPath: settings.socketPath,
+    composeCommand: settings.composeCommand,
+    operationTimeoutMs: settings.operationTimeoutMs,
+    consoleShells: settings.consoleShells,
+    composeRoots: settings.composeRoots,
+    updatedAt
+  };
+
+  db.prepare(`
+    INSERT INTO system_settings (key, value_json, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET
+      value_json = excluded.value_json,
+      updated_at = excluded.updated_at
+  `).run(DOCKER_SETTING_KEY, JSON.stringify(record), updatedAt);
 
   return record;
 }
@@ -1304,6 +1340,21 @@ function mapPiToolPolicySettings(row: DbSystemSettingRow): PiToolPolicySettingsR
   return normalizePiToolPolicySettings(parsed, parsed.updatedAt ?? row.updated_at);
 }
 
+function mapDockerSettings(row: DbSystemSettingRow): DockerSettingsRecord {
+  const parsed = JSON.parse(row.value_json) as Partial<DockerSettingsRecord> & {
+    composeRoots?: Array<{ id?: unknown; name?: unknown; path?: unknown }>;
+  };
+  return {
+    enabled: Boolean(parsed.enabled),
+    socketPath: normalizeString(parsed.socketPath) ?? "/var/run/docker.sock",
+    composeCommand: normalizeString(parsed.composeCommand) ?? "docker",
+    operationTimeoutMs: normalizePositiveInteger(parsed.operationTimeoutMs) ?? 120_000,
+    consoleShells: normalizeDockerShells(parsed.consoleShells),
+    composeRoots: normalizeDockerComposeRoots(parsed.composeRoots),
+    updatedAt: normalizeString(parsed.updatedAt) ?? row.updated_at
+  };
+}
+
 function normalizePiToolPolicySettings(
   settings: Partial<PiToolPolicySettingsRecord>,
   updatedAt: string
@@ -1330,6 +1381,53 @@ function normalizePiToolPolicySettings(
   }
 
   return normalized;
+}
+
+function normalizeDockerComposeRoots(
+  roots: Array<{ id?: unknown; name?: unknown; path?: unknown }> | undefined
+): DockerSettingsRecord["composeRoots"] {
+  if (!Array.isArray(roots)) {
+    return [];
+  }
+
+  return roots
+    .map((root, index) => {
+      const pathValue = normalizeString(root.path);
+      if (!pathValue) {
+        return null;
+      }
+      const id = normalizeString(root.id) ?? `compose-root-${index + 1}`;
+      return {
+        id,
+        name: normalizeString(root.name) ?? id,
+        path: pathValue
+      };
+    })
+    .filter((root): root is DockerSettingsRecord["composeRoots"][number] => root !== null);
+}
+
+function normalizeDockerShells(shells: unknown): string[] {
+  if (!Array.isArray(shells)) {
+    return ["/bin/sh", "/bin/bash"];
+  }
+
+  const normalized = shells.map(normalizeString).filter((shell): shell is string => shell !== null);
+  return normalized.length ? normalized : ["/bin/sh", "/bin/bash"];
+}
+
+function normalizeString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function normalizePositiveInteger(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    return null;
+  }
+  return value;
 }
 
 function isPiToolPolicyMode(value: unknown): value is PiToolPolicyMode {

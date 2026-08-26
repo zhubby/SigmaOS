@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import {
   appendEvent,
   createTrashEntry,
+  getDockerSettings,
   getApproval,
   getDockerOperationByApproval,
   getNasRoot,
@@ -15,10 +16,12 @@ import {
 import { applyFileMutation } from "@sigmaos/nas-tools";
 import type { DockerOperationProposal, FileOperationProposal, PendingApprovalRecord } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
+import { effectiveDockerConfig } from "../lib/settings.js";
 import { applyDockerOperation, safeDockerMessage } from "../lib/docker-service.js";
 
 export function registerApprovalRoutes(server: FastifyInstance, context: ApiRouteContext): void {
   const { config, db } = context;
+  const currentConfig = () => effectiveDockerConfig(config, getDockerSettings(db));
   server.get("/api/approvals", async () => ({
     approvals: listPendingApprovals(db)
   }));
@@ -69,7 +72,7 @@ export function registerApprovalRoutes(server: FastifyInstance, context: ApiRout
       }
 
       try {
-        const metadata = await applyDockerOperation(config, operation, proposal, context.docker);
+        const metadata = await applyDockerOperation(currentConfig(), operation, proposal, context.docker);
         const applied = updateDockerOperationStatus(db, operation.id, "applied", {
           ...metadata,
           appliedAt: new Date().toISOString()

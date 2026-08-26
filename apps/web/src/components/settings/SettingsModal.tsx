@@ -14,13 +14,16 @@ import {
   Lock,
   MemoryStick,
   Network,
+  Plus,
   Search,
   Server,
   ShieldCheck,
+  Trash2,
   Wrench,
   X
 } from "lucide-react";
 import type {
+  DockerSettings,
   FileOperation,
   PendingApproval,
   ModelProviderSettings,
@@ -41,6 +44,8 @@ import {
   settingsSectionTitle,
   settingsStatus,
   settingsUpdatedAtLabel,
+  type DockerComposeRootFormState,
+  type DockerSettingsFormState,
   type ModelProviderFormState,
   type SettingsSectionId,
   type SettingsState,
@@ -66,8 +71,10 @@ interface SettingsModalProps {
   activeSection: SettingsSectionId;
   error: string | null;
   form: ModelProviderFormState;
+  dockerForm: DockerSettingsFormState;
   loading: boolean;
   saving: boolean;
+  dockerSettings: DockerSettings | null;
   settings: ModelProviderSettings | null;
   systemInfo: SystemInfo | null;
   systemInfoError: string | null;
@@ -85,6 +92,7 @@ interface SettingsModalProps {
   resolvedLocale: SupportedLocale;
   onClose: () => void;
   onFormChange: (form: ModelProviderFormState) => void;
+  onDockerFormChange: (form: DockerSettingsFormState) => void;
   onToolPolicyFormChange: (form: ToolPolicyFormState) => void;
   onLanguagePreferenceChange: (preference: LanguagePreference) => void;
   onThemePreferenceChange: (preference: ThemePreference) => void;
@@ -103,8 +111,10 @@ export function SettingsModal({
   activeSection,
   error,
   form,
+  dockerForm,
   loading,
   saving,
+  dockerSettings,
   settings,
   systemInfo,
   systemInfoError,
@@ -122,6 +132,7 @@ export function SettingsModal({
   resolvedLocale,
   onClose,
   onFormChange,
+  onDockerFormChange,
   onToolPolicyFormChange,
   onLanguagePreferenceChange,
   onThemePreferenceChange,
@@ -144,7 +155,7 @@ export function SettingsModal({
       )
     : SETTINGS_SECTIONS;
   const groups = [...new Set(visibleSections.map((section) => section.group))];
-  const currentState = settingsSectionState(currentSection, settings);
+  const currentState = settingsSectionState(currentSection, settings, dockerSettings);
   const providerOptions = PROVIDER_OPTIONS.map((provider) => ({
     value: provider,
     label: providerLabel(provider, t)
@@ -187,7 +198,7 @@ export function SettingsModal({
                     {settingsSectionIcon(section.id)}
                     <span>
                       <strong>{settingsSectionTitle(section, t)}</strong>
-                      <small>{settingsSectionLabel(section, settings, loading, t)}</small>
+                      <small>{settingsSectionLabel(section, settings, loading, t, dockerSettings)}</small>
                     </span>
                   </button>
                 ))}
@@ -213,7 +224,7 @@ export function SettingsModal({
               <div className="settings-header-meta" aria-label={t("settings.status")}>
                 <span data-state={currentState}>
                   {settingsStateIcon(currentState)}
-                  {settingsSectionLabel(currentSection, settings, loading, t)}
+                  {settingsSectionLabel(currentSection, settings, loading, t, dockerSettings)}
                 </span>
                 <span>
                   <Lock aria-hidden="true" size={13} />
@@ -237,6 +248,7 @@ export function SettingsModal({
             <SettingsOverview
               loading={loading}
               settings={settings}
+              dockerSettings={dockerSettings}
               systemInfo={systemInfo}
               systemInfoError={systemInfoError}
               locale={resolvedLocale}
@@ -452,6 +464,19 @@ export function SettingsModal({
             />
           ) : null}
 
+          {activeSection === "docker" ? (
+            <SettingsDockerPage
+              form={dockerForm}
+              settings={dockerSettings}
+              loading={loading}
+              saving={saving}
+              locale={resolvedLocale}
+              onChange={onDockerFormChange}
+              onSubmit={onSubmit}
+              onClose={onClose}
+            />
+          ) : null}
+
           {activeSection === "files" ? (
             <SettingsFilesPage
               previewFileSizeLimitBytes={previewFileSizeLimitBytes}
@@ -492,6 +517,7 @@ export function SettingsModal({
 function SettingsOverview({
   loading,
   settings,
+  dockerSettings,
   systemInfo,
   systemInfoError,
   locale,
@@ -499,6 +525,7 @@ function SettingsOverview({
 }: {
   loading: boolean;
   settings: ModelProviderSettings | null;
+  dockerSettings: DockerSettings | null;
   systemInfo: SystemInfo | null;
   systemInfoError: string | null;
   locale: SupportedLocale;
@@ -536,14 +563,16 @@ function SettingsOverview({
         },
         {
           value: formatLocaleNumber(
-            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings) === "ready").length,
+            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings, dockerSettings) === "ready")
+              .length,
             locale
           ),
           label: t("settings.overview.configured")
         },
         {
           value: formatLocaleNumber(
-            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings) === "missing").length,
+            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings, dockerSettings) === "missing")
+              .length,
             locale
           ),
           label: t("settings.overview.needsAttention")
@@ -625,8 +654,8 @@ function SettingsOverview({
                 <strong>{settingsSectionTitle(section, t)}</strong>
                 <small>{settingsSectionDescription(section, t)}</small>
               </span>
-              <em data-state={settingsSectionState(section, settings)}>
-                {settingsSectionLabel(section, settings, loading, t)}
+              <em data-state={settingsSectionState(section, settings, dockerSettings)}>
+                {settingsSectionLabel(section, settings, loading, t, dockerSettings)}
               </em>
             </button>
           ))}
@@ -1535,6 +1564,291 @@ function SettingsToolPolicyPage({
   );
 }
 
+function SettingsDockerPage({
+  form,
+  settings,
+  loading,
+  saving,
+  locale,
+  onChange,
+  onSubmit,
+  onClose
+}: {
+  form: DockerSettingsFormState;
+  settings: DockerSettings | null;
+  loading: boolean;
+  saving: boolean;
+  locale: SupportedLocale;
+  onChange: (form: DockerSettingsFormState) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const rootCount = form.composeRoots.length;
+  const shellCount = splitDockerShells(form.consoleShells).length;
+  const statusState = loading && !settings ? "loading" : settings ? "ready" : "missing";
+  const statusLabel = loading && !settings
+    ? t("common.states.loading")
+    : !settings
+      ? t("settings.docker.notLoaded")
+      : form.enabled
+        ? t("settings.docker.enabled")
+        : t("settings.docker.disabled");
+
+  function updateRoot(index: number, patch: Partial<DockerComposeRootFormState>) {
+    onChange({
+      ...form,
+      composeRoots: form.composeRoots.map((root, currentIndex) =>
+        currentIndex === index
+          ? {
+              ...root,
+              ...patch
+            }
+          : root
+      )
+    });
+  }
+
+  function addRoot() {
+    onChange({
+      ...form,
+      composeRoots: [
+        ...form.composeRoots,
+        {
+          id: `compose-root-${form.composeRoots.length + 1}`,
+          name: t("settings.docker.newRootName", { index: form.composeRoots.length + 1 }),
+          path: ""
+        }
+      ]
+    });
+  }
+
+  function removeRoot(index: number) {
+    onChange({
+      ...form,
+      composeRoots: form.composeRoots.filter((_, currentIndex) => currentIndex !== index)
+    });
+  }
+
+  return (
+    <form className="settings-form" onSubmit={onSubmit}>
+      <div className="settings-content-body">
+        <div className="settings-page-grid settings-docker-grid">
+          <div className="settings-main-stack">
+            <section className="settings-section-card">
+              <header>
+                <div>
+                  <h3>{t("settings.docker.runtimeTitle")}</h3>
+                  <p>{t("settings.docker.runtimeDescription")}</p>
+                </div>
+                <span data-state={statusState}>{statusLabel}</span>
+              </header>
+
+              <fieldset className="settings-field-grid settings-docker-runtime-grid" disabled={loading || saving}>
+                <label className="settings-check settings-field-wide">
+                  <input
+                    type="checkbox"
+                    checked={form.enabled}
+                    onChange={(event) =>
+                      onChange({
+                        ...form,
+                        enabled: event.target.checked
+                      })
+                    }
+                  />
+                  <span>{t("settings.docker.enabledField")}</span>
+                </label>
+
+                <label className="settings-field-wide">
+                  <span>{t("settings.docker.socketPath")}</span>
+                  <input
+                    value={form.socketPath}
+                    onChange={(event) =>
+                      onChange({
+                        ...form,
+                        socketPath: event.target.value
+                      })
+                    }
+                    placeholder="/var/run/docker.sock"
+                  />
+                </label>
+
+                <label className="settings-field-wide">
+                  <span>{t("settings.docker.composeCommand")}</span>
+                  <input
+                    value={form.composeCommand}
+                    onChange={(event) =>
+                      onChange({
+                        ...form,
+                        composeCommand: event.target.value
+                      })
+                    }
+                    placeholder="docker"
+                  />
+                </label>
+
+                <label>
+                  <span>{t("settings.docker.operationTimeout")}</span>
+                  <input
+                    type="number"
+                    min="1000"
+                    step="1000"
+                    value={form.operationTimeoutMs}
+                    onChange={(event) =>
+                      onChange({
+                        ...form,
+                        operationTimeoutMs: event.target.value
+                      })
+                    }
+                    placeholder="120000"
+                  />
+                </label>
+
+                <label className="settings-field-wide">
+                  <span>{t("settings.docker.consoleShells")}</span>
+                  <textarea
+                    className="settings-textarea"
+                    rows={3}
+                    value={form.consoleShells}
+                    onChange={(event) =>
+                      onChange({
+                        ...form,
+                        consoleShells: event.target.value
+                      })
+                    }
+                    placeholder="/bin/sh, /bin/bash"
+                  />
+                  <small>{t("settings.docker.consoleShellsHelp")}</small>
+                </label>
+              </fieldset>
+
+              <div className="settings-secret-note">
+                <Lock aria-hidden="true" size={15} />
+                <span>{t("settings.docker.socketNote")}</span>
+              </div>
+            </section>
+
+            <section className="settings-section-card">
+              <header>
+                <div>
+                  <h3>{t("settings.docker.composeTitle")}</h3>
+                  <p>{t("settings.docker.composeDescription")}</p>
+                </div>
+                <span data-state={rootCount ? "ready" : "missing"}>{formatLocaleNumber(rootCount, locale)}</span>
+              </header>
+
+              <div className="settings-docker-root-list">
+                {form.composeRoots.length ? (
+                  form.composeRoots.map((root, index) => (
+                    <div key={`${root.id}-${index}`} className="settings-docker-root-row">
+                      <div className="settings-docker-root-header">
+                        <span className="settings-docker-root-index">{formatLocaleNumber(index + 1, locale)}</span>
+                        <button
+                          type="button"
+                          className="settings-icon-button settings-docker-root-remove"
+                          onClick={() => removeRoot(index)}
+                          title={t("settings.docker.removeRoot")}
+                          aria-label={t("settings.docker.removeRoot")}
+                        >
+                          <Trash2 aria-hidden="true" size={14} />
+                        </button>
+                      </div>
+                      <label>
+                        <span>{t("settings.docker.rootId")}</span>
+                        <input
+                          value={root.id}
+                          onChange={(event) => updateRoot(index, { id: event.target.value })}
+                          placeholder={`compose-root-${index + 1}`}
+                        />
+                      </label>
+                      <label>
+                        <span>{t("settings.docker.rootName")}</span>
+                        <input
+                          value={root.name}
+                          onChange={(event) => updateRoot(index, { name: event.target.value })}
+                          placeholder={t("settings.docker.rootNamePlaceholder")}
+                        />
+                      </label>
+                      <label className="settings-field-wide">
+                        <span>{t("settings.docker.rootPath")}</span>
+                        <input
+                          value={root.path}
+                          onChange={(event) => updateRoot(index, { path: event.target.value })}
+                          placeholder={t("settings.docker.rootPathPlaceholder")}
+                        />
+                      </label>
+                    </div>
+                  ))
+                ) : (
+                  <p className="settings-empty-note">{t("settings.docker.noComposeRoots")}</p>
+                )}
+              </div>
+
+              <button type="button" className="secondary-button settings-docker-add-root" onClick={addRoot}>
+                <Plus aria-hidden="true" size={14} />
+                <span>{t("settings.docker.addRoot")}</span>
+              </button>
+            </section>
+          </div>
+
+          <aside className="settings-side-stack" aria-label={t("settings.docker.summaryTitle")}>
+            <section className="settings-section-card settings-route-card">
+              <header>
+                <div>
+                  <h3>{t("settings.docker.summaryTitle")}</h3>
+                  <p>{t("settings.docker.summaryDescription")}</p>
+                </div>
+              </header>
+              <dl className="settings-summary-list">
+                <div>
+                  <dt>{t("settings.docker.enabledField")}</dt>
+                  <dd>{settings ? (settings.enabled ? t("settings.docker.enabled") : t("settings.docker.disabled")) : t("settings.docker.notLoaded")}</dd>
+                </div>
+                <div>
+                  <dt>{t("settings.docker.socketPath")}</dt>
+                  <dd className="is-mono">{form.socketPath || t("common.dash")}</dd>
+                </div>
+                <div>
+                  <dt>{t("settings.docker.composeCommand")}</dt>
+                  <dd className="is-mono">{form.composeCommand || t("common.dash")}</dd>
+                </div>
+                <div>
+                  <dt>{t("settings.docker.operationTimeout")}</dt>
+                  <dd>{form.operationTimeoutMs || t("common.dash")}</dd>
+                </div>
+                <div>
+                  <dt>{t("settings.docker.composeRootsCount")}</dt>
+                  <dd>{formatLocaleNumber(rootCount, locale)}</dd>
+                </div>
+                <div>
+                  <dt>{t("settings.docker.consoleShellsCount")}</dt>
+                  <dd>{formatLocaleNumber(shellCount, locale)}</dd>
+                </div>
+                <div>
+                  <dt>{t("settings.modelProvider.updated")}</dt>
+                  <dd>{settingsUpdatedAtLabel(settings, locale, t)}</dd>
+                </div>
+              </dl>
+            </section>
+          </aside>
+        </div>
+      </div>
+
+      <footer className="settings-actions">
+        <span>{statusLabel}</span>
+        <div>
+          <button className="secondary-button" type="button" onClick={onClose}>
+            {t("common.actions.cancel")}
+          </button>
+          <button className="primary-button" type="submit" disabled={loading || saving}>
+            {saving ? t("common.actions.saving") : t("common.actions.saveChanges")}
+          </button>
+        </div>
+      </footer>
+    </form>
+  );
+}
+
 function SettingsSecurityPage({
   settings,
   systemInfo,
@@ -1954,6 +2268,8 @@ function settingsSectionIcon(section: SettingsSectionId) {
       return <KeyRound aria-hidden="true" size={16} />;
     case "agents":
       return <Bot aria-hidden="true" size={16} />;
+    case "docker":
+      return <Server aria-hidden="true" size={16} />;
     case "files":
       return <Folder aria-hidden="true" size={16} />;
     case "security":
@@ -1991,4 +2307,11 @@ function toolPolicyModeLabel(mode: string, t: ReturnType<typeof useTranslation>[
     return t("settings.toolPolicy.modes.ask");
   }
   return t("settings.toolPolicy.modes.disabled");
+}
+
+function splitDockerShells(value: string): string[] {
+  return value
+    .split(/[\n,]/gu)
+    .map((shell) => shell.trim())
+    .filter(Boolean);
 }

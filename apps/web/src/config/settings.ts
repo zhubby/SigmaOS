@@ -1,5 +1,11 @@
 import type { TFunction } from "i18next";
-import type { ModelProviderSettings, PiDangerousToolPolicyMode, PiToolPolicyMode, PiToolPolicySettings } from "../api.js";
+import type {
+  DockerSettings,
+  ModelProviderSettings,
+  PiDangerousToolPolicyMode,
+  PiToolPolicyMode,
+  PiToolPolicySettings
+} from "../api.js";
 import { formatDate } from "../i18n/format.js";
 import type { SupportedLocale } from "../i18n/locale.js";
 
@@ -7,6 +13,7 @@ export type SettingsSectionId =
   | "overview"
   | "model-providers"
   | "agents"
+  | "docker"
   | "files"
   | "security"
   | "appearance"
@@ -24,6 +31,22 @@ export interface ModelProviderFormState {
   model: string;
   apiKey: string;
   clearApiKey: boolean;
+}
+
+export interface DockerComposeRootFormState {
+  id: string;
+  name: string;
+  path: string;
+}
+
+export interface DockerSettingsFormState {
+  enabled: boolean;
+  socketPath: string;
+  composeCommand: string;
+  operationTimeoutMs: string;
+  consoleShells: string;
+  composeRoots: DockerComposeRootFormState[];
+  updatedAt: string;
 }
 
 export interface SettingsSection {
@@ -50,6 +73,10 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     group: "ai"
   },
   {
+    id: "docker",
+    group: "administration"
+  },
+  {
     id: "files",
     group: "workspace"
   },
@@ -71,6 +98,7 @@ const SECTION_TITLE_KEYS = {
   overview: "settings.sections.overview.title",
   "model-providers": "settings.sections.modelProviders.title",
   agents: "settings.sections.agents.title",
+  docker: "settings.sections.docker.title",
   files: "settings.sections.files.title",
   security: "settings.sections.security.title",
   appearance: "settings.sections.appearance.title",
@@ -81,6 +109,7 @@ const SECTION_DESCRIPTION_KEYS = {
   overview: "settings.sections.overview.description",
   "model-providers": "settings.sections.modelProviders.description",
   agents: "settings.sections.agents.description",
+  docker: "settings.sections.docker.description",
   files: "settings.sections.files.description",
   security: "settings.sections.security.description",
   appearance: "settings.sections.appearance.description",
@@ -102,6 +131,22 @@ export function modelSettingsToForm(settings: ModelProviderSettings | null): Mod
     model: settings?.model ?? "",
     apiKey: "",
     clearApiKey: false
+  };
+}
+
+export function dockerSettingsToForm(settings: DockerSettings | null): DockerSettingsFormState {
+  return {
+    enabled: settings?.enabled ?? false,
+    socketPath: settings?.socketPath ?? "/var/run/docker.sock",
+    composeCommand: settings?.composeCommand ?? "docker",
+    operationTimeoutMs: String(settings?.operationTimeoutMs ?? 120_000),
+    consoleShells: (settings?.consoleShells ?? ["/bin/sh", "/bin/bash"]).join(", "),
+    composeRoots: (settings?.composeRoots ?? []).map((root) => ({
+      id: root.id,
+      name: root.name,
+      path: root.path
+    })),
+    updatedAt: settings?.updatedAt ?? new Date(0).toISOString()
   };
 }
 
@@ -127,7 +172,7 @@ export function settingsStatus(settings: ModelProviderSettings | null, t: Transl
 }
 
 export function settingsUpdatedAtLabel(
-  settings: ModelProviderSettings | null,
+  settings: { updatedAt: string } | null,
   locale: SupportedLocale,
   t: Translate
 ): string {
@@ -137,9 +182,16 @@ export function settingsUpdatedAtLabel(
   return formatDate(settings.updatedAt, locale);
 }
 
-export function settingsSectionState(section: SettingsSection, settings: ModelProviderSettings | null): SettingsState {
+export function settingsSectionState(
+  section: SettingsSection,
+  settings: ModelProviderSettings | null,
+  dockerSettings: DockerSettings | null
+): SettingsState {
   if (section.id === "model-providers") {
     return settings?.apiKeyConfigured ? "ready" : "missing";
+  }
+  if (section.id === "docker") {
+    return dockerSettings ? "ready" : "missing";
   }
   return "ready";
 }
@@ -148,12 +200,19 @@ export function settingsSectionLabel(
   section: SettingsSection,
   settings: ModelProviderSettings | null,
   loading: boolean,
-  t: Translate
+  t: Translate,
+  dockerSettings: DockerSettings | null
 ): string {
-  if (loading && section.id === "model-providers") {
+  if (loading && (section.id === "model-providers" || section.id === "docker")) {
     return t("common.states.loading");
   }
-  const state = settingsSectionState(section, settings);
+  if (section.id === "docker") {
+    if (!dockerSettings) {
+      return t("settings.docker.notLoaded");
+    }
+    return dockerSettings.enabled ? t("settings.docker.enabled") : t("settings.docker.disabled");
+  }
+  const state = settingsSectionState(section, settings, dockerSettings);
   if (state === "ready") {
     return t("common.states.configured");
   }

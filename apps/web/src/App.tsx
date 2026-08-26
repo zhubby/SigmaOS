@@ -8,6 +8,7 @@ import {
   deleteSession,
   getApprovals,
   getDockerOperations,
+  getDockerSettings,
   getFileBlobUrl,
   getFileMeta,
   getFiles,
@@ -22,6 +23,7 @@ import {
   proposeFileOperation,
   rejectRequest,
   rollbackOperation,
+  saveDockerSettings,
   saveModelProviderSettings,
   savePiToolPolicySettings,
   searchFiles,
@@ -32,6 +34,7 @@ import {
   type FileMeta,
   type FileOperation,
   type DockerOperation,
+  type DockerSettings,
   type SaveEditableTextResult,
   type ModelProviderSettings,
   type NasRoot,
@@ -49,7 +52,9 @@ import { SettingsModal } from "./components/settings/SettingsModal.js";
 import { WorkspacePane } from "./components/workspace/WorkspacePane.js";
 import {
   defaultToolPolicyForm,
+  dockerSettingsToForm,
   modelSettingsToForm,
+  type DockerSettingsFormState,
   type ModelProviderFormState,
   type SettingsSectionId,
   type ToolPolicyFormState
@@ -124,12 +129,16 @@ export function App() {
   const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSectionId>("model-providers");
   const [modelSettings, setModelSettings] = useState<ModelProviderSettings | null>(null);
   const [toolPolicySettings, setToolPolicySettings] = useState<PiToolPolicySettings | null>(null);
+  const [dockerSettings, setDockerSettings] = useState<DockerSettings | null>(null);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [systemInfoError, setSystemInfoError] = useState<string | null>(null);
   const [modelSettingsForm, setModelSettingsForm] = useState<ModelProviderFormState>(() =>
     modelSettingsToForm(null)
   );
   const [toolPolicyForm, setToolPolicyForm] = useState<ToolPolicyFormState>(() => defaultToolPolicyForm());
+  const [dockerSettingsForm, setDockerSettingsForm] = useState<DockerSettingsFormState>(() =>
+    dockerSettingsToForm(null)
+  );
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -421,9 +430,10 @@ export function App() {
     setSettingsError(null);
     setSystemInfoError(null);
     try {
-      const [settingsResult, toolPolicyResult, systemInfoResult] = await Promise.allSettled([
+      const [settingsResult, toolPolicyResult, dockerSettingsResult, systemInfoResult] = await Promise.allSettled([
         getModelProviderSettings(),
         getPiToolPolicySettings(),
+        getDockerSettings(),
         getSystemInfo()
       ]);
 
@@ -440,6 +450,13 @@ export function App() {
         setToolPolicyForm(toolPolicyResult.value);
       } else {
         errors.push(toErrorMessage(toolPolicyResult.reason));
+      }
+
+      if (dockerSettingsResult.status === "fulfilled") {
+        setDockerSettings(dockerSettingsResult.value);
+        setDockerSettingsForm(dockerSettingsToForm(dockerSettingsResult.value));
+      } else {
+        errors.push(toErrorMessage(dockerSettingsResult.reason));
       }
 
       if (systemInfoResult.status === "fulfilled") {
@@ -462,7 +479,7 @@ export function App() {
     setSettingsSaving(true);
     setSettingsError(null);
     try {
-      const [settings, toolPolicy] = await Promise.all([
+      const [settings, toolPolicy, nextDockerSettings] = await Promise.all([
         saveModelProviderSettings({
           providerName: modelSettingsForm.providerName,
           displayName: modelSettingsForm.displayName,
@@ -471,12 +488,33 @@ export function App() {
           ...(modelSettingsForm.apiKey ? { apiKey: modelSettingsForm.apiKey } : {}),
           clearApiKey: modelSettingsForm.clearApiKey
         }),
-        savePiToolPolicySettings(toolPolicyForm)
+        savePiToolPolicySettings(toolPolicyForm),
+        saveDockerSettings({
+          enabled: dockerSettingsForm.enabled,
+          socketPath: dockerSettingsForm.socketPath,
+          composeCommand: dockerSettingsForm.composeCommand,
+          operationTimeoutMs: Number(dockerSettingsForm.operationTimeoutMs),
+          consoleShells: parseDockerShells(dockerSettingsForm.consoleShells),
+          composeRoots: dockerSettingsForm.composeRoots.map((root) => ({
+            id: root.id,
+            name: root.name,
+            path: root.path
+          }))
+        })
       ]);
       setModelSettings(settings);
       setToolPolicySettings(toolPolicy);
+      setDockerSettings(nextDockerSettings);
       setModelSettingsForm(modelSettingsToForm(settings));
       setToolPolicyForm(toolPolicy);
+      setDockerSettingsForm(dockerSettingsToForm(nextDockerSettings));
+      try {
+        const refreshedSystemInfo = await getSystemInfo();
+        setSystemInfo(refreshedSystemInfo);
+        setSystemInfoError(null);
+      } catch (refreshError) {
+        setSystemInfoError(toErrorMessage(refreshError));
+      }
     } catch (nextError) {
       setSettingsError(toErrorMessage(nextError));
     } finally {
@@ -1026,6 +1064,8 @@ export function App() {
           loading={settingsLoading}
           saving={settingsSaving}
           settings={modelSettings}
+          dockerSettings={dockerSettings}
+          dockerForm={dockerSettingsForm}
           systemInfo={systemInfo}
           systemInfoError={systemInfoError}
           pendingApprovals={approvals}
@@ -1042,6 +1082,7 @@ export function App() {
           resolvedLocale={resolvedLocale}
           onClose={() => setSettingsOpen(false)}
           onFormChange={setModelSettingsForm}
+          onDockerFormChange={setDockerSettingsForm}
           onToolPolicyFormChange={setToolPolicyForm}
           onLanguagePreferenceChange={changeLanguagePreference}
           onThemePreferenceChange={changeThemePreference}
@@ -1053,6 +1094,13 @@ export function App() {
       ) : null}
     </main>
   );
+}
+
+function parseDockerShells(input: string): string[] {
+  return input
+    .split(/[\n,]/gu)
+    .map((shell) => shell.trim())
+    .filter(Boolean);
 }
 
 function pathContains(containerPath: string, candidatePath: string): boolean {

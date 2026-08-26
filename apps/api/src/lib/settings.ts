@@ -1,4 +1,4 @@
-import type { ModelProviderSettingsRecord, SigmaConfig } from "@sigmaos/shared";
+import type { DockerConfig, DockerSettingsRecord, ModelProviderSettingsRecord, SigmaConfig } from "@sigmaos/shared";
 import { defaultPiToolPolicySettings } from "@sigmaos/db";
 
 export function defaultModelProviderSettings(config: SigmaConfig): ModelProviderSettingsRecord {
@@ -44,6 +44,35 @@ export function normalizeOptionalText(value: string | null | undefined): string 
 
 export function toPublicPiToolPolicySettings(settings = defaultPiToolPolicySettings()) {
   return settings;
+}
+
+export function defaultDockerSettings(config: SigmaConfig): DockerSettingsRecord {
+  return {
+    ...config.docker,
+    updatedAt: new Date(0).toISOString()
+  };
+}
+
+export function toPublicDockerSettings(settings: DockerSettingsRecord): DockerSettingsRecord {
+  return settings;
+}
+
+export function dockerSettingsToConfig(settings: DockerSettingsRecord): DockerConfig {
+  return {
+    enabled: settings.enabled,
+    socketPath: settings.socketPath,
+    composeCommand: settings.composeCommand,
+    operationTimeoutMs: settings.operationTimeoutMs,
+    consoleShells: settings.consoleShells,
+    composeRoots: settings.composeRoots
+  };
+}
+
+export function effectiveDockerConfig(config: SigmaConfig, settings: DockerSettingsRecord | null): SigmaConfig {
+  return {
+    ...config,
+    docker: settings ? dockerSettingsToConfig(settings) : config.docker
+  };
 }
 
 function modelProviderLabel(providerName: string): string {

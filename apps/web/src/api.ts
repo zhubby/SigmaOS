@@ -2,6 +2,7 @@ import type {
   DockerOperationAction,
   DockerOperationRecord,
   DockerOperationTargetType,
+  DockerSettingsRecord,
   DockerSummary as PublicDockerSummary,
   PublicSystemInfo
 } from "@sigmaos/shared";
@@ -217,6 +218,8 @@ export interface DockerConsoleSession {
   websocketUrl: string;
 }
 
+export type DockerSettings = DockerSettingsRecord;
+
 export const MAX_EDIT_TEXT_BYTES = 1024 * 1024;
 
 export async function getRoots(): Promise<NasRoot[]> {
@@ -245,6 +248,13 @@ export async function getDockerSummary(): Promise<DockerSummary> {
   await ensureOk(response);
   const body = (await response.json()) as { summary: DockerSummary };
   return body.summary;
+}
+
+export async function getDockerSettings(): Promise<DockerSettings> {
+  const response = await fetch("/api/settings/docker");
+  await ensureOk(response);
+  const body = (await response.json()) as { settings: DockerSettings };
+  return body.settings;
 }
 
 export async function getDockerContainerLogs(containerId: string, tail = 200): Promise<string> {
@@ -299,6 +309,19 @@ export async function createDockerConsoleSession(operationId: string): Promise<D
   await ensureOk(response);
   const body = (await response.json()) as { consoleSession: DockerConsoleSession };
   return body.consoleSession;
+}
+
+export async function saveDockerSettings(input: Omit<DockerSettings, "updatedAt">): Promise<DockerSettings> {
+  const response = await fetch("/api/settings/docker", {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(input)
+  });
+  await ensureOk(response);
+  const body = (await response.json()) as { settings: DockerSettings };
+  return body.settings;
 }
 
 export async function saveModelProviderSettings(

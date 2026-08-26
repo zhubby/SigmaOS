@@ -69,6 +69,12 @@ export interface DockerConfig {
   composeRoots: DockerComposeRootConfig[];
 }
 
+export interface DockerSettingsRecord extends DockerConfig {
+  updatedAt: string;
+}
+
+export type PublicDockerSettings = DockerSettingsRecord;
+
 export interface SigmaConfig {
   dataDir: string;
   databasePath: string;
