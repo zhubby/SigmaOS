@@ -325,6 +325,57 @@
   min-width: 0;
 }
 
+.file-row > .file-column-sort {
+  overflow: visible;
+}
+
+.file-sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  height: 26px;
+  margin-left: -7px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: 1;
+  text-transform: inherit;
+  transition:
+    color 140ms ease,
+    background 140ms ease,
+    border-color 140ms ease;
+}
+
+.file-sort-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-sort-button svg {
+  flex: 0 0 auto;
+}
+
+.file-column-sort[aria-sort="ascending"] .file-sort-button,
+.file-column-sort[aria-sort="descending"] .file-sort-button {
+  color: var(--text);
+}
+
+.file-sort-button:hover,
+.file-sort-button:focus-visible {
+  color: var(--text);
+  border-color: var(--line-soft);
+  background: var(--surface-hover);
+}
+
 .workspace-grid.has-preview:not(.is-preview-collapsed) .file-row {
   grid-template-columns: minmax(0, 1fr) 78px 74px 66px;
 }

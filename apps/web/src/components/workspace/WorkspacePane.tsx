@@ -22,7 +22,7 @@ import type { DockerOperation, FileEntry, FileListing, FileMeta, FileOperation, 
 import { describeFileVisual } from "../../file-type-utils.js";
 import { formatBytes, formatDate, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
-import { sortEntriesByModifiedAt, type FileSortDirection } from "../../lib/file-listing-sort.js";
+import { sortEntries, type FileSortDirection, type FileSortKey, type FileSortState } from "../../lib/file-listing-sort.js";
 import { ActivityMenu } from "../activity/ActivityMenu.js";
 import { CustomSelect } from "../common/CustomSelect.js";
 import { FileTypeIcon } from "../file/FileTypeIcon.js";
@@ -57,6 +57,28 @@ const WORKSPACE_PANELS = [
   shortLabelKey: string;
   Icon: LucideIcon;
 }>;
+
+function nextFileSort(current: FileSortState, key: FileSortKey): FileSortState {
+  if (current.key !== key) {
+    return { key, direction: "desc" };
+  }
+
+  return { key, direction: current.direction === "desc" ? "asc" : "desc" };
+}
+
+function fileSortAria(sort: FileSortState, key: FileSortKey): "ascending" | "descending" | "none" {
+  if (sort.key !== key) {
+    return "none";
+  }
+
+  return sort.direction === "desc" ? "descending" : "ascending";
+}
+
+function SortDirectionIcon({ direction }: { direction: FileSortDirection }) {
+  const Icon = direction === "desc" ? ArrowDown : ArrowUp;
+
+  return <Icon aria-hidden="true" size={12} />;
+}
 
 export function WorkspacePane({
   active,
@@ -146,9 +168,9 @@ export function WorkspacePane({
   const [operationError, setOperationError] = useState<string | null>(null);
   const [operationSubmitting, setOperationSubmitting] = useState(false);
   const [activePanel, setActivePanel] = useState<WorkspacePanelId>("files");
-  const [modifiedSortDirection, setModifiedSortDirection] = useState<FileSortDirection>("desc");
+  const [fileSort, setFileSort] = useState<FileSortState>({ key: "modifiedAt", direction: "desc" });
   const displayTitle = displayPath === "." ? t("common.root") : displayPath;
-  const sortedEntries = useMemo(() => sortEntriesByModifiedAt(entries, modifiedSortDirection), [entries, modifiedSortDirection]);
+  const sortedEntries = useMemo(() => sortEntries(entries, fileSort), [entries, fileSort]);
   const gitChangeCount = gitStatus
     ? gitStatus.summary.staged + gitStatus.summary.modified + gitStatus.summary.untracked + gitStatus.summary.conflicted
     : 0;
@@ -399,17 +421,28 @@ export function WorkspacePane({
                     <div className="file-row file-row-head" role="row">
                       <span role="columnheader">{t("workspace.table.name")}</span>
                       <span role="columnheader">{t("workspace.table.type")}</span>
-                      <span role="columnheader">{t("workspace.table.size")}</span>
-                      <span className="file-column-sort" role="columnheader" aria-sort={modifiedSortDirection === "desc" ? "descending" : "ascending"}>
+                      <span className="file-column-sort" role="columnheader" aria-sort={fileSortAria(fileSort, "sizeBytes")}>
                         <button
                           type="button"
                           className="file-sort-button"
-                          onClick={() => setModifiedSortDirection((current) => (current === "desc" ? "asc" : "desc"))}
+                          onClick={() => setFileSort((current) => nextFileSort(current, "sizeBytes"))}
+                          aria-label={t("workspace.table.size")}
+                          title={t("workspace.table.size")}
+                        >
+                          <span>{t("workspace.table.size")}</span>
+                          {fileSort.key === "sizeBytes" ? <SortDirectionIcon direction={fileSort.direction} /> : null}
+                        </button>
+                      </span>
+                      <span className="file-column-sort" role="columnheader" aria-sort={fileSortAria(fileSort, "modifiedAt")}>
+                        <button
+                          type="button"
+                          className="file-sort-button"
+                          onClick={() => setFileSort((current) => nextFileSort(current, "modifiedAt"))}
                           aria-label={t("workspace.table.modified")}
                           title={t("workspace.table.modified")}
                         >
                           <span>{t("workspace.table.modified")}</span>
-                          {modifiedSortDirection === "desc" ? <ArrowDown aria-hidden="true" size={12} /> : <ArrowUp aria-hidden="true" size={12} />}
+                          {fileSort.key === "modifiedAt" ? <SortDirectionIcon direction={fileSort.direction} /> : null}
                         </button>
                       </span>
                       <span role="columnheader" aria-label={t("workspace.table.actions")} />

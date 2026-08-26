@@ -1,14 +1,20 @@
 import type { FileEntry } from "../api.js";
 
 export type FileSortDirection = "asc" | "desc";
+export type FileSortKey = "modifiedAt" | "sizeBytes";
 
-export function sortEntriesByModifiedAt(entries: FileEntry[], direction: FileSortDirection = "desc"): FileEntry[] {
-  const directionFactor = direction === "asc" ? 1 : -1;
+export interface FileSortState {
+  key: FileSortKey;
+  direction: FileSortDirection;
+}
+
+export function sortEntries(entries: FileEntry[], sort: FileSortState = { key: "modifiedAt", direction: "desc" }): FileEntry[] {
+  const directionFactor = sort.direction === "asc" ? 1 : -1;
 
   return [...entries].sort((left, right) => {
-    const modifiedComparison = compareStrings(left.modifiedAt, right.modifiedAt);
-    if (modifiedComparison !== 0) {
-      return modifiedComparison * directionFactor;
+    const primaryComparison = compareEntriesByKey(left, right, sort.key);
+    if (primaryComparison !== 0) {
+      return primaryComparison * directionFactor;
     }
 
     const nameComparison = compareStrings(left.name, right.name);
@@ -18,6 +24,26 @@ export function sortEntriesByModifiedAt(entries: FileEntry[], direction: FileSor
 
     return compareStrings(left.path, right.path);
   });
+}
+
+export function sortEntriesByModifiedAt(entries: FileEntry[], direction: FileSortDirection = "desc"): FileEntry[] {
+  return sortEntries(entries, { key: "modifiedAt", direction });
+}
+
+function compareEntriesByKey(left: FileEntry, right: FileEntry, key: FileSortKey): number {
+  if (key === "sizeBytes") {
+    return compareNumbers(getSortableSizeBytes(left), getSortableSizeBytes(right));
+  }
+
+  return compareStrings(left.modifiedAt, right.modifiedAt);
+}
+
+function getSortableSizeBytes(entry: FileEntry): number {
+  return entry.kind === "directory" ? 0 : entry.sizeBytes;
+}
+
+function compareNumbers(left: number, right: number): number {
+  return left - right;
 }
 
 function compareStrings(left: string, right: string): number {
