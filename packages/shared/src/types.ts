@@ -26,6 +26,30 @@ export type FileMutationOperation =
   | "restore"
   | "edit";
 
+export type GitFileStatus = "tracked" | "staged" | "modified" | "untracked" | "conflicted";
+
+export interface GitStatusSummary {
+  tracked: number;
+  staged: number;
+  modified: number;
+  untracked: number;
+  conflicted: number;
+}
+
+export interface GitDirectoryStatus {
+  repositoryName: string;
+  repositoryPath: string;
+  currentPath: string;
+  branch: string | null;
+  headSha: string | null;
+  detached: boolean;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  dirty: boolean;
+  summary: GitStatusSummary;
+}
+
 export type PendingApprovalKind = "file_operation" | "pi_tool_call" | "docker_operation";
 
 export type PiToolName = "read" | "bash" | "edit" | "write" | "grep" | "find" | "ls";

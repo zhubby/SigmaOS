@@ -31,7 +31,7 @@ install -d "$OUT_DIR"
 mmdebstrap \
   --architectures="$ARCH" \
   --variant=minbase \
-  --include=systemd-sysv,ca-certificates,curl,nodejs,npm,sqlite3,rsync,tesseract-ocr,poppler-utils,ffmpeg,imagemagick,smartmontools \
+  --include=systemd-sysv,ca-certificates,curl,nodejs,npm,sqlite3,git,rsync,tesseract-ocr,poppler-utils,ffmpeg,imagemagick,smartmontools \
   "$SUITE" "$ROOTFS"
 
 cp "$DEB_PATH" "$ROOTFS/tmp/sigmaos.deb"

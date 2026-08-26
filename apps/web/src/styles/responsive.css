@@ -261,6 +261,16 @@
     align-items: end;
   }
 
+  .files-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .files-navigation-bar,
+  .files-navigation-bar.has-root-switcher {
+    grid-template-columns: 1fr;
+  }
+
   .root-control,
   .breadcrumbs,
   .search {
@@ -496,12 +506,12 @@
     font-size: 18px;
   }
 
-  .management-actions button {
+  .management-actions > button {
     width: 34px;
     padding: 0;
   }
 
-  .management-actions button span,
+  .management-actions > button span,
   .management-row-action span {
     display: none;
   }
