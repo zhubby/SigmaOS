@@ -125,7 +125,11 @@
 }
 
 .breadcrumbs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   flex: 0 0 auto;
+  min-width: 0;
   max-width: 170px;
   height: 30px;
   padding: 0 9px;
@@ -134,8 +138,6 @@
   background: transparent;
   cursor: pointer;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .breadcrumbs button::after {
@@ -147,6 +149,13 @@
 .breadcrumbs button:last-child::after {
   content: "";
   margin: 0;
+}
+
+.breadcrumbs button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .breadcrumbs button:hover {

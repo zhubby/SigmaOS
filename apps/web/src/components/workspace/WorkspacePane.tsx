@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   Container,
   Files,
+  HardDrive,
   Home,
   MonitorCog,
   PanelRightClose,
@@ -284,11 +285,12 @@ export function WorkspacePane({
 
                 <nav className="breadcrumbs" aria-label={t("workspace.breadcrumbs")}>
                   <button type="button" onClick={() => onGoToBreadcrumb(-1)}>
-                    {t("common.root")}
+                    <HardDrive aria-hidden="true" size={14} />
+                    <span>{t("common.root")}</span>
                   </button>
                   {breadcrumbs.map((crumb, index) => (
                     <button key={`${crumb}-${index}`} type="button" onClick={() => onGoToBreadcrumb(index)}>
-                      {crumb}
+                      <span>{crumb}</span>
                     </button>
                   ))}
                 </nav>
