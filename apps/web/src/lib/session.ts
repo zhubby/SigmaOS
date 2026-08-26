@@ -1,8 +1,17 @@
-import { getFiles, updateSessionPath, type FileEntry, type Session, type SessionSummary } from "../api.js";
+import {
+  getFiles,
+  searchFiles,
+  updateSessionPath,
+  type FileEntry,
+  type FileListing,
+  type Session,
+  type SessionSummary
+} from "../api.js";
 
 export interface LoadedSessionEntries {
   session: Session | SessionSummary;
   entries: FileEntry[];
+  git: FileListing["git"];
   didResetPath: boolean;
 }
 
@@ -11,9 +20,11 @@ export async function loadEntriesForSession(
   targetSession: Session | SessionSummary
 ): Promise<LoadedSessionEntries> {
   try {
+    const listing = await getFiles(rootId, targetSession.currentPath);
     return {
       session: targetSession,
-      entries: await getFiles(rootId, targetSession.currentPath),
+      entries: listing.entries,
+      git: listing.git,
       didResetPath: false
     };
   } catch (error) {
@@ -22,12 +33,27 @@ export async function loadEntriesForSession(
     }
 
     const resetSession = await updateSessionPath(targetSession.id, ".");
+    const listing = await getFiles(rootId, resetSession.currentPath);
     return {
       session: resetSession,
-      entries: await getFiles(rootId, resetSession.currentPath),
+      entries: listing.entries,
+      git: listing.git,
       didResetPath: true
     };
   }
+}
+
+export async function loadFileListingForView(rootId: string, currentPath: string, query: string): Promise<FileListing> {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) {
+    return getFiles(rootId, currentPath);
+  }
+
+  const result = await searchFiles(rootId, currentPath, trimmedQuery);
+  return {
+    entries: result.files,
+    git: result.git
+  };
 }
 
 export function isRecoverablePathError(error: unknown): boolean {

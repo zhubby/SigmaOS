@@ -21,6 +21,7 @@ import {
   parseRangeHeader,
   safeQueryIndex
 } from "../lib/files.js";
+import { getDirectoryGitView } from "../lib/git.js";
 import { resolveRoot } from "../lib/roots.js";
 
 const MAX_EDIT_TEXT_BYTES = 1024 * 1024;
@@ -36,10 +37,12 @@ export function registerFileRoutes(server: FastifyInstance, { db }: ApiRouteCont
     }
 
     const entries = await listDir(root, request.query.path ?? ".");
+    const gitView = await getDirectoryGitView(root.path, request.query.path ?? ".", entries);
     reply.send({
       root,
       path: request.query.path ?? ".",
-      entries
+      entries: gitView.entries,
+      git: gitView.git
     });
   });
 
@@ -305,12 +308,14 @@ export function registerFileRoutes(server: FastifyInstance, { db }: ApiRouteCont
           path: request.query.path ?? ".",
           limit: 50
         });
+    const gitView = await getDirectoryGitView(root.path, request.query.path ?? ".", files);
 
     reply.send({
       root,
       query,
       indexed,
-      files
+      files: gitView.entries,
+      git: gitView.git
     });
   });
 }

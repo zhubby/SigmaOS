@@ -244,8 +244,14 @@
 .panel-heading dl {
   display: flex;
   flex: 0 0 auto;
+  min-width: 0;
   gap: 10px;
   margin: 0;
+  justify-content: flex-end;
+}
+
+.panel-heading dl > div {
+  min-width: 0;
 }
 
 .panel-heading dt {
@@ -260,6 +266,10 @@
   color: var(--text);
   font-size: 15px;
   font-weight: 800;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-list {
@@ -275,7 +285,7 @@
   width: 100%;
   min-height: 42px;
   padding: 0 12px;
-  border-bottom: 1px solid rgb(255 255 255 / 4%);
+  border-bottom: 1px solid var(--table-border);
   color: var(--muted);
   background: transparent;
   text-align: left;
@@ -301,12 +311,18 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  min-height: 34px;
+  min-height: 36px;
   color: var(--muted-2);
-  background: #222530;
+  background: var(--row-head-bg);
   font-size: 10.5px;
   font-weight: 800;
   text-transform: uppercase;
+}
+
+.file-row-head > span {
+  display: flex;
+  align-items: center;
+  min-width: 0;
 }
 
 .workspace-grid.has-preview:not(.is-preview-collapsed) .file-row {
@@ -415,6 +431,54 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.file-name-text {
+  min-width: 0;
+}
+
+.git-file-status {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  color: var(--muted-2);
+  background: rgb(255 255 255 / 4%);
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+  overflow: visible;
+}
+
+.git-file-status-tracked {
+  color: var(--muted-2);
+}
+
+.git-file-status-staged {
+  color: #f2c16b;
+  border-color: rgb(242 193 107 / 30%);
+  background: rgb(242 193 107 / 8%);
+}
+
+.git-file-status-modified {
+  color: #ffcf7a;
+  border-color: rgb(255 207 122 / 32%);
+  background: rgb(255 207 122 / 9%);
+}
+
+.git-file-status-untracked {
+  color: #8ddc9a;
+  border-color: rgb(141 220 154 / 30%);
+  background: rgb(141 220 154 / 8%);
+}
+
+.git-file-status-conflicted {
+  color: #ffb3b6;
+  border-color: rgb(255 179 182 / 34%);
+  background: rgb(255 179 182 / 9%);
 }
 
 .file-row-actions {
@@ -735,7 +799,7 @@
   min-width: 0;
 }
 
-.management-actions button,
+.management-actions > button,
 .management-row-action {
   display: inline-flex;
   align-items: center;
@@ -751,11 +815,11 @@
   white-space: nowrap;
 }
 
-.management-actions button {
+.management-actions > button {
   padding: 0 10px;
 }
 
-.management-actions button:disabled,
+.management-actions > button:disabled,
 .management-row-action:disabled {
   opacity: 0.64;
 }
@@ -796,6 +860,87 @@
 .management-workload em[data-state="offline"] {
   color: var(--danger-text);
   background: var(--danger-bg);
+}
+
+.files-header {
+  grid-template-rows: auto auto;
+}
+
+.files-title-block h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files-title-block p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files-header-actions {
+  flex-wrap: wrap;
+}
+
+.management-actions.files-header-actions {
+  overflow: visible;
+}
+
+.files-header-actions .files-header-button,
+.files-header-actions .activity-menu-button {
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+}
+
+.files-git-status {
+  justify-content: flex-start;
+  gap: 6px;
+  max-width: min(520px, 48vw);
+}
+
+.files-git-status svg {
+  flex: 0 0 auto;
+}
+
+.files-git-status span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.files-navigation-bar {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 280px);
+  align-items: end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.files-navigation-bar.has-root-switcher {
+  grid-template-columns: minmax(170px, 230px) minmax(0, 1fr) minmax(190px, 280px);
+}
+
+.files-navigation-bar .root-control .custom-select-trigger,
+.files-navigation-bar .search input {
+  height: 34px;
+}
+
+.files-navigation-bar .search svg {
+  top: 8px;
+}
+
+.files-list-header {
+  min-height: 58px;
+}
+
+.files-list-summary {
+  max-width: 520px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .management-body {

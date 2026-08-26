@@ -121,6 +121,10 @@ export const en = {
     searchAria: "Search filenames",
     fileBrowser: "File browser",
     files: "Files",
+    filesEyebrow: "Files",
+    filesPathDescription: "{{root}} · {{path}}",
+    filesListTitle: "Directory contents",
+    filesListDescription: "{{total}} items · {{root}}",
     items: "Items",
     safe: "Safe",
     table: {
@@ -130,6 +134,27 @@ export const en = {
       size: "Size",
       modified: "Modified",
       actions: "Actions"
+    },
+    git: {
+      label: "Git",
+      repository: "Repository",
+      branch: "Branch",
+      upstream: "Upstream",
+      clean: "Clean",
+      dirty: "{{count}} changed",
+      dirtyShort: "{{count}} chg",
+      ahead: "{{count}} ahead",
+      aheadShort: "+{{count}}",
+      behind: "{{count}} behind",
+      behindShort: "-{{count}}",
+      detached: "detached",
+      statuses: {
+        tracked: "Tracked",
+        staged: "Staged",
+        modified: "Modified",
+        untracked: "Untracked",
+        conflicted: "Conflicted"
+      }
     },
     preview: "Preview",
     selectFile: "Select a file",
@@ -852,6 +877,10 @@ export const zhCN = {
     searchAria: "搜索文件名",
     fileBrowser: "文件浏览器",
     files: "文件",
+    filesEyebrow: "文件",
+    filesPathDescription: "{{root}} · {{path}}",
+    filesListTitle: "目录内容",
+    filesListDescription: "{{total}} 项 · {{root}}",
     items: "项目",
     safe: "安全",
     table: {
@@ -861,6 +890,27 @@ export const zhCN = {
       size: "大小",
       modified: "修改时间",
       actions: "操作"
+    },
+    git: {
+      label: "Git",
+      repository: "仓库",
+      branch: "分支",
+      upstream: "上游",
+      clean: "干净",
+      dirty: "{{count}} 项变更",
+      dirtyShort: "{{count}} 改",
+      ahead: "领先 {{count}}",
+      aheadShort: "+{{count}}",
+      behind: "落后 {{count}}",
+      behindShort: "-{{count}}",
+      detached: "detached",
+      statuses: {
+        tracked: "已跟踪",
+        staged: "已暂存",
+        modified: "已修改",
+        untracked: "未跟踪",
+        conflicted: "有冲突"
+      }
     },
     preview: "预览",
     selectFile: "选择文件",

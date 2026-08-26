@@ -1,6 +1,8 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   appendEvent,
@@ -28,6 +30,8 @@ import type { DockerComposeProjectSummary, DockerContainerSummary, DockerOperati
 import type { DockerComposeRuntime } from "./lib/docker-compose.js";
 import type { DockerEngineRuntime, DockerExecStream } from "./lib/docker-client.js";
 import { buildServer } from "./server.js";
+
+const execFileAsync = promisify(execFile);
 
 let tempDir: string;
 let rootDir: string;
@@ -71,6 +75,7 @@ describe("API server", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
+      git: null,
       entries: [
         {
           name: "hello.txt",
@@ -81,6 +86,146 @@ describe("API server", () => {
     });
 
     await server.close();
+  });
+
+  it("lists Git status for files inside a repository", async () => {
+    await git(["init", "-b", "main"]);
+    await writeFile(path.join(rootDir, "clean.txt"), "clean");
+    await writeFile(path.join(rootDir, "tracked.txt"), "tracked");
+    await git(["add", "."]);
+    await gitCommit("initial");
+    await writeFile(path.join(rootDir, "tracked.txt"), "changed");
+    await writeFile(path.join(rootDir, "new.txt"), "new");
+
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/files?rootId=local&path=."
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      git: {
+        repositoryName: "root",
+        repositoryPath: ".",
+        currentPath: ".",
+        branch: "main",
+        dirty: true,
+        summary: {
+          modified: 1,
+          untracked: 1
+        }
+      },
+      entries: expect.arrayContaining([
+        expect.objectContaining({
+          name: "clean.txt",
+          gitStatus: "tracked"
+        }),
+        expect.objectContaining({
+          name: "tracked.txt",
+          gitStatus: "modified"
+        }),
+        expect.objectContaining({
+          name: "new.txt",
+          gitStatus: "untracked"
+        })
+      ])
+    });
+
+    await server.close();
+  });
+
+  it("returns Git status for search results inside a repository", async () => {
+    await git(["init", "-b", "main"]);
+    await writeFile(path.join(rootDir, "tracked-match.txt"), "tracked");
+    await git(["add", "."]);
+    await gitCommit("initial");
+    await writeFile(path.join(rootDir, "tracked-match.txt"), "changed");
+
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/search?rootId=local&path=.&q=match"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      git: {
+        repositoryName: "root",
+        branch: "main",
+        dirty: true,
+        summary: {
+          modified: 1
+        }
+      },
+      files: [
+        expect.objectContaining({
+          name: "tracked-match.txt",
+          gitStatus: "modified"
+        })
+      ]
+    });
+
+    await server.close();
+  });
+
+  it("keeps file listing available when Git metadata is invalid", async () => {
+    await mkdir(path.join(rootDir, "broken"));
+    await writeFile(path.join(rootDir, "broken", ".git"), "gitdir: /missing/sigmaos/repo");
+    await writeFile(path.join(rootDir, "broken", "visible.txt"), "visible");
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/files?rootId=local&path=broken"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      git: null,
+      entries: expect.arrayContaining([
+        expect.objectContaining({
+          name: ".git"
+        }),
+        expect.objectContaining({
+          name: "visible.txt"
+        })
+      ])
+    });
+
+    await server.close();
+  });
+
+  it("keeps file listing available when Git status times out", async () => {
+    await mkdir(path.join(rootDir, ".git"));
+    await writeFile(path.join(rootDir, "visible.txt"), "visible");
+    const fakeBinPath = path.join(tempDir, "fake-bin");
+    await mkdir(fakeBinPath);
+    const fakeGitPath = path.join(fakeBinPath, "git");
+    await writeFile(fakeGitPath, `#!/bin/sh\nexec "${process.execPath}" -e "setTimeout(() => {}, 10000)"\n`);
+    await chmod(fakeGitPath, 0o755);
+
+    const originalPath = process.env.PATH;
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    try {
+      process.env.PATH = fakeBinPath;
+      const response = await server.inject({
+        method: "GET",
+        url: "/api/files?rootId=local&path=."
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        git: null,
+        entries: expect.arrayContaining([
+          expect.objectContaining({
+            name: "visible.txt"
+          })
+        ])
+      });
+    } finally {
+      process.env.PATH = originalPath;
+      await server.close();
+    }
   });
 
   it("reports missing file paths without leaking an internal error", async () => {
@@ -1144,6 +1289,7 @@ describe("API server", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
+      git: null,
       files: [
         {
           name: "readme.txt",
@@ -1572,4 +1718,18 @@ class FakeDockerCompose implements DockerComposeRuntime {
     this.calls.push(`${proposal.action}:${proposal.composeProjectId}`);
     return { output: "done" };
   }
+}
+
+async function git(args: string[], cwd = rootDir): Promise<void> {
+  await execFileAsync("git", args, {
+    cwd,
+    env: {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: "0"
+    }
+  });
+}
+
+async function gitCommit(message: string, cwd = rootDir): Promise<void> {
+  await git(["-c", "user.name=SigmaOS", "-c", "user.email=sigmaos@example.test", "commit", "-m", message], cwd);
 }

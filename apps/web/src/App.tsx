@@ -36,6 +36,7 @@ import {
   type DockerOperation,
   type DockerSettings,
   type SaveEditableTextResult,
+  type FileListing,
   type ModelProviderSettings,
   type NasRoot,
   type PendingApproval,
@@ -92,7 +93,7 @@ import {
   type ResolvedTheme,
   type ThemePreference
 } from "./lib/theme-settings.js";
-import { loadEntriesForSession } from "./lib/session.js";
+import { loadEntriesForSession, loadFileListingForView } from "./lib/session.js";
 
 type MobileView = "chat" | "workspace";
 
@@ -110,6 +111,7 @@ export function App() {
   const [operationsReady, setOperationsReady] = useState(false);
   const [currentPath, setCurrentPath] = useState(".");
   const [entries, setEntries] = useState<FileEntry[]>([]);
+  const [gitStatus, setGitStatus] = useState<FileListing["git"]>(null);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [previewMeta, setPreviewMeta] = useState<FileMeta | null>(null);
   const [textPreview, setTextPreview] = useState<TextPreview | null>(null);
@@ -151,6 +153,8 @@ export function App() {
   const [codeFontSettings, setCodeFontSettings] = useState<CodeFontSettings>(() => readStoredCodeFontSettings());
   const seenEvents = useRef(new Set<number>());
   const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const fileListingRequestId = useRef(0);
+  const activeSearchQueryRef = useRef("");
 
   const selectedRoot = roots.find((root) => root.id === selectedRootId);
   const hasRootSwitcher = roots.length > 1;
@@ -160,7 +164,6 @@ export function App() {
   const resolvedLocale = resolveSupportedLocale(i18n.resolvedLanguage ?? i18n.language);
   const resolvedTheme = resolveThemePreference(themePreference, systemTheme);
   const displayPath = currentPath;
-  const safeEntries = entries.filter((entry) => entry.isSafe).length;
   const breadcrumbs = useMemo(() => (currentPath === "." ? [] : currentPath.split("/").filter(Boolean)), [currentPath]);
   const appStyle = useMemo(
     () =>
@@ -198,9 +201,11 @@ export function App() {
 
     let active = true;
     const rootId = selectedRootId;
+    const fileRequestId = beginFileListingRequest();
     async function loadRootWorkspace() {
       setStatus("loading");
       setError(null);
+      activeSearchQueryRef.current = "";
       const nextSessions = await getSessions(rootId);
       let nextSession: Session | SessionSummary | null = nextSessions[0] ?? null;
       let nextSessionList = nextSessions;
@@ -216,7 +221,7 @@ export function App() {
       }
       const nextTranscript = await getTranscript(loaded.session.id);
 
-      if (!active) {
+      if (!active || !isCurrentFileListingRequest(fileRequestId)) {
         return;
       }
 
@@ -225,7 +230,10 @@ export function App() {
       setSession(loaded.session);
       setActiveSessionId(loaded.session.id);
       setCurrentPath(loaded.session.currentPath);
-      setEntries(loaded.entries);
+      commitFileListing(fileRequestId, {
+        entries: loaded.entries,
+        git: loaded.git
+      });
       setTranscript(nextTranscript);
       setSelectedFilePath(null);
       setPreviewMeta(null);
@@ -537,14 +545,24 @@ export function App() {
       setSelectedFilePath(null);
       setPreviewMeta(null);
       setTextPreview(null);
+      setGitStatus(null);
+      activeSearchQueryRef.current = "";
+      setSearchQuery("");
+      const fileRequestId = beginFileListingRequest();
       setPreviewCollapsed(false);
       const [loaded, nextTranscript] = await Promise.all([
         loadEntriesForSession(nextSession.rootId, nextSession),
         getTranscript(nextSession.id)
       ]);
+      if (!isCurrentFileListingRequest(fileRequestId)) {
+        return;
+      }
       setSession(loaded.session);
       setCurrentPath(loaded.session.currentPath);
-      setEntries(loaded.entries);
+      commitFileListing(fileRequestId, {
+        entries: loaded.entries,
+        git: loaded.git
+      });
       setTranscript(nextTranscript);
       if (loaded.didResetPath) {
         void reloadSessions();
@@ -585,14 +603,24 @@ export function App() {
     setPreviewMeta(null);
     setTextPreview(null);
     setPreviewError(null);
+    setGitStatus(null);
+    activeSearchQueryRef.current = "";
+    setSearchQuery("");
+    const fileRequestId = beginFileListingRequest();
     setPreviewCollapsed(false);
     const [loaded, nextTranscript] = await Promise.all([
       loadEntriesForSession(nextSession.rootId, nextSession),
       getTranscript(nextSession.id)
     ]);
+    if (!isCurrentFileListingRequest(fileRequestId)) {
+      return;
+    }
     setSession(loaded.session);
     setCurrentPath(loaded.session.currentPath);
-    setEntries(loaded.entries);
+    commitFileListing(fileRequestId, {
+      entries: loaded.entries,
+      git: loaded.git
+    });
     setTranscript(nextTranscript);
   }
 
@@ -626,20 +654,38 @@ export function App() {
     if (!selectedRootId) {
       return;
     }
-    setStatus("loading");
-    setEntries(await getFiles(selectedRootId, currentPath));
-    setStatus("ready");
+    setStatus(activeSearchQueryRef.current ? "searching" : "loading");
+    const committed = await refreshCurrentFileListing();
+    if (committed) {
+      setStatus("ready");
+    }
+  }
+
+  async function refreshCurrentFileListing(query = activeSearchQueryRef.current): Promise<boolean> {
+    if (!selectedRootId) {
+      return false;
+    }
+    const fileRequestId = beginFileListingRequest();
+    const listing = await loadFileListingForView(selectedRootId, currentPath, query);
+    return commitFileListing(fileRequestId, listing);
   }
 
   async function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedRootId || !searchQuery.trim()) {
+    const query = searchQuery.trim();
+    if (!selectedRootId || !query) {
+      activeSearchQueryRef.current = "";
       await refreshFiles();
       return;
     }
 
     setStatus("searching");
-    setEntries(await searchFiles(selectedRootId, currentPath, searchQuery.trim()));
+    activeSearchQueryRef.current = query;
+    const fileRequestId = beginFileListingRequest();
+    const result = await searchFiles(selectedRootId, currentPath, query);
+    if (!commitFileListing(fileRequestId, { entries: result.files, git: result.git })) {
+      return;
+    }
     setSelectedFilePath(null);
     setPreviewCollapsed(false);
     setStatus("ready");
@@ -652,15 +698,20 @@ export function App() {
     setStatus("loading");
     setError(null);
     setSearchQuery("");
+    activeSearchQueryRef.current = "";
     setSelectedFilePath(null);
     setPreviewMeta(null);
     setTextPreview(null);
     setPreviewCollapsed(false);
-    const [nextEntries, updatedSession] = await Promise.all([
+    const fileRequestId = beginFileListingRequest();
+    const [nextListing, updatedSession] = await Promise.all([
       getFiles(selectedRootId, pathname),
       session ? updateSessionPath(session.id, pathname) : Promise.resolve(null)
     ]);
-    setEntries(nextEntries);
+    if (!isCurrentFileListingRequest(fileRequestId)) {
+      return;
+    }
+    commitFileListing(fileRequestId, nextListing);
     setCurrentPath(pathname);
     if (updatedSession) {
       setSession(updatedSession);
@@ -782,6 +833,9 @@ export function App() {
       )
     );
     setOperations((current) => [result.operation, ...current.filter((operation) => operation.id !== result.operation.id)].slice(0, 100));
+    void refreshCurrentFileListing().catch((nextError: unknown) => {
+      setError(toErrorMessage(nextError));
+    });
   }
 
   async function requestFileRename(entry: FileEntry, targetName: string) {
@@ -860,8 +914,30 @@ export function App() {
   }
 
   function selectRoot(rootId: string) {
+    beginFileListingRequest();
+    activeSearchQueryRef.current = "";
+    setSearchQuery("");
     setSelectedRootId(rootId);
     setCurrentPath(".");
+    setGitStatus(null);
+  }
+
+  function beginFileListingRequest(): number {
+    fileListingRequestId.current += 1;
+    return fileListingRequestId.current;
+  }
+
+  function isCurrentFileListingRequest(requestId: number): boolean {
+    return fileListingRequestId.current === requestId;
+  }
+
+  function commitFileListing(requestId: number, listing: FileListing): boolean {
+    if (!isCurrentFileListingRequest(requestId)) {
+      return false;
+    }
+    setEntries(listing.entries);
+    setGitStatus(listing.git);
+    return true;
   }
 
   function openEntry(entry: FileEntry) {
@@ -1014,7 +1090,7 @@ export function App() {
         displayPath={displayPath}
         breadcrumbs={breadcrumbs}
         entries={entries}
-        safeEntries={safeEntries}
+        gitStatus={gitStatus}
         selectedFilePath={selectedFilePath}
         previewMeta={previewMeta}
         previewLoading={previewLoading}

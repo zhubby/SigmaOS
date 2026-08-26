@@ -3,6 +3,8 @@ import type {
   DockerOperationRecord,
   DockerOperationTargetType,
   DockerSettingsRecord,
+  GitDirectoryStatus,
+  GitFileStatus,
   DockerSummary as PublicDockerSummary,
   PublicSystemInfo
 } from "@sigmaos/shared";
@@ -21,6 +23,17 @@ export interface FileEntry {
   sizeBytes: number;
   modifiedAt: string;
   isSafe: boolean;
+  gitStatus?: GitFileStatus;
+}
+
+export interface FileListing {
+  entries: FileEntry[];
+  git: GitDirectoryStatus | null;
+}
+
+export interface FileSearchResult {
+  files: FileEntry[];
+  git: GitDirectoryStatus | null;
 }
 
 export interface Session {
@@ -417,18 +430,17 @@ export async function getTranscript(sessionId: string): Promise<TranscriptMessag
   return body.transcript;
 }
 
-export async function getFiles(rootId: string, currentPath: string): Promise<FileEntry[]> {
+export async function getFiles(rootId: string, currentPath: string): Promise<FileListing> {
   const params = new URLSearchParams({
     rootId,
     path: currentPath
   });
   const response = await fetch(`/api/files?${params.toString()}`);
   await ensureOk(response);
-  const body = (await response.json()) as { entries: FileEntry[] };
-  return body.entries;
+  return (await response.json()) as FileListing;
 }
 
-export async function searchFiles(rootId: string, currentPath: string, query: string): Promise<FileEntry[]> {
+export async function searchFiles(rootId: string, currentPath: string, query: string): Promise<FileSearchResult> {
   const params = new URLSearchParams({
     rootId,
     path: currentPath,
@@ -436,8 +448,7 @@ export async function searchFiles(rootId: string, currentPath: string, query: st
   });
   const response = await fetch(`/api/search?${params.toString()}`);
   await ensureOk(response);
-  const body = (await response.json()) as { files: FileEntry[] };
-  return body.files;
+  return (await response.json()) as FileSearchResult;
 }
 
 export async function getFileMeta(rootId: string, currentPath: string): Promise<FileMeta> {

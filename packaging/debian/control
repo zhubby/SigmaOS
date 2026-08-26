@@ -9,7 +9,7 @@ Rules-Requires-Root: no
 
 Package: sigmaos
 Architecture: any
-Depends: nodejs (>= 22), sqlite3, adduser, ${misc:Depends}
+Depends: nodejs (>= 22), sqlite3, git, adduser, ${misc:Depends}
 Description: Native Linux NAS appliance with approval-gated AI file operations
  SigmaOS provides a local web UI, API service, agent worker, SQLite FTS
  indexer, and scheduled maintenance tasks for a single-user NAS appliance.

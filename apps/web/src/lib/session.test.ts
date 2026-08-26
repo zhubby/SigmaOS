@@ -1,14 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getFiles, updateSessionPath } from "../api.js";
-import { loadEntriesForSession, sessionTitle } from "./session.js";
-import type { FileEntry, Session, SessionSummary } from "../api.js";
+import { getFiles, searchFiles, updateSessionPath } from "../api.js";
+import { loadEntriesForSession, loadFileListingForView, sessionTitle } from "./session.js";
+import type { FileEntry, FileListing, Session, SessionSummary } from "../api.js";
 
 vi.mock("../api.js", () => ({
   getFiles: vi.fn(),
+  searchFiles: vi.fn(),
   updateSessionPath: vi.fn()
 }));
 
 const mockedGetFiles = vi.mocked(getFiles);
+const mockedSearchFiles = vi.mocked(searchFiles);
 const mockedUpdateSessionPath = vi.mocked(updateSessionPath);
 
 const baseSession: SessionSummary = {
@@ -30,9 +32,30 @@ const fileEntry: FileEntry = {
   isSafe: true
 };
 
+const gitStatus: FileListing["git"] = {
+  repositoryName: "repo",
+  repositoryPath: ".",
+  currentPath: ".",
+  branch: "main",
+  headSha: "abc123",
+  detached: false,
+  upstream: null,
+  ahead: 0,
+  behind: 0,
+  dirty: true,
+  summary: {
+    tracked: 1,
+    staged: 0,
+    modified: 1,
+    untracked: 0,
+    conflicted: 0
+  }
+};
+
 describe("session helpers", () => {
   beforeEach(() => {
     mockedGetFiles.mockReset();
+    mockedSearchFiles.mockReset();
     mockedUpdateSessionPath.mockReset();
   });
 
@@ -51,11 +74,12 @@ describe("session helpers", () => {
   });
 
   it("loads entries for the current session path without resetting", async () => {
-    mockedGetFiles.mockResolvedValueOnce([fileEntry]);
+    mockedGetFiles.mockResolvedValueOnce({ entries: [fileEntry], git: gitStatus });
 
     await expect(loadEntriesForSession("root-1", { ...baseSession, currentPath: "docs" })).resolves.toEqual({
       session: { ...baseSession, currentPath: "docs" },
       entries: [fileEntry],
+      git: gitStatus,
       didResetPath: false
     });
     expect(mockedGetFiles).toHaveBeenCalledWith("root-1", "docs");
@@ -68,12 +92,13 @@ describe("session helpers", () => {
       rootId: "root-1",
       currentPath: "."
     };
-    mockedGetFiles.mockRejectedValueOnce(new Error("Path not found")).mockResolvedValueOnce([fileEntry]);
+    mockedGetFiles.mockRejectedValueOnce(new Error("Path not found")).mockResolvedValueOnce({ entries: [fileEntry], git: gitStatus });
     mockedUpdateSessionPath.mockResolvedValueOnce(resetSession);
 
     await expect(loadEntriesForSession("root-1", { ...baseSession, currentPath: "missing" })).resolves.toEqual({
       session: resetSession,
       entries: [fileEntry],
+      git: gitStatus,
       didResetPath: true
     });
     expect(mockedUpdateSessionPath).toHaveBeenCalledWith("session-1", ".");
@@ -93,5 +118,22 @@ describe("session helpers", () => {
       permissionError
     );
     expect(mockedUpdateSessionPath).not.toHaveBeenCalled();
+  });
+
+  it("loads file listings in the active directory or search mode", async () => {
+    mockedGetFiles.mockResolvedValueOnce({ entries: [fileEntry], git: gitStatus });
+    await expect(loadFileListingForView("root-1", ".", " ")).resolves.toEqual({
+      entries: [fileEntry],
+      git: gitStatus
+    });
+    expect(mockedGetFiles).toHaveBeenCalledWith("root-1", ".");
+    expect(mockedSearchFiles).not.toHaveBeenCalled();
+
+    mockedSearchFiles.mockResolvedValueOnce({ files: [{ ...fileEntry, name: "match.txt" }], git: gitStatus });
+    await expect(loadFileListingForView("root-1", "docs", " match ")).resolves.toEqual({
+      entries: [{ ...fileEntry, name: "match.txt" }],
+      git: gitStatus
+    });
+    expect(mockedSearchFiles).toHaveBeenCalledWith("root-1", "docs", "match");
   });
 });

@@ -1,9 +1,12 @@
-import { FormEvent, KeyboardEvent, MouseEvent, useState } from "react";
+import { FormEvent, KeyboardEvent, MouseEvent, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  ArrowDown,
+  ArrowUp,
   ChevronLeft,
   Container,
   Files,
+  GitBranch,
   HardDrive,
   Home,
   MonitorCog,
@@ -15,10 +18,11 @@ import {
   Trash2,
   type LucideIcon
 } from "lucide-react";
-import type { DockerOperation, FileEntry, FileMeta, FileOperation, NasRoot, PendingApproval, TextPreview } from "../../api.js";
+import type { DockerOperation, FileEntry, FileListing, FileMeta, FileOperation, NasRoot, PendingApproval, TextPreview } from "../../api.js";
 import { describeFileVisual } from "../../file-type-utils.js";
 import { formatBytes, formatDate, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
+import { sortEntriesByModifiedAt, type FileSortDirection } from "../../lib/file-listing-sort.js";
 import { ActivityMenu } from "../activity/ActivityMenu.js";
 import { CustomSelect } from "../common/CustomSelect.js";
 import { FileTypeIcon } from "../file/FileTypeIcon.js";
@@ -64,7 +68,7 @@ export function WorkspacePane({
   displayPath,
   breadcrumbs,
   entries,
-  safeEntries,
+  gitStatus,
   selectedFilePath,
   previewMeta,
   previewLoading,
@@ -104,7 +108,7 @@ export function WorkspacePane({
   displayPath: string;
   breadcrumbs: string[];
   entries: FileEntry[];
-  safeEntries: number;
+  gitStatus: FileListing["git"];
   selectedFilePath: string | null;
   previewMeta: FileMeta | null;
   previewLoading: boolean;
@@ -142,14 +146,43 @@ export function WorkspacePane({
   const [operationError, setOperationError] = useState<string | null>(null);
   const [operationSubmitting, setOperationSubmitting] = useState(false);
   const [activePanel, setActivePanel] = useState<WorkspacePanelId>("files");
+  const [modifiedSortDirection, setModifiedSortDirection] = useState<FileSortDirection>("desc");
   const displayTitle = displayPath === "." ? t("common.root") : displayPath;
-  const entryCount = formatLocaleNumber(entries.length, locale);
-  const safeEntryCount = formatLocaleNumber(safeEntries, locale);
+  const sortedEntries = useMemo(() => sortEntriesByModifiedAt(entries, modifiedSortDirection), [entries, modifiedSortDirection]);
+  const gitChangeCount = gitStatus
+    ? gitStatus.summary.staged + gitStatus.summary.modified + gitStatus.summary.untracked + gitStatus.summary.conflicted
+    : 0;
+  const gitBranchLabel = gitStatus?.branch ?? gitStatus?.headSha ?? t("workspace.git.detached");
+  const gitSummaryText = gitStatus
+    ? [
+        gitStatus.repositoryName,
+        gitBranchLabel,
+        gitStatus.dirty ? t("workspace.git.dirtyShort", { count: gitChangeCount }) : t("workspace.git.clean"),
+        gitStatus.ahead > 0 ? t("workspace.git.aheadShort", { count: gitStatus.ahead }) : null,
+        gitStatus.behind > 0 ? t("workspace.git.behindShort", { count: gitStatus.behind }) : null
+      ]
+        .filter((item): item is string => Boolean(item))
+        .join(" · ")
+    : "";
+  const gitTooltip = gitStatus
+    ? [
+        `${t("workspace.git.repository")}: ${gitStatus.repositoryName}`,
+        `${t("workspace.git.branch")}: ${gitBranchLabel}`,
+        gitStatus.upstream ? `${t("workspace.git.upstream")}: ${gitStatus.upstream}` : null,
+        gitStatus.ahead > 0 ? t("workspace.git.ahead", { count: gitStatus.ahead }) : null,
+        gitStatus.behind > 0 ? t("workspace.git.behind", { count: gitStatus.behind }) : null,
+        gitStatus.dirty ? t("workspace.git.dirty", { count: gitChangeCount }) : t("workspace.git.clean")
+      ]
+        .filter((item): item is string => Boolean(item))
+        .join("\n")
+    : "";
+  const gitStatusState = gitStatus && (gitStatus.dirty || gitStatus.ahead > 0 || gitStatus.behind > 0) ? "warning" : "ready";
   const rootOptions = roots.map((root) => ({
     value: root.id,
     label: root.name
   }));
   const selectedRootLabel = rootOptions.find((root) => root.value === selectedRootId)?.label ?? selectedRootId;
+  const entryCount = formatLocaleNumber(sortedEntries.length, locale);
   const hasPreview = Boolean(selectedFilePath);
   const selectedFileName = selectedFilePath?.split("/").pop() ?? "";
   const previewTitle = previewMeta?.name ?? selectedFileName;
@@ -269,35 +302,22 @@ export function WorkspacePane({
         <div className="workspace-stage" data-panel={activePanel}>
           {activePanel === "files" ? (
             <>
-              <header className={`workspace-header${hasRootSwitcher ? " has-root-switcher" : ""}`}>
-                {hasRootSwitcher ? (
-                  <div className="root-control">
-                    <label htmlFor="root-select">{t("workspace.rootLabel")}</label>
-                    <CustomSelect
-                      id="root-select"
-                      value={selectedRootId}
-                      options={rootOptions}
-                      ariaLabel={`${t("workspace.rootLabel")}: ${selectedRootLabel}`}
-                      onChange={onSelectRoot}
-                    />
-                  </div>
-                ) : null}
+              <header className={`management-header files-header${hasRootSwitcher ? " has-root-switcher" : ""}`}>
+                <div className="management-title-block files-title-block">
+                  <span className="eyebrow">{t("workspace.filesEyebrow")}</span>
+                  <h2>{displayTitle}</h2>
+                  <p>{t("workspace.filesPathDescription", { root: selectedRootLabel, path: displayTitle })}</p>
+                </div>
 
-                <nav className="breadcrumbs" aria-label={t("workspace.breadcrumbs")}>
-                  <button type="button" onClick={() => onGoToBreadcrumb(-1)}>
-                    <HardDrive aria-hidden="true" size={14} />
-                    <span>{t("common.root")}</span>
-                  </button>
-                  {breadcrumbs.map((crumb, index) => (
-                    <button key={`${crumb}-${index}`} type="button" onClick={() => onGoToBreadcrumb(index)}>
-                      <span>{crumb}</span>
-                    </button>
-                  ))}
-                </nav>
-
-                <div className="workspace-actions">
+                <div className="management-actions files-header-actions" aria-label={t("workspace.management.actions.label")}>
+                  {gitStatus ? (
+                    <span className="management-status-pill files-git-status" data-state={gitStatusState} title={gitTooltip} aria-label={gitTooltip}>
+                      <GitBranch aria-hidden="true" size={13} />
+                      <span>{gitSummaryText}</span>
+                    </span>
+                  ) : null}
                   <button
-                    className="icon-button"
+                    className="icon-button files-header-button"
                     type="button"
                     onClick={onGoHome}
                     disabled={!selectedRoot?.homePath || currentPath === selectedRoot.homePath}
@@ -306,54 +326,95 @@ export function WorkspacePane({
                   >
                     <Home aria-hidden="true" size={18} />
                   </button>
-                  <button className="icon-button" type="button" onClick={onGoUp} disabled={currentPath === "."} title={t("common.actions.up")}>
+                  <button
+                    className="icon-button files-header-button"
+                    type="button"
+                    onClick={onGoUp}
+                    disabled={currentPath === "."}
+                    title={t("common.actions.up")}
+                    aria-label={t("common.actions.up")}
+                  >
                     <ChevronLeft aria-hidden="true" size={18} />
                   </button>
-                  <button className="icon-button" type="button" onClick={onRefreshFiles} title={t("common.actions.refresh")}>
+                  <button
+                    className="icon-button files-header-button"
+                    type="button"
+                    onClick={onRefreshFiles}
+                    title={t("common.actions.refresh")}
+                    aria-label={t("common.actions.refresh")}
+                  >
                     <RefreshCw aria-hidden="true" size={18} />
                   </button>
                   <ActivityMenu operations={operations} operationsReady={operationsReady} onRollback={onRollback} />
                 </div>
 
-                <form className="search" onSubmit={onSubmitSearch}>
-                  <Search aria-hidden="true" size={17} />
-                  <input
-                    value={searchQuery}
-                    onChange={(event) => onSearchQueryChange(event.target.value)}
-                    placeholder={t("workspace.searchPlaceholder")}
-                    aria-label={t("workspace.searchAria")}
-                  />
-                </form>
+                <div className={`files-navigation-bar${hasRootSwitcher ? " has-root-switcher" : ""}`}>
+                  {hasRootSwitcher ? (
+                    <div className="root-control">
+                      <label htmlFor="root-select">{t("workspace.rootLabel")}</label>
+                      <CustomSelect
+                        id="root-select"
+                        value={selectedRootId}
+                        options={rootOptions}
+                        ariaLabel={`${t("workspace.rootLabel")}: ${selectedRootLabel}`}
+                        onChange={onSelectRoot}
+                      />
+                    </div>
+                  ) : null}
+
+                  <nav className="breadcrumbs" aria-label={t("workspace.breadcrumbs")}>
+                    <button type="button" onClick={() => onGoToBreadcrumb(-1)}>
+                      <HardDrive aria-hidden="true" size={14} />
+                      <span>{t("common.root")}</span>
+                    </button>
+                    {breadcrumbs.map((crumb, index) => (
+                      <button key={`${crumb}-${index}`} type="button" onClick={() => onGoToBreadcrumb(index)}>
+                        <span>{crumb}</span>
+                      </button>
+                    ))}
+                  </nav>
+
+                  <form className="search" onSubmit={onSubmitSearch}>
+                    <Search aria-hidden="true" size={17} />
+                    <input
+                      value={searchQuery}
+                      onChange={(event) => onSearchQueryChange(event.target.value)}
+                      placeholder={t("workspace.searchPlaceholder")}
+                      aria-label={t("workspace.searchAria")}
+                    />
+                  </form>
+                </div>
               </header>
 
               <div className={`workspace-grid${hasPreview ? " has-preview" : ""}${isPreviewCollapsed ? " is-preview-collapsed" : ""}`}>
                 <section className="file-browser" aria-label={t("workspace.fileBrowser")}>
-                  <div className="panel-heading">
+                  <header className="management-section-header files-list-header">
                     <div>
-                      <span className="eyebrow">{t("workspace.files")}</span>
-                      <h2>{displayTitle}</h2>
+                      <h3>{t("workspace.filesListTitle")}</h3>
+                      <p className="files-list-summary">{t("workspace.filesListDescription", { total: entryCount, root: selectedRootLabel })}</p>
                     </div>
-                    <dl>
-                      <div>
-                        <dt>{t("workspace.items")}</dt>
-                        <dd>{entryCount}</dd>
-                      </div>
-                      <div>
-                        <dt>{t("workspace.safe")}</dt>
-                        <dd>{safeEntryCount}</dd>
-                      </div>
-                    </dl>
-                  </div>
+                  </header>
 
                   <div className="file-list" role="table" aria-label={t("workspace.table.files")}>
                     <div className="file-row file-row-head" role="row">
                       <span role="columnheader">{t("workspace.table.name")}</span>
                       <span role="columnheader">{t("workspace.table.type")}</span>
                       <span role="columnheader">{t("workspace.table.size")}</span>
-                      <span role="columnheader">{t("workspace.table.modified")}</span>
+                      <span className="file-column-sort" role="columnheader" aria-sort={modifiedSortDirection === "desc" ? "descending" : "ascending"}>
+                        <button
+                          type="button"
+                          className="file-sort-button"
+                          onClick={() => setModifiedSortDirection((current) => (current === "desc" ? "asc" : "desc"))}
+                          aria-label={t("workspace.table.modified")}
+                          title={t("workspace.table.modified")}
+                        >
+                          <span>{t("workspace.table.modified")}</span>
+                          {modifiedSortDirection === "desc" ? <ArrowDown aria-hidden="true" size={12} /> : <ArrowUp aria-hidden="true" size={12} />}
+                        </button>
+                      </span>
                       <span role="columnheader" aria-label={t("workspace.table.actions")} />
                     </div>
-                    {entries.map((entry) => {
+                    {sortedEntries.map((entry) => {
                       const fileVisual = describeFileVisual(entry);
                       const displaySize =
                         entry.kind === "directory"
@@ -374,7 +435,16 @@ export function WorkspacePane({
                         >
                           <span className="file-name" role="cell">
                             <FileTypeIcon kind={fileVisual.kind} />
-                            <span>{entry.name}</span>
+                            <span className="file-name-text">{entry.name}</span>
+                            {entry.gitStatus ? (
+                              <span
+                                className={`git-file-status git-file-status-${entry.gitStatus}`}
+                                title={t(`workspace.git.statuses.${entry.gitStatus}`)}
+                                aria-label={t(`workspace.git.statuses.${entry.gitStatus}`)}
+                              >
+                                {gitFileStatusCode(entry.gitStatus)}
+                              </span>
+                            ) : null}
                           </span>
                           <span className={`file-type-label file-type-${fileVisual.kind}`} role="cell">
                             {t(`files.labels.${fileVisual.kind}`)}
@@ -588,4 +658,19 @@ export function WorkspacePane({
 
     </section>
   );
+}
+
+function gitFileStatusCode(status: NonNullable<FileEntry["gitStatus"]>): string {
+  switch (status) {
+    case "tracked":
+      return "T";
+    case "staged":
+      return "S";
+    case "modified":
+      return "M";
+    case "untracked":
+      return "U";
+    case "conflicted":
+      return "C";
+  }
 }
