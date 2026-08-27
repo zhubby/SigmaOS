@@ -352,6 +352,11 @@
   background: rgb(35 165 135 / 16%);
 }
 
+.approval-card-icon[data-kind="share"] {
+  color: #ffd28b;
+  background: rgb(214 144 33 / 16%);
+}
+
 .approval-card-body {
   grid-area: body;
   display: grid;

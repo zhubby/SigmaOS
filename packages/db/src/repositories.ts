@@ -9,6 +9,7 @@ import type {
   DockerOperationStatus,
   DockerOperationTargetType,
   DockerSettingsRecord,
+  DlnaMediaType,
   FileMutationOperation,
   FileOperationProposal,
   FileOperationRecord,
@@ -31,6 +32,13 @@ import type {
   ModelProviderSettingsRecord,
   NasRootRecord,
   PendingApprovalRecord,
+  ShareDefinitionConfig,
+  ShareOperationAction,
+  ShareOperationProposal,
+  ShareOperationRecord,
+  ShareOperationStatus,
+  ShareProtocolConfig,
+  ShareSettingsRecord,
   TrashEntryRecord
 } from "@sigmaos/shared";
 import { isModelProviderName } from "@sigmaos/shared";
@@ -126,6 +134,17 @@ type DbDockerOperationRow = {
   updated_at: string;
 };
 
+type DbShareOperationRow = {
+  id: string;
+  approval_id: string | null;
+  action: ShareOperationAction;
+  target_id: string;
+  status: ShareOperationStatus;
+  metadata_json: string;
+  created_at: string;
+  updated_at: string;
+};
+
 type DbDockerConsoleAuthorizationRow = {
   id: string;
   operation_id: string;
@@ -157,10 +176,12 @@ type DbSystemSettingRow = {
 const MODEL_PROVIDER_SETTING_KEY = "model_provider";
 const PI_TOOL_POLICY_SETTING_KEY = "pi_tool_policy";
 const DOCKER_SETTING_KEY = "docker_settings";
+const SHARE_SETTING_KEY = "share_settings";
 const READ_ONLY_PI_TOOLS = ["read", "grep", "find", "ls"] as const satisfies PiToolName[];
 const DANGEROUS_PI_TOOLS = ["bash", "edit", "write"] as const satisfies PiToolName[];
 const PI_TOOL_POLICY_MODES = ["auto", "ask", "disabled"] as const satisfies PiToolPolicyMode[];
 const DANGEROUS_PI_TOOL_POLICY_MODES = ["ask", "disabled"] as const satisfies PiDangerousToolPolicyMode[];
+const DLNA_MEDIA_TYPES = ["audio", "video", "pictures"] as const satisfies DlnaMediaType[];
 
 export const DEFAULT_PI_TOOL_POLICY_SETTINGS: Omit<PiToolPolicySettingsRecord, "updatedAt"> = {
   read: "auto",
@@ -484,6 +505,32 @@ export function saveDockerSettings(
       value_json = excluded.value_json,
       updated_at = excluded.updated_at
   `).run(DOCKER_SETTING_KEY, JSON.stringify(record), updatedAt);
+
+  return record;
+}
+
+export function getShareSettings(db: SigmaDatabase): ShareSettingsRecord | null {
+  const row = db
+    .prepare("SELECT key, value_json, updated_at FROM system_settings WHERE key = ?")
+    .get(SHARE_SETTING_KEY) as DbSystemSettingRow | undefined;
+
+  return row ? mapShareSettings(row) : null;
+}
+
+export function saveShareSettings(
+  db: SigmaDatabase,
+  settings: Omit<ShareSettingsRecord, "updatedAt">
+): ShareSettingsRecord {
+  const updatedAt = new Date().toISOString();
+  const record = normalizeShareSettings(settings, updatedAt);
+
+  db.prepare(`
+    INSERT INTO system_settings (key, value_json, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET
+      value_json = excluded.value_json,
+      updated_at = excluded.updated_at
+  `).run(SHARE_SETTING_KEY, JSON.stringify(record), updatedAt);
 
   return record;
 }
@@ -914,6 +961,61 @@ export function createDockerOperationApproval(
   return { approval, operation };
 }
 
+export function createShareOperationApproval(
+  db: SigmaDatabase,
+  input: { jobId: string; proposal: ShareOperationProposal; settings: ShareSettingsRecord }
+): { approval: PendingApprovalRecord; operation: ShareOperationRecord } {
+  const job = getJob(db, input.jobId);
+  if (!job) {
+    throw new Error("Job not found");
+  }
+
+  const now = new Date().toISOString();
+  const approval: PendingApprovalRecord = {
+    id: randomUUID(),
+    jobId: input.jobId,
+    sessionId: job.sessionId,
+    kind: "share_operation",
+    status: "pending",
+    proposal: [input.proposal],
+    createdAt: now,
+    updatedAt: now
+  };
+  const operation: ShareOperationRecord = {
+    id: randomUUID(),
+    approvalId: approval.id,
+    action: input.proposal.action,
+    targetId: "share-settings",
+    status: "proposed",
+    metadata: {
+      proposal: input.proposal,
+      settings: input.settings
+    },
+    createdAt: now,
+    updatedAt: now
+  };
+
+  const tx = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO pending_approvals (id, job_id, kind, status, proposal_json, created_at, updated_at)
+      VALUES (?, ?, 'share_operation', 'pending', ?, ?, ?)
+    `).run(approval.id, approval.jobId, JSON.stringify(approval.proposal), now, now);
+
+    db.prepare(`
+      INSERT INTO share_operations (
+        id, approval_id, action, target_id, status, metadata_json, created_at, updated_at
+      )
+      VALUES (@id, @approvalId, @action, @targetId, @status, @metadataJson, @createdAt, @updatedAt)
+    `).run({
+      ...operation,
+      metadataJson: JSON.stringify(operation.metadata)
+    });
+  });
+
+  tx();
+  return { approval, operation };
+}
+
 export function getApproval(db: SigmaDatabase, approvalId: string): PendingApprovalRecord | null {
   const row = db
     .prepare(`
@@ -996,6 +1098,78 @@ export function updateDockerOperationStatus(
     `)
     .get(status, JSON.stringify(nextMetadata), now, operationId) as DbDockerOperationRow | undefined;
   return row ? mapDockerOperation(row) : null;
+}
+
+export function getShareOperation(db: SigmaDatabase, operationId: string): ShareOperationRecord | null {
+  const row = db
+    .prepare(`
+      SELECT id, approval_id, action, target_id, status, metadata_json, created_at, updated_at
+      FROM share_operations
+      WHERE id = ?
+    `)
+    .get(operationId) as DbShareOperationRow | undefined;
+  return row ? mapShareOperation(row) : null;
+}
+
+export function getShareOperationByApproval(
+  db: SigmaDatabase,
+  approvalId: string
+): ShareOperationRecord | null {
+  const row = db
+    .prepare(`
+      SELECT id, approval_id, action, target_id, status, metadata_json, created_at, updated_at
+      FROM share_operations
+      WHERE approval_id = ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `)
+    .get(approvalId) as DbShareOperationRow | undefined;
+  return row ? mapShareOperation(row) : null;
+}
+
+export function listShareOperations(
+  db: SigmaDatabase,
+  input: { sessionId?: string; limit?: number } = {}
+): ShareOperationRecord[] {
+  const rows = db
+    .prepare(`
+      SELECT o.id, o.approval_id, o.action, o.target_id, o.status, o.metadata_json, o.created_at, o.updated_at
+      FROM share_operations o
+      LEFT JOIN pending_approvals a ON a.id = o.approval_id
+      LEFT JOIN jobs j ON j.id = a.job_id
+      WHERE (? IS NULL OR j.session_id = ?)
+      ORDER BY o.created_at DESC
+      LIMIT ?
+    `)
+    .all(input.sessionId ?? null, input.sessionId ?? null, input.limit ?? 100) as DbShareOperationRow[];
+  return rows.map(mapShareOperation);
+}
+
+export function updateShareOperationStatus(
+  db: SigmaDatabase,
+  operationId: string,
+  status: ShareOperationStatus,
+  metadata: Record<string, unknown> = {}
+): ShareOperationRecord | null {
+  const existing = getShareOperation(db, operationId);
+  if (!existing) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  const nextMetadata = {
+    ...existing.metadata,
+    ...metadata
+  };
+  const row = db
+    .prepare(`
+      UPDATE share_operations
+      SET status = ?, metadata_json = ?, updated_at = ?
+      WHERE id = ?
+      RETURNING id, approval_id, action, target_id, status, metadata_json, created_at, updated_at
+    `)
+    .get(status, JSON.stringify(nextMetadata), now, operationId) as DbShareOperationRow | undefined;
+  return row ? mapShareOperation(row) : null;
 }
 
 export function createDockerConsoleAuthorization(
@@ -1353,6 +1527,11 @@ function mapDockerSettings(row: DbSystemSettingRow): DockerSettingsRecord {
   };
 }
 
+function mapShareSettings(row: DbSystemSettingRow): ShareSettingsRecord {
+  const parsed = JSON.parse(row.value_json) as Partial<ShareSettingsRecord>;
+  return normalizeShareSettings(parsed, normalizeString(parsed.updatedAt) ?? row.updated_at);
+}
+
 function normalizePiToolPolicySettings(
   settings: Partial<PiToolPolicySettingsRecord>,
   updatedAt: string
@@ -1411,6 +1590,137 @@ function normalizeDockerShells(shells: unknown): string[] {
 
   const normalized = shells.map(normalizeString).filter((shell): shell is string => shell !== null);
   return normalized.length ? normalized : ["/bin/sh", "/bin/bash"];
+}
+
+function normalizeShareSettings(
+  settings: Partial<ShareSettingsRecord>,
+  updatedAt: string
+): ShareSettingsRecord {
+  const account = recordFrom(settings.account);
+  return {
+    enabled: normalizeBoolean(settings.enabled, false),
+    helperSocketPath: normalizeString(settings.helperSocketPath) ?? "/run/sigmaos/share-helper.sock",
+    account: {
+      username: normalizeString(account.username) ?? "sigma-share",
+      password: normalizeNullableString(account.password)
+    },
+    shares: normalizeShareDefinitions(settings.shares),
+    updatedAt
+  };
+}
+
+function normalizeShareDefinitions(shares: unknown): ShareDefinitionConfig[] {
+  if (!Array.isArray(shares)) {
+    return [];
+  }
+
+  return shares
+    .map((share, index) => normalizeShareDefinition(share, index))
+    .filter((share): share is ShareDefinitionConfig => share !== null);
+}
+
+function normalizeShareDefinition(value: unknown, index: number): ShareDefinitionConfig | null {
+  const share = recordFrom(value);
+  const rootId = normalizeString(share.rootId);
+  const sharePath = normalizeString(share.path);
+  if (!rootId || !sharePath) {
+    return null;
+  }
+  const id = normalizeString(share.id) ?? `share-${index + 1}`;
+  const name = normalizeString(share.name) ?? id;
+  return {
+    id,
+    name,
+    rootId,
+    path: sharePath,
+    description: normalizeString(share.description) ?? "",
+    protocols: normalizeShareProtocolConfig(share.protocols, name)
+  };
+}
+
+function normalizeShareProtocolConfig(value: unknown, shareName: string): ShareProtocolConfig {
+  const protocols = recordFrom(value);
+  const smb = recordFrom(protocols.smb);
+  const webdav = recordFrom(protocols.webdav);
+  const ftp = recordFrom(protocols.ftp);
+  const nfs = recordFrom(protocols.nfs);
+  const dlna = recordFrom(protocols.dlna);
+  return {
+    smb: {
+      enabled: normalizeBoolean(smb.enabled, false),
+      readOnly: normalizeBoolean(smb.readOnly, true),
+      browseable: normalizeBoolean(smb.browseable, true),
+      allowGuest: normalizeBoolean(smb.allowGuest, false)
+    },
+    webdav: {
+      enabled: normalizeBoolean(webdav.enabled, false),
+      readOnly: normalizeBoolean(webdav.readOnly, true),
+      allowGuest: normalizeBoolean(webdav.allowGuest, false),
+      port: normalizePositiveInteger(webdav.port) ?? 8088,
+      pathPrefix: normalizeString(webdav.pathPrefix) ?? `/shares/${shareSlug(shareName)}`
+    },
+    ftp: {
+      enabled: normalizeBoolean(ftp.enabled, false),
+      readOnly: normalizeBoolean(ftp.readOnly, true),
+      allowGuest: normalizeBoolean(ftp.allowGuest, false),
+      port: normalizePositiveInteger(ftp.port) ?? 2121,
+      passivePortStart: normalizePositiveInteger(ftp.passivePortStart) ?? 50000,
+      passivePortEnd: normalizePositiveInteger(ftp.passivePortEnd) ?? 50100
+    },
+    nfs: {
+      enabled: normalizeBoolean(nfs.enabled, false),
+      readOnly: normalizeBoolean(nfs.readOnly, true),
+      allowedCidrs: normalizeStringArray(nfs.allowedCidrs),
+      rootSquash: normalizeBoolean(nfs.rootSquash, true)
+    },
+    dlna: {
+      enabled: normalizeBoolean(dlna.enabled, false),
+      mediaTypes: normalizeDlnaMediaTypes(dlna.mediaTypes),
+      bindInterface: normalizeNullableString(dlna.bindInterface),
+      bindAddress: normalizeNullableString(dlna.bindAddress),
+      friendlyName: normalizeString(dlna.friendlyName) ?? shareName
+    }
+  };
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map(normalizeString).filter((item): item is string => item !== null);
+}
+
+function normalizeDlnaMediaTypes(value: unknown): DlnaMediaType[] {
+  if (!Array.isArray(value)) {
+    return [...DLNA_MEDIA_TYPES];
+  }
+  const mediaTypes = value.filter((item): item is DlnaMediaType => DLNA_MEDIA_TYPES.includes(item as DlnaMediaType));
+  return mediaTypes.length ? mediaTypes : [...DLNA_MEDIA_TYPES];
+}
+
+function normalizeBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function normalizeNullableString(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  return normalizeString(value);
+}
+
+function recordFrom(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function shareSlug(value: string): string {
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/gu, "-")
+      .replace(/^-|-$/gu, "") || "share"
+  );
 }
 
 function normalizeString(value: unknown): string | null {
@@ -1503,6 +1813,19 @@ function mapDockerOperation(row: DbDockerOperationRow): DockerOperationRecord {
     approvalId: row.approval_id,
     action: row.action,
     targetType: row.target_type,
+    targetId: row.target_id,
+    status: row.status,
+    metadata: JSON.parse(row.metadata_json) as Record<string, unknown>,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function mapShareOperation(row: DbShareOperationRow): ShareOperationRecord {
+  return {
+    id: row.id,
+    approvalId: row.approval_id,
+    action: row.action,
     targetId: row.target_id,
     status: row.status,
     metadata: JSON.parse(row.metadata_json) as Record<string, unknown>,

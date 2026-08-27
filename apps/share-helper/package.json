@@ -1,0 +1,17 @@
+{
+  "name": "@sigmaos/share-helper",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/helper.ts"
+  },
+  "types": "./src/helper.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsup src/index.ts --format esm --platform node --target node22 --out-dir dist"
+  },
+  "dependencies": {
+    "@sigmaos/shared": "0.1.0"
+  }
+}

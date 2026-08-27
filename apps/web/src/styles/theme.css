@@ -249,6 +249,11 @@
   background: var(--teal-bg);
 }
 
+:root[data-theme="light"] .approval-card-icon[data-kind="share"] {
+  color: var(--warning-text);
+  background: var(--warning-bg);
+}
+
 :root[data-theme="light"] .workspace-pane,
 :root[data-theme="light"] .settings-actions {
   background: var(--footer-bg);

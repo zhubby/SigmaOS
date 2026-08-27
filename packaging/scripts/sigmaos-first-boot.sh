@@ -65,6 +65,11 @@ compose_command = "docker"
 operation_timeout_ms = 120000
 console_shells = ["/bin/sh", "/bin/bash"]
 
+[shares]
+enabled = false
+helper_socket_path = "/run/sigmaos/share-helper.sock"
+account_username = "sigma-share"
+
 [[nas_roots]]
 id = "$NAS_ROOT_ID"
 name = "$NAS_ROOT_NAME"

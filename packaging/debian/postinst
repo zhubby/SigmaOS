@@ -15,7 +15,7 @@ if [ "$1" = "configure" ]; then
 
   if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload || true
-    systemctl enable sigmaos-api.service sigmaos-worker@1.service sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer || true
+    systemctl enable sigmaos-share-helper.service sigmaos-api.service sigmaos-worker@1.service sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer || true
   fi
 fi
 

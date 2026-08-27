@@ -38,6 +38,15 @@ describe("loadConfig", () => {
       consoleShells: ["/bin/sh", "/bin/bash"],
       composeRoots: []
     });
+    expect(config.shares).toMatchObject({
+      enabled: false,
+      helperSocketPath: "/run/sigmaos/share-helper.sock",
+      account: {
+        username: "sigma-share",
+        password: null
+      },
+      shares: []
+    });
   });
 
   it("loads Docker settings from TOML", async () => {
@@ -109,6 +118,103 @@ describe("loadConfig", () => {
           id: "lab",
           name: "Lab",
           path: "/srv/lab"
+        }
+      ]
+    });
+  });
+
+  it("loads share settings from TOML", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-config-"));
+    const configPath = path.join(tempDir, "config.toml");
+    await writeFile(
+      configPath,
+      `
+        [shares]
+        enabled = true
+        helper_socket_path = "/tmp/share-helper.sock"
+        account_username = "sigma-share"
+
+        [[shares.items]]
+        id = "media"
+        name = "Media"
+        root_id = "primary"
+        path = "media"
+        description = "LAN media"
+
+        [shares.items.smb]
+        enabled = true
+        read_only = false
+        browseable = true
+
+        [shares.items.webdav]
+        enabled = true
+        port = 8090
+        path_prefix = "/dav/media"
+
+        [shares.items.ftp]
+        enabled = true
+        port = 2021
+        passive_port_start = 51000
+        passive_port_end = 51010
+
+        [shares.items.nfs]
+        enabled = true
+        allowed_cidrs = ["192.168.1.0/24"]
+
+        [shares.items.dlna]
+        enabled = true
+        media_types = ["audio", "video"]
+        bind_interface = "eth0"
+        friendly_name = "Sigma Media"
+      `
+    );
+
+    const config = loadConfig({ SIGMAOS_CONFIG: configPath } as NodeJS.ProcessEnv, tempDir);
+
+    expect(config.shares).toMatchObject({
+      enabled: true,
+      helperSocketPath: "/tmp/share-helper.sock",
+      account: {
+        username: "sigma-share",
+        password: null
+      },
+      shares: [
+        {
+          id: "media",
+          name: "Media",
+          rootId: "primary",
+          path: "media",
+          description: "LAN media",
+          protocols: {
+            smb: {
+              enabled: true,
+              readOnly: false,
+              browseable: true,
+              allowGuest: false
+            },
+            webdav: {
+              enabled: true,
+              port: 8090,
+              pathPrefix: "/dav/media"
+            },
+            ftp: {
+              enabled: true,
+              port: 2021,
+              passivePortStart: 51000,
+              passivePortEnd: 51010
+            },
+            nfs: {
+              enabled: true,
+              allowedCidrs: ["192.168.1.0/24"],
+              rootSquash: true
+            },
+            dlna: {
+              enabled: true,
+              mediaTypes: ["audio", "video"],
+              bindInterface: "eth0",
+              friendlyName: "Sigma Media"
+            }
+          }
         }
       ]
     });

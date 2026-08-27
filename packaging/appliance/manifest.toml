@@ -12,6 +12,7 @@ package = "sigmaos.deb"
 [services]
 units = [
   "sigmaos-api.service",
+  "sigmaos-share-helper.service",
   "sigmaos-worker@1.service",
   "sigmaos-indexer.timer",
   "sigmaos-scheduler.timer",
@@ -40,4 +41,13 @@ ocr_media_helpers = [
 ]
 nas_health = [
   "smartmontools"
+]
+sharing = [
+  "samba",
+  "apache2",
+  "apache2-utils",
+  "vsftpd",
+  "libpam-pwdfile",
+  "nfs-kernel-server",
+  "minidlna"
 ]

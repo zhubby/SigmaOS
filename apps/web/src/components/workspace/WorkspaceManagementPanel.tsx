@@ -34,19 +34,22 @@ import {
   getDockerContainerLogs,
   getDockerSummary,
   proposeDockerOperation,
+  type DockerOperationProposal,
   type DockerConsoleSession,
   type DockerComposeProject,
   type DockerContainer,
   type DockerOperation,
   type DockerSummary,
+  type NasRoot,
   type PendingApproval
 } from "../../api.js";
 import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
 import type { en } from "../../i18n/resources.js";
 import { SystemNetworkManagementPanel, SystemStorageManagementPanel } from "./SystemManagementPanel.js";
+import { ShareManagementPanel } from "./ShareManagementPanel.js";
 
-export type ManagementPanelId = "docker" | "virtualMachines" | "network" | "storage";
+export type ManagementPanelId = "docker" | "virtualMachines" | "network" | "storage" | "shares";
 
 type JoinKey<Key extends string, Rest extends string> = Rest extends "" ? Key : `${Key}.${Rest}`;
 type TranslationKeyOf<T> = T extends object
@@ -141,7 +144,7 @@ const VM_COLUMNS: ManagementColumn[] = [
   { id: "actions", labelKey: "workspace.management.columns.actions" }
 ];
 
-const MANAGEMENT_PANELS: Record<Exclude<ManagementPanelId, "docker" | "network" | "storage">, ManagementPanelConfig> = {
+const MANAGEMENT_PANELS: Record<Exclude<ManagementPanelId, "docker" | "network" | "storage" | "shares">, ManagementPanelConfig> = {
   virtualMachines: {
     Icon: MonitorCog,
     eyebrowKey: "workspace.management.virtualMachines.eyebrow",
@@ -279,6 +282,7 @@ const MANAGEMENT_PANELS: Record<Exclude<ManagementPanelId, "docker" | "network" 
 
 export function WorkspaceManagementPanel({
   panel,
+  roots,
   sessionId,
   pendingApprovals,
   dockerOperations,
@@ -286,6 +290,7 @@ export function WorkspaceManagementPanel({
   onWorkQueuesChanged
 }: {
   panel: ManagementPanelId;
+  roots: NasRoot[];
   sessionId: string | null;
   pendingApprovals: PendingApproval[];
   dockerOperations: DockerOperation[];
@@ -298,6 +303,17 @@ export function WorkspaceManagementPanel({
         sessionId={sessionId}
         pendingApprovals={pendingApprovals}
         dockerOperations={dockerOperations}
+        locale={locale}
+        onWorkQueuesChanged={onWorkQueuesChanged}
+      />
+    );
+  }
+  if (panel === "shares") {
+    return (
+      <ShareManagementPanel
+        roots={roots}
+        sessionId={sessionId}
+        pendingApprovals={pendingApprovals}
         locale={locale}
         onWorkQueuesChanged={onWorkQueuesChanged}
       />
@@ -1166,13 +1182,17 @@ function pendingDockerApprovalForTarget(approvals: PendingApproval[], targetId: 
         return false;
       }
       return approval.proposal.some((proposal) => {
-        if (!("action" in proposal)) {
+        if (!isDockerOperationProposal(proposal)) {
           return false;
         }
         return proposal.containerId === targetId || proposal.composeProjectId === targetId;
       });
     }) ?? null
   );
+}
+
+function isDockerOperationProposal(proposal: PendingApproval["proposal"][number]): proposal is DockerOperationProposal {
+  return "targetType" in proposal;
 }
 
 function approvedConsoleOperation(container: DockerContainer, operations: DockerOperation[]): DockerOperation | null {

@@ -192,6 +192,15 @@ function testConfig(): SigmaConfig {
       consoleShells: ["/bin/sh", "/bin/bash"],
       composeRoots: []
     },
+    shares: {
+      enabled: false,
+      helperSocketPath: "/run/sigmaos/share-helper.sock",
+      account: {
+        username: "sigma-share",
+        password: null
+      },
+      shares: []
+    },
     nasRoots: [{ id: "local", name: "Local", path: rootDir }]
   };
 }
