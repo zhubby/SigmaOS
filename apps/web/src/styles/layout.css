@@ -1,7 +1,7 @@
 .app-shell {
   --chat-pane-width: 560px;
   display: grid;
-  grid-template-columns: minmax(560px, var(--chat-pane-width)) 6px minmax(460px, 1fr);
+  grid-template-columns: minmax(560px, var(--chat-pane-width)) 10px minmax(460px, 1fr);
   width: 100vw;
   height: 100vh;
   min-height: 0;
@@ -87,7 +87,7 @@
 .split-handle {
   display: inline-grid;
   place-items: center;
-  width: 6px;
+  width: 10px;
   height: 100vh;
   padding: 0;
   border: 0;
@@ -120,7 +120,7 @@
 }
 
 .split-handle-grip {
-  width: 1px;
+  width: 2px;
   height: 18px;
   border-radius: 999px;
   background: currentColor;
