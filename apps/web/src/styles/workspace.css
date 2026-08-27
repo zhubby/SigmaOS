@@ -1005,14 +1005,32 @@
 }
 
 .files-list-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: start;
   min-height: 58px;
 }
 
+.files-list-title-block {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  min-width: 0;
+}
+
 .files-list-summary {
+  margin-top: 4px;
   max-width: 520px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.files-git-status {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: end;
+  align-self: end;
 }
 
 .management-body {

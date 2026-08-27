@@ -328,16 +328,10 @@ export function WorkspacePane({
                 <div className="management-title-block files-title-block">
                   <span className="eyebrow">{t("workspace.filesEyebrow")}</span>
                   <h2>{displayTitle}</h2>
-                  <p>{t("workspace.filesPathDescription", { root: selectedRootLabel, path: displayTitle })}</p>
+                  <p>{t("workspace.filesManagementDescription")}</p>
                 </div>
 
                 <div className="management-actions files-header-actions" aria-label={t("workspace.management.actions.label")}>
-                  {gitStatus ? (
-                    <span className="management-status-pill files-git-status" data-state={gitStatusState} title={gitTooltip} aria-label={gitTooltip}>
-                      <GitBranch aria-hidden="true" size={13} />
-                      <span>{gitSummaryText}</span>
-                    </span>
-                  ) : null}
                   <button
                     className="icon-button files-header-button"
                     type="button"
@@ -411,10 +405,16 @@ export function WorkspacePane({
               <div className={`workspace-grid${hasPreview ? " has-preview" : ""}${isPreviewCollapsed ? " is-preview-collapsed" : ""}`}>
                 <section className="file-browser" aria-label={t("workspace.fileBrowser")}>
                   <header className="management-section-header files-list-header">
-                    <div>
+                    <div className="files-list-title-block">
                       <h3>{t("workspace.filesListTitle")}</h3>
                       <p className="files-list-summary">{t("workspace.filesListDescription", { total: entryCount, root: selectedRootLabel })}</p>
                     </div>
+                    {gitStatus ? (
+                      <span className="management-status-pill files-git-status" data-state={gitStatusState} title={gitTooltip} aria-label={gitTooltip}>
+                        <GitBranch aria-hidden="true" size={13} />
+                        <span>{gitSummaryText}</span>
+                      </span>
+                    ) : null}
                   </header>
 
                   <div className="file-list" role="table" aria-label={t("workspace.table.files")}>
