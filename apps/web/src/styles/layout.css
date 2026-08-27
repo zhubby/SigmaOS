@@ -1,7 +1,7 @@
 .app-shell {
   --chat-pane-width: 560px;
   display: grid;
-  grid-template-columns: minmax(560px, var(--chat-pane-width)) 10px minmax(460px, 1fr);
+  grid-template-columns: minmax(560px, var(--chat-pane-width)) 14px minmax(460px, 1fr);
   width: 100vw;
   height: 100vh;
   min-height: 0;
@@ -87,54 +87,58 @@
 .split-handle {
   display: inline-grid;
   place-items: center;
-  width: 10px;
+  width: 14px;
   height: 100vh;
   padding: 0;
   border: 0;
   color: var(--muted-2);
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 4%), transparent 24%),
-    var(--split-bg);
-  box-shadow:
-    inset 1px 0 0 var(--split-border-left),
-    inset -1px 0 0 var(--split-border-right);
+    linear-gradient(
+      90deg,
+      transparent 0,
+      transparent calc(50% - 0.5px),
+      var(--split-handle-line) calc(50% - 0.5px),
+      var(--split-handle-line) calc(50% + 0.5px),
+      transparent calc(50% + 0.5px)
+    );
   cursor: col-resize;
   overflow: hidden;
   position: relative;
   transition:
-    background 140ms ease,
-    box-shadow 140ms ease,
+    background-color 220ms cubic-bezier(0.22, 1, 0.36, 1),
     color 140ms ease;
+}
+
+.split-handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 9px;
+  height: 34px;
+  transform: translate(-50%, -50%) scaleY(0.98);
+  border-radius: 999px;
+  background: var(--split-handle-thumb);
+  border: 1px solid var(--split-handle-thumb-border);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 16%),
+    inset 0 -1px 0 rgb(0 0 0 / 10%),
+    0 1px 4px var(--split-handle-thumb-shadow);
+  opacity: 0.95;
+  transition:
+    opacity 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .split-handle:hover,
 .split-handle:focus-visible {
   color: var(--text);
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 7%), transparent 24%),
-    var(--split-bg);
-  box-shadow:
-    inset 0 0 0 1px rgb(255 255 255 / 7%),
-    inset 1px 0 0 rgb(0 0 0 / 18%),
-    inset -1px 0 0 rgb(255 255 255 / 5%);
+  background-color: var(--split-handle-surface-hover);
 }
 
-.split-handle-grip {
-  width: 2px;
-  height: 18px;
-  border-radius: 999px;
-  background: currentColor;
-  opacity: 0.3;
-  box-shadow:
-    0 -6px 0 currentColor,
-    0 6px 0 currentColor;
-  transition:
-    opacity 140ms ease,
-    transform 140ms ease;
-}
-
-.split-handle:hover .split-handle-grip,
-.split-handle:focus-visible .split-handle-grip {
-  opacity: 0.5;
-  transform: scaleY(1.02);
+.split-handle:hover::after,
+.split-handle:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, -50%) scaleY(1.02);
+  background: var(--split-handle-thumb-hover);
 }

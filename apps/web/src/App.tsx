@@ -1075,9 +1075,7 @@ export function App() {
         aria-label={t("common.actions.resizePanes")}
         onPointerDown={startResize}
         onKeyDown={resizeWithKeyboard}
-      >
-        <span className="split-handle-grip" aria-hidden="true" />
-      </button>
+      />
 
       <WorkspacePane
         active={mobileView === "workspace"}
