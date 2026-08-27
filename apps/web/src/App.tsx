@@ -1,6 +1,6 @@
 import { FormEvent, KeyboardEvent, PointerEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, GripVertical, MessageSquare, PanelRight, Settings, X } from "lucide-react";
+import { AlertTriangle, MessageSquare, PanelRight, Settings, X } from "lucide-react";
 import {
   approveRequest,
   cancelJob,
@@ -1076,7 +1076,7 @@ export function App() {
         onPointerDown={startResize}
         onKeyDown={resizeWithKeyboard}
       >
-        <GripVertical aria-hidden="true" size={16} />
+        <span className="split-handle-grip" aria-hidden="true" />
       </button>
 
       <WorkspacePane

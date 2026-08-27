@@ -11,12 +11,6 @@
     drop-shadow(0 9px 20px rgb(8 118 107 / 15%));
 }
 
-:root[data-theme="light"] .split-handle {
-  background: var(--split-bg);
-  border-right-color: var(--split-border-right);
-  border-left-color: var(--split-border-left);
-}
-
 :root[data-theme="light"] .agent-list,
 :root[data-theme="light"] .settings-rail {
   border-right-color: var(--rail-border);
