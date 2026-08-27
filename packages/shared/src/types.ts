@@ -263,6 +263,184 @@ export interface PublicSystemInfoNetworkAddress {
   scopeId: number | null;
 }
 
+export type SystemCollectionStatus = "ready" | "partial" | "unavailable";
+
+export interface SystemCollectionIssue {
+  source: string;
+  message: string;
+}
+
+export type SystemNetworkInterfaceKind =
+  | "ethernet"
+  | "wireless"
+  | "loopback"
+  | "bridge"
+  | "bond"
+  | "vlan"
+  | "virtual"
+  | "unknown";
+
+export type SystemNetworkInterfaceState = "connected" | "up" | "down" | "unknown";
+
+export interface SystemNetworkAddress {
+  family: "inet" | "inet6" | "unknown";
+  address: string;
+  prefixLength: number | null;
+  cidr: string | null;
+  scope: string | null;
+  label: string | null;
+}
+
+export interface SystemNetworkInterface {
+  id: string;
+  index: number | null;
+  name: string;
+  kind: SystemNetworkInterfaceKind;
+  state: SystemNetworkInterfaceState;
+  operState: string | null;
+  flags: string[];
+  mac: string | null;
+  mtu: number | null;
+  speedMbps: number | null;
+  addresses: SystemNetworkAddress[];
+  hasDefaultRoute: boolean;
+}
+
+export interface SystemNetworkRoute {
+  family: "inet" | "inet6" | "unknown";
+  destination: string;
+  gateway: string | null;
+  device: string | null;
+  preferredSource: string | null;
+  protocol: string | null;
+  scope: string | null;
+}
+
+export interface SystemNetworkSummary {
+  collectedAt: string;
+  status: SystemCollectionStatus;
+  capabilities: {
+    backend: "systemd-networkd";
+    canApplyConfiguration: false;
+    canConfigureBridge: false;
+    canConfigureBond: false;
+    canConfigureVlan: false;
+  };
+  metrics: {
+    interfaces: number;
+    connected: number;
+    addresses: number;
+    defaultRoutes: number;
+  };
+  interfaces: SystemNetworkInterface[];
+  routes: SystemNetworkRoute[];
+  issues: SystemCollectionIssue[];
+}
+
+export type SystemSmartHealth = "passed" | "failed" | "unknown" | "error";
+
+export interface SystemSmartSummary {
+  health: SystemSmartHealth;
+  temperatureCelsius: number | null;
+  powerOnHours: number | null;
+  errorCount: number | null;
+  message: string | null;
+}
+
+export interface SystemStorageMount {
+  id: string;
+  source: string;
+  target: string;
+  filesystem: string | null;
+  totalBytes: number | null;
+  usedBytes: number | null;
+  availableBytes: number | null;
+  usedPercent: number | null;
+}
+
+export interface SystemStoragePartition {
+  id: string;
+  name: string;
+  path: string;
+  parent: string | null;
+  filesystem: string | null;
+  label: string | null;
+  uuid: string | null;
+  sizeBytes: number | null;
+  mountpoints: string[];
+}
+
+export interface SystemStorageDisk {
+  id: string;
+  name: string;
+  path: string;
+  model: string | null;
+  serial: string | null;
+  transport: string | null;
+  rotational: boolean | null;
+  sizeBytes: number | null;
+  mountpoints: string[];
+  partitions: SystemStoragePartition[];
+  smart: SystemSmartSummary;
+}
+
+export interface SystemRaidArray {
+  id: string;
+  name: string;
+  path: string;
+  level: string | null;
+  state: string | null;
+  uuid: string | null;
+  sizeBytes: number | null;
+  activeDevices: number | null;
+  totalDevices: number | null;
+  failedDevices: number | null;
+  spareDevices: number | null;
+  memberDevices: string[];
+}
+
+export interface SystemStoragePool {
+  id: string;
+  name: string;
+  raidPath: string;
+  raidLevel: string | null;
+  status: "ready" | "warning" | "offline" | "unknown";
+  mountpoint: string | null;
+  filesystem: string | null;
+  totalBytes: number | null;
+  usedBytes: number | null;
+  availableBytes: number | null;
+  usedPercent: number | null;
+  memberDevices: string[];
+}
+
+export interface SystemStorageSummary {
+  collectedAt: string;
+  status: SystemCollectionStatus;
+  capabilities: {
+    backend: "mdadm";
+    canCreatePool: false;
+    canDeletePool: false;
+    canApplyConfiguration: false;
+  };
+  metrics: {
+    pools: number;
+    arrays: number;
+    disks: number;
+    totalBytes: number | null;
+    usedBytes: number | null;
+    availableBytes: number | null;
+    smartPassed: number;
+    smartFailed: number;
+    smartUnknown: number;
+  };
+  pools: SystemStoragePool[];
+  arrays: SystemRaidArray[];
+  disks: SystemStorageDisk[];
+  mounts: SystemStorageMount[];
+  issues: SystemCollectionIssue[];
+}
+
 export interface PiToolPolicySettingsRecord {
   read: PiToolPolicyMode;
   grep: PiToolPolicyMode;

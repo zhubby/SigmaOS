@@ -44,8 +44,9 @@ import {
 import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
 import type { en } from "../../i18n/resources.js";
+import { SystemNetworkManagementPanel, SystemStorageManagementPanel } from "./SystemManagementPanel.js";
 
-export type ManagementPanelId = "docker" | "virtualMachines";
+export type ManagementPanelId = "docker" | "virtualMachines" | "network" | "storage";
 
 type JoinKey<Key extends string, Rest extends string> = Rest extends "" ? Key : `${Key}.${Rest}`;
 type TranslationKeyOf<T> = T extends object
@@ -54,6 +55,7 @@ type TranslationKeyOf<T> = T extends object
     }[Extract<keyof T, string>]
   : "";
 type TranslationKey = TranslationKeyOf<typeof en>;
+type Translate = (key: string, options?: Record<string, unknown>) => unknown;
 type StatusTone = "ready" | "warning" | "offline" | "neutral";
 type GaugeTone = "ready" | "warning" | "danger" | "neutral";
 
@@ -139,7 +141,7 @@ const VM_COLUMNS: ManagementColumn[] = [
   { id: "actions", labelKey: "workspace.management.columns.actions" }
 ];
 
-const MANAGEMENT_PANELS: Record<Exclude<ManagementPanelId, "docker">, ManagementPanelConfig> = {
+const MANAGEMENT_PANELS: Record<Exclude<ManagementPanelId, "docker" | "network" | "storage">, ManagementPanelConfig> = {
   virtualMachines: {
     Icon: MonitorCog,
     eyebrowKey: "workspace.management.virtualMachines.eyebrow",
@@ -300,6 +302,12 @@ export function WorkspaceManagementPanel({
         onWorkQueuesChanged={onWorkQueuesChanged}
       />
     );
+  }
+  if (panel === "network") {
+    return <SystemNetworkManagementPanel locale={locale} />;
+  }
+  if (panel === "storage") {
+    return <SystemStorageManagementPanel locale={locale} />;
   }
 
   const { t } = useTranslation();
@@ -1009,48 +1017,48 @@ function DockerConsoleDialog({ session, onClose }: { session: DockerConsoleSessi
   );
 }
 
-function dockerMetrics(summary: DockerSummary | null, locale: SupportedLocale, t: ReturnType<typeof useTranslation>["t"]) {
+function dockerMetrics(summary: DockerSummary | null, locale: SupportedLocale, t: Translate) {
   const metrics = summary?.metrics;
   return [
     {
-      label: t("workspace.management.docker.metrics.containers"),
+      label: String(t("workspace.management.docker.metrics.containers")),
       value: metrics ? `${formatLocaleNumber(metrics.containers.running, locale)} / ${formatLocaleNumber(metrics.containers.total, locale)}` : "-",
-      detail: t("workspace.management.docker.metrics.containersDetail"),
+      detail: String(t("workspace.management.docker.metrics.containersDetail")),
       state: metrics?.containers.running ? ("ready" as const) : ("neutral" as const),
       Icon: Boxes
     },
     {
-      label: t("workspace.management.docker.metrics.images"),
+      label: String(t("workspace.management.docker.metrics.images")),
       value: metrics ? formatLocaleNumber(metrics.images, locale) : "-",
-      detail: t("workspace.management.docker.metrics.imagesDetail"),
+      detail: String(t("workspace.management.docker.metrics.imagesDetail")),
       state: "neutral" as const,
       Icon: Box
     },
     {
-      label: t("workspace.management.docker.metrics.networks"),
+      label: String(t("workspace.management.docker.metrics.networks")),
       value: metrics ? formatLocaleNumber(metrics.networks, locale) : "-",
-      detail: t("workspace.management.docker.metrics.networksDetail"),
+      detail: String(t("workspace.management.docker.metrics.networksDetail")),
       state: "ready" as const,
       Icon: Network
     },
     {
-      label: t("workspace.management.docker.metrics.volumes"),
+      label: String(t("workspace.management.docker.metrics.volumes")),
       value: metrics ? formatLocaleNumber(metrics.volumes, locale) : "-",
-      detail: t("workspace.management.docker.metrics.volumesDetail"),
+      detail: String(t("workspace.management.docker.metrics.volumesDetail")),
       state: metrics?.volumes ? ("warning" as const) : ("neutral" as const),
       Icon: Database
     }
   ];
 }
 
-function dockerGauges(summary: DockerSummary | null, locale: SupportedLocale, t: ReturnType<typeof useTranslation>["t"]): ManagementGauge[] {
+function dockerGauges(summary: DockerSummary | null, locale: SupportedLocale, t: Translate): ManagementGauge[] {
   const metrics = summary?.metrics;
   return [
     {
       id: "cpu",
       labelKey: "workspace.management.gauges.cpu",
       value: clampGauge(metrics?.cpuPercent ?? 0),
-      display: metrics?.cpuPercent === null || metrics?.cpuPercent === undefined ? t("common.dash") : formatPercent(metrics.cpuPercent, locale),
+      display: metrics?.cpuPercent === null || metrics?.cpuPercent === undefined ? String(t("common.dash")) : formatPercent(metrics.cpuPercent, locale),
       tone: gaugeTone(metrics?.cpuPercent ?? 0)
     },
     {
@@ -1059,7 +1067,7 @@ function dockerGauges(summary: DockerSummary | null, locale: SupportedLocale, t:
       value: clampGauge(metrics?.memoryPercent ?? 0),
       display:
         metrics?.memoryUsageBytes === null || metrics?.memoryUsageBytes === undefined
-          ? t("common.dash")
+          ? String(t("common.dash"))
           : `${formatBytes(metrics.memoryUsageBytes, locale)}${
               metrics.memoryLimitBytes ? ` / ${formatBytes(metrics.memoryLimitBytes, locale)}` : ""
             }`,
@@ -1069,14 +1077,14 @@ function dockerGauges(summary: DockerSummary | null, locale: SupportedLocale, t:
       id: "network",
       labelKey: "workspace.management.gauges.network",
       value: clampGauge((metrics?.networks ?? 0) * 8),
-      display: metrics ? `${formatLocaleNumber(metrics.networks, locale)} ${t("workspace.management.docker.units.networks")}` : t("common.dash"),
+      display: metrics ? `${formatLocaleNumber(metrics.networks, locale)} ${String(t("workspace.management.docker.units.networks"))}` : String(t("common.dash")),
       tone: "neutral"
     },
     {
       id: "storage",
       labelKey: "workspace.management.gauges.storage",
       value: clampGauge((metrics?.volumes ?? 0) * 6),
-      display: metrics ? `${formatLocaleNumber(metrics.volumes, locale)} ${t("workspace.management.docker.units.volumes")}` : t("common.dash"),
+      display: metrics ? `${formatLocaleNumber(metrics.volumes, locale)} ${String(t("workspace.management.docker.units.volumes"))}` : String(t("common.dash")),
       tone: metrics?.volumes ? "warning" : "neutral"
     }
   ];
@@ -1096,59 +1104,59 @@ function dockerStatusLabel(
   summary: DockerSummary | null,
   loading: boolean,
   error: string | null,
-  t: ReturnType<typeof useTranslation>["t"]
+  t: Translate
 ): string {
   if (loading) {
-    return t("common.states.loading");
+    return String(t("common.states.loading"));
   }
   if (error) {
-    return t("common.states.unavailable");
+    return String(t("common.states.unavailable"));
   }
   if (!summary?.enabled) {
-    return t("workspace.management.docker.states.disabled");
+    return String(t("workspace.management.docker.states.disabled"));
   }
   if (summary.engine.status === "ready") {
-    return t("workspace.management.states.ready");
+    return String(t("workspace.management.states.ready"));
   }
-  return t("common.states.unavailable");
+  return String(t("common.states.unavailable"));
 }
 
 function dockerStatusDetail(
   summary: DockerSummary | null,
   loading: boolean,
   error: string | null,
-  t: ReturnType<typeof useTranslation>["t"]
+  t: Translate
 ): string {
   if (loading) {
-    return t("workspace.management.docker.loading");
+    return String(t("workspace.management.docker.loading"));
   }
   if (error) {
     return error;
   }
   if (!summary?.enabled) {
-    return t("workspace.management.docker.disabledDetail");
+    return String(t("workspace.management.docker.disabledDetail"));
   }
-  return summary.engine.error ?? t("workspace.management.docker.engineDetail");
+  return summary.engine.error ?? String(t("workspace.management.docker.engineDetail"));
 }
 
-function dockerEmptyState(enabled: boolean, loading: boolean, t: ReturnType<typeof useTranslation>["t"]): string {
+function dockerEmptyState(enabled: boolean, loading: boolean, t: Translate): string {
   if (loading) {
-    return t("common.states.loading");
+    return String(t("common.states.loading"));
   }
   if (!enabled) {
-    return t("workspace.management.docker.disabledEmpty");
+    return String(t("workspace.management.docker.disabledEmpty"));
   }
-  return t("workspace.management.docker.noContainers");
+  return String(t("workspace.management.docker.noContainers"));
 }
 
-function dockerComposeEmptyState(enabled: boolean, loading: boolean, t: ReturnType<typeof useTranslation>["t"]): string {
+function dockerComposeEmptyState(enabled: boolean, loading: boolean, t: Translate): string {
   if (loading) {
-    return t("common.states.loading");
+    return String(t("common.states.loading"));
   }
   if (!enabled) {
-    return t("workspace.management.docker.disabledEmpty");
+    return String(t("workspace.management.docker.disabledEmpty"));
   }
-  return t("workspace.management.docker.noComposeProjects");
+  return String(t("workspace.management.docker.noComposeProjects"));
 }
 
 function pendingDockerApprovalForTarget(approvals: PendingApproval[], targetId: string): PendingApproval | null {
@@ -1204,17 +1212,17 @@ function composeTone(project: DockerComposeProject): StatusTone {
   return "neutral";
 }
 
-function composeStatusLabel(project: DockerComposeProject, t: ReturnType<typeof useTranslation>["t"]): string {
+function composeStatusLabel(project: DockerComposeProject, t: Translate): string {
   if (project.status === "configured") {
-    return t("workspace.management.states.staged");
+    return String(t("workspace.management.states.staged"));
   }
   if (project.status === "partial") {
-    return t("workspace.management.states.attention");
+    return String(t("workspace.management.states.attention"));
   }
   if (project.status === "stopped") {
-    return t("workspace.management.states.stopped");
+    return String(t("workspace.management.states.stopped"));
   }
-  return t("workspace.management.states.running");
+  return String(t("workspace.management.states.running"));
 }
 
 function formatContainerMemory(container: DockerContainer, locale: SupportedLocale): string {
@@ -1306,11 +1314,11 @@ function ResourceGauge({ gauge }: { gauge: ManagementGauge }) {
   );
 }
 
-function renderCell(row: ManagementRow, column: ManagementColumn, t: (key: TranslationKey) => string) {
+function renderCell(row: ManagementRow, column: ManagementColumn, t: Translate) {
   if (column.id === "status") {
     return (
       <span className="management-row-status" data-state={row.state}>
-        {t(row.statusKey)}
+        {String(t(row.statusKey))}
       </span>
     );
   }
@@ -1321,11 +1329,11 @@ function renderCell(row: ManagementRow, column: ManagementColumn, t: (key: Trans
         type="button"
         className="management-row-action"
         disabled
-        title={t("workspace.management.actions.disabledReason")}
-        aria-label={t(row.actionKey)}
+        title={String(t("workspace.management.actions.disabledReason"))}
+        aria-label={String(t(row.actionKey))}
       >
         <TerminalSquare aria-hidden="true" size={13} />
-        <span>{t(row.actionKey)}</span>
+        <span>{String(t(row.actionKey))}</span>
       </button>
     );
   }

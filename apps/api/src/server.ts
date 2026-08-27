@@ -7,7 +7,7 @@ import { registerApiRoutes } from "./routes/index.js";
 
 export type { ServerDependencies } from "./context.js";
 
-export async function buildServer({ config, db, docker }: ServerDependencies): Promise<FastifyInstance> {
+export async function buildServer({ config, db, docker, system }: ServerDependencies): Promise<FastifyInstance> {
   const server = Fastify({
     logger: {
       level: process.env.LOG_LEVEL ?? "info"
@@ -25,7 +25,8 @@ export async function buildServer({ config, db, docker }: ServerDependencies): P
   registerApiRoutes(server, {
     config,
     db,
-    ...(docker ? { docker } : {})
+    ...(docker ? { docker } : {}),
+    ...(system ? { system } : {})
   });
 
   return server;

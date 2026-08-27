@@ -106,6 +106,7 @@ const PROVIDER_OPTIONS = ["openai", "anthropic"] as const;
 const READ_ONLY_TOOLS = ["read", "grep", "find", "ls"] as const;
 const DANGEROUS_TOOLS = ["bash", "edit", "write"] as const;
 const DEFAULT_TEXT_PREVIEW_BYTES = 64 * 1024;
+type Translate = (key: string, options?: Record<string, unknown>) => unknown;
 
 export function SettingsModal({
   activeSection,
@@ -2166,26 +2167,26 @@ function SettingsConfigRows({ items }: { items: SettingsConfigRowItem[] }) {
 
 function storageVolumeLabel(
   volume: SystemInfoStorageVolume,
-  t: ReturnType<typeof useTranslation>["t"]
+  t: Translate
 ): string {
   if (volume.kind === "nas-root") {
     return volume.label;
   }
-  return t(`settings.system.storageKinds.${volume.kind}`);
+  return String(t(`settings.system.storageKinds.${volume.kind}`));
 }
 
 function formatNullableBytes(
   value: number | null,
   locale: SupportedLocale,
-  t: ReturnType<typeof useTranslation>["t"]
+  t: Translate
 ): string {
-  return value === null ? t("common.dash") : formatBytes(value, locale);
+  return value === null ? String(t("common.dash")) : formatBytes(value, locale);
 }
 
 function formatDuration(
   seconds: number,
   locale: SupportedLocale,
-  t: ReturnType<typeof useTranslation>["t"]
+  t: Translate
 ): string {
   const totalSeconds = Math.max(Math.round(seconds), 0);
   const days = Math.floor(totalSeconds / 86_400);
@@ -2194,26 +2195,26 @@ function formatDuration(
   const remainingSeconds = totalSeconds % 60;
 
   if (days > 0) {
-    return t("settings.system.duration.daysHours", {
+    return String(t("settings.system.duration.daysHours", {
       days: formatLocaleNumber(days, locale),
       hours: formatLocaleNumber(hours, locale)
-    });
+    }));
   }
   if (hours > 0) {
-    return t("settings.system.duration.hoursMinutes", {
+    return String(t("settings.system.duration.hoursMinutes", {
       hours: formatLocaleNumber(hours, locale),
       minutes: formatLocaleNumber(minutes, locale)
-    });
+    }));
   }
   if (minutes > 0) {
-    return t("settings.system.duration.minutesSeconds", {
+    return String(t("settings.system.duration.minutesSeconds", {
       minutes: formatLocaleNumber(minutes, locale),
       seconds: formatLocaleNumber(remainingSeconds, locale)
-    });
+    }));
   }
-  return t("settings.system.duration.seconds", {
+  return String(t("settings.system.duration.seconds", {
     seconds: formatLocaleNumber(remainingSeconds, locale)
-  });
+  }));
 }
 
 function formatLoadAverage(values: number[], locale: SupportedLocale): string {
@@ -2271,22 +2272,22 @@ function settingsStateIcon(state: SettingsState) {
   return <Clock3 aria-hidden="true" size={13} />;
 }
 
-function languageLocaleLabel(locale: SupportedLocale, t: ReturnType<typeof useTranslation>["t"]): string {
-  return locale === "zh-CN" ? t("common.language.chineseSimplified") : t("common.language.english");
+function languageLocaleLabel(locale: SupportedLocale, t: Translate): string {
+  return String(locale === "zh-CN" ? t("common.language.chineseSimplified") : t("common.language.english"));
 }
 
-function themeResolvedLabel(theme: ResolvedTheme, t: ReturnType<typeof useTranslation>["t"]): string {
-  return theme === "light" ? t("settings.appearance.lightTheme") : t("settings.appearance.darkTheme");
+function themeResolvedLabel(theme: ResolvedTheme, t: Translate): string {
+  return String(theme === "light" ? t("settings.appearance.lightTheme") : t("settings.appearance.darkTheme"));
 }
 
-function toolPolicyModeLabel(mode: string, t: ReturnType<typeof useTranslation>["t"]): string {
+function toolPolicyModeLabel(mode: string, t: Translate): string {
   if (mode === "auto") {
-    return t("settings.toolPolicy.modes.auto");
+    return String(t("settings.toolPolicy.modes.auto"));
   }
   if (mode === "ask") {
-    return t("settings.toolPolicy.modes.ask");
+    return String(t("settings.toolPolicy.modes.ask"));
   }
-  return t("settings.toolPolicy.modes.disabled");
+  return String(t("settings.toolPolicy.modes.disabled"));
 }
 
 function splitDockerShells(value: string): string[] {

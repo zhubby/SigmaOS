@@ -31,6 +31,8 @@ interface ApprovalCard {
   items: { label: string; value: string }[];
 }
 
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
 export function ChatPane({
   active,
   selectedRoot,
@@ -79,6 +81,7 @@ export function ChatPane({
   onCancelActiveJob: () => void;
 }) {
   const { t } = useTranslation();
+  const translate = t as Translate;
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const rootAgentTitle = t("chat.rootAgent");
   const hasConversationContent = transcript.length > 0 || activeApprovals.length > 0;
@@ -88,7 +91,7 @@ export function ChatPane({
 
   const renderApprovalCard = (approval: PendingApproval) => {
     const risk = approval.proposal[0]?.risk ?? "low";
-    const card = approvalCard(approval, t);
+    const card = approvalCard(approval, translate);
     const CardIcon = card.kind === "tool" ? TerminalSquare : card.kind === "docker" ? Container : FileCog;
 
     return (
@@ -104,7 +107,7 @@ export function ChatPane({
               <strong>{card.title}</strong>
             </div>
             <span className="risk-pill" data-risk={risk}>
-              {t("chat.risk", { risk: approvalRiskLabel(risk, t) })}
+              {t("chat.risk", { risk: approvalRiskLabel(risk, translate) })}
             </span>
           </div>
 
@@ -312,7 +315,7 @@ export function ChatPane({
   );
 }
 
-function approvalRiskLabel(risk: ApprovalRisk, t: ReturnType<typeof useTranslation>["t"]): string {
+function approvalRiskLabel(risk: ApprovalRisk, t: Translate): string {
   if (risk === "high") {
     return t("chat.risks.high");
   }
@@ -322,7 +325,7 @@ function approvalRiskLabel(risk: ApprovalRisk, t: ReturnType<typeof useTranslati
   return t("chat.risks.low");
 }
 
-function approvalCard(approval: PendingApproval, t: ReturnType<typeof useTranslation>["t"]): ApprovalCard {
+function approvalCard(approval: PendingApproval, t: Translate): ApprovalCard {
   if (approval.kind === "pi_tool_call") {
     const toolCall = approval.proposal.find((proposal) => "toolName" in proposal);
     if (!toolCall || !("toolName" in toolCall)) {
@@ -421,7 +424,7 @@ function approvalCard(approval: PendingApproval, t: ReturnType<typeof useTransla
 
 function dockerActionLabel(
   action: string,
-  t: ReturnType<typeof useTranslation>["t"]
+  t: Translate
 ): string {
   switch (action) {
     case "start":
@@ -447,7 +450,7 @@ function dockerActionLabel(
 
 function dockerTargetTypeLabel(
   targetType: string,
-  t: ReturnType<typeof useTranslation>["t"]
+  t: Translate
 ): string {
   switch (targetType) {
     case "container":

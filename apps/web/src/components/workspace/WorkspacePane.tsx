@@ -10,6 +10,7 @@ import {
   HardDrive,
   Home,
   MonitorCog,
+  Network,
   PanelRightClose,
   PanelRightOpen,
   PencilLine,
@@ -50,6 +51,18 @@ const WORKSPACE_PANELS = [
     labelKey: "workspace.panels.virtualMachines",
     shortLabelKey: "workspace.panels.virtualMachinesShort",
     Icon: MonitorCog
+  },
+  {
+    id: "network",
+    labelKey: "workspace.panels.network",
+    shortLabelKey: "workspace.panels.networkShort",
+    Icon: Network
+  },
+  {
+    id: "storage",
+    labelKey: "workspace.panels.storage",
+    shortLabelKey: "workspace.panels.storageShort",
+    Icon: HardDrive
   }
 ] as const satisfies ReadonlyArray<{
   id: WorkspacePanelId;

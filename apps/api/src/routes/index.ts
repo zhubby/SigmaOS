@@ -9,11 +9,13 @@ import { registerOperationRoutes } from "./operations.js";
 import { registerRootRoutes } from "./roots.js";
 import { registerSessionRoutes } from "./sessions.js";
 import { registerSettingsRoutes } from "./settings.js";
+import { registerSystemRoutes } from "./system.js";
 
 export function registerApiRoutes(server: FastifyInstance, context: ApiRouteContext): void {
   registerHealthRoutes(server, context);
   registerRootRoutes(server, context);
   registerSettingsRoutes(server, context);
+  registerSystemRoutes(server, context);
   registerSessionRoutes(server, context);
   registerJobRoutes(server, context);
   registerFileRoutes(server, context);

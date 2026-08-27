@@ -29,6 +29,7 @@ import {
 import type { DockerComposeProjectSummary, DockerContainerSummary, DockerOperationProposal, SigmaConfig } from "@sigmaos/shared";
 import type { DockerComposeRuntime } from "./lib/docker-compose.js";
 import type { DockerEngineRuntime, DockerExecStream } from "./lib/docker-client.js";
+import type { SystemCommandRunner } from "./lib/system-management.js";
 import { buildServer } from "./server.js";
 
 const execFileAsync = promisify(execFile);
@@ -334,6 +335,275 @@ describe("API server", () => {
       delete process.env.SIGMAOS_TEST_SECRET;
       await server.close();
     }
+  });
+
+  it("returns read-only network management summary from host commands", async () => {
+    const commandRunner = new FakeSystemCommandRunner({
+      "ip -j link": JSON.stringify([
+        {
+          ifindex: 1,
+          ifname: "lo",
+          flags: ["LOOPBACK", "UP", "LOWER_UP"],
+          mtu: 65536,
+          operstate: "UNKNOWN",
+          link_type: "loopback",
+          address: "00:00:00:00:00:00"
+        },
+        {
+          ifindex: 2,
+          ifname: "enp1s0",
+          flags: ["BROADCAST", "MULTICAST", "UP", "LOWER_UP"],
+          mtu: 1500,
+          operstate: "UP",
+          link_type: "ether",
+          address: "52:54:00:12:34:56"
+        }
+      ]),
+      "ip -j addr": JSON.stringify([
+        {
+          ifname: "lo",
+          addr_info: [{ family: "inet", local: "127.0.0.1", prefixlen: 8, scope: "host", label: "lo" }]
+        },
+        {
+          ifname: "enp1s0",
+          addr_info: [
+            { family: "inet", local: "192.168.50.10", prefixlen: 24, scope: "global", label: "enp1s0" },
+            { family: "inet6", local: "fe80::5054", prefixlen: 64, scope: "link", label: "enp1s0" }
+          ]
+        }
+      ]),
+      "ip -j route": JSON.stringify([
+        { dst: "default", gateway: "192.168.50.1", dev: "enp1s0", protocol: "dhcp" },
+        { dst: "192.168.50.0/24", dev: "enp1s0", prefsrc: "192.168.50.10", scope: "link" }
+      ])
+    });
+    const server = await buildServer({ config: testConfig(tempDir), db, system: { commandRunner } });
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/system/network"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      network: {
+        status: "ready",
+        capabilities: {
+          backend: "systemd-networkd",
+          canApplyConfiguration: false
+        },
+        metrics: {
+          interfaces: 2,
+          connected: 2,
+          addresses: 3,
+          defaultRoutes: 1
+        },
+        interfaces: expect.arrayContaining([
+          expect.objectContaining({
+            name: "enp1s0",
+            kind: "ethernet",
+            state: "connected",
+            mac: "52:54:00:12:34:56",
+            mtu: 1500,
+            hasDefaultRoute: true,
+            addresses: expect.arrayContaining([
+              expect.objectContaining({ family: "inet", cidr: "192.168.50.10/24" })
+            ])
+          })
+        ]),
+        routes: expect.arrayContaining([
+          expect.objectContaining({ destination: "default", gateway: "192.168.50.1", device: "enp1s0" })
+        ]),
+        issues: []
+      }
+    });
+    await server.close();
+  });
+
+  it("returns unavailable network summary when ip command collection fails", async () => {
+    const commandRunner = new FakeSystemCommandRunner({});
+    const server = await buildServer({ config: testConfig(tempDir), db, system: { commandRunner } });
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/system/network"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      network: {
+        status: "unavailable",
+        metrics: {
+          interfaces: 0,
+          connected: 0,
+          addresses: 0,
+          defaultRoutes: 0
+        },
+        interfaces: [],
+        routes: []
+      }
+    });
+    expect(response.json().network.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ source: "network links" }),
+        expect.objectContaining({ source: "network addresses" }),
+        expect.objectContaining({ source: "network routes" })
+      ])
+    );
+    await server.close();
+  });
+
+  it("returns read-only storage management summary from block, RAID, mount, and SMART commands", async () => {
+    const commandRunner = storageCommandRunner({
+      smartSdb: JSON.stringify({
+        smart_status: { passed: false },
+        temperature: { current: 42 },
+        power_on_time: { hours: 20_100 },
+        ata_smart_error_log: { summary: { count: 3 } }
+      })
+    });
+    const server = await buildServer({ config: testConfig(tempDir), db, system: { commandRunner } });
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/system/storage"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      storage: {
+        status: "ready",
+        capabilities: {
+          backend: "mdadm",
+          canCreatePool: false,
+          canDeletePool: false
+        },
+        metrics: {
+          pools: 1,
+          arrays: 1,
+          disks: 2,
+          totalBytes: 2000,
+          usedBytes: 800,
+          availableBytes: 1200,
+          smartPassed: 1,
+          smartFailed: 1
+        },
+        pools: [
+          expect.objectContaining({
+            name: "nas:0",
+            raidPath: "/dev/md0",
+            raidLevel: "raid1",
+            status: "ready",
+            mountpoint: "/srv/storage",
+            filesystem: "ext4",
+            usedPercent: 0.4,
+            memberDevices: ["/dev/sda1", "/dev/sdb1"]
+          })
+        ],
+        disks: expect.arrayContaining([
+          expect.objectContaining({
+            path: "/dev/sdb",
+            smart: expect.objectContaining({
+              health: "failed",
+              temperatureCelsius: 42,
+              powerOnHours: 20100,
+              errorCount: 3
+            })
+          })
+        ]),
+        issues: []
+      }
+    });
+    await server.close();
+  });
+
+  it("keeps storage summary available when mdadm and SMART commands are missing", async () => {
+    const commandRunner = new FakeSystemCommandRunner({
+      "lsblk --json --bytes --output NAME,KNAME,PATH,TYPE,SIZE,MODEL,SERIAL,TRAN,ROTA,FSTYPE,LABEL,UUID,MOUNTPOINTS,PKNAME": JSON.stringify({
+        blockdevices: [
+          {
+            name: "sda",
+            path: "/dev/sda",
+            type: "disk",
+            size: 1000,
+            model: "TestDisk",
+            serial: "disk-a",
+            tran: "sata",
+            rota: 1,
+            mountpoints: []
+          }
+        ]
+      }),
+      "findmnt --json --bytes --output SOURCE,TARGET,FSTYPE,SIZE,USED,AVAIL,USE%": JSON.stringify({
+        filesystems: [{ source: "/dev/sda1", target: "/srv/storage", fstype: "ext4", size: 1000, used: 250, avail: 750, "use%": "25%" }]
+      })
+    });
+    const server = await buildServer({ config: testConfig(tempDir), db, system: { commandRunner } });
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/system/storage"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      storage: {
+        status: "partial",
+        metrics: {
+          disks: 1,
+          arrays: 0,
+          pools: 0,
+          totalBytes: 1000,
+          usedBytes: null,
+          availableBytes: null,
+          smartUnknown: 1
+        },
+        disks: [
+          expect.objectContaining({
+            path: "/dev/sda",
+            smart: expect.objectContaining({ health: "unknown" })
+          })
+        ],
+        pools: []
+      }
+    });
+    expect(response.json().storage.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ source: "mdadm scan" }),
+        expect.objectContaining({ source: "SMART scan" })
+      ])
+    );
+    await server.close();
+  });
+
+  it("scopes SMART command failures to the affected disk", async () => {
+    const commandRunner = storageCommandRunner({
+      failSmartSdb: true
+    });
+    const server = await buildServer({ config: testConfig(tempDir), db, system: { commandRunner } });
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/system/storage"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().storage).toMatchObject({
+      status: "partial",
+      metrics: {
+        smartPassed: 1,
+        smartFailed: 1
+      },
+      disks: expect.arrayContaining([
+        expect.objectContaining({
+          path: "/dev/sda",
+          smart: expect.objectContaining({ health: "passed" })
+        }),
+        expect.objectContaining({
+          path: "/dev/sdb",
+          smart: expect.objectContaining({ health: "error" })
+        })
+      ])
+    });
+    expect(response.json().storage.issues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ source: "SMART /dev/sdb" })])
+    );
+    await server.close();
   });
 
   it("returns and stores Docker settings through the settings API", async () => {
@@ -1571,6 +1841,134 @@ describe("API server", () => {
     await server.close();
   });
 });
+
+class FakeSystemCommandRunner implements SystemCommandRunner {
+  constructor(private readonly outputs: Record<string, string>) {}
+
+  async run(command: string, args: string[]): Promise<string> {
+    const key = [command, ...args].join(" ");
+    const output = this.outputs[key];
+    if (output === undefined) {
+      throw new Error(`${key} unavailable`);
+    }
+    return output;
+  }
+}
+
+function storageCommandRunner({
+  smartSdb,
+  failSmartSdb = false
+}: {
+  smartSdb?: string;
+  failSmartSdb?: boolean;
+}): FakeSystemCommandRunner {
+  return new FakeSystemCommandRunner({
+    "lsblk --json --bytes --output NAME,KNAME,PATH,TYPE,SIZE,MODEL,SERIAL,TRAN,ROTA,FSTYPE,LABEL,UUID,MOUNTPOINTS,PKNAME": JSON.stringify({
+      blockdevices: [
+        {
+          name: "sda",
+          path: "/dev/sda",
+          type: "disk",
+          size: 1000,
+          model: "Disk A",
+          serial: "disk-a",
+          tran: "sata",
+          rota: 1,
+          mountpoints: [],
+          children: [
+            {
+              name: "sda1",
+              path: "/dev/sda1",
+              type: "part",
+              size: 1000,
+              fstype: "linux_raid_member",
+              uuid: "part-a",
+              mountpoints: []
+            }
+          ]
+        },
+        {
+          name: "sdb",
+          path: "/dev/sdb",
+          type: "disk",
+          size: 1000,
+          model: "Disk B",
+          serial: "disk-b",
+          tran: "sata",
+          rota: 1,
+          mountpoints: [],
+          children: [
+            {
+              name: "sdb1",
+              path: "/dev/sdb1",
+              type: "part",
+              size: 1000,
+              fstype: "linux_raid_member",
+              uuid: "part-b",
+              mountpoints: []
+            }
+          ]
+        }
+      ]
+    }),
+    "findmnt --json --bytes --output SOURCE,TARGET,FSTYPE,SIZE,USED,AVAIL,USE%": JSON.stringify({
+      filesystems: [
+        {
+          source: "/dev/md0",
+          target: "/srv/storage",
+          fstype: "ext4",
+          size: 2000,
+          used: 800,
+          avail: 1200,
+          "use%": "40%"
+        }
+      ]
+    }),
+    "mdadm --detail --scan": "ARRAY /dev/md0 metadata=1.2 name=nas:0 UUID=raid-uuid\n",
+    "mdadm --detail /dev/md0": `
+/dev/md0:
+           Version : 1.2
+        Raid Level : raid1
+        Array Size : 2 (2.00 KiB 2.05 KB)
+      Raid Devices : 2
+     Total Devices : 2
+             State : clean
+    Active Devices : 2
+    Failed Devices : 0
+     Spare Devices : 0
+              Name : nas:0
+              UUID : raid-uuid
+
+    Number   Major   Minor   RaidDevice State
+       0       8        1        0      active sync   /dev/sda1
+       1       8       17        1      active sync   /dev/sdb1
+`,
+    "smartctl --scan-open --json": JSON.stringify({
+      devices: [
+        { name: "/dev/sda", type: "sat", protocol: "ATA" },
+        { name: "/dev/sdb", type: "sat", protocol: "ATA" }
+      ]
+    }),
+    "smartctl --all --json -d sat /dev/sda": JSON.stringify({
+      smart_status: { passed: true },
+      temperature: { current: 35 },
+      power_on_time: { hours: 1200 },
+      ata_smart_error_log: { summary: { count: 0 } }
+    }),
+    ...(failSmartSdb
+      ? {}
+      : {
+          "smartctl --all --json -d sat /dev/sdb":
+            smartSdb ??
+            JSON.stringify({
+              smart_status: { passed: true },
+              temperature: { current: 36 },
+              power_on_time: { hours: 1220 },
+              ata_smart_error_log: { summary: { count: 0 } }
+            })
+        })
+  });
+}
 
 function testConfig(dataDir: string): SigmaConfig {
   return {

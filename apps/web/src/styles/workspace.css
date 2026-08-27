@@ -22,7 +22,9 @@
 }
 
 .workspace-stage[data-panel="docker"],
-.workspace-stage[data-panel="virtualMachines"] {
+.workspace-stage[data-panel="virtualMachines"],
+.workspace-stage[data-panel="network"],
+.workspace-stage[data-panel="storage"] {
   grid-template-rows: minmax(0, 1fr);
 }
 
@@ -1252,6 +1254,14 @@
   min-width: 720px;
 }
 
+.management-table-network {
+  min-width: 920px;
+}
+
+.management-table-storage {
+  min-width: 860px;
+}
+
 .management-table-docker th:nth-child(1),
 .management-table-docker td:nth-child(1) {
   width: 15%;
@@ -1321,6 +1331,69 @@
   width: 19%;
 }
 
+.management-table-network th:nth-child(1),
+.management-table-network td:nth-child(1) {
+  width: 13%;
+}
+
+.management-table-network th:nth-child(2),
+.management-table-network td:nth-child(2),
+.management-table-network th:nth-child(3),
+.management-table-network td:nth-child(3) {
+  width: 10%;
+}
+
+.management-table-network th:nth-child(4),
+.management-table-network td:nth-child(4) {
+  width: 27%;
+}
+
+.management-table-network th:nth-child(5),
+.management-table-network td:nth-child(5) {
+  width: 16%;
+}
+
+.management-table-network th:nth-child(6),
+.management-table-network td:nth-child(6),
+.management-table-network th:nth-child(7),
+.management-table-network td:nth-child(7),
+.management-table-network th:nth-child(8),
+.management-table-network td:nth-child(8) {
+  width: 8%;
+}
+
+.management-table-storage th:nth-child(1),
+.management-table-storage td:nth-child(1) {
+  width: 18%;
+}
+
+.management-table-storage th:nth-child(2),
+.management-table-storage td:nth-child(2),
+.management-table-storage th:nth-child(3),
+.management-table-storage td:nth-child(3) {
+  width: 12%;
+}
+
+.management-table-storage th:nth-child(4),
+.management-table-storage td:nth-child(4) {
+  width: 24%;
+}
+
+.management-table-storage th:nth-child(5),
+.management-table-storage td:nth-child(5) {
+  width: 18%;
+}
+
+.management-table-storage th:nth-child(6),
+.management-table-storage td:nth-child(6) {
+  width: 8%;
+}
+
+.management-table-storage th:nth-child(7),
+.management-table-storage td:nth-child(7) {
+  width: 8%;
+}
+
 .management-table th,
 .management-table td {
   max-width: 240px;
@@ -1333,7 +1406,8 @@
 }
 
 .management-table-docker td:nth-child(7),
-.management-table-virtualMachines td:nth-child(8) {
+.management-table-virtualMachines td:nth-child(8),
+.management-table-storage td:nth-child(7) {
   overflow: visible;
 }
 
@@ -1378,6 +1452,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.system-issue-list span {
+  white-space: normal;
 }
 
 .management-action-cluster {
@@ -1438,6 +1516,10 @@
 
 .management-workload-docker {
   grid-template-columns: 18px minmax(0, 1fr) auto minmax(118px, auto);
+}
+
+.system-storage-disk-row {
+  grid-template-columns: 18px minmax(0, 1fr) auto minmax(150px, auto);
 }
 
 .management-workload svg[data-state="ready"] {

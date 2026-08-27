@@ -3,6 +3,8 @@ export const en = {
     appName: "SigmaOS",
     root: "root",
     dash: "-",
+    yes: "Yes",
+    no: "No",
     actions: {
       approve: "Approve",
       cancel: "Cancel",
@@ -28,7 +30,8 @@ export const en = {
       missing: "Missing",
       needsKey: "Needs key",
       ready: "Ready",
-      unavailable: "Unavailable"
+      unavailable: "Unavailable",
+      unknown: "Unknown"
     },
     language: {
       system: "System default",
@@ -188,7 +191,11 @@ export const en = {
       docker: "Docker",
       dockerShort: "Docker",
       virtualMachines: "Virtual machines",
-      virtualMachinesShort: "VMs"
+      virtualMachinesShort: "VMs",
+      network: "Network",
+      networkShort: "Net",
+      storage: "Storage",
+      storageShort: "Store"
     },
     management: {
       previewMode: "Static preview",
@@ -207,7 +214,11 @@ export const en = {
         openConsole: "Open console",
         logs: "Logs",
         pendingApproval: "Pending approval",
-        resume: "Resume"
+        resume: "Resume",
+        configure: "Configure",
+        createPool: "Create pool",
+        deletePool: "Delete pool",
+        systemIntegrationRequired: "System integration is read-only in this release."
       },
       columns: {
         name: "Name",
@@ -236,6 +247,9 @@ export const en = {
         network: "Network I/O",
         storage: "Storage I/O",
         snapshots: "Snapshot growth"
+      },
+      values: {
+        readOnly: "Read-only"
       },
       docker: {
         eyebrow: "Containers",
@@ -291,6 +305,125 @@ export const en = {
         composeDescription: "Whitelisted Compose files available for approval-gated deploy actions.",
         resourcesTitle: "Runtime pressure",
         resourcesDescription: "Aggregated CPU, memory, network, and volume signals from the Docker runtime."
+      },
+      network: {
+        eyebrow: "Network",
+        title: "Network",
+        description: "Read-only multi-interface inventory for addresses, link state, routes, and future systemd-networkd configuration.",
+        loading: "Loading network interfaces.",
+        readyDetail: "Live interface and route data from the host networking stack.",
+        partialDetail: "Some network commands failed; available interfaces are still shown.",
+        unavailableDetail: "Network command data is unavailable on this host.",
+        defaultRoute: "Default",
+        noInterfaces: "No network interfaces are visible.",
+        noRoutes: "No routes are visible.",
+        interfacesTitle: "Interfaces",
+        interfacesDescription: "Physical, virtual, bridge, bond, and VLAN devices reported by the host.",
+        routesTitle: "Routes",
+        routesDescription: "Default and scoped routes reported by the kernel.",
+        readinessTitle: "Configuration readiness",
+        readinessDescription: "Readiness signals for future systemd-networkd management.",
+        facts: {
+          backend: "Backend",
+          mode: "Mode",
+          defaultRoutes: "Default routes",
+          interfaces: "Interfaces"
+        },
+        metrics: {
+          interfaces: "Interfaces",
+          interfacesDetail: "Detected network devices",
+          connected: "Connected",
+          connectedDetail: "Links with carrier",
+          addresses: "Addresses",
+          addressesDetail: "IPv4 and IPv6 assignments",
+          defaultRoutes: "Default routes",
+          defaultRoutesDetail: "Outbound route candidates"
+        },
+        columns: {
+          kind: "Kind",
+          addresses: "Addresses",
+          mac: "MAC",
+          speed: "Speed",
+          mtu: "MTU",
+          defaultRoute: "Default route"
+        },
+        states: {
+          connected: "Connected",
+          up: "Up",
+          down: "Down",
+          unknown: "Unknown"
+        },
+        kinds: {
+          ethernet: "Ethernet",
+          wireless: "Wireless",
+          loopback: "Loopback",
+          bridge: "Bridge",
+          bond: "Bond",
+          vlan: "VLAN",
+          virtual: "Virtual",
+          unknown: "Unknown"
+        },
+        gauges: {
+          connected: "Connected links",
+          addressCoverage: "Address coverage",
+          defaultRoute: "Default route"
+        }
+      },
+      storage: {
+        eyebrow: "Storage",
+        title: "Storage",
+        description: "Read-only mdadm storage pool view with RAID arrays, disk inventory, mounts, and SMART health.",
+        loading: "Loading storage devices.",
+        readyDetail: "Live block device, mdadm, mount, and SMART data from the host.",
+        partialDetail: "Some storage commands failed; available disks and pools are still shown.",
+        unavailableDetail: "Storage command data is unavailable on this host.",
+        noPools: "No mdadm storage pools are visible.",
+        noDisks: "No disks are visible.",
+        poolsTitle: "Storage pools",
+        poolsDescription: "Each pool maps to one mdadm RAID array.",
+        disksTitle: "Disks and SMART",
+        disksDescription: "Physical disk inventory with SMART health, temperature, and error counters.",
+        healthTitle: "Storage health",
+        healthDescription: "Capacity, pool readiness, and SMART pass rate.",
+        facts: {
+          backend: "Backend",
+          mode: "Mode",
+          pools: "Pools",
+          arrays: "RAID arrays"
+        },
+        metrics: {
+          pools: "Pools",
+          poolsDetail: "Mapped mdadm arrays",
+          disks: "Disks",
+          disksDetail: "Physical block devices",
+          smart: "SMART",
+          smartDetail: "Passing disks",
+          capacity: "Capacity",
+          capacityDetail: "No mounted pool usage",
+          capacityUsed: "{{value}} used"
+        },
+        columns: {
+          raid: "RAID",
+          usage: "Usage",
+          mount: "Mount",
+          members: "Members"
+        },
+        smart: {
+          passed: "SMART OK",
+          failed: "SMART fail",
+          unknown: "Unknown",
+          error: "SMART error"
+        },
+        diskMeta: {
+          temperature: "{{value}} C",
+          powerOn: "{{value}} h",
+          errors: "{{value}} errors"
+        },
+        gauges: {
+          capacity: "Used capacity",
+          smart: "SMART pass",
+          pools: "Ready pools"
+        }
       },
       virtualMachines: {
         eyebrow: "Virtualization",
@@ -759,6 +892,8 @@ export const zhCN = {
     appName: "SigmaOS",
     root: "根目录",
     dash: "-",
+    yes: "是",
+    no: "否",
     actions: {
       approve: "批准",
       cancel: "取消",
@@ -784,7 +919,8 @@ export const zhCN = {
       missing: "缺失",
       needsKey: "需要密钥",
       ready: "就绪",
-      unavailable: "不可用"
+      unavailable: "不可用",
+      unknown: "未知"
     },
     language: {
       system: "跟随系统",
@@ -944,7 +1080,11 @@ export const zhCN = {
       docker: "Docker",
       dockerShort: "Docker",
       virtualMachines: "虚拟机",
-      virtualMachinesShort: "VM"
+      virtualMachinesShort: "VM",
+      network: "网络",
+      networkShort: "网络",
+      storage: "存储",
+      storageShort: "存储"
     },
     management: {
       previewMode: "静态预览",
@@ -963,7 +1103,11 @@ export const zhCN = {
         openConsole: "打开控制台",
         logs: "日志",
         pendingApproval: "等待审批",
-        resume: "恢复"
+        resume: "恢复",
+        configure: "配置",
+        createPool: "创建池",
+        deletePool: "删除池",
+        systemIntegrationRequired: "此版本的系统集成为只读。"
       },
       columns: {
         name: "名称",
@@ -992,6 +1136,9 @@ export const zhCN = {
         network: "网络 I/O",
         storage: "存储 I/O",
         snapshots: "快照增长"
+      },
+      values: {
+        readOnly: "只读"
       },
       docker: {
         eyebrow: "容器",
@@ -1047,6 +1194,125 @@ export const zhCN = {
         composeDescription: "白名单 Compose 文件，可发起审批式部署操作。",
         resourcesTitle: "运行时压力",
         resourcesDescription: "汇总 Docker 运行时的 CPU、内存、网络和卷信号。"
+      },
+      network: {
+        eyebrow: "网络",
+        title: "网络",
+        description: "只读查看多网卡地址、链路状态、路由和未来 systemd-networkd 配置入口。",
+        loading: "正在加载网络接口。",
+        readyDetail: "来自宿主网络栈的实时接口和路由数据。",
+        partialDetail: "部分网络命令失败；仍会展示可用接口。",
+        unavailableDetail: "当前主机无法读取网络命令数据。",
+        defaultRoute: "默认",
+        noInterfaces: "当前没有可见网络接口。",
+        noRoutes: "当前没有可见路由。",
+        interfacesTitle: "网络接口",
+        interfacesDescription: "宿主报告的物理、虚拟、桥接、bond 和 VLAN 设备。",
+        routesTitle: "路由",
+        routesDescription: "内核报告的默认路由和作用域路由。",
+        readinessTitle: "配置就绪度",
+        readinessDescription: "未来 systemd-networkd 管理所需的只读信号。",
+        facts: {
+          backend: "后端",
+          mode: "模式",
+          defaultRoutes: "默认路由",
+          interfaces: "接口"
+        },
+        metrics: {
+          interfaces: "接口",
+          interfacesDetail: "检测到的网络设备",
+          connected: "已连接",
+          connectedDetail: "有载波的链路",
+          addresses: "地址",
+          addressesDetail: "IPv4 和 IPv6 分配",
+          defaultRoutes: "默认路由",
+          defaultRoutesDetail: "出站路由候选"
+        },
+        columns: {
+          kind: "类型",
+          addresses: "地址",
+          mac: "MAC",
+          speed: "速率",
+          mtu: "MTU",
+          defaultRoute: "默认路由"
+        },
+        states: {
+          connected: "已连接",
+          up: "已启用",
+          down: "已断开",
+          unknown: "未知"
+        },
+        kinds: {
+          ethernet: "以太网",
+          wireless: "无线",
+          loopback: "Loopback",
+          bridge: "桥接",
+          bond: "Bond",
+          vlan: "VLAN",
+          virtual: "虚拟",
+          unknown: "未知"
+        },
+        gauges: {
+          connected: "已连接链路",
+          addressCoverage: "地址覆盖",
+          defaultRoute: "默认路由"
+        }
+      },
+      storage: {
+        eyebrow: "存储",
+        title: "存储",
+        description: "只读查看 mdadm 存储池、RAID 阵列、磁盘、挂载和 SMART 健康。",
+        loading: "正在加载存储设备。",
+        readyDetail: "来自宿主的块设备、mdadm、挂载和 SMART 实时数据。",
+        partialDetail: "部分存储命令失败；仍会展示可用磁盘和存储池。",
+        unavailableDetail: "当前主机无法读取存储命令数据。",
+        noPools: "当前没有可见 mdadm 存储池。",
+        noDisks: "当前没有可见磁盘。",
+        poolsTitle: "存储池",
+        poolsDescription: "每个存储池映射一个 mdadm RAID 阵列。",
+        disksTitle: "磁盘与 SMART",
+        disksDescription: "物理磁盘清单，包含 SMART 健康、温度和错误计数。",
+        healthTitle: "存储健康",
+        healthDescription: "容量、存储池就绪度和 SMART 通过率。",
+        facts: {
+          backend: "后端",
+          mode: "模式",
+          pools: "存储池",
+          arrays: "RAID 阵列"
+        },
+        metrics: {
+          pools: "存储池",
+          poolsDetail: "映射的 mdadm 阵列",
+          disks: "磁盘",
+          disksDetail: "物理块设备",
+          smart: "SMART",
+          smartDetail: "通过的磁盘",
+          capacity: "容量",
+          capacityDetail: "没有已挂载存储池用量",
+          capacityUsed: "已用 {{value}}"
+        },
+        columns: {
+          raid: "RAID",
+          usage: "用量",
+          mount: "挂载",
+          members: "成员"
+        },
+        smart: {
+          passed: "SMART 正常",
+          failed: "SMART 失败",
+          unknown: "未知",
+          error: "SMART 错误"
+        },
+        diskMeta: {
+          temperature: "{{value}} C",
+          powerOn: "{{value}} 小时",
+          errors: "{{value}} 错误"
+        },
+        gauges: {
+          capacity: "已用容量",
+          smart: "SMART 通过",
+          pools: "就绪池"
+        }
       },
       virtualMachines: {
         eyebrow: "虚拟化",

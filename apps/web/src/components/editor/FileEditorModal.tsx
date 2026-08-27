@@ -13,6 +13,7 @@ import { toErrorMessage } from "../../lib/format.js";
 import { describeTextPreview, highlightSource } from "../../preview-utils.js";
 
 type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "conflict" | "error";
+type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 export function FileEditorModal({
   rootId,
@@ -28,6 +29,7 @@ export function FileEditorModal({
   onSaved: (result: SaveEditableTextResult) => void;
 }) {
   const { t } = useTranslation();
+  const translate = t as Translate;
   const [content, setContent] = useState("");
   const [savedContent, setSavedContent] = useState("");
   const [modifiedAt, setModifiedAt] = useState<string | null>(null);
@@ -47,8 +49,8 @@ export function FileEditorModal({
     [content, descriptor.language]
   );
   const status = useMemo(
-    () => editorStatusLabel({ dirty, error, loading, saveStatus, t }),
-    [dirty, error, loading, saveStatus, t]
+    () => editorStatusLabel({ dirty, error, loading, saveStatus, t: translate }),
+    [dirty, error, loading, saveStatus, translate]
   );
 
   useEffect(() => {
@@ -230,12 +232,12 @@ function editorStatusLabel({
   loading,
   saveStatus,
   t
-}: {
+  }: {
   dirty: boolean;
   error: string | null;
   loading: boolean;
   saveStatus: SaveStatus;
-  t: ReturnType<typeof useTranslation>["t"];
+  t: Translate;
 }): { icon: ReactElement; label: string; state: string } {
   if (loading) {
     return { icon: <LoaderCircle aria-hidden="true" size={14} />, label: t("editor.states.loading"), state: "loading" };

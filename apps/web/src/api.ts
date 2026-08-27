@@ -8,7 +8,9 @@ import type {
   ModelProviderName as SharedModelProviderName,
   PublicModelProviderSettings,
   DockerSummary as PublicDockerSummary,
-  PublicSystemInfo
+  PublicSystemInfo,
+  SystemNetworkSummary,
+  SystemStorageSummary
 } from "@sigmaos/shared";
 
 export interface NasRoot {
@@ -171,6 +173,8 @@ export interface PiToolPolicySettings {
 
 export type SystemInfo = PublicSystemInfo;
 export type SystemInfoStorageVolume = PublicSystemInfo["storage"]["volumes"][number];
+export type NetworkSummary = SystemNetworkSummary;
+export type StorageSummary = SystemStorageSummary;
 export type DockerSummary = PublicDockerSummary;
 export type DockerContainer = DockerSummary["containers"][number];
 export type DockerComposeProject = DockerSummary["composeProjects"][number];
@@ -249,6 +253,20 @@ export async function getSystemInfo(): Promise<SystemInfo> {
   await ensureOk(response);
   const body = (await response.json()) as { info: SystemInfo };
   return body.info;
+}
+
+export async function getSystemNetwork(): Promise<NetworkSummary> {
+  const response = await fetch("/api/system/network");
+  await ensureOk(response);
+  const body = (await response.json()) as { network: NetworkSummary };
+  return body.network;
+}
+
+export async function getSystemStorage(): Promise<StorageSummary> {
+  const response = await fetch("/api/system/storage");
+  await ensureOk(response);
+  const body = (await response.json()) as { storage: StorageSummary };
+  return body.storage;
 }
 
 export async function getDockerSummary(): Promise<DockerSummary> {
