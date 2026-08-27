@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dockerSettingsToForm, settingsSectionState, type SettingsSection } from "./settings.js";
+import { dockerSettingsToForm, modelSettingsToForm, settingsSectionState, type SettingsSection } from "./settings.js";
 
 describe("settings helpers", () => {
   it("treats saved Docker settings as configured even when disabled", () => {
@@ -30,6 +30,16 @@ describe("settings helpers", () => {
       operationTimeoutMs: String(120_000),
       consoleShells: "/bin/sh, /bin/bash",
       composeRoots: []
+    });
+  });
+
+  it("hydrates model provider form defaults without a display name", () => {
+    expect(modelSettingsToForm(null)).toMatchObject({
+      providerName: "openai",
+      baseUrl: "",
+      model: "",
+      apiKey: "",
+      clearApiKey: false
     });
   });
 });

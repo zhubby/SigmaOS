@@ -17,6 +17,7 @@ import {
   getAgentProviderSession,
   getApproval,
   getDockerOperation,
+  getModelProviderSettings,
   getPiToolPolicySettings,
   listEvents,
   listNasRoots,
@@ -110,19 +111,62 @@ describe("SQLite schema and repositories", () => {
       sessionId: session.id,
       providerSessionId: "pi-1",
       sessionFile: path.join(tempDir, "pi-sessions", "pi-1.jsonl"),
-      providerName: "google",
+      providerName: "openai",
       model: "",
-      settingsSnapshot: { providerName: "google", apiKeyConfigured: true }
+      settingsSnapshot: { providerName: "openai", apiKeyConfigured: true }
     });
 
     expect(getAgentProviderSession(db, session.id)).toMatchObject({
       sessionId: session.id,
       providerSessionId: "pi-1",
-      providerName: "google",
+      providerName: "openai",
       settingsSnapshot: {
-        providerName: "google",
+        providerName: "openai",
         apiKeyConfigured: true
       }
+    });
+  });
+
+  it("normalizes legacy model provider settings when loading", () => {
+    const settingsKey = "model_provider";
+    db.prepare(
+      "INSERT INTO system_settings (key, value_json, updated_at) VALUES (?, ?, ?)"
+    ).run(
+      settingsKey,
+      JSON.stringify({
+        providerName: "openrouter",
+        displayName: "OpenRouter",
+        baseUrl: "https://api.example.com/v1",
+        model: "gpt-4o",
+        apiKey: "legacy-secret"
+      }),
+      "2026-01-01T00:00:00.000Z"
+    );
+
+    expect(getModelProviderSettings(db)).toMatchObject({
+      providerName: "openai",
+      baseUrl: "https://api.example.com/v1",
+      model: "gpt-4o",
+      apiKey: "legacy-secret"
+    });
+    expect(getModelProviderSettings(db)).not.toHaveProperty("displayName");
+
+    db.prepare("UPDATE system_settings SET value_json = ?, updated_at = ? WHERE key = ?").run(
+      JSON.stringify({
+        provider: "anthropic-compatible",
+        baseUrl: "https://api.anthropic.com",
+        model: "anthropic/claude-sonnet-4",
+        apiKey: null
+      }),
+      "2026-01-02T00:00:00.000Z",
+      settingsKey
+    );
+
+    expect(getModelProviderSettings(db)).toMatchObject({
+      providerName: "anthropic",
+      baseUrl: "https://api.anthropic.com",
+      model: "anthropic/claude-sonnet-4",
+      apiKey: null
     });
   });
 

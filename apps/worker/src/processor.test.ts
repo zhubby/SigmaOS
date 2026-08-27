@@ -58,9 +58,9 @@ describe("worker processor", () => {
       await input.saveProviderSession({
         providerSessionId: "pi-session-1",
         sessionFile: path.join(tempDir, "pi-sessions", "pi-session-1.jsonl"),
-        providerName: "google",
+        providerName: "openai",
         model: "",
-        settingsSnapshot: { providerName: "google" }
+        settingsSnapshot: { providerName: "openai" }
       });
       return { status: "completed", summary: "Pi response" };
     };
@@ -76,7 +76,7 @@ describe("worker processor", () => {
     ]);
     expect(getAgentProviderSession(db, session.id)).toMatchObject({
       providerSessionId: "pi-session-1",
-      providerName: "google"
+      providerName: "openai"
     });
   });
 
@@ -145,9 +145,9 @@ describe("worker processor", () => {
       await input.saveProviderSession({
         providerSessionId: "pi-session-reused",
         sessionFile: path.join(tempDir, "pi-sessions", "pi-session-reused.jsonl"),
-        providerName: "google",
+        providerName: "openai",
         model: "",
-        settingsSnapshot: { providerName: "google" }
+        settingsSnapshot: { providerName: "openai" }
       });
       await input.emit({
         type: "agent.started",

@@ -1,17 +1,10 @@
 import type { DockerConfig, DockerSettingsRecord, ModelProviderSettingsRecord, SigmaConfig } from "@sigmaos/shared";
+import { isModelProviderName as sharedIsModelProviderName } from "@sigmaos/shared";
 import { defaultPiToolPolicySettings } from "@sigmaos/db";
 
 export function defaultModelProviderSettings(config: SigmaConfig): ModelProviderSettingsRecord {
-  const providerName =
-    config.model.provider === "local"
-      ? "openai"
-      : config.model.provider === "cloud"
-        ? "openai"
-        : "google";
-
   return {
-    providerName,
-    displayName: modelProviderLabel(providerName),
+    providerName: "openai",
     baseUrl: config.model.localEndpoint,
     model: "",
     apiKey: null,
@@ -22,7 +15,6 @@ export function defaultModelProviderSettings(config: SigmaConfig): ModelProvider
 export function toPublicModelProviderSettings(settings: ModelProviderSettingsRecord) {
   return {
     providerName: settings.providerName,
-    displayName: settings.displayName,
     baseUrl: settings.baseUrl,
     model: settings.model,
     apiKeyConfigured: Boolean(settings.apiKey),
@@ -30,8 +22,8 @@ export function toPublicModelProviderSettings(settings: ModelProviderSettingsRec
   };
 }
 
-export function isProviderName(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0 && value.trim().length <= 80;
+export function isModelProviderName(value: unknown): value is ModelProviderSettingsRecord["providerName"] {
+  return sharedIsModelProviderName(value);
 }
 
 export function normalizeOptionalText(value: string | null | undefined): string | null {
@@ -73,17 +65,4 @@ export function effectiveDockerConfig(config: SigmaConfig, settings: DockerSetti
     ...config,
     docker: settings ? dockerSettingsToConfig(settings) : config.docker
   };
-}
-
-function modelProviderLabel(providerName: string): string {
-  switch (providerName) {
-    case "google":
-      return "Google";
-    case "openai":
-      return "OpenAI";
-    case "anthropic":
-      return "Anthropic";
-    default:
-      return providerName;
-  }
 }

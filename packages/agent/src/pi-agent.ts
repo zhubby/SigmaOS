@@ -31,6 +31,7 @@ import type {
   AgentSessionRecord,
   ApprovalStatus,
   ModelProviderSettingsRecord,
+  ModelProviderName,
   NasRootRecord,
   PendingApprovalRecord,
   PiToolCallApproval,
@@ -70,7 +71,7 @@ export interface PiAgentInput {
   saveProviderSession: (session: {
     providerSessionId: string;
     sessionFile: string | null;
-    providerName: string;
+    providerName: ModelProviderName;
     model: string;
     settingsSnapshot: Record<string, unknown>;
   }) => void | Promise<void>;
@@ -725,7 +726,6 @@ function redactToolArgs(toolName: PiToolName, args: Record<string, unknown>): Re
 function settingsSnapshot(settings: ModelProviderSettingsRecord): Record<string, unknown> {
   return {
     providerName: settings.providerName,
-    displayName: settings.displayName,
     baseUrl: settings.baseUrl,
     model: settings.model,
     apiKeyConfigured: Boolean(settings.apiKey),

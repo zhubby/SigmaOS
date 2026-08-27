@@ -5,6 +5,8 @@ import type {
   DockerSettingsRecord,
   GitDirectoryStatus,
   GitFileStatus,
+  ModelProviderName as SharedModelProviderName,
+  PublicModelProviderSettings,
   DockerSummary as PublicDockerSummary,
   PublicSystemInfo
 } from "@sigmaos/shared";
@@ -141,22 +143,15 @@ export interface AgentEvent {
 
 export type FilePreviewKind = "directory" | "text" | "image" | "audio" | "video" | "pdf" | "unsupported";
 
-export type ModelProviderKind = "pi" | "openai-compatible" | "anthropic-compatible" | "local";
+export type ModelProviderName = SharedModelProviderName;
+export type ModelProviderKind = ModelProviderName;
 export type PiToolPolicyMode = "auto" | "ask" | "disabled";
 export type PiDangerousToolPolicyMode = "ask" | "disabled";
 
-export interface ModelProviderSettings {
-  providerName: string;
-  displayName: string;
-  baseUrl: string | null;
-  model: string;
-  apiKeyConfigured: boolean;
-  updatedAt: string;
-}
+export type ModelProviderSettings = PublicModelProviderSettings;
 
 export interface ModelProviderSettingsInput {
-  providerName?: string;
-  displayName?: string;
+  providerName?: ModelProviderName;
   baseUrl?: string | null;
   model?: string;
   apiKey?: string;

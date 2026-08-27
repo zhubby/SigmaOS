@@ -123,11 +123,14 @@ export interface SigmaConfig {
   nasRoots: NasRootConfig[];
 }
 
-export type ModelProviderKind = "pi" | "openai-compatible" | "anthropic-compatible" | "local";
+export const MODEL_PROVIDER_NAMES = ["openai", "anthropic"] as const;
+
+export type ModelProviderName = (typeof MODEL_PROVIDER_NAMES)[number];
+
+export type ModelProviderKind = ModelProviderName;
 
 export interface ModelProviderSettingsRecord {
-  providerName: string;
-  displayName: string;
+  providerName: ModelProviderName;
   baseUrl: string | null;
   model: string;
   apiKey: string | null;
@@ -135,12 +138,18 @@ export interface ModelProviderSettingsRecord {
 }
 
 export interface PublicModelProviderSettings {
-  providerName: string;
-  displayName: string;
+  providerName: ModelProviderName;
   baseUrl: string | null;
   model: string;
   apiKeyConfigured: boolean;
   updatedAt: string;
+}
+
+export function isModelProviderName(value: unknown): value is ModelProviderName {
+  return (
+    typeof value === "string" &&
+    (MODEL_PROVIDER_NAMES as readonly string[]).includes(value.trim() as ModelProviderName)
+  );
 }
 
 export interface PublicSystemInfo {
@@ -279,7 +288,7 @@ export interface AgentProviderSessionRecord {
   sessionId: string;
   providerSessionId: string;
   sessionFile: string | null;
-  providerName: string;
+  providerName: ModelProviderName;
   model: string;
   settingsSnapshot: Record<string, unknown>;
   createdAt: string;

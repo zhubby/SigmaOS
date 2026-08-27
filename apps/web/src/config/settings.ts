@@ -2,6 +2,7 @@ import type { TFunction } from "i18next";
 import type {
   DockerSettings,
   ModelProviderSettings,
+  ModelProviderName,
   PiDangerousToolPolicyMode,
   PiToolPolicyMode,
   PiToolPolicySettings
@@ -25,8 +26,7 @@ export type SettingsState = "ready" | "missing" | "loading";
 type Translate = TFunction<"translation">;
 
 export interface ModelProviderFormState {
-  providerName: string;
-  displayName: string;
+  providerName: ModelProviderName;
   baseUrl: string;
   model: string;
   apiKey: string;
@@ -125,8 +125,7 @@ const GROUP_LABEL_KEYS = {
 
 export function modelSettingsToForm(settings: ModelProviderSettings | null): ModelProviderFormState {
   return {
-    providerName: settings?.providerName ?? "google",
-    displayName: settings?.displayName ?? "Google",
+    providerName: settings?.providerName ?? "openai",
     baseUrl: settings?.baseUrl ?? "",
     model: settings?.model ?? "",
     apiKey: "",
@@ -222,18 +221,12 @@ export function settingsSectionLabel(
   return t("common.states.loading");
 }
 
-export function providerLabel(providerName: string, t: Translate): string {
+export function providerLabel(providerName: ModelProviderName, t: Translate): string {
   switch (providerName) {
-    case "google":
-      return t("settings.modelProvider.providers.google");
     case "openai":
       return t("settings.modelProvider.providers.openai");
     case "anthropic":
       return t("settings.modelProvider.providers.anthropic");
-    case "openrouter":
-      return t("settings.modelProvider.providers.openrouter");
-    case "local":
-      return t("settings.modelProvider.providers.local");
     default:
       return providerName;
   }

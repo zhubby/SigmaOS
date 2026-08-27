@@ -102,7 +102,7 @@ interface SettingsModalProps {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }
 
-const PROVIDER_OPTIONS = ["google", "openai", "anthropic", "openrouter", "local"];
+const PROVIDER_OPTIONS = ["openai", "anthropic"] as const;
 const READ_ONLY_TOOLS = ["read", "grep", "find", "ls"] as const;
 const DANGEROUS_TOOLS = ["bash", "edit", "write"] as const;
 const DEFAULT_TEXT_PREVIEW_BYTES = 64 * 1024;
@@ -275,37 +275,17 @@ export function SettingsModal({
                       <fieldset className="settings-field-grid" disabled={loading || saving}>
                         <label>
                           <span>{t("settings.modelProvider.provider")}</span>
-                          <input
-                            list="model-provider-options"
+                          <CustomSelect
+                            id="model-provider"
                             value={form.providerName}
-                            onChange={(event) =>
+                            options={providerOptions}
+                            onChange={(providerName) =>
                               onFormChange({
                                 ...form,
-                                providerName: event.target.value
+                                providerName
                               })
                             }
-                            placeholder="google"
-                          />
-                          <datalist id="model-provider-options">
-                            {providerOptions.map((provider) => (
-                              <option key={provider.value} value={provider.value}>
-                                {provider.label}
-                              </option>
-                            ))}
-                          </datalist>
-                        </label>
-
-                        <label>
-                          <span>{t("settings.modelProvider.displayName")}</span>
-                          <input
-                            value={form.displayName}
-                            onChange={(event) =>
-                              onFormChange({
-                                ...form,
-                                displayName: event.target.value
-                              })
-                            }
-                            placeholder="OpenRouter"
+                            ariaLabel={t("settings.modelProvider.provider")}
                           />
                         </label>
 

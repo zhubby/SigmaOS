@@ -276,8 +276,7 @@ describe("API server", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       settings: {
-        providerName: "google",
-        displayName: "Google",
+        providerName: "openai",
         baseUrl: null,
         model: "",
         apiKeyConfigured: false
@@ -690,9 +689,8 @@ describe("API server", () => {
       method: "PATCH",
       url: "/api/settings/model-provider",
       payload: {
-        providerName: "openrouter",
-        displayName: "OpenRouter",
-        baseUrl: "https://openrouter.ai/api/v1",
+        providerName: "anthropic",
+        baseUrl: "https://api.anthropic.com",
         model: "anthropic/claude-sonnet-4",
         apiKey: "secret-token"
       }
@@ -705,9 +703,8 @@ describe("API server", () => {
     expect(saved.statusCode).toBe(200);
     expect(saved.json()).toMatchObject({
       settings: {
-        providerName: "openrouter",
-        displayName: "OpenRouter",
-        baseUrl: "https://openrouter.ai/api/v1",
+        providerName: "anthropic",
+        baseUrl: "https://api.anthropic.com",
         model: "anthropic/claude-sonnet-4",
         apiKeyConfigured: true
       }
@@ -718,6 +715,21 @@ describe("API server", () => {
         apiKeyConfigured: true
       }
     });
+    await server.close();
+  });
+
+  it("rejects unsupported model provider names", async () => {
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    const response = await server.inject({
+      method: "PATCH",
+      url: "/api/settings/model-provider",
+      payload: {
+        providerName: "openrouter",
+        model: "anthropic/claude-sonnet-4"
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
     await server.close();
   });
 

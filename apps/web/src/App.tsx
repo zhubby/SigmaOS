@@ -490,7 +490,6 @@ export function App() {
       const [settings, toolPolicy, nextDockerSettings] = await Promise.all([
         saveModelProviderSettings({
           providerName: modelSettingsForm.providerName,
-          displayName: modelSettingsForm.displayName,
           baseUrl: modelSettingsForm.baseUrl || null,
           model: modelSettingsForm.model,
           ...(modelSettingsForm.apiKey ? { apiKey: modelSettingsForm.apiKey } : {}),

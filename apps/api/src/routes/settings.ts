@@ -10,13 +10,13 @@ import {
   saveModelProviderSettings,
   savePiToolPolicySettings
 } from "@sigmaos/db";
-import type { DockerSettingsRecord, PiToolPolicySettingsRecord } from "@sigmaos/shared";
+import type { DockerSettingsRecord, ModelProviderName, PiToolPolicySettingsRecord } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
 import {
   defaultDockerSettings,
   defaultModelProviderSettings,
   effectiveDockerConfig,
-  isProviderName,
+  isModelProviderName,
   normalizeOptionalText,
   toPublicDockerSettings,
   toPublicModelProviderSettings,
@@ -37,7 +37,6 @@ export function registerSettingsRoutes(server: FastifyInstance, { config, db }: 
     Body: {
       providerName?: string;
       provider?: string;
-      displayName?: string;
       baseUrl?: string | null;
       model?: string;
       apiKey?: string;
@@ -46,13 +45,12 @@ export function registerSettingsRoutes(server: FastifyInstance, { config, db }: 
   }>("/api/settings/model-provider", async (request, reply) => {
     const existing = getModelProviderSettings(db) ?? defaultModelProviderSettings(config);
     const providerName = request.body?.providerName ?? request.body?.provider ?? existing.providerName;
-    if (!isProviderName(providerName)) {
+    if (!isModelProviderName(providerName)) {
       reply.status(400).send({ error: "Unsupported model provider" });
       return;
     }
 
-    const normalizedProviderName = providerName.trim();
-    const displayName = normalizeOptionalText(request.body?.displayName) ?? existing.displayName;
+    const normalizedProviderName = providerName.trim() as ModelProviderName;
     const baseUrl =
       request.body?.baseUrl === undefined ? existing.baseUrl : normalizeOptionalText(request.body.baseUrl);
     const model = normalizeOptionalText(request.body?.model) ?? existing.model;
@@ -62,7 +60,6 @@ export function registerSettingsRoutes(server: FastifyInstance, { config, db }: 
 
     const settings = saveModelProviderSettings(db, {
       providerName: normalizedProviderName,
-      displayName,
       baseUrl,
       model,
       apiKey

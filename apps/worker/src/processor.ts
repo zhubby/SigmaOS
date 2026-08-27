@@ -187,10 +187,8 @@ export async function processNextJob({ db, config, agentRunner, allowLocalFallba
 }
 
 function defaultModelProviderSettings(config: SigmaConfig): ModelProviderSettingsRecord {
-  const providerName = config.model.provider === "pi" ? "google" : "openai";
   return {
-    providerName,
-    displayName: providerName === "google" ? "Google" : "OpenAI",
+    providerName: "openai",
     baseUrl: config.model.localEndpoint,
     model: "",
     apiKey: null,

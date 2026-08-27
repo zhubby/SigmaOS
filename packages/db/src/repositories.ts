@@ -27,11 +27,13 @@ import type {
   AgentSessionRecord,
   JobRecord,
   JobStatus,
+  ModelProviderName,
   ModelProviderSettingsRecord,
   NasRootRecord,
   PendingApprovalRecord,
   TrashEntryRecord
 } from "@sigmaos/shared";
+import { isModelProviderName } from "@sigmaos/shared";
 import type { SigmaDatabase } from "./connection.js";
 
 type DbSessionRow = {
@@ -328,7 +330,7 @@ export function saveAgentProviderSession(
     sessionId: string;
     providerSessionId: string;
     sessionFile?: string | null;
-    providerName: string;
+    providerName: ModelProviderName;
     model: string;
     settingsSnapshot: Record<string, unknown>;
   }
@@ -400,11 +402,8 @@ export function saveModelProviderSettings(
   settings: Omit<ModelProviderSettingsRecord, "updatedAt">
 ): ModelProviderSettingsRecord {
   const updatedAt = new Date().toISOString();
-  const providerName = normalizeProviderName(settings.providerName);
   const record: ModelProviderSettingsRecord = {
-    ...settings,
-    providerName,
-    displayName: settings.displayName.trim() || providerDisplayName(providerName),
+    providerName: normalizeModelProviderName(settings.providerName),
     baseUrl: settings.baseUrl?.trim() || null,
     model: settings.model.trim(),
     apiKey: settings.apiKey?.trim() || null,
@@ -1324,10 +1323,9 @@ function mapEvent(row: DbEventRow): AgentEventRecord {
 
 function mapModelProviderSettings(row: DbSystemSettingRow): ModelProviderSettingsRecord {
   const parsed = JSON.parse(row.value_json) as Partial<ModelProviderSettingsRecord> & { provider?: string };
-  const providerName = normalizeProviderName(parsed.providerName ?? legacyProviderName(parsed.provider));
+  const providerName = normalizeModelProviderName(parsed.providerName ?? parsed.provider);
   return {
     providerName,
-    displayName: parsed.displayName ?? providerDisplayName(providerName),
     baseUrl: parsed.baseUrl ?? null,
     model: parsed.model ?? "",
     apiKey: parsed.apiKey ?? null,
@@ -1438,11 +1436,12 @@ function isDangerousPiToolPolicyMode(value: unknown): value is PiDangerousToolPo
   return typeof value === "string" && DANGEROUS_PI_TOOL_POLICY_MODES.includes(value as PiDangerousToolPolicyMode);
 }
 
-function normalizeProviderName(value: unknown): string {
-  return typeof value === "string" && value.trim() ? value.trim() : "google";
+function normalizeModelProviderName(value: unknown): ModelProviderName {
+  const providerName = legacyModelProviderName(normalizeString(value) ?? undefined);
+  return isModelProviderName(providerName) ? providerName : "openai";
 }
 
-function legacyProviderName(provider: string | undefined): string | undefined {
+function legacyModelProviderName(provider: string | undefined): string | undefined {
   switch (provider) {
     case "openai-compatible":
       return "openai";
@@ -1451,22 +1450,13 @@ function legacyProviderName(provider: string | undefined): string | undefined {
     case "local":
       return "openai";
     case "pi":
-      return "google";
+      return "openai";
+    case "google":
+      return "openai";
+    case "openrouter":
+      return "openai";
     default:
       return provider;
-  }
-}
-
-function providerDisplayName(providerName: string): string {
-  switch (providerName) {
-    case "google":
-      return "Google";
-    case "openai":
-      return "OpenAI";
-    case "anthropic":
-      return "Anthropic";
-    default:
-      return providerName;
   }
 }
 
@@ -1475,7 +1465,7 @@ function mapProviderSession(row: DbProviderSessionRow): AgentProviderSessionReco
     sessionId: row.session_id,
     providerSessionId: row.provider_session_id,
     sessionFile: row.session_file,
-    providerName: row.provider_name,
+    providerName: normalizeModelProviderName(row.provider_name),
     model: row.model,
     settingsSnapshot: JSON.parse(row.settings_snapshot_json) as Record<string, unknown>,
     createdAt: row.created_at,
