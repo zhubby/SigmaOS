@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeFileVisual } from "./file-type-utils.js";
+import { describeFileVisual, isHiddenName } from "./file-type-utils.js";
 
 describe("file type utilities", () => {
   it("classifies entry safety and non-file kinds first", () => {
@@ -46,5 +46,13 @@ describe("file type utilities", () => {
     expect(describeFileVisual({ name: ".env.local", kind: "file", isSafe: true })).toMatchObject({
       kind: "config"
     });
+  });
+
+  it("detects hidden dot-prefixed names", () => {
+    expect(isHiddenName(".env")).toBe(true);
+    expect(isHiddenName(".git")).toBe(true);
+    expect(isHiddenName("README.md")).toBe(false);
+    expect(isHiddenName(".")).toBe(false);
+    expect(isHiddenName("..")).toBe(false);
   });
 });

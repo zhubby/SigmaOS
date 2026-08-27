@@ -37,6 +37,33 @@ const entries: FileEntry[] = [
   }
 ];
 
+const alphabeticalEntries: FileEntry[] = [
+  {
+    name: "zeta.txt",
+    path: "zeta.txt",
+    kind: "file",
+    sizeBytes: 3,
+    modifiedAt: "2026-08-22T12:00:00.000Z",
+    isSafe: true
+  },
+  {
+    name: "alpha.txt",
+    path: "alpha.txt",
+    kind: "file",
+    sizeBytes: 3,
+    modifiedAt: "2026-08-20T12:00:00.000Z",
+    isSafe: true
+  },
+  {
+    name: "beta.txt",
+    path: "beta.txt",
+    kind: "file",
+    sizeBytes: 3,
+    modifiedAt: "2026-08-21T12:00:00.000Z",
+    isSafe: true
+  }
+];
+
 const sizeEntries: FileEntry[] = [
   {
     name: "zeta.bin",
@@ -107,6 +134,14 @@ describe("sortEntriesByModifiedAt", () => {
 });
 
 describe("sortEntries", () => {
+  it("sorts alphabetically by default", () => {
+    expect(sortEntries(alphabeticalEntries).map((entry) => entry.path)).toEqual([
+      "alpha.txt",
+      "beta.txt",
+      "zeta.txt"
+    ]);
+  });
+
   it("sorts largest files first by size", () => {
     expect(sortEntries(sizeEntries, { key: "sizeBytes", direction: "desc" }).map((entry) => entry.path)).toEqual([
       "large.bin",

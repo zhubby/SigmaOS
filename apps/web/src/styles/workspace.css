@@ -307,6 +307,27 @@
   opacity: 0.62;
 }
 
+.file-row.is-hidden {
+  color: var(--muted-2);
+}
+
+.file-row.is-hidden:hover,
+.file-row.is-hidden:focus-visible,
+.file-row.is-hidden.is-selected {
+  color: var(--muted);
+}
+
+.file-row.is-hidden .file-name svg,
+.file-row.is-hidden .file-type-label,
+.file-row.is-hidden .git-file-status {
+  color: currentColor;
+}
+
+.file-row.is-hidden .git-file-status {
+  border-color: var(--line-soft);
+  background: var(--subtle-bg-inverse);
+}
+
 .file-row-head {
   position: sticky;
   top: 0;

@@ -19,7 +19,7 @@ import {
   type LucideIcon
 } from "lucide-react";
 import type { DockerOperation, FileEntry, FileListing, FileMeta, FileOperation, NasRoot, PendingApproval, TextPreview } from "../../api.js";
-import { describeFileVisual } from "../../file-type-utils.js";
+import { describeFileVisual, isHiddenName } from "../../file-type-utils.js";
 import { formatBytes, formatDate, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
 import { sortEntries, type FileSortDirection, type FileSortKey, type FileSortState } from "../../lib/file-listing-sort.js";
@@ -168,7 +168,7 @@ export function WorkspacePane({
   const [operationError, setOperationError] = useState<string | null>(null);
   const [operationSubmitting, setOperationSubmitting] = useState(false);
   const [activePanel, setActivePanel] = useState<WorkspacePanelId>("files");
-  const [fileSort, setFileSort] = useState<FileSortState>({ key: "modifiedAt", direction: "desc" });
+  const [fileSort, setFileSort] = useState<FileSortState>({ key: "name", direction: "asc" });
   const displayTitle = displayPath === "." ? t("common.root") : displayPath;
   const sortedEntries = useMemo(() => sortEntries(entries, fileSort), [entries, fileSort]);
   const gitChangeCount = gitStatus
@@ -419,7 +419,9 @@ export function WorkspacePane({
 
                   <div className="file-list" role="table" aria-label={t("workspace.table.files")}>
                     <div className="file-row file-row-head" role="row">
-                      <span role="columnheader">{t("workspace.table.name")}</span>
+                      <span role="columnheader" aria-sort={fileSortAria(fileSort, "name")}>
+                        {t("workspace.table.name")}
+                      </span>
                       <span role="columnheader">{t("workspace.table.type")}</span>
                       <span className="file-column-sort" role="columnheader" aria-sort={fileSortAria(fileSort, "sizeBytes")}>
                         <button
@@ -449,6 +451,7 @@ export function WorkspacePane({
                     </div>
                     {sortedEntries.map((entry) => {
                       const fileVisual = describeFileVisual(entry);
+                      const isHidden = isHiddenName(entry.name);
                       const displaySize =
                         entry.kind === "directory"
                           ? t("common.dash")
@@ -458,7 +461,13 @@ export function WorkspacePane({
                       return (
                         <div
                           key={entry.path}
-                          className={entry.path === selectedFilePath ? "file-row is-selected" : "file-row"}
+                          className={[
+                            "file-row",
+                            entry.path === selectedFilePath ? "is-selected" : "",
+                            isHidden ? "is-hidden" : ""
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
                           onClick={() => openEntryFromRow(entry)}
                           onKeyDown={(event) => handleRowKeyDown(event, entry)}
                           tabIndex={entry.isSafe ? 0 : -1}

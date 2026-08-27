@@ -1,14 +1,14 @@
 import type { FileEntry } from "../api.js";
 
 export type FileSortDirection = "asc" | "desc";
-export type FileSortKey = "modifiedAt" | "sizeBytes";
+export type FileSortKey = "name" | "modifiedAt" | "sizeBytes";
 
 export interface FileSortState {
   key: FileSortKey;
   direction: FileSortDirection;
 }
 
-export function sortEntries(entries: FileEntry[], sort: FileSortState = { key: "modifiedAt", direction: "desc" }): FileEntry[] {
+export function sortEntries(entries: FileEntry[], sort: FileSortState = { key: "name", direction: "asc" }): FileEntry[] {
   const directionFactor = sort.direction === "asc" ? 1 : -1;
 
   return [...entries].sort((left, right) => {
@@ -31,11 +31,22 @@ export function sortEntriesByModifiedAt(entries: FileEntry[], direction: FileSor
 }
 
 function compareEntriesByKey(left: FileEntry, right: FileEntry, key: FileSortKey): number {
+  if (key === "name") {
+    return compareNames(left.name, right.name);
+  }
+
   if (key === "sizeBytes") {
     return compareNumbers(getSortableSizeBytes(left), getSortableSizeBytes(right));
   }
 
   return compareStrings(left.modifiedAt, right.modifiedAt);
+}
+
+function compareNames(left: string, right: string): number {
+  return left.localeCompare(right, undefined, {
+    sensitivity: "base",
+    numeric: true
+  });
 }
 
 function getSortableSizeBytes(entry: FileEntry): number {

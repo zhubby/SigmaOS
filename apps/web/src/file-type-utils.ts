@@ -31,6 +31,10 @@ export interface FileVisualDescriptor {
   kind: FileVisualKind;
 }
 
+export function isHiddenName(name: string): boolean {
+  return name.startsWith(".") && name !== "." && name !== "..";
+}
+
 const IMAGE_EXTENSIONS = new Set([".avif", ".bmp", ".gif", ".heic", ".ico", ".jpeg", ".jpg", ".png", ".svg", ".tif", ".tiff", ".webp"]);
 const AUDIO_EXTENSIONS = new Set([".aac", ".aiff", ".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav"]);
 const VIDEO_EXTENSIONS = new Set([".avi", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".webm"]);
