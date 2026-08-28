@@ -9,6 +9,7 @@ import { registerOperationRoutes } from "./operations.js";
 import { registerRootRoutes } from "./roots.js";
 import { registerSessionRoutes } from "./sessions.js";
 import { registerSettingsRoutes } from "./settings.js";
+import { registerShareRoutes } from "./shares.js";
 import { registerSystemRoutes } from "./system.js";
 
 export function registerApiRoutes(server: FastifyInstance, context: ApiRouteContext): void {
@@ -22,4 +23,5 @@ export function registerApiRoutes(server: FastifyInstance, context: ApiRouteCont
   registerApprovalRoutes(server, context);
   registerOperationRoutes(server, context);
   registerDockerRoutes(server, context);
+  registerShareRoutes(server, context);
 }

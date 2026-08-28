@@ -1,4 +1,5 @@
 apps/api/dist/ usr/lib/sigmaos/apps/api/dist/
+apps/share-helper/dist/ usr/lib/sigmaos/apps/share-helper/dist/
 apps/worker/dist/ usr/lib/sigmaos/apps/worker/dist/
 apps/indexer/dist/ usr/lib/sigmaos/apps/indexer/dist/
 apps/scheduler/dist/ usr/lib/sigmaos/apps/scheduler/dist/

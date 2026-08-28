@@ -10,18 +10,26 @@ import {
   Plus,
   Send,
   Settings,
+  Share2,
   TerminalSquare,
   Trash2,
   X
 } from "lucide-react";
-import type { NasRoot, PendingApproval, SessionSummary, TranscriptMessage } from "../../api.js";
+import type {
+  DockerOperationProposal,
+  NasRoot,
+  PendingApproval,
+  SessionSummary,
+  ShareOperationProposal,
+  TranscriptMessage
+} from "../../api.js";
 import type { AppStatus } from "../../config/status.js";
 import { formatTime } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
 import { sessionTitle } from "../../lib/session.js";
 
 type ApprovalRisk = PendingApproval["proposal"][number]["risk"];
-type ApprovalCardKind = "file" | "tool" | "docker";
+type ApprovalCardKind = "file" | "tool" | "docker" | "share";
 
 interface ApprovalCard {
   kind: ApprovalCardKind;
@@ -92,7 +100,8 @@ export function ChatPane({
   const renderApprovalCard = (approval: PendingApproval) => {
     const risk = approval.proposal[0]?.risk ?? "low";
     const card = approvalCard(approval, translate);
-    const CardIcon = card.kind === "tool" ? TerminalSquare : card.kind === "docker" ? Container : FileCog;
+    const CardIcon =
+      card.kind === "tool" ? TerminalSquare : card.kind === "docker" ? Container : card.kind === "share" ? Share2 : FileCog;
 
     return (
       <article className="approval-card" aria-label={t("chat.pendingApprovals")}>
@@ -350,7 +359,7 @@ function approvalCard(approval: PendingApproval, t: Translate): ApprovalCard {
   }
 
   if (approval.kind === "docker_operation") {
-    const dockerOperation = approval.proposal.find((proposal) => "action" in proposal);
+    const dockerOperation = approval.proposal.find(isDockerOperationProposal);
     if (!dockerOperation || !("action" in dockerOperation)) {
       return {
         kind: "docker",
@@ -395,6 +404,46 @@ function approvalCard(approval: PendingApproval, t: Translate): ApprovalCard {
     };
   }
 
+  if (approval.kind === "share_operation") {
+    const shareOperation = approval.proposal.find(isShareOperationProposal);
+    if (!shareOperation || !("settings" in shareOperation)) {
+      return {
+        kind: "share",
+        title: t("chat.approvalCards.shareTitle"),
+        detail: t("chat.approvalCards.shareApproval"),
+        meta: t("chat.approvalCards.shareOperation"),
+        items: []
+      };
+    }
+    const enabledProtocols = shareOperation.settings.shares.flatMap((share) =>
+      Object.entries(share.protocols)
+        .filter(([, protocol]) => protocol.enabled)
+        .map(([protocol]) => protocol.toUpperCase())
+    );
+    return {
+      kind: "share",
+      title: t("chat.approvalCards.shareTitle"),
+      detail: shareOperation.summary,
+      meta: t("chat.approvalCards.shareOperation"),
+      items: [
+        {
+          label: t("chat.approvalCards.shares"),
+          value: String(shareOperation.settings.shares.length)
+        },
+        {
+          label: t("chat.approvalCards.protocols"),
+          value: [...new Set(enabledProtocols)].join(", ") || t("common.dash")
+        },
+        {
+          label: t("chat.approvalCards.account"),
+          value: shareOperation.settings.account.passwordConfigured
+            ? shareOperation.settings.account.username
+            : t("settings.security.keyNotConfigured")
+        }
+      ]
+    };
+  }
+
   const fileOperations = approval.proposal.filter((proposal) => "operation" in proposal);
   const firstOperation = fileOperations[0];
   const affectedPaths = Array.from(
@@ -420,6 +469,14 @@ function approvalCard(approval: PendingApproval, t: Translate): ApprovalCard {
         : [])
     ]
   };
+}
+
+function isDockerOperationProposal(proposal: PendingApproval["proposal"][number]): proposal is DockerOperationProposal {
+  return "targetType" in proposal;
+}
+
+function isShareOperationProposal(proposal: PendingApproval["proposal"][number]): proposal is ShareOperationProposal {
+  return "action" in proposal && proposal.action === "apply_settings" && "settings" in proposal;
 }
 
 function dockerActionLabel(

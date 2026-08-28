@@ -50,7 +50,7 @@ export interface GitDirectoryStatus {
   summary: GitStatusSummary;
 }
 
-export type PendingApprovalKind = "file_operation" | "pi_tool_call" | "docker_operation";
+export type PendingApprovalKind = "file_operation" | "pi_tool_call" | "docker_operation" | "share_operation";
 
 export type PiToolName = "read" | "bash" | "edit" | "write" | "grep" | "find" | "ls";
 
@@ -99,6 +99,99 @@ export interface DockerSettingsRecord extends DockerConfig {
 
 export type PublicDockerSettings = DockerSettingsRecord;
 
+export const SHARE_PROTOCOLS = ["smb", "webdav", "ftp", "nfs", "dlna"] as const;
+
+export type ShareProtocol = (typeof SHARE_PROTOCOLS)[number];
+
+export type ShareOperationAction = "apply_settings";
+
+export type ShareOperationStatus = "proposed" | "approved" | "applied" | "failed";
+
+export type ShareProtocolServiceStatus = "disabled" | "active" | "inactive" | "failed" | "unknown";
+
+export type DlnaMediaType = "audio" | "video" | "pictures";
+
+export interface ShareAccountConfig {
+  username: string;
+  password: string | null;
+}
+
+export interface PublicShareAccountConfig {
+  username: string;
+  passwordConfigured: boolean;
+}
+
+export interface SmbShareConfig {
+  enabled: boolean;
+  readOnly: boolean;
+  browseable: boolean;
+  allowGuest: boolean;
+}
+
+export interface WebDavShareConfig {
+  enabled: boolean;
+  readOnly: boolean;
+  allowGuest: boolean;
+  port: number;
+  pathPrefix: string;
+}
+
+export interface FtpShareConfig {
+  enabled: boolean;
+  readOnly: boolean;
+  allowGuest: boolean;
+  port: number;
+  passivePortStart: number;
+  passivePortEnd: number;
+}
+
+export interface NfsShareConfig {
+  enabled: boolean;
+  readOnly: boolean;
+  allowedCidrs: string[];
+  rootSquash: boolean;
+}
+
+export interface DlnaShareConfig {
+  enabled: boolean;
+  mediaTypes: DlnaMediaType[];
+  bindInterface: string | null;
+  bindAddress: string | null;
+  friendlyName: string;
+}
+
+export interface ShareProtocolConfig {
+  smb: SmbShareConfig;
+  webdav: WebDavShareConfig;
+  ftp: FtpShareConfig;
+  nfs: NfsShareConfig;
+  dlna: DlnaShareConfig;
+}
+
+export interface ShareDefinitionConfig {
+  id: string;
+  name: string;
+  rootId: string;
+  path: string;
+  description: string;
+  protocols: ShareProtocolConfig;
+}
+
+export interface ShareConfig {
+  enabled: boolean;
+  helperSocketPath: string;
+  account: ShareAccountConfig;
+  shares: ShareDefinitionConfig[];
+}
+
+export interface ShareSettingsRecord extends ShareConfig {
+  updatedAt: string;
+}
+
+export interface PublicShareSettings extends Omit<ShareSettingsRecord, "account"> {
+  account: PublicShareAccountConfig;
+}
+
 export interface SigmaConfig {
   dataDir: string;
   databasePath: string;
@@ -120,6 +213,7 @@ export interface SigmaConfig {
     localEndpoint: string | null;
   };
   docker: DockerConfig;
+  shares: ShareConfig;
   nasRoots: NasRootConfig[];
 }
 
@@ -646,6 +740,69 @@ export interface DockerOperationRecord {
   updatedAt: string;
 }
 
+export interface ShareProtocolService {
+  name: string;
+  status: ShareProtocolServiceStatus;
+  error: string | null;
+}
+
+export interface ShareProtocolSummary {
+  protocol: ShareProtocol;
+  enabledShares: number;
+  services: ShareProtocolService[];
+}
+
+export interface ShareSummaryItem {
+  id: string;
+  name: string;
+  rootId: string;
+  path: string;
+  enabledProtocols: ShareProtocol[];
+}
+
+export interface ShareSummary {
+  collectedAt: string;
+  enabled: boolean;
+  settingsUpdatedAt: string;
+  metrics: {
+    shares: number;
+    enabledProtocols: number;
+    authenticatedProtocols: number;
+  };
+  protocols: Record<ShareProtocol, ShareProtocolSummary>;
+  shares: ShareSummaryItem[];
+  issues: SystemCollectionIssue[];
+}
+
+export interface ShareApplyRequest {
+  settings: ShareSettingsRecord;
+  roots: NasRootConfig[];
+}
+
+export interface ShareApplyResult {
+  appliedAt: string;
+  files: string[];
+  services: string[];
+}
+
+export interface ShareOperationProposal {
+  action: ShareOperationAction;
+  risk: "high";
+  summary: string;
+  settings: PublicShareSettings;
+}
+
+export interface ShareOperationRecord {
+  id: string;
+  approvalId: string | null;
+  action: ShareOperationAction;
+  targetId: string;
+  status: ShareOperationStatus;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DockerConsoleAuthorizationRecord {
   id: string;
   operationId: string;
@@ -658,7 +815,11 @@ export interface DockerConsoleAuthorizationRecord {
   usedAt: string | null;
 }
 
-export type PendingApprovalProposal = FileOperationProposal | PiToolCallApproval | DockerOperationProposal;
+export type PendingApprovalProposal =
+  | FileOperationProposal
+  | PiToolCallApproval
+  | DockerOperationProposal
+  | ShareOperationProposal;
 
 export interface PendingApprovalRecord {
   id: string;

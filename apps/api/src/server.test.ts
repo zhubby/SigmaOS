@@ -17,6 +17,8 @@ import {
   getFileOperation,
   getJob,
   getSession,
+  getShareOperationByApproval,
+  getShareSettings,
   getTrashEntry,
   listEvents,
   listFileOperations,
@@ -26,7 +28,14 @@ import {
   updateJobStatus,
   type SigmaDatabase
 } from "@sigmaos/db";
-import type { DockerComposeProjectSummary, DockerContainerSummary, DockerOperationProposal, SigmaConfig } from "@sigmaos/shared";
+import type {
+  DockerComposeProjectSummary,
+  DockerContainerSummary,
+  DockerOperationProposal,
+  ShareApplyRequest,
+  ShareApplyResult,
+  SigmaConfig
+} from "@sigmaos/shared";
 import type { DockerComposeRuntime } from "./lib/docker-compose.js";
 import type { DockerEngineRuntime, DockerExecStream } from "./lib/docker-client.js";
 import type { SystemCommandRunner } from "./lib/system-management.js";
@@ -681,6 +690,208 @@ describe("API server", () => {
         }
       ]
     });
+    await server.close();
+  });
+
+  it("returns default share settings without exposing passwords", async () => {
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/settings/shares"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      settings: {
+        enabled: false,
+        helperSocketPath: "/run/sigmaos/share-helper.sock",
+        account: {
+          username: "sigma-share",
+          passwordConfigured: false
+        },
+        shares: []
+      }
+    });
+    expect(response.payload).not.toContain("password\":\"");
+    await server.close();
+  });
+
+  it("creates share approvals and applies them only after approval", async () => {
+    await mkdir(path.join(rootDir, "media"));
+    const session = createSession(db, { rootId: "local" });
+    const helper = new FakeShareHelper();
+    const server = await buildServer({
+      config: testConfig(tempDir),
+      db,
+      shares: {
+        helper
+      }
+    });
+
+    const proposed = await server.inject({
+      method: "POST",
+      url: "/api/shares/proposals",
+      payload: {
+        sessionId: session.id,
+        settings: shareSettingsPayload("secret")
+      }
+    });
+
+    expect(proposed.statusCode).toBe(202);
+    expect(helper.requests).toEqual([]);
+    expect(getShareSettings(db)).toBeNull();
+    expect(proposed.payload).not.toContain("secret");
+    expect(proposed.json()).toMatchObject({
+      approval: {
+        kind: "share_operation",
+        status: "pending",
+        proposal: [
+          {
+            action: "apply_settings",
+            risk: "high",
+            settings: {
+              account: {
+                username: "sigma-share",
+                passwordConfigured: true
+              }
+            }
+          }
+        ]
+      },
+      operation: {
+        action: "apply_settings",
+        status: "proposed"
+      }
+    });
+
+    const approved = await server.inject({
+      method: "POST",
+      url: `/api/approvals/${proposed.json().approval.id}/approve`
+    });
+
+    expect(approved.statusCode).toBe(202);
+    expect(helper.requests).toHaveLength(1);
+    expect(helper.requests[0]?.settings.account.password).toBe("secret");
+    expect(helper.requests[0]?.roots).toEqual([{ id: "local", name: "Local", path: rootDir }]);
+    expect(getShareSettings(db)).toMatchObject({
+      enabled: true,
+      account: {
+        username: "sigma-share",
+        password: "secret"
+      },
+      shares: [
+        {
+          id: "media",
+          path: "media",
+          protocols: {
+            smb: {
+              enabled: true,
+              readOnly: false
+            },
+            nfs: {
+              allowedCidrs: ["192.168.1.0/24"]
+            },
+            dlna: {
+              bindInterface: "eth0"
+            }
+          }
+        }
+      ]
+    });
+    expect(getShareOperationByApproval(db, proposed.json().approval.id)).toMatchObject({
+      action: "apply_settings",
+      status: "applied"
+    });
+    await server.close();
+  });
+
+  it("keeps saved share settings unchanged when helper application fails", async () => {
+    await mkdir(path.join(rootDir, "media"));
+    const session = createSession(db, { rootId: "local" });
+    const helper = new FakeShareHelper();
+    helper.failApply = true;
+    const server = await buildServer({
+      config: testConfig(tempDir),
+      db,
+      shares: {
+        helper
+      }
+    });
+    const proposed = await server.inject({
+      method: "POST",
+      url: "/api/shares/proposals",
+      payload: {
+        sessionId: session.id,
+        settings: shareSettingsPayload("secret")
+      }
+    });
+
+    const approved = await server.inject({
+      method: "POST",
+      url: `/api/approvals/${proposed.json().approval.id}/approve`
+    });
+
+    expect(approved.statusCode).toBe(400);
+    expect(getShareSettings(db)).toBeNull();
+    expect(getApproval(db, proposed.json().approval.id)?.status).toBe("failed");
+    expect(getShareOperationByApproval(db, proposed.json().approval.id)).toMatchObject({
+      status: "failed"
+    });
+    await server.close();
+  });
+
+  it("rejects unsafe share paths and invalid CIDRs before creating approvals", async () => {
+    await mkdir(path.join(rootDir, "media"));
+    const session = createSession(db, { rootId: "local" });
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    const payload = shareSettingsPayload("secret");
+    const share = payload.shares[0];
+    if (!share) {
+      throw new Error("test share payload missing share");
+    }
+
+    const unsafePath = await server.inject({
+      method: "POST",
+      url: "/api/shares/proposals",
+      payload: {
+        sessionId: session.id,
+        settings: {
+          ...payload,
+          shares: [
+            {
+              ...share,
+              path: "../outside"
+            }
+          ]
+        }
+      }
+    });
+    const invalidCidr = await server.inject({
+      method: "POST",
+      url: "/api/shares/proposals",
+      payload: {
+        sessionId: session.id,
+        settings: {
+          ...payload,
+          shares: [
+            {
+              ...share,
+              protocols: {
+                ...share.protocols,
+                nfs: {
+                  ...share.protocols.nfs,
+                  allowedCidrs: ["0.0.0.0/0"]
+                }
+              }
+            }
+          ]
+        }
+      }
+    });
+
+    expect(unsafePath.statusCode).toBe(400);
+    expect(invalidCidr.statusCode).toBe(400);
+    expect(listPendingApprovals(db)).toEqual([]);
     await server.close();
   });
 
@@ -1999,7 +2210,72 @@ function testConfig(dataDir: string): SigmaConfig {
       consoleShells: ["/bin/sh", "/bin/bash"],
       composeRoots: []
     },
+    shares: {
+      enabled: false,
+      helperSocketPath: "/run/sigmaos/share-helper.sock",
+      account: {
+        username: "sigma-share",
+        password: null
+      },
+      shares: []
+    },
     nasRoots: [{ id: "local", name: "Local", path: rootDir }]
+  };
+}
+
+function shareSettingsPayload(password: string) {
+  return {
+    enabled: true,
+    helperSocketPath: "/run/sigmaos/share-helper.sock",
+    account: {
+      username: "sigma-share",
+      password
+    },
+    shares: [
+      {
+        id: "media",
+        name: "Media",
+        rootId: "local",
+        path: "media",
+        description: "Media share",
+        protocols: {
+          smb: {
+            enabled: true,
+            readOnly: false,
+            browseable: true,
+            allowGuest: false
+          },
+          webdav: {
+            enabled: true,
+            readOnly: true,
+            allowGuest: false,
+            port: 8088,
+            pathPrefix: "/shares/media"
+          },
+          ftp: {
+            enabled: true,
+            readOnly: true,
+            allowGuest: false,
+            port: 2121,
+            passivePortStart: 50000,
+            passivePortEnd: 50100
+          },
+          nfs: {
+            enabled: true,
+            readOnly: true,
+            allowedCidrs: ["192.168.1.0/24"],
+            rootSquash: true
+          },
+          dlna: {
+            enabled: true,
+            mediaTypes: ["audio", "video"],
+            bindInterface: "eth0",
+            bindAddress: null,
+            friendlyName: "Media"
+          }
+        }
+      }
+    ]
   };
 }
 
@@ -2093,6 +2369,23 @@ class FakeDockerEngine implements DockerEngineRuntime {
 
   async resizeExec(): Promise<void> {
     this.calls.push("resize");
+  }
+}
+
+class FakeShareHelper {
+  requests: ShareApplyRequest[] = [];
+  failApply = false;
+
+  async apply(input: ShareApplyRequest): Promise<ShareApplyResult> {
+    this.requests.push(input);
+    if (this.failApply) {
+      throw new Error("share apply failed");
+    }
+    return {
+      appliedAt: "2026-01-01T00:00:00.000Z",
+      files: ["/etc/samba/smb.conf.d/sigmaos-shares.conf"],
+      services: ["smbd.service", "nmbd.service"]
+    };
   }
 }
 

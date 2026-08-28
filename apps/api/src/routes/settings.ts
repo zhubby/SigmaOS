@@ -6,6 +6,7 @@ import {
   getDockerSettings,
   getModelProviderSettings,
   getPiToolPolicySettings,
+  getShareSettings,
   saveDockerSettings,
   saveModelProviderSettings,
   savePiToolPolicySettings
@@ -14,11 +15,13 @@ import type { DockerSettingsRecord, ModelProviderName, PiToolPolicySettingsRecor
 import type { ApiRouteContext } from "../context.js";
 import {
   defaultDockerSettings,
+  defaultShareSettings,
   defaultModelProviderSettings,
   effectiveDockerConfig,
   isModelProviderName,
   normalizeOptionalText,
   toPublicDockerSettings,
+  toPublicShareSettings,
   toPublicModelProviderSettings,
   toPublicPiToolPolicySettings
 } from "../lib/settings.js";
@@ -106,6 +109,10 @@ export function registerSettingsRoutes(server: FastifyInstance, { config, db }: 
 
   server.get("/api/settings/docker", async () => ({
     settings: toPublicDockerSettings(getDockerSettings(db) ?? defaultDockerSettings(config))
+  }));
+
+  server.get("/api/settings/shares", async () => ({
+    settings: toPublicShareSettings(getShareSettings(db) ?? defaultShareSettings(config))
   }));
 
   server.patch<{

@@ -7,8 +7,12 @@ import type {
   GitFileStatus,
   ModelProviderName as SharedModelProviderName,
   PublicModelProviderSettings,
+  PublicShareSettings,
   DockerSummary as PublicDockerSummary,
   PublicSystemInfo,
+  ShareOperationRecord,
+  ShareOperationProposal as SharedShareOperationProposal,
+  ShareSummary as PublicShareSummary,
   SystemNetworkSummary,
   SystemStorageSummary
 } from "@sigmaos/shared";
@@ -113,13 +117,19 @@ export interface DockerOperationProposal {
   summary: string;
 }
 
-export type PendingApprovalProposal = FileOperationProposal | PiToolCallApproval | DockerOperationProposal;
+export type ShareOperationProposal = SharedShareOperationProposal;
+
+export type PendingApprovalProposal =
+  | FileOperationProposal
+  | PiToolCallApproval
+  | DockerOperationProposal
+  | ShareOperationProposal;
 
 export interface PendingApproval {
   id: string;
   jobId: string;
   sessionId: string;
-  kind: "file_operation" | "pi_tool_call" | "docker_operation";
+  kind: "file_operation" | "pi_tool_call" | "docker_operation" | "share_operation";
   status: string;
   proposal: PendingApprovalProposal[];
   createdAt: string;
@@ -176,9 +186,19 @@ export type SystemInfoStorageVolume = PublicSystemInfo["storage"]["volumes"][num
 export type NetworkSummary = SystemNetworkSummary;
 export type StorageSummary = SystemStorageSummary;
 export type DockerSummary = PublicDockerSummary;
+export type ShareSettings = PublicShareSettings;
+export type ShareSummary = PublicShareSummary;
+export type ShareSettingsInput = Omit<ShareSettings, "account" | "updatedAt"> & {
+  account: {
+    username: string;
+    password?: string;
+    clearPassword?: boolean;
+  };
+};
 export type DockerContainer = DockerSummary["containers"][number];
 export type DockerComposeProject = DockerSummary["composeProjects"][number];
 export type DockerOperation = DockerOperationRecord;
+export type ShareOperation = ShareOperationRecord;
 
 export interface FileMeta {
   path: string;
@@ -283,6 +303,20 @@ export async function getDockerSettings(): Promise<DockerSettings> {
   return body.settings;
 }
 
+export async function getShareSettings(): Promise<ShareSettings> {
+  const response = await fetch("/api/settings/shares");
+  await ensureOk(response);
+  const body = (await response.json()) as { settings: ShareSettings };
+  return body.settings;
+}
+
+export async function getShareSummary(): Promise<ShareSummary> {
+  const response = await fetch("/api/shares/summary");
+  await ensureOk(response);
+  const body = (await response.json()) as { summary: ShareSummary };
+  return body.summary;
+}
+
 export async function getDockerContainerLogs(containerId: string, tail = 200): Promise<string> {
   const params = new URLSearchParams({
     tail: String(tail)
@@ -335,6 +369,31 @@ export async function createDockerConsoleSession(operationId: string): Promise<D
   await ensureOk(response);
   const body = (await response.json()) as { consoleSession: DockerConsoleSession };
   return body.consoleSession;
+}
+
+export async function proposeShareSettings(input: {
+  sessionId: string;
+  settings: ShareSettingsInput;
+}): Promise<{
+  message: AgentMessage;
+  job: Job;
+  approval: PendingApproval;
+  operation: ShareOperation;
+}> {
+  const response = await fetch("/api/shares/proposals", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(input)
+  });
+  await ensureOk(response);
+  return (await response.json()) as {
+    message: AgentMessage;
+    job: Job;
+    approval: PendingApproval;
+    operation: ShareOperation;
+  };
 }
 
 export async function saveDockerSettings(input: Omit<DockerSettings, "updatedAt">): Promise<DockerSettings> {

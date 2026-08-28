@@ -1,4 +1,12 @@
-import type { DockerConfig, DockerSettingsRecord, ModelProviderSettingsRecord, SigmaConfig } from "@sigmaos/shared";
+import type {
+  DockerConfig,
+  DockerSettingsRecord,
+  ModelProviderSettingsRecord,
+  PublicShareSettings,
+  ShareConfig,
+  ShareSettingsRecord,
+  SigmaConfig
+} from "@sigmaos/shared";
 import { isModelProviderName as sharedIsModelProviderName } from "@sigmaos/shared";
 import { defaultPiToolPolicySettings } from "@sigmaos/db";
 
@@ -49,6 +57,35 @@ export function toPublicDockerSettings(settings: DockerSettingsRecord): DockerSe
   return settings;
 }
 
+export function defaultShareSettings(config: SigmaConfig): ShareSettingsRecord {
+  return {
+    ...config.shares,
+    updatedAt: new Date(0).toISOString()
+  };
+}
+
+export function toPublicShareSettings(settings: ShareSettingsRecord): PublicShareSettings {
+  return {
+    enabled: settings.enabled,
+    helperSocketPath: settings.helperSocketPath,
+    account: {
+      username: settings.account.username,
+      passwordConfigured: Boolean(settings.account.password)
+    },
+    shares: settings.shares,
+    updatedAt: settings.updatedAt
+  };
+}
+
+export function shareSettingsToConfig(settings: ShareSettingsRecord): ShareConfig {
+  return {
+    enabled: settings.enabled,
+    helperSocketPath: settings.helperSocketPath,
+    account: settings.account,
+    shares: settings.shares
+  };
+}
+
 export function dockerSettingsToConfig(settings: DockerSettingsRecord): DockerConfig {
   return {
     enabled: settings.enabled,
@@ -64,5 +101,12 @@ export function effectiveDockerConfig(config: SigmaConfig, settings: DockerSetti
   return {
     ...config,
     docker: settings ? dockerSettingsToConfig(settings) : config.docker
+  };
+}
+
+export function effectiveShareConfig(config: SigmaConfig, settings: ShareSettingsRecord | null): SigmaConfig {
+  return {
+    ...config,
+    shares: settings ? shareSettingsToConfig(settings) : config.shares
   };
 }

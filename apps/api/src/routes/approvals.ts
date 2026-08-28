@@ -6,18 +6,27 @@ import {
   getDockerSettings,
   getApproval,
   getDockerOperationByApproval,
+  getShareOperationByApproval,
   getNasRoot,
   listPendingApprovals,
   recordAppliedOperation,
+  saveShareSettings,
   updateDockerOperationStatus,
+  updateShareOperationStatus,
   updateApprovalStatus,
   updateJobStatus
 } from "@sigmaos/db";
 import { applyFileMutation } from "@sigmaos/nas-tools";
-import type { DockerOperationProposal, FileOperationProposal, PendingApprovalRecord } from "@sigmaos/shared";
+import type { DockerOperationProposal, FileOperationProposal, PendingApprovalRecord, ShareOperationProposal } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
 import { effectiveDockerConfig } from "../lib/settings.js";
 import { applyDockerOperation, safeDockerMessage } from "../lib/docker-service.js";
+import {
+  applyShareOperation,
+  safeShareMessage,
+  shareSettingsFromOperation,
+  toPublicShareOperation
+} from "../lib/share-service.js";
 
 export function registerApprovalRoutes(server: FastifyInstance, context: ApiRouteContext): void {
   const { config, db } = context;
@@ -98,6 +107,65 @@ export function registerApprovalRoutes(server: FastifyInstance, context: ApiRout
       } catch (error) {
         const message = safeDockerMessage(error);
         updateDockerOperationStatus(db, operation.id, "failed", {
+          error: message,
+          failedAt: new Date().toISOString()
+        });
+        updateApprovalStatus(db, approval.id, "failed", ["approved"]);
+        updateJobStatus(db, approval.jobId, "failed", message, ["waiting_approval"]);
+        appendEvent(db, {
+          sessionId: approval.sessionId,
+          jobId: approval.jobId,
+          type: "job.failed",
+          payload: { error: message }
+        });
+        reply.status(400).send({ error: message });
+        return;
+      }
+    }
+
+    if (approval.kind === "share_operation") {
+      const operation = getShareOperationByApproval(db, approval.id);
+      const proposal = shareOperationProposal(approval);
+      if (!operation || !proposal) {
+        reply.status(400).send({ error: "Share approval is missing operation metadata" });
+        return;
+      }
+      if (!updateApprovalStatus(db, approval.id, "approved", ["pending"])) {
+        reply.status(409).send({ error: `Approval is already ${approval.status}` });
+        return;
+      }
+
+      try {
+        const settings = shareSettingsFromOperation(operation);
+        const metadata = await applyShareOperation(config, operation, proposal, context.shares);
+        const { updatedAt: _proposedUpdatedAt, ...settingsToSave } = settings;
+        const saved = saveShareSettings(db, settingsToSave);
+        const applied = updateShareOperationStatus(db, operation.id, "applied", {
+          ...metadata,
+          settingsUpdatedAt: saved.updatedAt,
+          appliedAt: new Date().toISOString()
+        });
+        updateApprovalStatus(db, approval.id, "applied", ["approved"]);
+        updateJobStatus(db, approval.jobId, "completed", null, ["waiting_approval"]);
+        appendEvent(db, {
+          sessionId: approval.sessionId,
+          jobId: approval.jobId,
+          type: "job.completed",
+          payload: {
+            jobId: approval.jobId,
+            approvalId: approval.id,
+            shareOperation: applied ? toPublicShareOperation(applied) : null
+          }
+        });
+        reply.status(202).send({
+          approvalId: approval.id,
+          status: "applied",
+          operation: applied ? toPublicShareOperation(applied) : null
+        });
+        return;
+      } catch (error) {
+        const message = safeShareMessage(error);
+        updateShareOperationStatus(db, operation.id, "failed", {
           error: message,
           failedAt: new Date().toISOString()
         });
@@ -237,6 +305,36 @@ export function registerApprovalRoutes(server: FastifyInstance, context: ApiRout
       return;
     }
 
+    if (approval.kind === "share_operation") {
+      if (!updateApprovalStatus(db, approval.id, "rejected", ["pending"])) {
+        reply.status(409).send({ error: `Approval is already ${approval.status}` });
+        return;
+      }
+      const operation = getShareOperationByApproval(db, approval.id);
+      if (operation) {
+        updateShareOperationStatus(db, operation.id, "failed", {
+          rejected: true,
+          rejectedAt: new Date().toISOString()
+        });
+      }
+      updateJobStatus(db, approval.jobId, "completed", null, ["waiting_approval"]);
+      appendEvent(db, {
+        sessionId: approval.sessionId,
+        jobId: approval.jobId,
+        type: "job.completed",
+        payload: {
+          jobId: approval.jobId,
+          approvalId: approval.id,
+          rejected: true
+        }
+      });
+      reply.status(202).send({
+        approvalId: approval.id,
+        status: "rejected"
+      });
+      return;
+    }
+
     if (!updateApprovalStatus(db, approval.id, "rejected", ["pending"])) {
       reply.status(409).send({ error: `Approval is already ${approval.status}` });
       return;
@@ -272,6 +370,22 @@ function dockerOperationProposal(approval: PendingApprovalRecord): DockerOperati
     typeof (proposal as { action?: unknown }).action === "string"
   ) {
     return proposal as DockerOperationProposal;
+  }
+  return null;
+}
+
+function shareOperationProposal(approval: PendingApprovalRecord): ShareOperationProposal | null {
+  if (approval.kind !== "share_operation") {
+    return null;
+  }
+  const proposal = approval.proposal[0];
+  if (
+    typeof proposal === "object" &&
+    proposal !== null &&
+    "action" in proposal &&
+    (proposal as { action?: unknown }).action === "apply_settings"
+  ) {
+    return proposal as ShareOperationProposal;
   }
   return null;
 }

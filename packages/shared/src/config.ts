@@ -1,7 +1,15 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parse } from "smol-toml";
-import type { DockerComposeRootConfig, NasRootConfig, SigmaConfig } from "./types.js";
+import type {
+  DlnaMediaType,
+  DockerComposeRootConfig,
+  NasRootConfig,
+  ShareConfig,
+  ShareDefinitionConfig,
+  ShareProtocolConfig,
+  SigmaConfig
+} from "./types.js";
 
 interface TomlConfig {
   data_dir?: string;
@@ -32,6 +40,52 @@ interface TomlConfig {
       id?: string;
       name?: string;
       path?: string;
+    }>;
+  };
+  shares?: {
+    enabled?: boolean;
+    helper_socket_path?: string;
+    account_username?: string;
+    items?: Array<{
+      id?: string;
+      name?: string;
+      root_id?: string;
+      path?: string;
+      description?: string;
+      smb?: Partial<{
+        enabled: boolean;
+        read_only: boolean;
+        browseable: boolean;
+        allow_guest: boolean;
+      }>;
+      webdav?: Partial<{
+        enabled: boolean;
+        read_only: boolean;
+        allow_guest: boolean;
+        port: number;
+        path_prefix: string;
+      }>;
+      ftp?: Partial<{
+        enabled: boolean;
+        read_only: boolean;
+        allow_guest: boolean;
+        port: number;
+        passive_port_start: number;
+        passive_port_end: number;
+      }>;
+      nfs?: Partial<{
+        enabled: boolean;
+        read_only: boolean;
+        allowed_cidrs: string[];
+        root_squash: boolean;
+      }>;
+      dlna?: Partial<{
+        enabled: boolean;
+        media_types: string[];
+        bind_interface: string;
+        bind_address: string;
+        friendly_name: string;
+      }>;
     }>;
   };
   nas_roots?: Array<{
@@ -86,6 +140,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
       consoleShells: loadDockerConsoleShells(env, fileConfig),
       composeRoots: loadDockerComposeRoots(env, fileConfig, workspaceRoot)
     },
+    shares: loadShareConfig(env, fileConfig),
     nasRoots
   };
 }
@@ -162,6 +217,102 @@ function loadDockerConsoleShells(env: NodeJS.ProcessEnv, fileConfig: TomlConfig)
     .map((shell) => normalizeText(shell))
     .filter((shell): shell is string => shell !== null && path.isAbsolute(shell));
   return shells.length ? shells : ["/bin/sh", "/bin/bash"];
+}
+
+function loadShareConfig(env: NodeJS.ProcessEnv, fileConfig: TomlConfig): ShareConfig {
+  const shares = fileConfig.shares;
+  return {
+    enabled: toBoolean(env.SIGMAOS_SHARES_ENABLED, shares?.enabled ?? false),
+    helperSocketPath:
+      normalizeText(env.SIGMAOS_SHARE_HELPER_SOCKET_PATH) ??
+      normalizeText(shares?.helper_socket_path) ??
+      "/run/sigmaos/share-helper.sock",
+    account: {
+      username:
+        normalizeText(env.SIGMAOS_SHARE_ACCOUNT_USERNAME) ??
+        normalizeText(shares?.account_username) ??
+        "sigma-share",
+      password: null
+    },
+    shares: (shares?.items ?? []).map(normalizeShareItem).filter((item): item is ShareDefinitionConfig => item !== null)
+  };
+}
+
+function normalizeShareItem(item: NonNullable<NonNullable<TomlConfig["shares"]>["items"]>[number], index: number): ShareDefinitionConfig | null {
+  const rootId = normalizeText(item.root_id);
+  const sharePath = normalizeText(item.path);
+  if (!rootId || !sharePath) {
+    return null;
+  }
+  const id = normalizeText(item.id) ?? `share-${index + 1}`;
+  const name = normalizeText(item.name) ?? id;
+  return {
+    id,
+    name,
+    rootId,
+    path: sharePath,
+    description: normalizeText(item.description) ?? "",
+    protocols: normalizeShareProtocols(item, name)
+  };
+}
+
+function normalizeShareProtocols(
+  item: NonNullable<NonNullable<TomlConfig["shares"]>["items"]>[number],
+  name: string
+): ShareProtocolConfig {
+  return {
+    smb: {
+      enabled: Boolean(item.smb?.enabled),
+      readOnly: item.smb?.read_only ?? true,
+      browseable: item.smb?.browseable ?? true,
+      allowGuest: item.smb?.allow_guest ?? false
+    },
+    webdav: {
+      enabled: Boolean(item.webdav?.enabled),
+      readOnly: item.webdav?.read_only ?? true,
+      allowGuest: item.webdav?.allow_guest ?? false,
+      port: toPositiveInteger(item.webdav?.port, 8088),
+      pathPrefix: normalizeText(item.webdav?.path_prefix) ?? `/shares/${idPath(name)}`
+    },
+    ftp: {
+      enabled: Boolean(item.ftp?.enabled),
+      readOnly: item.ftp?.read_only ?? true,
+      allowGuest: item.ftp?.allow_guest ?? false,
+      port: toPositiveInteger(item.ftp?.port, 2121),
+      passivePortStart: toPositiveInteger(item.ftp?.passive_port_start, 50000),
+      passivePortEnd: toPositiveInteger(item.ftp?.passive_port_end, 50100)
+    },
+    nfs: {
+      enabled: Boolean(item.nfs?.enabled),
+      readOnly: item.nfs?.read_only ?? true,
+      allowedCidrs: (item.nfs?.allowed_cidrs ?? []).map((cidr) => cidr.trim()).filter(Boolean),
+      rootSquash: item.nfs?.root_squash ?? true
+    },
+    dlna: {
+      enabled: Boolean(item.dlna?.enabled),
+      mediaTypes: normalizeDlnaMediaTypes(item.dlna?.media_types),
+      bindInterface: normalizeText(item.dlna?.bind_interface) ?? null,
+      bindAddress: normalizeText(item.dlna?.bind_address) ?? null,
+      friendlyName: normalizeText(item.dlna?.friendly_name) ?? name
+    }
+  };
+}
+
+function normalizeDlnaMediaTypes(values: string[] | undefined): DlnaMediaType[] {
+  const mediaTypes = (values ?? ["audio", "video", "pictures"]).filter(isDlnaMediaType);
+  return mediaTypes.length ? mediaTypes : ["audio", "video", "pictures"];
+}
+
+function isDlnaMediaType(value: string): value is DlnaMediaType {
+  return value === "audio" || value === "video" || value === "pictures";
+}
+
+function idPath(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-|-$/gu, "") || "share";
 }
 
 function systemRootPath(cwd: string): string {

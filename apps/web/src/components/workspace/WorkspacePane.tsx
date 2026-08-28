@@ -16,6 +16,7 @@ import {
   PencilLine,
   RefreshCw,
   Search,
+  Share2,
   Trash2,
   type LucideIcon
 } from "lucide-react";
@@ -63,6 +64,12 @@ const WORKSPACE_PANELS = [
     labelKey: "workspace.panels.storage",
     shortLabelKey: "workspace.panels.storageShort",
     Icon: HardDrive
+  },
+  {
+    id: "shares",
+    labelKey: "workspace.panels.shares",
+    shortLabelKey: "workspace.panels.sharesShort",
+    Icon: Share2
   }
 ] as const satisfies ReadonlyArray<{
   id: WorkspacePanelId;
@@ -608,6 +615,7 @@ export function WorkspacePane({
           ) : (
             <WorkspaceManagementPanel
               panel={activePanel}
+              roots={roots}
               sessionId={sessionId}
               pendingApprovals={pendingApprovals}
               dockerOperations={dockerOperations}
