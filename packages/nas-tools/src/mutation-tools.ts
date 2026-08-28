@@ -185,6 +185,7 @@ async function applyMove(root: NasRootRecord, proposal: FileOperationProposal): 
 
   const source = await resolveSafeExistingPath(root.path, proposal.sourcePath);
   const target = await resolveSafeTargetPath(root.path, proposal.targetPath);
+  await assertTransferDestinationIsValid(source, target.absolutePath);
   await assertTargetDoesNotExist(target.absolutePath);
   await mkdir(path.dirname(target.absolutePath), { recursive: true });
   await rename(source.realPath, target.absolutePath);
@@ -206,6 +207,7 @@ async function applyCopy(root: NasRootRecord, proposal: FileOperationProposal): 
 
   const source = await resolveSafeExistingPath(root.path, proposal.sourcePath);
   const target = await resolveSafeTargetPath(root.path, proposal.targetPath);
+  await assertTransferDestinationIsValid(source, target.absolutePath);
   await assertTargetDoesNotExist(target.absolutePath);
   await mkdir(path.dirname(target.absolutePath), { recursive: true });
   await cp(source.realPath, target.absolutePath, {
@@ -291,6 +293,42 @@ async function assertTargetDoesNotExist(absolutePath: string): Promise<void> {
       return;
     }
     throw error;
+  }
+}
+
+async function assertTransferDestinationIsValid(
+  source: Awaited<ReturnType<typeof resolveSafeExistingPath>>,
+  targetPath: string
+): Promise<void> {
+  if (source.realPath === targetPath) {
+    throw new Error("Transfer target must be different from the source");
+  }
+
+  await assertNoSymlinkPathSegments(source.rootRealPath, source.absolutePath);
+  await assertNoSymlinkPathSegments(source.rootRealPath, path.dirname(targetPath));
+
+  const sourceStat = await stat(source.realPath);
+  if (sourceStat.isDirectory() && isPathInside(source.realPath, path.dirname(targetPath))) {
+    throw new Error("Cannot transfer a folder into itself");
+  }
+}
+
+async function assertNoSymlinkPathSegments(rootRealPath: string, absolutePath: string): Promise<void> {
+  const relativePath = path.relative(rootRealPath, absolutePath);
+  let currentPath = rootRealPath;
+  for (const segment of relativePath.split(path.sep).filter(Boolean)) {
+    currentPath = path.join(currentPath, segment);
+    try {
+      const currentStat = await lstat(currentPath);
+      if (currentStat.isSymbolicLink()) {
+        throw new Error("Refusing to transfer through a symlink");
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return;
+      }
+      throw error;
+    }
   }
 }
 

@@ -5,7 +5,9 @@ import {
   ArrowUp,
   ChevronLeft,
   Container,
+  Copy,
   Files,
+  FolderInput,
   GitBranch,
   HardDrive,
   Home,
@@ -141,6 +143,7 @@ export function WorkspacePane({
   onOpenEditor,
   onRequestRename,
   onRequestTrash,
+  onRequestTransfer,
   onUploadSources,
   onCancelUploadBatch,
   onWorkQueuesChanged,
@@ -184,6 +187,7 @@ export function WorkspacePane({
   onOpenEditor: (meta: FileMeta) => void;
   onRequestRename: (entry: FileEntry, targetName: string) => Promise<void>;
   onRequestTrash: (entry: FileEntry) => Promise<void>;
+  onRequestTransfer: (entry: FileEntry, operation: "move" | "copy", targetPath: string) => Promise<void>;
   onUploadSources: (sources: UploadSource[]) => void | Promise<void>;
   onCancelUploadBatch: (batchId: string) => void;
   onWorkQueuesChanged: () => void | Promise<void>;
@@ -194,6 +198,8 @@ export function WorkspacePane({
   const [renameEntry, setRenameEntry] = useState<FileEntry | null>(null);
   const [renameName, setRenameName] = useState("");
   const [deleteState, setDeleteState] = useState<{ entry: FileEntry; step: "initial" | "final" } | null>(null);
+  const [transferState, setTransferState] = useState<{ entry: FileEntry; operation: "move" | "copy" } | null>(null);
+  const [transferTargetDirectory, setTransferTargetDirectory] = useState(currentPath);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [operationSubmitting, setOperationSubmitting] = useState(false);
   const [activePanel, setActivePanel] = useState<WorkspacePanelId>("files");
@@ -268,6 +274,17 @@ export function WorkspacePane({
         : t("workspace.actions.deleteFolderBody", { name: deleteState.entry.name })
       : t("workspace.actions.deleteBody", { name: deleteState.entry.name })
     : "";
+  const normalizedTransferDirectory =
+    transferTargetDirectory.trim().replace(/\\/gu, "/").replace(/^\.\//u, "").replace(/\/+$/u, "") || ".";
+  const transferTargetPath =
+    normalizedTransferDirectory === "."
+      ? transferState?.entry.name ?? ""
+      : `${normalizedTransferDirectory}/${transferState?.entry.name ?? ""}`;
+  const transferTargetInvalid =
+    !transferTargetDirectory.trim() ||
+    normalizedTransferDirectory.startsWith("/") ||
+    normalizedTransferDirectory.split("/").some((segment) => segment === ".." || segment === "") ||
+    transferTargetPath === transferState?.entry.path;
 
   useEffect(() => {
     const input = folderUploadInputRef.current;
@@ -299,12 +316,22 @@ export function WorkspacePane({
     setDeleteState({ entry, step: "initial" });
   }
 
+  function openTransferDialog(event: MouseEvent<HTMLButtonElement>, entry: FileEntry, operation: "move" | "copy") {
+    event.stopPropagation();
+    setOperationError(null);
+    setRenameEntry(null);
+    setDeleteState(null);
+    setTransferState({ entry, operation });
+    setTransferTargetDirectory(currentPath);
+  }
+
   function closeActionDialog() {
     if (operationSubmitting) {
       return;
     }
     setRenameEntry(null);
     setDeleteState(null);
+    setTransferState(null);
     setOperationError(null);
   }
 
@@ -437,6 +464,24 @@ export function WorkspacePane({
     try {
       await onRequestTrash(deleteState.entry);
       setDeleteState(null);
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setOperationSubmitting(false);
+    }
+  }
+
+  async function submitTransfer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!transferState || transferTargetInvalid || operationSubmitting) {
+      return;
+    }
+
+    setOperationSubmitting(true);
+    setOperationError(null);
+    try {
+      await onRequestTransfer(transferState.entry, transferState.operation, transferTargetPath);
+      setTransferState(null);
     } catch (error) {
       setOperationError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -683,6 +728,26 @@ export function WorkspacePane({
                             <button
                               type="button"
                               className="file-action-button"
+                              onClick={(event) => openTransferDialog(event, entry, "move")}
+                              disabled={!entry.isSafe}
+                              title={t("workspace.actions.move")}
+                              aria-label={t("workspace.actions.moveEntry", { name: entry.name })}
+                            >
+                              <FolderInput aria-hidden="true" size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              className="file-action-button"
+                              onClick={(event) => openTransferDialog(event, entry, "copy")}
+                              disabled={!entry.isSafe}
+                              title={t("workspace.actions.copy")}
+                              aria-label={t("workspace.actions.copyEntry", { name: entry.name })}
+                            >
+                              <Copy aria-hidden="true" size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              className="file-action-button"
                               onClick={(event) => openRenameDialog(event, entry)}
                               disabled={!entry.isSafe}
                               title={t("workspace.actions.rename")}
@@ -882,6 +947,64 @@ export function WorkspacePane({
               </button>
             </footer>
           </section>
+        </div>
+      ) : null}
+
+      {transferState ? (
+        <div className="file-action-backdrop" role="presentation">
+          <form
+            className="file-action-dialog transfer-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="file-transfer-title"
+            onSubmit={(event) => void submitTransfer(event)}
+          >
+            <header>
+              <span className="eyebrow">
+                {transferState.operation === "move" ? t("workspace.actions.move") : t("workspace.actions.copy")}
+              </span>
+              <h2 id="file-transfer-title">{transferState.entry.name}</h2>
+            </header>
+
+            <div className="file-transfer-route" aria-label={t("workspace.actions.transferPreview")}>
+              <span>{transferState.entry.path}</span>
+              <FolderInput aria-hidden="true" size={15} />
+              <strong>{transferTargetPath || t("workspace.actions.chooseFolder")}</strong>
+            </div>
+
+            <label className="file-action-field">
+              <span>{t("workspace.actions.destinationFolder")}</span>
+              <input
+                autoFocus
+                value={transferTargetDirectory}
+                onChange={(event) => setTransferTargetDirectory(event.target.value)}
+                placeholder="."
+                aria-describedby={operationError ? "file-action-error" : "file-transfer-hint"}
+              />
+            </label>
+
+            <p id="file-transfer-hint" className="file-action-hint">
+              {t("workspace.actions.transferHint")}
+            </p>
+            {operationError ? (
+              <p id="file-action-error" className="file-action-error" role="alert">
+                {operationError}
+              </p>
+            ) : null}
+
+            <footer>
+              <button type="button" className="secondary-button" onClick={closeActionDialog} disabled={operationSubmitting}>
+                {t("common.actions.cancel")}
+              </button>
+              <button type="submit" className="primary-button" disabled={operationSubmitting || transferTargetInvalid}>
+                {operationSubmitting
+                  ? t("common.actions.saving")
+                  : transferState.operation === "move"
+                    ? t("workspace.actions.requestMove")
+                    : t("workspace.actions.requestCopy")}
+              </button>
+            </footer>
+          </form>
         </div>
       ) : null}
 

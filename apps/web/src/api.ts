@@ -591,9 +591,10 @@ export async function saveEditableText(input: {
 export async function proposeFileOperation(input: {
   sessionId: string;
   rootId: string;
-  operation: "rename" | "trash";
+  operation: "rename" | "trash" | "move" | "copy";
   sourcePath: string;
   targetName?: string;
+  targetPath?: string;
 }): Promise<FileProposalResult> {
   const response = await fetch("/api/files/proposals", {
     method: "POST",

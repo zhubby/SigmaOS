@@ -7,6 +7,7 @@ import type { FastifyInstance } from "fastify";
 import {
   inferMimeType,
   inferPreviewKind,
+  isPathInside,
   listDir,
   readText,
   resolveSafeExistingPath,
@@ -257,9 +258,10 @@ export function registerFileRoutes(server: FastifyInstance, { db }: ApiRouteCont
     Body: {
       sessionId?: string;
       rootId?: string;
-      operation?: "rename" | "trash";
+      operation?: "rename" | "trash" | "move" | "copy";
       sourcePath?: string;
       targetName?: string;
+      targetPath?: string;
     };
   }>("/api/files/proposals", async (request, reply) => {
     const session = getSession(db, request.body?.sessionId ?? "");
@@ -279,7 +281,7 @@ export function registerFileRoutes(server: FastifyInstance, { db }: ApiRouteCont
     }
 
     const operation = request.body?.operation;
-    if (operation !== "rename" && operation !== "trash") {
+    if (operation !== "rename" && operation !== "trash" && operation !== "move" && operation !== "copy") {
       reply.status(400).send({ error: "Unsupported file proposal operation" });
       return;
     }
@@ -293,7 +295,9 @@ export function registerFileRoutes(server: FastifyInstance, { db }: ApiRouteCont
     const proposal =
       operation === "rename"
         ? await buildRenameProposal(root, source.safe.relativePath, request.body?.targetName)
-        : buildTrashProposal(root, source.safe.relativePath);
+        : operation === "trash"
+          ? buildTrashProposal(root, source.safe.relativePath)
+          : await buildTransferProposal(root, source.safe, operation, request.body?.targetPath);
     if ("error" in proposal) {
       reply.status(proposal.statusCode).send({ error: proposal.error });
       return;
@@ -505,6 +509,58 @@ async function buildRenameProposal(
   };
 }
 
+async function buildTransferProposal(
+  root: NasRootRecord,
+  source: Awaited<ReturnType<typeof resolveSafeExistingPath>>,
+  operation: "move" | "copy",
+  rawTargetPath: string | undefined
+): Promise<
+  | {
+      proposal: FileOperationProposal;
+    }
+  | { statusCode: number; error: string }
+> {
+  const normalizedTarget = normalizeTransferTargetPath(rawTargetPath);
+  if ("error" in normalizedTarget) {
+    return normalizedTarget;
+  }
+
+  const target = await resolveSafeTargetPath(root.path, normalizedTarget.path);
+  if (target.relativePath === source.relativePath) {
+    return { statusCode: 400, error: "Transfer target must be different from the source" };
+  }
+  if (await pathExists(target.absolutePath)) {
+    return { statusCode: 409, error: "Mutation target already exists" };
+  }
+
+  const destination = await resolveSafeExistingPath(root.path, path.dirname(target.relativePath));
+  const destinationLinkStat = await lstat(destination.absolutePath);
+  if (destinationLinkStat.isSymbolicLink()) {
+    return { statusCode: 400, error: "Refusing to transfer into a symlinked folder" };
+  }
+  const destinationStat = await stat(destination.realPath);
+  if (!destinationStat.isDirectory()) {
+    return { statusCode: 400, error: "Transfer destination must be a folder" };
+  }
+  const sourceStat = await stat(source.realPath);
+  if (sourceStat.isDirectory() && isPathInside(source.realPath, destination.realPath)) {
+    return { statusCode: 400, error: "Cannot transfer a folder into itself" };
+  }
+
+  const verb = operation === "move" ? "Move" : "Copy";
+  return {
+    proposal: {
+      operation,
+      rootId: root.id,
+      sourcePath: source.relativePath,
+      targetPath: target.relativePath,
+      risk: "medium",
+      reversible: true,
+      summary: `${verb} ${source.relativePath} to ${target.relativePath}`
+    }
+  };
+}
+
 function buildTrashProposal(
   root: NasRootRecord,
   sourcePath: string
@@ -532,6 +588,19 @@ function normalizeTargetName(rawTargetName: string | undefined): { name: string 
     return { statusCode: 400, error: "New name must stay in the same folder" };
   }
   return { name };
+}
+
+function normalizeTransferTargetPath(
+  rawTargetPath: string | undefined
+): { path: string } | { statusCode: number; error: string } {
+  const targetPath = rawTargetPath?.trim() ?? "";
+  if (!targetPath) {
+    return { statusCode: 400, error: "Transfer target is required" };
+  }
+  if (targetPath.includes("\0") || path.isAbsolute(targetPath)) {
+    return { statusCode: 400, error: "Transfer target must be a relative path inside the NAS root" };
+  }
+  return { path: targetPath };
 }
 
 async function pathExists(absolutePath: string): Promise<boolean> {

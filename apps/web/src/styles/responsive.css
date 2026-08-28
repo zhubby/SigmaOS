@@ -149,7 +149,7 @@
 
 @media (max-width: 1580px) {
   .file-row {
-    grid-template-columns: minmax(150px, 1fr) 92px 90px 66px;
+    grid-template-columns: minmax(150px, 1fr) 92px 90px 124px;
   }
 
   .file-row > span:nth-child(4) {
@@ -307,7 +307,7 @@
   }
 
   .file-row {
-    grid-template-columns: minmax(150px, 1fr) 82px 84px 66px;
+    grid-template-columns: minmax(150px, 1fr) 82px 84px 124px;
   }
 
   .file-row > span:nth-child(4) {
@@ -485,7 +485,7 @@
   }
 
   .file-row {
-    grid-template-columns: minmax(120px, 1fr) 78px 66px;
+    grid-template-columns: minmax(120px, 1fr) 78px 124px;
   }
 
   .file-row > span:nth-child(3),

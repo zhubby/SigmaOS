@@ -54,6 +54,45 @@ describe("approval-gated mutation tools", () => {
     await expect(stat(path.join(rootDir, "source.txt"))).rejects.toThrow();
   });
 
+  it("copies files without removing the source", async () => {
+    await applyFileMutation(
+      root,
+      {
+        operation: "copy",
+        rootId: root.id,
+        sourcePath: "source.txt",
+        targetPath: "copy.txt",
+        risk: "medium",
+        reversible: true,
+        summary: "Copy source"
+      },
+      trashDir
+    );
+
+    await expect(readFile(path.join(rootDir, "source.txt"), "utf8")).resolves.toBe("hello");
+    await expect(readFile(path.join(rootDir, "copy.txt"), "utf8")).resolves.toBe("hello");
+  });
+
+  it("rejects transferring a folder into itself", async () => {
+    await mkdir(path.join(rootDir, "folder", "child"), { recursive: true });
+
+    await expect(
+      applyFileMutation(
+        root,
+        {
+          operation: "copy",
+          rootId: root.id,
+          sourcePath: "folder",
+          targetPath: "folder/child/folder",
+          risk: "medium",
+          reversible: true,
+          summary: "Copy folder"
+        },
+        trashDir
+      )
+    ).rejects.toThrow("Cannot transfer a folder into itself");
+  });
+
   it("moves trash requests into SigmaOS trash", async () => {
     const result = await applyFileMutation(
       root,

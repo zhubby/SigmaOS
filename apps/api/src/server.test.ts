@@ -1705,6 +1705,69 @@ describe("API server", () => {
     await server.close();
   });
 
+  it("creates approval-gated move and copy proposals for an existing destination folder", async () => {
+    await mkdir(path.join(rootDir, "archive"));
+    const session = createSession(db, { rootId: "local" });
+    const server = await buildServer({ config: testConfig(tempDir), db });
+
+    for (const operation of ["move", "copy"] as const) {
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/files/proposals",
+        payload: {
+          sessionId: session.id,
+          rootId: "local",
+          operation,
+          sourcePath: "hello.txt",
+          targetPath: `archive/${operation}.txt`
+        }
+      });
+
+      expect(response.statusCode).toBe(202);
+      expect(response.json()).toMatchObject({
+        approval: {
+          kind: "file_operation",
+          status: "pending",
+          proposal: [
+            {
+              operation,
+              rootId: "local",
+              sourcePath: "hello.txt",
+              targetPath: `archive/${operation}.txt`
+            }
+          ]
+        }
+      });
+    }
+
+    await expect(readFile(path.join(rootDir, "hello.txt"), "utf8")).resolves.toBe("hello");
+    await expect(stat(path.join(rootDir, "archive", "move.txt"))).rejects.toThrow();
+    await expect(stat(path.join(rootDir, "archive", "copy.txt"))).rejects.toThrow();
+    await server.close();
+  });
+
+  it("rejects moving or copying a folder into itself", async () => {
+    await mkdir(path.join(rootDir, "folder", "child"), { recursive: true });
+    const session = createSession(db, { rootId: "local" });
+    const server = await buildServer({ config: testConfig(tempDir), db });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/files/proposals",
+      payload: {
+        sessionId: session.id,
+        rootId: "local",
+        operation: "copy",
+        sourcePath: "folder",
+        targetPath: "folder/child/folder"
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "Cannot transfer a folder into itself" });
+    await server.close();
+  });
+
   it("refuses file operation proposals against the NAS root itself", async () => {
     const session = createSession(db, { rootId: "local" });
     const server = await buildServer({ config: testConfig(tempDir), db });
@@ -1891,6 +1954,41 @@ describe("API server", () => {
     expect(response.statusCode).toBe(202);
     await expect(readFile(path.join(rootDir, "moved.txt"), "utf8")).resolves.toBe("hello");
     await expect(stat(path.join(rootDir, "hello.txt"))).rejects.toThrow();
+    await server.close();
+  });
+
+  it("applies an approved copy operation without removing the source", async () => {
+    await mkdir(path.join(rootDir, "archive"));
+    const session = createSession(db, { rootId: "local" });
+    const { job } = createUserMessageAndJob(db, {
+      sessionId: session.id,
+      content: "copy hello.txt to archive/copied.txt"
+    });
+    updateJobStatus(db, job.id, "waiting_approval");
+    const approval = createPendingApproval(db, {
+      jobId: job.id,
+      proposal: [
+        {
+          operation: "copy",
+          rootId: "local",
+          sourcePath: "hello.txt",
+          targetPath: "archive/copied.txt",
+          risk: "medium",
+          reversible: true,
+          summary: "Copy hello.txt to archive/copied.txt"
+        }
+      ]
+    });
+    const server = await buildServer({ config: testConfig(tempDir), db });
+
+    const response = await server.inject({
+      method: "POST",
+      url: `/api/approvals/${approval.id}/approve`
+    });
+
+    expect(response.statusCode).toBe(202);
+    await expect(readFile(path.join(rootDir, "hello.txt"), "utf8")).resolves.toBe("hello");
+    await expect(readFile(path.join(rootDir, "archive", "copied.txt"), "utf8")).resolves.toBe("hello");
     await server.close();
   });
 
