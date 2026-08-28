@@ -1,6 +1,8 @@
-import { createReadStream } from "node:fs";
-import { lstat, stat, writeFile } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { lstat, mkdir, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import type { FastifyInstance } from "fastify";
 import {
   inferMimeType,
@@ -25,8 +27,13 @@ import { getDirectoryGitView } from "../lib/git.js";
 import { resolveRoot } from "../lib/roots.js";
 
 const MAX_EDIT_TEXT_BYTES = 1024 * 1024;
+const MAX_UPLOAD_BYTES = 4 * 1024 * 1024 * 1024;
 
 export function registerFileRoutes(server: FastifyInstance, { db }: ApiRouteContext): void {
+  server.addContentTypeParser("application/octet-stream", (_request, payload, done) => {
+    done(null, payload);
+  });
+
   server.get<{
     Querystring: { rootId?: string; path?: string };
   }>("/api/files", async (request, reply) => {
@@ -174,6 +181,78 @@ export function registerFileRoutes(server: FastifyInstance, { db }: ApiRouteCont
     });
   });
 
+  server.put<{
+    Querystring: { rootId?: string; path?: string };
+  }>(
+    "/api/files/upload",
+    {
+      bodyLimit: MAX_UPLOAD_BYTES
+    },
+    async (request, reply) => {
+      const root = resolveRoot(db, request.query.rootId);
+      if (!root) {
+        reply.status(404).send({ error: "NAS root not found" });
+        return;
+      }
+
+      const requestedPath = request.query.path ?? ".";
+      const target = await prepareUploadTarget(root.path, requestedPath);
+      if (target.exists) {
+        reply.status(409).send({ error: "Upload target already exists" });
+        return;
+      }
+
+      await ensureUploadParents(target.safe.rootRealPath, path.dirname(target.safe.absolutePath));
+
+      const output = createWriteStream(target.safe.absolutePath, { flags: "wx" });
+      let ownsTarget = false;
+      output.once("open", () => {
+        ownsTarget = true;
+      });
+      try {
+        await pipeline(
+          request.body as NodeJS.ReadableStream,
+          createUploadLimitStream(MAX_UPLOAD_BYTES),
+          output
+        );
+      } catch (error) {
+        const bodyStream = request.body as NodeJS.ReadableStream & { destroy?: () => void };
+        if (typeof bodyStream.destroy === "function") {
+          bodyStream.destroy();
+        }
+        if (ownsTarget) {
+          await unlinkIfExists(target.safe.absolutePath);
+        }
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+          reply.status(409).send({ error: "Upload target already exists" });
+          return;
+        }
+        throw error;
+      }
+
+      const meta = await getFilePreviewMeta(root.path, target.safe.relativePath);
+      const operation = recordAppliedOperation(db, {
+        approvalId: null,
+        operation: "upload",
+        sourcePath: null,
+        targetPath: meta.path,
+        status: "applied",
+        metadata: {
+          rootId: root.id,
+          reversible: true,
+          sizeBytes: meta.sizeBytes,
+          mimeType: meta.mimeType,
+          previewKind: meta.previewKind
+        }
+      });
+
+      reply.status(201).send({
+        meta,
+        operation
+      });
+    }
+  );
+
   server.post<{
     Body: {
       sessionId?: string;
@@ -320,6 +399,20 @@ export function registerFileRoutes(server: FastifyInstance, { db }: ApiRouteCont
   });
 }
 
+function createUploadLimitStream(maxBytes: number): Transform {
+  let receivedBytes = 0;
+  return new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      receivedBytes += chunk.length;
+      if (receivedBytes > maxBytes) {
+        callback(new Error("Upload is too large"));
+        return;
+      }
+      callback(null, chunk);
+    }
+  });
+}
+
 async function getEditableTextTarget(
   root: NasRootRecord,
   requestedPath: string
@@ -450,5 +543,73 @@ async function pathExists(absolutePath: string): Promise<boolean> {
       return false;
     }
     throw error;
+  }
+}
+
+async function prepareUploadTarget(rootPath: string, requestedPath: string): Promise<{
+  safe: Awaited<ReturnType<typeof resolveSafeTargetPath>>;
+  exists: boolean;
+}> {
+  const safe = await resolveSafeTargetPath(rootPath, requestedPath);
+  const exists = await pathExistsNoSymlink(safe.absolutePath);
+  return { safe, exists };
+}
+
+async function ensureUploadParents(rootRealPath: string, absoluteDirPath: string): Promise<void> {
+  const relativePath = path.relative(rootRealPath, absoluteDirPath);
+  if (!relativePath || relativePath === ".") {
+    return;
+  }
+
+  const segments = relativePath.split(path.sep).filter(Boolean);
+  let currentPath = rootRealPath;
+  for (const segment of segments) {
+    currentPath = path.join(currentPath, segment);
+    try {
+      const entry = await lstat(currentPath);
+      if (entry.isSymbolicLink()) {
+        throw new Error("Refusing to upload through a symlink");
+      }
+      if (!entry.isDirectory()) {
+        throw new Error("Upload target parent is not a directory");
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+      try {
+        await mkdir(currentPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+          throw error;
+        }
+      }
+      const created = await lstat(currentPath);
+      if (created.isSymbolicLink() || !created.isDirectory()) {
+        throw new Error("Upload target parent is not a directory");
+      }
+    }
+  }
+}
+
+async function pathExistsNoSymlink(absolutePath: string): Promise<boolean> {
+  try {
+    await lstat(absolutePath);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function unlinkIfExists(absolutePath: string): Promise<void> {
+  try {
+    await unlink(absolutePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
   }
 }

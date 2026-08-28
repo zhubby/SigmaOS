@@ -24,7 +24,8 @@ export type FileMutationOperation =
   | "tag"
   | "trash"
   | "restore"
-  | "edit";
+  | "edit"
+  | "upload";
 
 export type GitFileStatus = "tracked" | "staged" | "modified" | "untracked" | "conflicted";
 

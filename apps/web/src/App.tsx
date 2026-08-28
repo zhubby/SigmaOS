@@ -29,6 +29,7 @@ import {
   searchFiles,
   sendMessage,
   updateSessionPath,
+  uploadFile,
   type AgentEvent,
   type FileEntry,
   type FileMeta,
@@ -80,6 +81,14 @@ import { i18n } from "./i18n/index.js";
 import { toErrorMessage } from "./lib/format.js";
 import { clampSplitWidth, readStoredSplitWidth, writeStoredSplitWidth } from "./lib/layout.js";
 import {
+  createUploadBatch,
+  pruneUploadBatchHistory,
+  updateUploadBatch,
+  updateUploadBatchItem,
+  type UploadBatchState,
+  type UploadSource
+} from "./lib/uploads.js";
+import {
   clampPreviewFileSizeLimitBytes,
   isPreviewOverFileSizeLimit,
   readStoredPreviewFileSizeLimitBytes,
@@ -96,6 +105,7 @@ import {
 import { loadEntriesForSession, loadFileListingForView } from "./lib/session.js";
 
 type MobileView = "chat" | "workspace";
+const MAX_UPLOAD_BATCHES = 8;
 
 export function App() {
   const { t } = useTranslation();
@@ -109,6 +119,7 @@ export function App() {
   const [operations, setOperations] = useState<FileOperation[]>([]);
   const [dockerOperations, setDockerOperations] = useState<DockerOperation[]>([]);
   const [operationsReady, setOperationsReady] = useState(false);
+  const [uploadBatches, setUploadBatches] = useState<UploadBatchState[]>([]);
   const [currentPath, setCurrentPath] = useState(".");
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [gitStatus, setGitStatus] = useState<FileListing["git"]>(null);
@@ -155,6 +166,11 @@ export function App() {
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const fileListingRequestId = useRef(0);
   const activeSearchQueryRef = useRef("");
+  const currentPathRef = useRef(currentPath);
+  const selectedRootIdRef = useRef(selectedRootId);
+  const uploadBatchSequenceRef = useRef(0);
+  const uploadAbortControllersRef = useRef(new Map<string, Set<AbortController>>());
+  const cancelledUploadBatchesRef = useRef(new Set<string>());
 
   const selectedRoot = roots.find((root) => root.id === selectedRootId);
   const hasRootSwitcher = roots.length > 1;
@@ -404,6 +420,14 @@ export function App() {
   }, [splitWidth]);
 
   useEffect(() => {
+    currentPathRef.current = currentPath;
+  }, [currentPath]);
+
+  useEffect(() => {
+    selectedRootIdRef.current = selectedRootId;
+  }, [selectedRootId]);
+
+  useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function" || themePreference !== "system") {
       return;
     }
@@ -423,6 +447,16 @@ export function App() {
       delete document.documentElement.dataset.themePreference;
     };
   }, [resolvedTheme, themePreference]);
+
+  useEffect(() => {
+    return () => {
+      uploadAbortControllersRef.current.forEach((controllers) => {
+        controllers.forEach((controller) => controller.abort());
+      });
+      uploadAbortControllersRef.current.clear();
+      cancelledUploadBatchesRef.current.clear();
+    };
+  }, []);
 
   async function reloadSessions() {
     if (!selectedRootId) {
@@ -750,6 +784,200 @@ export function App() {
 
     await cancelJob(activeJobId);
     setStatus("cancelling");
+  }
+
+  function nextUploadBatchId(): string {
+    uploadBatchSequenceRef.current += 1;
+    return `upload-${Date.now().toString(36)}-${uploadBatchSequenceRef.current}`;
+  }
+
+  function getNextQueuedUploadItemId(batch: UploadBatchState, currentItemId: string): string | null {
+    return batch.items.find((item) => item.id !== currentItemId && item.status === "queued")?.id ?? null;
+  }
+
+  function setUploadBatch(batchId: string, updater: (batch: UploadBatchState) => UploadBatchState) {
+    setUploadBatches((current) => updateUploadBatch(current, batchId, updater));
+  }
+
+  function settleUploadBatch(batchId: string, status: UploadBatchState["status"], error: string | null) {
+    setUploadBatch(batchId, (batch) => ({
+      ...batch,
+      status,
+      currentItemId: status === "uploading" ? batch.currentItemId : null,
+      error
+    }));
+  }
+
+  function markUploadBatchCancelled(batchId: string) {
+    setUploadBatch(batchId, (batch) => ({
+      ...batch,
+      status: "cancelled",
+      currentItemId: null,
+      error: t("workspace.uploadCancelled"),
+      items: batch.items.map((item) =>
+        item.status === "completed"
+          ? item
+          : {
+              ...item,
+              status: "cancelled",
+              error: item.error ?? t("workspace.uploadCancelled")
+            }
+      )
+    }));
+  }
+
+  function markUploadItemUploading(batchId: string, itemId: string) {
+    setUploadBatch(batchId, (batch) => ({
+      ...updateUploadBatchItem(batch, itemId, (item) => ({
+        ...item,
+        status: "uploading",
+        uploadedBytes: 0,
+        error: null
+      })),
+      status: "uploading",
+      currentItemId: itemId,
+      error: batch.error
+    }));
+  }
+
+  function markUploadItemProgress(batchId: string, itemId: string, uploadedBytes: number) {
+    setUploadBatch(batchId, (batch) =>
+      updateUploadBatchItem(batch, itemId, (item) => ({
+        ...item,
+        status: "uploading",
+        uploadedBytes,
+        error: null
+      }))
+    );
+  }
+
+  function markUploadItemCompleted(batchId: string, itemId: string) {
+    setUploadBatch(batchId, (batch) => {
+      const nextBatch = updateUploadBatchItem(batch, itemId, (item) => ({
+        ...item,
+        status: "completed",
+        uploadedBytes: item.sizeBytes,
+        error: null
+      }));
+      return {
+        ...nextBatch,
+        currentItemId: getNextQueuedUploadItemId(nextBatch, itemId)
+      };
+    });
+  }
+
+  function markUploadItemFailed(batchId: string, itemId: string, errorMessage: string) {
+    setUploadBatch(batchId, (batch) => {
+      const nextBatch = updateUploadBatchItem(batch, itemId, (item) => ({
+        ...item,
+        status: "failed",
+        error: errorMessage
+      }));
+      return {
+        ...nextBatch,
+        currentItemId: getNextQueuedUploadItemId(nextBatch, itemId),
+        error: batch.error ?? errorMessage
+      };
+    });
+  }
+
+  async function onUploadSources(sources: UploadSource[]) {
+    const rootId = selectedRootIdRef.current;
+    if (!rootId || !sources.length) {
+      return;
+    }
+
+    const batchId = nextUploadBatchId();
+    const uploadBatch = createUploadBatch({
+      id: batchId,
+      rootId,
+      currentPath: currentPathRef.current,
+      sources
+    });
+    const batchControllers = new Set<AbortController>();
+    uploadAbortControllersRef.current.set(batchId, batchControllers);
+    setUploadBatches((current) => pruneUploadBatchHistory([uploadBatch, ...current], MAX_UPLOAD_BATCHES));
+
+    let encounteredError: string | null = null;
+    let cancelled = false;
+
+    try {
+      setUploadBatch(batchId, (batch) => ({
+        ...batch,
+        status: "uploading",
+        currentItemId: batch.items[0]?.id ?? null
+      }));
+
+      for (const item of uploadBatch.items) {
+        if (cancelledUploadBatchesRef.current.has(batchId)) {
+          cancelled = true;
+          break;
+        }
+
+        const controller = new AbortController();
+        batchControllers.add(controller);
+        markUploadItemUploading(batchId, item.id);
+
+        try {
+          const result = await uploadFile({
+            rootId,
+            path: item.targetPath,
+            file: item.file,
+            signal: controller.signal,
+            onProgress: (progress) => {
+              if (cancelledUploadBatchesRef.current.has(batchId)) {
+                return;
+              }
+              markUploadItemProgress(batchId, item.id, progress.loadedBytes);
+            }
+          });
+
+          markUploadItemCompleted(batchId, item.id);
+          setOperations((current) => [result.operation, ...current.filter((operation) => operation.id !== result.operation.id)].slice(0, 100));
+        } catch (error) {
+          if (cancelledUploadBatchesRef.current.has(batchId) || (error instanceof DOMException && error.name === "AbortError")) {
+            cancelled = true;
+            markUploadBatchCancelled(batchId);
+            break;
+          }
+
+          const errorMessage = toErrorMessage(error);
+          encounteredError = encounteredError ?? errorMessage;
+          markUploadItemFailed(batchId, item.id, errorMessage);
+        } finally {
+          batchControllers.delete(controller);
+        }
+      }
+
+      if (cancelled) {
+        markUploadBatchCancelled(batchId);
+      } else if (encounteredError) {
+        settleUploadBatch(batchId, "failed", encounteredError);
+      } else {
+        settleUploadBatch(batchId, "completed", null);
+        if (selectedRootIdRef.current === rootId && currentPathRef.current === uploadBatch.targetPath && !activeSearchQueryRef.current) {
+          await refreshCurrentFileListing().catch((nextError: unknown) => {
+            setError(toErrorMessage(nextError));
+          });
+        }
+      }
+      await refreshWorkQueues();
+    } finally {
+      batchControllers.clear();
+      uploadAbortControllersRef.current.delete(batchId);
+      cancelledUploadBatchesRef.current.delete(batchId);
+      setUploadBatches((current) => pruneUploadBatchHistory(current, MAX_UPLOAD_BATCHES));
+    }
+  }
+
+  function onCancelUploadBatch(batchId: string) {
+    const batch = uploadBatches.find((item) => item.id === batchId);
+    if (!batch || (batch.status !== "queued" && batch.status !== "uploading")) {
+      return;
+    }
+    cancelledUploadBatchesRef.current.add(batchId);
+    uploadAbortControllersRef.current.get(batchId)?.forEach((controller) => controller.abort());
+    markUploadBatchCancelled(batchId);
   }
 
   async function refreshWorkQueues() {
@@ -1098,6 +1326,7 @@ export function App() {
         previewCollapsed={previewCollapsed}
         searchQuery={searchQuery}
         operations={operations}
+        uploadBatches={uploadBatches}
         dockerOperations={dockerOperations}
         operationsReady={operationsReady}
         sessionId={session?.id ?? null}
@@ -1114,6 +1343,8 @@ export function App() {
         onOpenEditor={setEditorMeta}
         onRequestRename={(entry, targetName) => requestFileRename(entry, targetName)}
         onRequestTrash={(entry) => requestFileTrash(entry)}
+        onUploadSources={(sources) => onUploadSources(sources)}
+        onCancelUploadBatch={(batchId) => onCancelUploadBatch(batchId)}
         onWorkQueuesChanged={refreshWorkQueues}
         onTogglePreviewCollapsed={() => setPreviewCollapsed((collapsed) => !collapsed)}
         onRollback={(operation) => void handleRollback(operation)}

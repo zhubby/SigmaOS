@@ -106,4 +106,28 @@ describe("approval-gated mutation tools", () => {
     await expect(readFile(path.join(rootDir, "source.txt"), "utf8")).resolves.toBe("hello");
     await expect(stat(path.join(rootDir, "target.txt"))).rejects.toThrow();
   });
+
+  it("rolls uploaded files back into trash", async () => {
+    await writeFile(path.join(rootDir, "uploaded.txt"), "new");
+
+    const rollback = await rollbackFileMutation(
+      root,
+      {
+        id: "operation-1",
+        approvalId: null,
+        operation: "upload",
+        sourcePath: null,
+        targetPath: "uploaded.txt",
+        status: "applied",
+        metadata: { rootId: root.id },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      },
+      trashDir
+    );
+
+    expect(rollback.operation).toBe("trash");
+    await expect(stat(path.join(rootDir, "uploaded.txt"))).rejects.toThrow();
+    await expect(stat(String(rollback.metadata.absoluteTrashPath))).resolves.toBeTruthy();
+  });
 });

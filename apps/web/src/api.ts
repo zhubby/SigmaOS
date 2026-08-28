@@ -234,6 +234,17 @@ export interface FileProposalResult {
   approval: PendingApproval;
 }
 
+export interface UploadProgress {
+  loadedBytes: number;
+  totalBytes: number;
+  lengthComputable: boolean;
+}
+
+export interface UploadFileResult {
+  meta: FileMeta;
+  operation: FileOperation;
+}
+
 export interface DockerProposalResult {
   message: AgentMessage;
   job: Job;
@@ -595,6 +606,73 @@ export async function proposeFileOperation(input: {
   return (await response.json()) as FileProposalResult;
 }
 
+export async function uploadFile(input: {
+  rootId: string;
+  path: string;
+  file: File;
+  signal?: AbortSignal;
+  onProgress?: (progress: UploadProgress) => void;
+}): Promise<UploadFileResult> {
+  return await new Promise<UploadFileResult>((resolve, reject) => {
+    const params = new URLSearchParams({
+      rootId: input.rootId,
+      path: input.path
+    });
+    const xhr = new XMLHttpRequest();
+    let abortListener: (() => void) | null = null;
+
+    function cleanup() {
+      if (abortListener && input.signal) {
+        input.signal.removeEventListener("abort", abortListener);
+      }
+      abortListener = null;
+    }
+
+    xhr.open("PUT", `/api/files/upload?${params.toString()}`);
+    xhr.responseType = "json";
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.upload.onprogress = (event) => {
+      input.onProgress?.({
+        loadedBytes: event.loaded,
+        totalBytes: event.total,
+        lengthComputable: event.lengthComputable
+      });
+    };
+    xhr.onload = () => {
+      cleanup();
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(readXhrError(xhr));
+        return;
+      }
+
+      const response =
+        xhr.response && typeof xhr.response === "object"
+          ? (xhr.response as UploadFileResult)
+          : (JSON.parse(xhr.responseText) as UploadFileResult);
+      resolve(response);
+    };
+    xhr.onerror = () => {
+      cleanup();
+      reject(new Error("Upload failed"));
+    };
+    xhr.onabort = () => {
+      cleanup();
+      reject(new DOMException("Upload cancelled", "AbortError"));
+    };
+
+    if (input.signal) {
+      if (input.signal.aborted) {
+        xhr.abort();
+        return;
+      }
+      abortListener = () => xhr.abort();
+      input.signal.addEventListener("abort", abortListener, { once: true });
+    }
+
+    xhr.send(input.file);
+  });
+}
+
 export function getFileBlobUrl(rootId: string, currentPath: string): string {
   const params = new URLSearchParams({
     rootId,
@@ -679,4 +757,24 @@ async function ensureOk(response: Response): Promise<void> {
   }
 
   throw new Error(message);
+}
+
+function readXhrError(xhr: XMLHttpRequest): Error {
+  let message = xhr.statusText || "Upload failed";
+  if (xhr.response && typeof xhr.response === "object") {
+    const body = xhr.response as { error?: unknown };
+    if (typeof body.error === "string" && body.error) {
+      return new Error(body.error);
+    }
+  }
+  try {
+    if (xhr.responseType === "" || xhr.responseType === "text") {
+      const body = JSON.parse(xhr.responseText) as { error?: string };
+      message = body.error ?? message;
+    }
+  } catch {
+    // Keep status text.
+  }
+
+  return new Error(message);
 }

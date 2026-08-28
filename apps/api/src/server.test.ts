@@ -1580,6 +1580,54 @@ describe("API server", () => {
     await server.close();
   });
 
+  it("uploads files directly into nested directories", async () => {
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    const response = await server.inject({
+      method: "PUT",
+      url: "/api/files/upload?rootId=local&path=docs/uploads/notes.txt",
+      headers: {
+        "content-type": "application/octet-stream"
+      },
+      payload: "uploaded body"
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      meta: {
+        path: "docs/uploads/notes.txt",
+        name: "notes.txt"
+      },
+      operation: {
+        operation: "upload",
+        targetPath: "docs/uploads/notes.txt",
+        status: "applied",
+        metadata: {
+          rootId: "local",
+          reversible: true
+        }
+      }
+    });
+    await expect(readFile(path.join(rootDir, "docs", "uploads", "notes.txt"), "utf8")).resolves.toBe("uploaded body");
+    await server.close();
+  });
+
+  it("rejects upload target conflicts", async () => {
+    await writeFile(path.join(rootDir, "existing.txt"), "old");
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    const response = await server.inject({
+      method: "PUT",
+      url: "/api/files/upload?rootId=local&path=existing.txt",
+      headers: {
+        "content-type": "application/octet-stream"
+      },
+      payload: "new"
+    });
+
+    expect(response.statusCode).toBe(409);
+    await expect(readFile(path.join(rootDir, "existing.txt"), "utf8")).resolves.toBe("old");
+    await server.close();
+  });
+
   it("creates approval-gated rename proposals without changing files", async () => {
     const session = createSession(db, { rootId: "local" });
     const server = await buildServer({ config: testConfig(tempDir), db });

@@ -7,6 +7,10 @@
   position: relative;
 }
 
+.activity-menu-button.has-upload-activity {
+  border-color: rgb(240 178 50 / 38%);
+}
+
 .activity-unread-dot {
   position: absolute;
   top: 7px;
@@ -26,10 +30,11 @@
   z-index: 30;
   display: grid;
   gap: 10px;
-  width: min(360px, calc(100vw - 28px));
-  max-height: min(440px, calc(100vh - 98px));
+  width: min(400px, calc(100vw - 28px));
+  max-height: min(560px, calc(100dvh - 98px));
   padding: 12px;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   border: 1px solid var(--line-soft);
   border-radius: 6px;
   background: #232631;
@@ -70,6 +75,181 @@
   padding: 0;
   overflow: auto;
   list-style: none;
+}
+
+.activity-upload-section {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.activity-upload-section-header {
+  display: flex !important;
+  align-items: end;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px;
+}
+
+.activity-upload-section-header strong {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.activity-upload-list {
+  max-height: 280px;
+}
+
+.activity-upload-item {
+  grid-template-columns: 30px minmax(0, 1fr) 28px !important;
+  align-items: start !important;
+  gap: 9px !important;
+  min-height: 74px !important;
+  padding: 10px !important;
+  border-left: 2px solid var(--accent) !important;
+  background: var(--subtle-bg-inverse) !important;
+}
+
+.activity-upload-item[data-state="warning"] {
+  border-left-color: var(--yellow) !important;
+}
+
+.activity-upload-item[data-state="ready"] {
+  border-left-color: var(--green) !important;
+}
+
+.activity-upload-item[data-state="offline"] {
+  border-left-color: var(--red) !important;
+}
+
+.activity-upload-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgb(142 161 255 / 24%);
+  border-radius: 5px;
+  color: var(--accent-soft-text);
+  background: var(--accent-soft-bg);
+}
+
+.activity-upload-item[data-state="warning"] .activity-upload-icon {
+  border-color: rgb(240 178 50 / 28%);
+  color: var(--warning-text);
+  background: var(--warning-bg);
+}
+
+.activity-upload-item[data-state="ready"] .activity-upload-icon {
+  border-color: rgb(35 165 89 / 28%);
+  color: var(--success-text);
+  background: var(--success-bg);
+}
+
+.activity-upload-item[data-state="offline"] .activity-upload-icon {
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+  background: var(--danger-bg);
+}
+
+.activity-upload-icon svg {
+  animation: activity-upload-spin 1.1s linear infinite;
+}
+
+.activity-upload-item[data-state="ready"] .activity-upload-icon svg,
+.activity-upload-item[data-state="offline"] .activity-upload-icon svg {
+  animation: none;
+}
+
+.activity-upload-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.activity-upload-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.activity-upload-head strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-upload-status {
+  flex: 0 0 auto;
+  min-height: 20px;
+  max-width: 105px;
+  padding: 3px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+}
+
+.activity-upload-body small {
+  margin-top: 0;
+}
+
+.activity-upload-current {
+  color: var(--text) !important;
+  overflow-wrap: anywhere;
+  white-space: normal !important;
+}
+
+.activity-upload-error {
+  color: var(--danger-text) !important;
+  overflow-wrap: anywhere;
+  white-space: normal !important;
+}
+
+.activity-upload-track {
+  height: 4px;
+  margin-top: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 8%);
+}
+
+.activity-upload-track span {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 180ms ease;
+}
+
+.activity-upload-item[data-state="warning"] .activity-upload-track span {
+  background: var(--yellow);
+}
+
+.activity-upload-item[data-state="ready"] .activity-upload-track span {
+  background: var(--green);
+}
+
+.activity-upload-item[data-state="offline"] .activity-upload-track span {
+  background: var(--red);
+}
+
+.activity-upload-cancel {
+  margin-top: 1px;
+  border: 1px solid var(--line-soft) !important;
+}
+
+.activity-operation-list {
+  max-height: 220px;
+}
+
+@keyframes activity-upload-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .activity-popover li {
@@ -133,4 +313,12 @@
   color: var(--muted-2);
   font-size: 12px;
   text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-upload-icon svg,
+  .activity-upload-track span {
+    animation: none;
+    transition: none;
+  }
 }

@@ -54,6 +54,10 @@ export async function applyFileMutation(
           metadata: { tag: proposal.tag, absoluteSourcePath: source.realPath }
         };
       }
+    case "upload":
+      throw new Error("Upload mutations are applied directly and do not use applyFileMutation");
+    default:
+      throw new Error(`Unsupported file mutation operation: ${proposal.operation}`);
   }
 }
 
@@ -99,6 +103,7 @@ export async function rollbackFileMutation(
     case "copy":
     case "mkdir":
     case "restore":
+    case "upload":
       return rollbackByTrashingTarget(root, operation, trashRootPath);
     case "trash":
       throw new Error("Trash rollback must restore the persisted trash entry");

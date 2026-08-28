@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent, MouseEvent, useMemo, useState } from "react";
+import { ChangeEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ArrowDown,
@@ -18,6 +18,8 @@ import {
   Search,
   Share2,
   Trash2,
+  FolderUp,
+  Upload,
   type LucideIcon
 } from "lucide-react";
 import type { DockerOperation, FileEntry, FileListing, FileMeta, FileOperation, NasRoot, PendingApproval, TextPreview } from "../../api.js";
@@ -29,6 +31,7 @@ import { ActivityMenu } from "../activity/ActivityMenu.js";
 import { CustomSelect } from "../common/CustomSelect.js";
 import { FileTypeIcon } from "../file/FileTypeIcon.js";
 import { PreviewContent, previewIcon } from "../preview/PreviewContent.js";
+import { collectUploadSourcesFromDataTransfer, collectUploadSourcesFromFileList, type UploadBatchState, type UploadSource } from "../../lib/uploads.js";
 import { WorkspaceManagementPanel, type ManagementPanelId } from "./WorkspaceManagementPanel.js";
 
 const EPOCH_DATE = new Date(0).toISOString();
@@ -121,6 +124,7 @@ export function WorkspacePane({
   previewCollapsed,
   searchQuery,
   operations,
+  uploadBatches,
   dockerOperations,
   operationsReady,
   sessionId,
@@ -137,6 +141,8 @@ export function WorkspacePane({
   onOpenEditor,
   onRequestRename,
   onRequestTrash,
+  onUploadSources,
+  onCancelUploadBatch,
   onWorkQueuesChanged,
   onTogglePreviewCollapsed,
   onRollback
@@ -161,6 +167,7 @@ export function WorkspacePane({
   previewCollapsed: boolean;
   searchQuery: string;
   operations: FileOperation[];
+  uploadBatches: UploadBatchState[];
   dockerOperations: DockerOperation[];
   operationsReady: boolean;
   sessionId: string | null;
@@ -177,6 +184,8 @@ export function WorkspacePane({
   onOpenEditor: (meta: FileMeta) => void;
   onRequestRename: (entry: FileEntry, targetName: string) => Promise<void>;
   onRequestTrash: (entry: FileEntry) => Promise<void>;
+  onUploadSources: (sources: UploadSource[]) => void | Promise<void>;
+  onCancelUploadBatch: (batchId: string) => void;
   onWorkQueuesChanged: () => void | Promise<void>;
   onTogglePreviewCollapsed: () => void;
   onRollback: (operation: FileOperation) => void;
@@ -189,6 +198,10 @@ export function WorkspacePane({
   const [operationSubmitting, setOperationSubmitting] = useState(false);
   const [activePanel, setActivePanel] = useState<WorkspacePanelId>("files");
   const [fileSort, setFileSort] = useState<FileSortState>({ key: "name", direction: "asc" });
+  const [isDropActive, setIsDropActive] = useState(false);
+  const fileUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const folderUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const dragDepthRef = useRef(0);
   const displayTitle = displayPath === "." ? t("common.root") : displayPath;
   const sortedEntries = useMemo(() => sortEntries(entries, fileSort), [entries, fileSort]);
   const gitChangeCount = gitStatus
@@ -256,6 +269,21 @@ export function WorkspacePane({
       : t("workspace.actions.deleteBody", { name: deleteState.entry.name })
     : "";
 
+  useEffect(() => {
+    const input = folderUploadInputRef.current;
+    if (!input) {
+      return;
+    }
+
+    input.setAttribute("webkitdirectory", "");
+    input.setAttribute("directory", "");
+  }, []);
+
+  useEffect(() => {
+    dragDepthRef.current = 0;
+    setIsDropActive(false);
+  }, [activePanel, active, selectedRootId]);
+
   function openRenameDialog(event: MouseEvent<HTMLButtonElement>, entry: FileEntry) {
     event.stopPropagation();
     setOperationError(null);
@@ -296,6 +324,84 @@ export function WorkspacePane({
     }
     event.preventDefault();
     openEntryFromRow(entry);
+  }
+
+  function triggerFileUpload() {
+    fileUploadInputRef.current?.click();
+  }
+
+  function triggerFolderUpload() {
+    folderUploadInputRef.current?.click();
+  }
+
+  function handleUploadFilesChange(event: ChangeEvent<HTMLInputElement>) {
+    const sources = event.currentTarget.files ? collectUploadSourcesFromFileList(event.currentTarget.files) : [];
+    event.currentTarget.value = "";
+    if (sources.length) {
+      void onUploadSources(sources);
+    }
+  }
+
+  function handleUploadFolderChange(event: ChangeEvent<HTMLInputElement>) {
+    const sources = event.currentTarget.files ? collectUploadSourcesFromFileList(event.currentTarget.files) : [];
+    event.currentTarget.value = "";
+    if (sources.length) {
+      void onUploadSources(sources);
+    }
+  }
+
+  function isFileDrag(event: DragEvent<HTMLElement>) {
+    return Array.from(event.dataTransfer.types).includes("Files");
+  }
+
+  function handleGridDragEnter(event: DragEvent<HTMLDivElement>) {
+    if (activePanel !== "files" || !selectedRootId || !isFileDrag(event)) {
+      return;
+    }
+
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    setIsDropActive(true);
+  }
+
+  function handleGridDragOver(event: DragEvent<HTMLDivElement>) {
+    if (activePanel !== "files" || !selectedRootId || !isFileDrag(event)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setIsDropActive(true);
+  }
+
+  function handleGridDragLeave(event: DragEvent<HTMLDivElement>) {
+    if (!isDropActive || !isFileDrag(event)) {
+      return;
+    }
+
+    if (dragDepthRef.current > 0) {
+      dragDepthRef.current -= 1;
+    }
+    if (dragDepthRef.current <= 0) {
+      dragDepthRef.current = 0;
+      setIsDropActive(false);
+    }
+  }
+
+  function handleGridDrop(event: DragEvent<HTMLDivElement>) {
+    if (activePanel !== "files" || !selectedRootId || !isFileDrag(event)) {
+      return;
+    }
+
+    event.preventDefault();
+    dragDepthRef.current = 0;
+    setIsDropActive(false);
+    void (async () => {
+      const sources = await collectUploadSourcesFromDataTransfer(event.dataTransfer);
+      if (sources.length) {
+        await onUploadSources(sources);
+      }
+    })();
   }
 
   async function submitRename(event: FormEvent<HTMLFormElement>) {
@@ -340,6 +446,24 @@ export function WorkspacePane({
 
   return (
     <section className={`workspace-pane ${active ? "is-mobile-active" : ""}`} aria-label={t("workspace.label")}>
+      <input
+        ref={fileUploadInputRef}
+        className="workspace-upload-input"
+        type="file"
+        multiple
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={handleUploadFilesChange}
+      />
+      <input
+        ref={folderUploadInputRef}
+        className="workspace-upload-input"
+        type="file"
+        multiple
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={handleUploadFolderChange}
+      />
       <div className="workspace-shell">
         <div className="workspace-stage" data-panel={activePanel}>
           {activePanel === "files" ? (
@@ -381,7 +505,34 @@ export function WorkspacePane({
                   >
                     <RefreshCw aria-hidden="true" size={18} />
                   </button>
-                  <ActivityMenu operations={operations} operationsReady={operationsReady} onRollback={onRollback} />
+                  <button
+                    className="icon-button files-header-button"
+                    type="button"
+                    onClick={triggerFileUpload}
+                    disabled={!selectedRootId}
+                    title={t("workspace.uploadFiles")}
+                    aria-label={t("workspace.uploadFiles")}
+                  >
+                    <Upload aria-hidden="true" size={18} />
+                  </button>
+                  <button
+                    className="icon-button files-header-button"
+                    type="button"
+                    onClick={triggerFolderUpload}
+                    disabled={!selectedRootId}
+                    title={t("workspace.uploadFolder")}
+                    aria-label={t("workspace.uploadFolder")}
+                  >
+                    <FolderUp aria-hidden="true" size={18} />
+                  </button>
+                  <ActivityMenu
+                    operations={operations}
+                    operationsReady={operationsReady}
+                    uploadBatches={uploadBatches}
+                    locale={locale}
+                    onCancelUploadBatch={onCancelUploadBatch}
+                    onRollback={onRollback}
+                  />
                 </div>
 
                 <div className={`files-navigation-bar${hasRootSwitcher ? " has-root-switcher" : ""}`}>
@@ -422,7 +573,22 @@ export function WorkspacePane({
                 </div>
               </header>
 
-              <div className={`workspace-grid${hasPreview ? " has-preview" : ""}${isPreviewCollapsed ? " is-preview-collapsed" : ""}`}>
+              <div
+                className={`workspace-grid${hasPreview ? " has-preview" : ""}${isPreviewCollapsed ? " is-preview-collapsed" : ""}${isDropActive ? " is-drop-active" : ""}`}
+                onDragEnter={handleGridDragEnter}
+                onDragOver={handleGridDragOver}
+                onDragLeave={handleGridDragLeave}
+                onDrop={handleGridDrop}
+              >
+                {isDropActive ? (
+                  <div className="workspace-drop-overlay" role="presentation" aria-hidden="true">
+                    <div className="workspace-drop-panel">
+                      <FolderUp aria-hidden="true" size={22} />
+                      <strong>{t("workspace.uploadDropTitle")}</strong>
+                      <p>{t("workspace.uploadDropBody")}</p>
+                    </div>
+                  </div>
+                ) : null}
                 <section className="file-browser" aria-label={t("workspace.fileBrowser")}>
                   <header className="management-section-header files-list-header">
                     <div className="files-list-title-block">

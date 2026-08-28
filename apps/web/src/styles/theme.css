@@ -318,6 +318,16 @@
   border-left-color: var(--line-soft);
 }
 
+:root[data-theme="light"] .workspace-drop-overlay {
+  background: rgb(255 255 255 / 88%);
+}
+
+:root[data-theme="light"] .workspace-drop-panel {
+  border-color: rgb(67 83 216 / 25%);
+  background: var(--dialog-bg);
+  box-shadow: 0 18px 42px rgb(31 45 68 / 14%);
+}
+
 :root[data-theme="light"] .activity-unread-dot {
   border-color: var(--surface);
 }
