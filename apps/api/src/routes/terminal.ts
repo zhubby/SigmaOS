@@ -1,3 +1,4 @@
+import os from "node:os";
 import type { FastifyInstance } from "fastify";
 import { getNasRoot } from "@sigmaos/db";
 import type { ApiRouteContext } from "../context.js";
@@ -56,11 +57,12 @@ export function registerTerminalRoutes(server: FastifyInstance, context: ApiRout
     };
 
     try {
+      const cwd = os.homedir();
       terminal = runtime.spawn(terminalShell(), [], {
         name: "xterm-256color",
         cols: DEFAULT_TERMINAL_COLS,
         rows: DEFAULT_TERMINAL_ROWS,
-        cwd: root.path,
+        cwd,
         env: {
           ...process.env,
           TERM: "xterm-256color"
@@ -100,7 +102,7 @@ export function registerTerminalRoutes(server: FastifyInstance, context: ApiRout
       });
       socket.on("close", cleanup);
       socket.on("error", cleanup);
-      sendSocket(socket, { type: "ready", cwd: root.path });
+      sendSocket(socket, { type: "ready", cwd });
     } catch (error) {
       cleanup();
       sendSocket(socket, { type: "error", error: terminalErrorMessage(error) });

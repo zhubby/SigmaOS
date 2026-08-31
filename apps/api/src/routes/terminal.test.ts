@@ -25,15 +25,16 @@ afterEach(async () => {
 });
 
 describe("terminal WebSocket", () => {
-  it("starts in the configured NAS root and forwards terminal traffic", async () => {
+  it("starts in the user's home directory and forwards terminal traffic", async () => {
     const runtime = new FakeTerminalRuntime();
     const server = await buildServer({ config: testConfig(), db, terminal: runtime });
     const socket = await connect(server);
+    const homeDir = os.homedir();
 
-    expect(await nextMessage(socket)).toEqual({ type: "ready", cwd: rootDir });
+    expect(await nextMessage(socket)).toEqual({ type: "ready", cwd: homeDir });
     expect(runtime.shell).toBe(terminalShell());
     expect(runtime.options).toMatchObject({
-      cwd: rootDir,
+      cwd: homeDir,
       cols: 120,
       rows: 32,
       name: "xterm-256color"
