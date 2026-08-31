@@ -41,6 +41,7 @@ export function isPreviewOverFileSizeLimit(
   return (
     meta.kind === "file" &&
     meta.previewKind !== "unsupported" &&
+    meta.previewKind !== "video" &&
     meta.sizeBytes > clampPreviewFileSizeLimitBytes(limitBytes)
   );
 }

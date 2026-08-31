@@ -32,6 +32,12 @@ describe("metadata tools", () => {
     expect(inferPreviewKind(inferMimeType("archive.zip"))).toBe("unsupported");
   });
 
+  it("recognizes video containers that require transcoding", () => {
+    for (const filePath of ["movie.avi", "movie.m4v", "movie.mkv", "movie.mpeg", "movie.mpg"]) {
+      expect(inferPreviewKind(inferMimeType(filePath))).toBe("video");
+    }
+  });
+
   it("allows generic octet-stream files to use text preview", () => {
     expect(inferMimeType("unknown.bin")).toBe("application/octet-stream");
     expect(inferPreviewKind(inferMimeType("unknown.bin"))).toBe("text");

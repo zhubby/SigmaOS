@@ -57,6 +57,16 @@ describe("preview settings helpers", () => {
         10 * 1024 * 1024
       )
     ).toBe(false);
+    expect(
+      isPreviewOverFileSizeLimit(
+        {
+          kind: "file",
+          previewKind: "video",
+          sizeBytes: 50 * 1024 * 1024
+        },
+        10 * 1024 * 1024
+      )
+    ).toBe(false);
   });
 
   it("reads and writes persisted preview limits", () => {

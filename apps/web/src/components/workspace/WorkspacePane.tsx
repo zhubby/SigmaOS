@@ -122,6 +122,7 @@ export function WorkspacePane({
   previewError,
   textPreview,
   blobUrl,
+  videoUrl,
   previewFileSizeLimitBytes,
   previewCollapsed,
   searchQuery,
@@ -166,6 +167,7 @@ export function WorkspacePane({
   previewError: string | null;
   textPreview: TextPreview | null;
   blobUrl: string;
+  videoUrl: string;
   previewFileSizeLimitBytes: number;
   previewCollapsed: boolean;
   searchQuery: string;
@@ -831,6 +833,8 @@ export function WorkspacePane({
 
                       <PreviewContent
                         blobUrl={blobUrl}
+                        videoUrl={videoUrl}
+                        rootId={selectedRootId}
                         loading={isPreviewLoading}
                         meta={previewMeta}
                         error={previewError}

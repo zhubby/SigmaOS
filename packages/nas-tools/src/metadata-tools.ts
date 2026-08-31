@@ -129,6 +129,15 @@ export function inferMimeType(filePath: string): string {
       return "video/mp4";
     case ".webm":
       return "video/webm";
+    case ".m4v":
+      return "video/mp4";
+    case ".avi":
+      return "video/x-msvideo";
+    case ".mkv":
+      return "video/x-matroska";
+    case ".mpeg":
+    case ".mpg":
+      return "video/mpeg";
     case ".mov":
       return "video/quicktime";
     case ".pdf":

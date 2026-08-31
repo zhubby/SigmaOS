@@ -10,6 +10,7 @@ import {
   getDockerOperations,
   getDockerSettings,
   getFileBlobUrl,
+  getFileVideoUrl,
   getFileMeta,
   getFiles,
   getOperations,
@@ -177,6 +178,7 @@ export function App() {
   const activeSessionSummary = sessions.find((item) => item.id === activeSessionId);
   const activeApprovals = approvals.filter((approval) => !session || approval.sessionId === session.id);
   const blobUrl = selectedRootId && selectedFilePath ? getFileBlobUrl(selectedRootId, selectedFilePath) : "";
+  const videoUrl = selectedRootId && selectedFilePath ? getFileVideoUrl(selectedRootId, selectedFilePath) : "";
   const resolvedLocale = resolveSupportedLocale(i18n.resolvedLanguage ?? i18n.language);
   const resolvedTheme = resolveThemePreference(themePreference, systemTheme);
   const displayPath = currentPath;
@@ -1346,6 +1348,7 @@ export function App() {
         previewError={previewError}
         textPreview={textPreview}
         blobUrl={blobUrl}
+        videoUrl={videoUrl}
         previewFileSizeLimitBytes={previewFileSizeLimitBytes}
         previewCollapsed={previewCollapsed}
         searchQuery={searchQuery}

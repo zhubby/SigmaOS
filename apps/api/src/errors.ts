@@ -19,10 +19,11 @@ export function registerErrorHandler(server: FastifyInstance): void {
     }
 
     const fastifyError = error as { statusCode?: number; message?: string };
+    const exposedError = error as { expose?: boolean };
     const statusCode =
       fastifyError.statusCode && fastifyError.statusCode >= 400 ? fastifyError.statusCode : 500;
     reply.status(statusCode).send({
-      error: statusCode >= 500 ? "Internal server error" : fastifyError.message
+      error: statusCode >= 500 && !exposedError.expose ? "Internal server error" : fastifyError.message
     });
   });
 }

@@ -41,6 +41,7 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("etc/sigmaos/");
     expect(install).toContain("lib/systemd/system/");
     expect(control).toContain("git");
+    expect(control).toContain("ffmpeg");
     expect(control).toContain("samba");
     expect(control).toContain("nfs-kernel-server");
     expect(control).toContain("minidlna");

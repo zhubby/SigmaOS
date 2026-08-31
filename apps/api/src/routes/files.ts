@@ -3,7 +3,7 @@ import { lstat, mkdir, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import {
   inferMimeType,
   inferPreviewKind,
@@ -26,11 +26,15 @@ import {
 } from "../lib/files.js";
 import { getDirectoryGitView } from "../lib/git.js";
 import { resolveRoot } from "../lib/roots.js";
+import { VideoCache } from "../lib/video-cache.js";
 
 const MAX_EDIT_TEXT_BYTES = 1024 * 1024;
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024 * 1024;
 
-export function registerFileRoutes(server: FastifyInstance, { db }: ApiRouteContext): void {
+export function registerFileRoutes(server: FastifyInstance, { config, db, videoTranscoder }: ApiRouteContext): void {
+  const videoCache = videoTranscoder
+    ? new VideoCache({ dataDir: config.dataDir, transcoder: videoTranscoder })
+    : new VideoCache({ dataDir: config.dataDir });
   server.addContentTypeParser("application/octet-stream", (_request, payload, done) => {
     done(null, payload);
   });
@@ -347,25 +351,59 @@ export function registerFileRoutes(server: FastifyInstance, { db }: ApiRouteCont
       return;
     }
 
-    const mimeType = inferMimeType(safe.realPath);
-    const range = parseRangeHeader(request.headers.range, safeStat.size);
-    reply.header("Accept-Ranges", "bytes");
-    reply.header("Content-Type", mimeType);
+    return sendFileStream(reply, request.headers.range, safe.realPath, inferMimeType(safe.realPath));
+  });
 
-    if (range === "invalid") {
-      reply.header("Content-Range", `bytes */${safeStat.size}`);
-      reply.status(416).send();
+  server.get<{
+    Querystring: { rootId?: string; path?: string };
+  }>("/api/files/video", async (request, reply) => {
+    const root = resolveRoot(db, request.query.rootId);
+    if (!root) {
+      reply.status(404).send({ error: "NAS root not found" });
       return;
     }
 
-    if (range) {
-      reply.header("Content-Range", `bytes ${range.start}-${range.end}/${safeStat.size}`);
-      reply.header("Content-Length", String(range.end - range.start + 1));
-      return reply.status(206).send(createReadStream(safe.realPath, range));
+    const safe = await resolveSafeExistingPath(root.path, request.query.path ?? ".");
+    const sourceStat = await stat(safe.realPath);
+    if (!sourceStat.isFile()) {
+      reply.status(400).send({ error: "Path is not a file" });
+      return;
     }
 
-    reply.header("Content-Length", String(safeStat.size));
-    return reply.send(createReadStream(safe.realPath));
+    const mimeType = inferMimeType(safe.realPath);
+    if (inferPreviewKind(mimeType) !== "video") {
+      reply.status(415).send({ error: "File is not video-previewable" });
+      return;
+    }
+
+    const extension = path.extname(safe.realPath).toLocaleLowerCase();
+    if (extension === ".mp4" || extension === ".webm") {
+      return sendFileStream(reply, request.headers.range, safe.realPath, mimeType);
+    }
+
+    const source = {
+      rootId: root.id,
+      relativePath: safe.relativePath,
+      realPath: safe.realPath,
+      sizeBytes: sourceStat.size,
+      modifiedAtMs: sourceStat.mtimeMs
+    };
+    const cachePath = videoCache.pathFor(source);
+    const release = videoCache.acquire(cachePath);
+    try {
+      await videoCache.ensure(source);
+      const result = await sendFileStream(reply, request.headers.range, cachePath, "video/mp4", (stream) => {
+        stream.once("close", release);
+        stream.once("error", release);
+      });
+      if (reply.statusCode === 416) {
+        release();
+      }
+      return result;
+    } catch (error) {
+      release();
+      throw error;
+    }
   });
 
   server.get<{
@@ -613,6 +651,35 @@ async function pathExists(absolutePath: string): Promise<boolean> {
     }
     throw error;
   }
+}
+
+async function sendFileStream(
+  reply: FastifyReply,
+  rangeHeader: string | string[] | undefined,
+  filePath: string,
+  mimeType: string,
+  onStreamCreated?: (stream: ReturnType<typeof createReadStream>) => void
+) {
+  const fileStat = await stat(filePath);
+  const range = parseRangeHeader(rangeHeader, fileStat.size);
+  reply.header("Accept-Ranges", "bytes");
+  reply.header("Content-Type", mimeType);
+
+  if (range === "invalid") {
+    reply.header("Content-Range", `bytes */${fileStat.size}`);
+    return reply.status(416).send();
+  }
+
+  const stream = range ? createReadStream(filePath, range) : createReadStream(filePath);
+  onStreamCreated?.(stream);
+  if (range) {
+    reply.header("Content-Range", `bytes ${range.start}-${range.end}/${fileStat.size}`);
+    reply.header("Content-Length", String(range.end - range.start + 1));
+    return reply.status(206).send(stream);
+  }
+
+  reply.header("Content-Length", String(fileStat.size));
+  return reply.send(stream);
 }
 
 async function prepareUploadTarget(rootPath: string, requestedPath: string): Promise<{

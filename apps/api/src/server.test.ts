@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   appendEvent,
   createPendingApproval,
@@ -1866,6 +1866,84 @@ describe("API server", () => {
 
     expect(response.statusCode).toBe(416);
     expect(response.headers["content-range"]).toBe("bytes */5");
+    await server.close();
+  });
+
+  it("streams native videos and supports byte ranges", async () => {
+    await writeFile(path.join(rootDir, "clip.mp4"), "native-video");
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/files/video?rootId=local&path=clip.mp4",
+      headers: {
+        range: "bytes=1-5"
+      }
+    });
+
+    expect(response.statusCode).toBe(206);
+    expect(response.headers["content-type"]).toContain("video/mp4");
+    expect(response.headers["accept-ranges"]).toBe("bytes");
+    expect(response.headers["content-range"]).toBe("bytes 1-5/12");
+    expect(response.payload).toBe("ative");
+    await server.close();
+  });
+
+  it("transcodes non-native videos once and reuses the cached MP4", async () => {
+    await writeFile(path.join(rootDir, "clip.mkv"), "source-video");
+    const transcode = vi.fn(async (_inputPath: string, outputPath: string) => {
+      await writeFile(outputPath, "converted-video");
+    });
+    const server = await buildServer({ config: testConfig(tempDir), db, videoTranscoder: { transcode } });
+
+    const [first, second] = await Promise.all([
+      server.inject({ method: "GET", url: "/api/files/video?rootId=local&path=clip.mkv" }),
+      server.inject({ method: "GET", url: "/api/files/video?rootId=local&path=clip.mkv" })
+    ]);
+
+    expect(first.statusCode).toBe(200);
+    expect(first.headers["content-type"]).toContain("video/mp4");
+    expect(first.payload).toBe("converted-video");
+    expect(second.payload).toBe("converted-video");
+    expect(transcode).toHaveBeenCalledTimes(1);
+
+    await writeFile(path.join(rootDir, "clip.mkv"), "changed-source-video");
+    const changed = await server.inject({ method: "GET", url: "/api/files/video?rootId=local&path=clip.mkv" });
+    expect(changed.statusCode).toBe(200);
+    expect(transcode).toHaveBeenCalledTimes(2);
+    await server.close();
+  });
+
+  it("returns a service error and removes failed transcode output", async () => {
+    await writeFile(path.join(rootDir, "broken.avi"), "source-video");
+    const transcode = vi.fn(async () => {
+      throw new Error("unsupported codec");
+    });
+    const server = await buildServer({ config: testConfig(tempDir), db, videoTranscoder: { transcode } });
+
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/files/video?rootId=local&path=broken.avi"
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: "Video transcoding failed" });
+    await expect(readdir(path.join(tempDir, "media-cache", "videos"))).resolves.toEqual([]);
+    await server.close();
+  });
+
+  it("rejects non-video files and traversal attempts on the video route", async () => {
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    const nonVideo = await server.inject({
+      method: "GET",
+      url: "/api/files/video?rootId=local&path=hello.txt"
+    });
+    const traversal = await server.inject({
+      method: "GET",
+      url: "/api/files/video?rootId=local&path=.."
+    });
+
+    expect(nonVideo.statusCode).toBe(415);
+    expect(traversal.statusCode).toBe(400);
     await server.close();
   });
 

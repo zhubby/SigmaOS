@@ -682,6 +682,14 @@ export function getFileBlobUrl(rootId: string, currentPath: string): string {
   return `/api/files/blob?${params.toString()}`;
 }
 
+export function getFileVideoUrl(rootId: string, currentPath: string): string {
+  const params = new URLSearchParams({
+    rootId,
+    path: currentPath
+  });
+  return `/api/files/video?${params.toString()}`;
+}
+
 export async function getApprovals(): Promise<PendingApproval[]> {
   const response = await fetch("/api/approvals");
   await ensureOk(response);

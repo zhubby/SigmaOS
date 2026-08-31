@@ -1,6 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { AlertTriangle, File, FileText, Folder, Image as ImageIcon, Music, PanelRight, Play, Video } from "lucide-react";
+import {
+  AlertTriangle,
+  File,
+  FileText,
+  Folder,
+  Image as ImageIcon,
+  Music,
+  PanelRight,
+  Play,
+  RefreshCw,
+  Video
+} from "lucide-react";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -8,6 +19,12 @@ import type { FileMeta, FilePreviewKind, TextPreview } from "../../api.js";
 import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
 import { isPreviewOverFileSizeLimit } from "../../lib/preview-settings.js";
+import {
+  clearVideoProgress,
+  readVideoProgress,
+  writeVideoProgress,
+  type VideoProgressIdentity
+} from "../../lib/video-progress.js";
 import {
   describeTextPreview,
   highlightSource,
@@ -18,6 +35,8 @@ import {
 
 export function PreviewContent({
   blobUrl,
+  videoUrl,
+  rootId,
   loading,
   meta,
   error,
@@ -26,6 +45,8 @@ export function PreviewContent({
   locale
 }: {
   blobUrl: string;
+  videoUrl: string;
+  rootId: string;
   loading: boolean;
   meta: FileMeta | null;
   error: string | null;
@@ -87,11 +108,7 @@ export function PreviewContent({
     );
   }
   if (meta.previewKind === "video") {
-    return (
-      <div className="media-preview">
-        <video src={blobUrl} controls />
-      </div>
-    );
+    return <VideoPreview src={videoUrl} identity={{ rootId, path: meta.path, sizeBytes: meta.sizeBytes, modifiedAt: meta.modifiedAt }} />;
   }
   if (meta.previewKind === "pdf") {
     return <iframe className="pdf-preview" title={meta.name} src={blobUrl} />;
@@ -101,6 +118,153 @@ export function PreviewContent({
       <File aria-hidden="true" size={24} />
       <strong>{meta.mimeType}</strong>
       <span>{t("preview.cannotPreview", { size: formatBytes(meta.sizeBytes, locale) })}</span>
+    </div>
+  );
+}
+
+function VideoPreview({ src, identity }: { src: string; identity: VideoProgressIdentity }) {
+  const { t } = useTranslation();
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const lastSavedAtRef = useRef(0);
+  const lastSavedPositionRef = useRef(0);
+  const lastKnownPositionRef = useRef(0);
+  const hasKnownPositionRef = useRef(false);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [sourceRevision, setSourceRevision] = useState(0);
+
+  const saveProgress = useCallback(
+    (force: boolean) => {
+      const video = videoRef.current;
+      if (video?.ended) {
+        return;
+      }
+
+      const hasLivePosition = video && Number.isFinite(video.currentTime);
+      const shouldUseLivePosition = hasLivePosition && (video.currentTime > 0 || video.isConnected || !hasKnownPositionRef.current);
+      const currentTime = shouldUseLivePosition
+        ? video.currentTime
+        : hasKnownPositionRef.current
+          ? lastKnownPositionRef.current
+          : null;
+      if (currentTime === null) {
+        return;
+      }
+      lastKnownPositionRef.current = currentTime;
+
+      if (currentTime <= 0) {
+        return;
+      }
+
+      const now = Date.now();
+      if (!force && now - lastSavedAtRef.current < 5000) {
+        return;
+      }
+      writeVideoProgress(identity, currentTime);
+      lastSavedAtRef.current = now;
+      lastSavedPositionRef.current = currentTime;
+    },
+    [identity]
+  );
+
+  useEffect(() => {
+    lastSavedAtRef.current = 0;
+    lastSavedPositionRef.current = 0;
+    lastKnownPositionRef.current = 0;
+    hasKnownPositionRef.current = false;
+    setStatus("loading");
+  }, [identity.modifiedAt, identity.path, identity.rootId, identity.sizeBytes, src, sourceRevision]);
+
+  useEffect(() => {
+    const handlePageHide = () => saveProgress(true);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        saveProgress(true);
+      }
+    };
+    window.addEventListener("pagehide", handlePageHide);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("pagehide", handlePageHide);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      saveProgress(true);
+    };
+  }, [saveProgress]);
+
+  function handleLoadedMetadata() {
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+
+    const saved = readVideoProgress(identity);
+    if (saved && Number.isFinite(video.duration) && video.duration > 0) {
+      if (saved.positionSeconds > 0 && saved.positionSeconds < video.duration - 1) {
+        video.currentTime = saved.positionSeconds;
+      } else if (saved.positionSeconds >= video.duration - 1) {
+        clearVideoProgress(identity);
+        video.currentTime = 0;
+      }
+    }
+    lastKnownPositionRef.current = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+    hasKnownPositionRef.current = true;
+    lastSavedPositionRef.current = lastKnownPositionRef.current;
+    setStatus("ready");
+  }
+
+  if (status === "error") {
+    return (
+      <div className="preview-empty preview-error">
+        <AlertTriangle aria-hidden="true" size={20} />
+        <span>{t("preview.videoPlaybackError")}</span>
+        <button
+          type="button"
+          className="preview-tool-button"
+          onClick={() => {
+            setStatus("loading");
+            setSourceRevision((current) => current + 1);
+          }}
+          title={t("preview.retry")}
+          aria-label={t("preview.retry")}
+        >
+          <RefreshCw aria-hidden="true" size={14} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="media-preview video-preview" aria-busy={status === "loading"}>
+      {status === "loading" ? <span className="video-preview-status">{t("preview.videoLoading")}</span> : null}
+      <video
+        key={`${src}-${sourceRevision}`}
+        ref={videoRef}
+        src={src}
+        controls
+        playsInline
+        preload="metadata"
+        onLoadStart={() => setStatus("loading")}
+        onLoadedMetadata={handleLoadedMetadata}
+        onTimeUpdate={() => saveProgress(false)}
+        onPause={() => saveProgress(true)}
+        onSeeked={() => {
+          const video = videoRef.current;
+          if (video && video.currentTime <= 0) {
+            clearVideoProgress(identity);
+            lastSavedAtRef.current = 0;
+            lastSavedPositionRef.current = 0;
+            lastKnownPositionRef.current = 0;
+            hasKnownPositionRef.current = true;
+            return;
+          }
+          saveProgress(true);
+        }}
+        onEnded={() => {
+          clearVideoProgress(identity);
+          lastSavedAtRef.current = 0;
+          lastSavedPositionRef.current = 0;
+        }}
+        onError={() => setStatus("error")}
+      />
     </div>
   );
 }
