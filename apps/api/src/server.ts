@@ -7,7 +7,7 @@ import { registerApiRoutes } from "./routes/index.js";
 
 export type { ServerDependencies } from "./context.js";
 
-export async function buildServer({ config, db, docker, shares, system, videoTranscoder }: ServerDependencies): Promise<FastifyInstance> {
+export async function buildServer({ config, db, docker, shares, system, terminal, videoTranscoder }: ServerDependencies): Promise<FastifyInstance> {
   const server = Fastify({
     logger: {
       level: process.env.LOG_LEVEL ?? "info"
@@ -28,6 +28,7 @@ export async function buildServer({ config, db, docker, shares, system, videoTra
     ...(docker ? { docker } : {}),
     ...(shares ? { shares } : {}),
     ...(system ? { system } : {}),
+    ...(terminal ? { terminal } : {}),
     ...(videoTranscoder ? { videoTranscoder } : {})
   });
 

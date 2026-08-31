@@ -48,6 +48,7 @@ import type { SupportedLocale } from "../../i18n/locale.js";
 import type { en } from "../../i18n/resources.js";
 import { SystemNetworkManagementPanel, SystemStorageManagementPanel } from "./SystemManagementPanel.js";
 import { ShareManagementPanel } from "./ShareManagementPanel.js";
+import { applyTerminalOptions, terminalOptions } from "../../lib/terminal-theme.js";
 
 export type ManagementPanelId = "docker" | "virtualMachines" | "network" | "storage" | "shares";
 
@@ -936,6 +937,7 @@ function DockerConsoleDialog({ session, onClose }: { session: DockerConsoleSessi
     let terminal: Terminal | null = null;
     let socket: WebSocket | null = null;
     let resizeObserver: ResizeObserver | null = null;
+    let appearanceObserver: MutationObserver | null = null;
     let disposable: { dispose(): void } | null = null;
     const openTimer = window.setTimeout(() => {
       if (disposed || !terminalRef.current) {
@@ -944,17 +946,28 @@ function DockerConsoleDialog({ session, onClose }: { session: DockerConsoleSessi
       terminal = new Terminal({
         cursorBlink: true,
         convertEol: true,
-        fontFamily: "var(--code-font-family)",
-        fontSize: 12,
-        theme: {
-          background: "#05070a",
-          foreground: "#d9e2ef",
-          cursor: "#f5b84b"
-        }
+        ...terminalOptions(terminalRef.current)
       });
       const fitAddon = new FitAddon();
       terminal.loadAddon(fitAddon);
       terminal.open(terminalRef.current);
+      const syncAppearance = () => {
+        if (terminal && terminalRef.current) {
+          applyTerminalOptions(terminal, terminalRef.current);
+        }
+      };
+      const appShell = terminalRef.current.closest(".app-shell");
+      appearanceObserver = new MutationObserver(syncAppearance);
+      appearanceObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["data-theme"]
+      });
+      if (appShell) {
+        appearanceObserver.observe(appShell, {
+          attributes: true,
+          attributeFilter: ["style"]
+        });
+      }
       fitAddon.fit();
 
       socket = new WebSocket(consoleWebSocketUrl(session.websocketUrl));
@@ -1009,6 +1022,7 @@ function DockerConsoleDialog({ session, onClose }: { session: DockerConsoleSessi
       disposed = true;
       window.clearTimeout(openTimer);
       resizeObserver?.disconnect();
+      appearanceObserver?.disconnect();
       disposable?.dispose();
       socket?.close();
       terminal?.dispose();

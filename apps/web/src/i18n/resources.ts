@@ -228,7 +228,24 @@ export const en = {
       storage: "Storage",
       storageShort: "Store",
       shares: "Shares",
-      sharesShort: "Share"
+      sharesShort: "Share",
+      terminal: "Terminal",
+      terminalShort: "Term"
+    },
+    terminal: {
+      eyebrow: "Local shell",
+      title: "Terminal",
+      connectionError: "Unable to connect to the local terminal.",
+      disconnectedError: "The local terminal connection was closed.",
+      noRoot: "No NAS root selected",
+      restart: "Restart terminal",
+      status: {
+        connecting: "Connecting",
+        connected: "Connected",
+        disconnected: "Disconnected",
+        error: "Connection error",
+        exited: "Shell exited"
+      }
     },
     management: {
       previewMode: "Static preview",
@@ -1268,7 +1285,24 @@ export const zhCN = {
       storage: "存储",
       storageShort: "存储",
       shares: "共享",
-      sharesShort: "共享"
+      sharesShort: "共享",
+      terminal: "终端",
+      terminalShort: "终端"
+    },
+    terminal: {
+      eyebrow: "本机 Shell",
+      title: "终端",
+      connectionError: "无法连接到本机终端。",
+      disconnectedError: "本机终端连接已关闭。",
+      noRoot: "未选择 NAS 根目录",
+      restart: "重启终端",
+      status: {
+        connecting: "连接中",
+        connected: "已连接",
+        disconnected: "已断开",
+        error: "连接错误",
+        exited: "Shell 已退出"
+      }
     },
     management: {
       previewMode: "静态预览",

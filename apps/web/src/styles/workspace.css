@@ -29,6 +29,10 @@
   grid-template-rows: minmax(0, 1fr);
 }
 
+.workspace-stage[data-panel="terminal"] {
+  grid-template-rows: minmax(0, 1fr);
+}
+
 .workspace-panel-rail {
   display: grid;
   align-content: start;
@@ -926,6 +930,107 @@
   min-width: 0;
   min-height: 0;
   background: var(--footer-bg);
+}
+
+.workspace-terminal-panel {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--code-bg);
+}
+
+.workspace-terminal-panel[hidden] {
+  display: none;
+}
+
+.workspace-terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  min-height: 70px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--header-border);
+  background: var(--channel-bg);
+}
+
+.workspace-terminal-title {
+  min-width: 0;
+}
+
+.workspace-terminal-title > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.workspace-terminal-title > div svg {
+  flex: 0 0 auto;
+  color: var(--accent-soft-text);
+}
+
+.workspace-terminal-title h2 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-terminal-title p {
+  margin: 6px 0 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-terminal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.workspace-terminal {
+  min-width: 0;
+  min-height: 0;
+  padding: 10px;
+  overflow: hidden;
+  background: var(--code-bg);
+}
+
+.workspace-terminal .xterm {
+  width: 100%;
+  height: 100%;
+}
+
+.workspace-terminal .xterm-viewport,
+.workspace-terminal .xterm-screen {
+  background: transparent !important;
+}
+
+.workspace-terminal-error {
+  position: absolute;
+  z-index: 1;
+  max-width: min(520px, calc(100% - 32px));
+  margin: 82px 16px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--danger-border);
+  border-radius: 5px;
+  color: var(--danger-text);
+  background: var(--danger-bg);
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .management-header {
@@ -2112,7 +2217,7 @@
   min-height: 440px;
   padding: 8px;
   overflow: hidden;
-  background: #05070a;
+  background: var(--code-bg);
 }
 
 @media (prefers-reduced-motion: reduce) {

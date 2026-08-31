@@ -1359,6 +1359,8 @@ export function App() {
         sessionId={session?.id ?? null}
         pendingApprovals={activeApprovals}
         locale={resolvedLocale}
+        codeFontSettings={codeFontSettings}
+        resolvedTheme={resolvedTheme}
         onSelectRoot={selectRoot}
         onGoHome={goHome}
         onGoUp={goUp}

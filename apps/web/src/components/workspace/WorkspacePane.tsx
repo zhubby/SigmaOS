@@ -19,6 +19,7 @@ import {
   RefreshCw,
   Search,
   Share2,
+  TerminalSquare,
   Trash2,
   FolderUp,
   Upload,
@@ -35,9 +36,12 @@ import { FileTypeIcon } from "../file/FileTypeIcon.js";
 import { PreviewContent, previewIcon } from "../preview/PreviewContent.js";
 import { collectUploadSourcesFromDataTransfer, collectUploadSourcesFromFileList, type UploadBatchState, type UploadSource } from "../../lib/uploads.js";
 import { WorkspaceManagementPanel, type ManagementPanelId } from "./WorkspaceManagementPanel.js";
+import { LocalTerminalPanel } from "./LocalTerminalPanel.js";
+import type { CodeFontSettings } from "../../lib/editor-settings.js";
+import type { ResolvedTheme } from "../../lib/theme-settings.js";
 
 const EPOCH_DATE = new Date(0).toISOString();
-type WorkspacePanelId = "files" | ManagementPanelId;
+type WorkspacePanelId = "files" | "terminal" | ManagementPanelId;
 
 const WORKSPACE_PANELS = [
   {
@@ -45,6 +49,12 @@ const WORKSPACE_PANELS = [
     labelKey: "workspace.panels.files",
     shortLabelKey: "workspace.panels.filesShort",
     Icon: Files
+  },
+  {
+    id: "terminal",
+    labelKey: "workspace.panels.terminal",
+    shortLabelKey: "workspace.panels.terminalShort",
+    Icon: TerminalSquare
   },
   {
     id: "docker",
@@ -133,6 +143,8 @@ export function WorkspacePane({
   sessionId,
   pendingApprovals,
   locale,
+  codeFontSettings,
+  resolvedTheme,
   onSelectRoot,
   onGoHome,
   onGoUp,
@@ -178,6 +190,8 @@ export function WorkspacePane({
   sessionId: string | null;
   pendingApprovals: PendingApproval[];
   locale: SupportedLocale;
+  codeFontSettings: CodeFontSettings;
+  resolvedTheme: ResolvedTheme;
   onSelectRoot: (rootId: string) => void;
   onGoHome: () => void;
   onGoUp: () => void;
@@ -205,6 +219,7 @@ export function WorkspacePane({
   const [operationError, setOperationError] = useState<string | null>(null);
   const [operationSubmitting, setOperationSubmitting] = useState(false);
   const [activePanel, setActivePanel] = useState<WorkspacePanelId>("files");
+  const [terminalMounted, setTerminalMounted] = useState(false);
   const [fileSort, setFileSort] = useState<FileSortState>({ key: "name", direction: "asc" });
   const [isDropActive, setIsDropActive] = useState(false);
   const fileUploadInputRef = useRef<HTMLInputElement | null>(null);
@@ -342,6 +357,13 @@ export function WorkspacePane({
       return;
     }
     onOpenEntry(entry);
+  }
+
+  function selectPanel(panel: WorkspacePanelId) {
+    if (panel === "terminal") {
+      setTerminalMounted(true);
+    }
+    setActivePanel(panel);
   }
 
   function handleRowKeyDown(event: KeyboardEvent<HTMLDivElement>, entry: FileEntry) {
@@ -847,7 +869,7 @@ export function WorkspacePane({
                 </section>
               </div>
             </>
-          ) : (
+          ) : activePanel === "terminal" ? null : (
             <WorkspaceManagementPanel
               panel={activePanel}
               roots={roots}
@@ -858,6 +880,14 @@ export function WorkspacePane({
               onWorkQueuesChanged={onWorkQueuesChanged}
             />
           )}
+          {terminalMounted ? (
+            <LocalTerminalPanel
+              active={activePanel === "terminal"}
+              root={selectedRoot}
+              codeFontSettings={codeFontSettings}
+              resolvedTheme={resolvedTheme}
+            />
+          ) : null}
         </div>
 
         <nav className="workspace-panel-rail" aria-label={t("workspace.panelRail")}>
@@ -869,7 +899,7 @@ export function WorkspacePane({
                 key={panel.id}
                 type="button"
                 className={isActive ? "workspace-panel-tab is-active" : "workspace-panel-tab"}
-                onClick={() => setActivePanel(panel.id)}
+                onClick={() => selectPanel(panel.id)}
                 title={t(panel.labelKey)}
                 aria-label={t(panel.labelKey)}
                 aria-current={isActive ? "page" : undefined}

@@ -4,6 +4,7 @@ import type { DockerComposeRuntime } from "./lib/docker-compose.js";
 import type { DockerEngineRuntime } from "./lib/docker-client.js";
 import type { ShareManagementDependencies } from "./lib/share-service.js";
 import type { SystemManagementDependencies } from "./lib/system-management.js";
+import type { TerminalRuntime } from "./lib/terminal.js";
 import type { VideoTranscoder } from "./lib/video-cache.js";
 
 export interface ApiRouteContext {
@@ -15,6 +16,7 @@ export interface ApiRouteContext {
   };
   shares?: ShareManagementDependencies;
   system?: SystemManagementDependencies;
+  terminal?: TerminalRuntime;
   videoTranscoder?: VideoTranscoder;
 }
 

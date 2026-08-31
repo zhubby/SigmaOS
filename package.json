@@ -13,6 +13,7 @@
     "index": "npm run once -w @sigmaos/indexer",
     "schedule": "npm run dev -w @sigmaos/scheduler",
     "maintenance": "npm run dev -w @sigmaos/scheduler -- --maintenance",
+    "postinstall": "node scripts/fix-node-pty-permissions.mjs",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
