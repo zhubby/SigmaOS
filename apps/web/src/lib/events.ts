@@ -1,6 +1,9 @@
 import type { AgentEvent, TranscriptMessage } from "../api.js";
 
 export function eventToTranscriptMessage(event: AgentEvent): TranscriptMessage | null {
+  if (event.type === "job.failed") {
+    return failedJobToTranscriptMessage(event);
+  }
   if (event.type !== "agent.message") {
     return null;
   }
@@ -12,6 +15,19 @@ export function eventToTranscriptMessage(event: AgentEvent): TranscriptMessage |
     id: `event:${event.id}`,
     role: "assistant",
     content,
+    createdAt: event.createdAt
+  };
+}
+
+function failedJobToTranscriptMessage(event: AgentEvent): TranscriptMessage | null {
+  const error = typeof event.payload.error === "string" ? event.payload.error : "";
+  if (!error) {
+    return null;
+  }
+  return {
+    id: `event:${event.id}`,
+    role: "assistant",
+    content: `Agent failed: ${error}`,
     createdAt: event.createdAt
   };
 }

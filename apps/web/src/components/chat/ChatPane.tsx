@@ -1,4 +1,5 @@
-import { FormEvent, useState, type RefObject } from "react";
+import { FormEvent, KeyboardEvent, useState, type RefObject } from "react";
+import ReactMarkdown from "react-markdown";
 import { useTranslation } from "react-i18next";
 import {
   Bot,
@@ -6,6 +7,7 @@ import {
   CircleStop,
   Container,
   FileCog,
+  LoaderCircle,
   MessageSquare,
   Plus,
   Send,
@@ -15,6 +17,7 @@ import {
   Trash2,
   X
 } from "lucide-react";
+import remarkGfm from "remark-gfm";
 import type {
   DockerOperationProposal,
   NasRoot,
@@ -26,10 +29,13 @@ import type {
 import type { AppStatus } from "../../config/status.js";
 import { formatTime } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
+import { highlightSource } from "../../preview-utils.js";
 import { sessionTitle } from "../../lib/session.js";
 
 type ApprovalRisk = PendingApproval["proposal"][number]["risk"];
 type ApprovalCardKind = "file" | "tool" | "docker" | "share";
+type ComposerKeyDownEvent = Pick<KeyboardEvent<HTMLTextAreaElement>, "key" | "shiftKey" | "nativeEvent">;
+type ComposerFeedbackState = "sending" | "queued" | "running" | "reconnecting";
 
 interface ApprovalCard {
   kind: ApprovalCardKind;
@@ -40,6 +46,53 @@ interface ApprovalCard {
 }
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+export function shouldSubmitComposerMessage(event: ComposerKeyDownEvent): boolean {
+  return event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing;
+}
+
+export function composerFeedbackState({
+  activeJobId,
+  messageSubmitting,
+  status
+}: {
+  activeJobId: string | null;
+  messageSubmitting: boolean;
+  status: AppStatus;
+}): ComposerFeedbackState | null {
+  if (messageSubmitting) {
+    return "sending";
+  }
+  if (!activeJobId) {
+    return null;
+  }
+  if (status === "queued") {
+    return "queued";
+  }
+  if (status === "agent-running") {
+    return "running";
+  }
+  if (status === "reconnecting") {
+    return "reconnecting";
+  }
+  return null;
+}
+
+export function composerFeedbackLabel(state: ComposerFeedbackState | null, t: Translate): string | null {
+  if (state === "sending") {
+    return t("chat.messageStatus.sending");
+  }
+  if (state === "queued") {
+    return t("chat.messageStatus.queued");
+  }
+  if (state === "running") {
+    return t("chat.messageStatus.running");
+  }
+  if (state === "reconnecting") {
+    return t("chat.messageStatus.reconnecting");
+  }
+  return null;
+}
 
 export function ChatPane({
   active,
@@ -53,6 +106,7 @@ export function ChatPane({
   status,
   locale,
   activeJobId,
+  messageSubmitting,
   hasSession,
   transcriptRef,
   onCreateAgent,
@@ -76,6 +130,7 @@ export function ChatPane({
   status: AppStatus;
   locale: SupportedLocale;
   activeJobId: string | null;
+  messageSubmitting: boolean;
   hasSession: boolean;
   transcriptRef: RefObject<HTMLDivElement | null>;
   onCreateAgent: () => void;
@@ -94,8 +149,24 @@ export function ChatPane({
   const rootAgentTitle = t("chat.rootAgent");
   const hasConversationContent = transcript.length > 0 || activeApprovals.length > 0;
   const activeSessionTitle = activeSessionSummary ? sessionTitle(activeSessionSummary, rootAgentTitle) : t("chat.agent");
-  const deleteDisabled = !activeSessionSummary || Boolean(activeJobId);
   const showAgentStatus = status !== "ready" && status !== "error" && status !== "offline";
+  const composerFeedback = composerFeedbackState({ activeJobId, messageSubmitting, status });
+  const deleteDisabled = !activeSessionSummary || composerFeedback !== null || status === "cancelling";
+  const composerHintId = "composer-hint";
+  const composerStatusId = "composer-status";
+  const composerDescribedBy = composerFeedback ? `${composerHintId} ${composerStatusId}` : composerHintId;
+  const ComposerIcon = composerFeedback ? LoaderCircle : Send;
+  const composerIconClass = composerFeedback ? "composer-spinner" : undefined;
+  const composerStatusLabel = composerFeedbackLabel(composerFeedback, t);
+
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (!shouldSubmitComposerMessage(event)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
+  }
 
   const renderApprovalCard = (approval: PendingApproval) => {
     const risk = approval.proposal[0]?.risk ?? "low";
@@ -238,7 +309,7 @@ export function ChatPane({
                       <strong>{item.role === "assistant" ? t("chat.sigmaAgent") : t("chat.you")}</strong>
                       <time>{formatTime(item.createdAt, locale)}</time>
                     </header>
-                    <p>{item.content}</p>
+                    <ChatMessageContent role={item.role} content={item.content} />
                   </div>
                 </article>
               ))}
@@ -266,21 +337,34 @@ export function ChatPane({
           )}
         </div>
 
-        <form className="composer" onSubmit={onSubmitMessage}>
+        <form className="composer" onSubmit={onSubmitMessage} aria-busy={messageSubmitting}>
           <textarea
             value={message}
             onChange={(event) => onMessageChange(event.target.value)}
+            onKeyDown={handleComposerKeyDown}
             placeholder={t("chat.messagePlaceholder")}
             aria-label={t("chat.messageAria")}
+            aria-describedby={composerDescribedBy}
             rows={3}
           />
+          <div className="composer-meta">
+            <p id={composerHintId} className="composer-hint">
+              {t("chat.messageHint")}
+            </p>
+            {composerStatusLabel ? (
+              <div id={composerStatusId} className="composer-status" role="status" aria-live="polite" data-state={composerFeedback}>
+                <LoaderCircle aria-hidden="true" className="composer-spinner" size={13} />
+                <span>{composerStatusLabel}</span>
+              </div>
+            ) : null}
+          </div>
           <div className="composer-actions">
             <button className="secondary-button" type="button" onClick={onCancelActiveJob} disabled={!activeJobId}>
               <CircleStop aria-hidden="true" size={16} />
               <span>{t("common.actions.stop")}</span>
             </button>
-            <button className="primary-button" type="submit" disabled={!hasSession || !message.trim()}>
-              <Send aria-hidden="true" size={16} />
+            <button className="primary-button" type="submit" disabled={!hasSession || !message.trim() || messageSubmitting}>
+              <ComposerIcon aria-hidden="true" className={composerIconClass} size={16} />
               <span>{t("common.actions.send")}</span>
             </button>
           </div>
@@ -322,6 +406,45 @@ export function ChatPane({
       ) : null}
     </section>
   );
+}
+
+export function ChatMessageContent({ role, content }: Pick<TranscriptMessage, "role" | "content">) {
+  if (role !== "assistant") {
+    return <p className="message-text">{content}</p>;
+  }
+
+  return (
+    <div className="message-markdown">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+          code: ({ className, children, node: _node }) => {
+            const language = markdownCodeLanguage(className);
+            if (!language) {
+              return <code className={className}>{children}</code>;
+            }
+
+            const highlighted = highlightSource(String(children).replace(/\n$/, ""), language);
+            return (
+              <code
+                className={`hljs language-${highlighted.language}`}
+                dangerouslySetInnerHTML={{ __html: highlighted.html }}
+              />
+            );
+          },
+          pre: ({ children, node: _node }) => <pre className="message-code-block">{children}</pre>
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+function markdownCodeLanguage(className: string | undefined): string | null {
+  const match = /language-([\w-]+)/.exec(className ?? "");
+  return match?.[1] ?? null;
 }
 
 function approvalRiskLabel(risk: ApprovalRisk, t: Translate): string {

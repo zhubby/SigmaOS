@@ -107,6 +107,8 @@ type TextToolResult = {
 const ALL_PI_TOOL_NAMES: PiToolName[] = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 const APPROVAL_POLL_MS = 500;
 const MAX_TOOL_OUTPUT_BYTES = 64 * 1024;
+type PiProviderConfig = Parameters<ModelRuntime["registerProvider"]>[1];
+type PiProviderApi = NonNullable<PiProviderConfig["api"]>;
 
 export async function runPiAgentTurn(input: PiAgentInput): Promise<PiAgentTurnResult> {
   const runtimeInput: PiAgentRuntimeInput = {
@@ -114,6 +116,50 @@ export async function runPiAgentTurn(input: PiAgentInput): Promise<PiAgentTurnRe
     isCancelled: input.isCancelled ?? (() => false)
   };
   return (input.runner ?? runPiSdkAgentTurn)(runtimeInput);
+}
+
+export function registerConfiguredProvider(
+  modelRuntime: ModelRuntime,
+  settings: ModelProviderSettingsRecord
+): void {
+  if (!settings.baseUrl) {
+    return;
+  }
+
+  if (settings.model && !modelRuntime.getModel(settings.providerName, settings.model)) {
+    modelRuntime.registerProvider(settings.providerName, {
+      baseUrl: settings.baseUrl,
+      api: providerApi(settings.providerName),
+      models: [configuredProviderModel(settings)]
+    });
+    return;
+  }
+
+  modelRuntime.registerProvider(settings.providerName, {
+    baseUrl: settings.baseUrl
+  });
+}
+
+function providerApi(providerName: ModelProviderName): PiProviderApi {
+  return providerName === "anthropic" ? "anthropic-messages" : "openai-completions";
+}
+
+function configuredProviderModel(settings: ModelProviderSettingsRecord): NonNullable<PiProviderConfig["models"]>[number] {
+  return {
+    id: settings.model,
+    name: settings.model,
+    api: providerApi(settings.providerName),
+    reasoning: false,
+    input: ["text"],
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0
+    },
+    contextWindow: 128000,
+    maxTokens: 16384
+  };
 }
 
 async function runPiSdkAgentTurn(input: PiAgentRuntimeInput): Promise<PiAgentTurnResult> {
@@ -137,11 +183,7 @@ async function runPiSdkAgentTurn(input: PiAgentRuntimeInput): Promise<PiAgentTur
       authPath: path.join(piAgentDir, "auth.json"),
       modelsPath: null
     });
-    if (input.modelSettings.baseUrl) {
-      modelRuntime.registerProvider(input.modelSettings.providerName, {
-        baseUrl: input.modelSettings.baseUrl
-      });
-    }
+    registerConfiguredProvider(modelRuntime, input.modelSettings);
     await modelRuntime.setRuntimeApiKey(input.modelSettings.providerName, input.modelSettings.apiKey);
 
     const model = input.modelSettings.model
@@ -149,7 +191,7 @@ async function runPiSdkAgentTurn(input: PiAgentRuntimeInput): Promise<PiAgentTur
       : undefined;
     if (input.modelSettings.model && !model) {
       throw new Error(
-        `Pi model "${input.modelSettings.model}" is not available for provider "${input.modelSettings.providerName}"`
+        `Pi model "${input.modelSettings.model}" is not available for provider "${input.modelSettings.providerName}". Set a Base URL when using a custom model ID.`
       );
     }
 

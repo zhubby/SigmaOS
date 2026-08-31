@@ -15,7 +15,7 @@ import {
 } from "@sigmaos/db";
 import { resolveSafeExistingPath } from "@sigmaos/nas-tools";
 import type { ApiRouteContext } from "../context.js";
-import { getAgentMessageContent, getAgentMessageRole, getInitialEventId } from "../lib/events.js";
+import { getAgentMessageContent, getAgentMessageRole, getFailedJobMessageContent, getInitialEventId } from "../lib/events.js";
 
 export function registerSessionRoutes(server: FastifyInstance, { db }: ApiRouteContext): void {
   server.get<{
@@ -136,11 +136,11 @@ export function registerSessionRoutes(server: FastifyInstance, { db }: ApiRouteC
       sessionId: session.id,
       limit: 500
     })
-      .filter((event) => event.type === "agent.message" && typeof event.payload === "object")
+      .filter((event) => (event.type === "agent.message" || event.type === "job.failed") && typeof event.payload === "object")
       .map((event) => ({
         id: `event:${event.id}`,
-        role: getAgentMessageRole(event.payload),
-        content: getAgentMessageContent(event.payload),
+        role: event.type === "job.failed" ? "assistant" : getAgentMessageRole(event.payload),
+        content: event.type === "job.failed" ? getFailedJobMessageContent(event.payload) : getAgentMessageContent(event.payload),
         createdAt: event.createdAt
       }))
       .filter((message) => message.content);

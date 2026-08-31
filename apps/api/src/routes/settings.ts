@@ -56,7 +56,8 @@ export function registerSettingsRoutes(server: FastifyInstance, { config, db }: 
     const normalizedProviderName = providerName.trim() as ModelProviderName;
     const baseUrl =
       request.body?.baseUrl === undefined ? existing.baseUrl : normalizeOptionalText(request.body.baseUrl);
-    const model = normalizeOptionalText(request.body?.model) ?? existing.model;
+    const model =
+      request.body?.model === undefined ? existing.model : normalizeOptionalText(request.body.model) ?? "";
     const apiKey = request.body?.clearApiKey
       ? null
       : normalizeOptionalText(request.body?.apiKey) ?? existing.apiKey;

@@ -120,7 +120,14 @@ export const en = {
       args: "Args"
     },
     messagePlaceholder: "Message Sigma Agent",
-    messageAria: "Agent message"
+    messageAria: "Agent message",
+    messageHint: "Enter sends, Shift+Enter adds a line.",
+    messageStatus: {
+      sending: "Sending...",
+      queued: "Waiting for agent reply...",
+      running: "Agent is running...",
+      reconnecting: "Reconnecting..."
+    }
   },
   workspace: {
     label: "Workspace",
@@ -1177,7 +1184,14 @@ export const zhCN = {
       args: "参数"
     },
     messagePlaceholder: "给 Sigma Agent 发消息",
-    messageAria: "Agent 消息"
+    messageAria: "Agent 消息",
+    messageHint: "Enter 发送，Shift+Enter 换行。",
+    messageStatus: {
+      sending: "发送中...",
+      queued: "等待 agent 回复...",
+      running: "Agent 运行中...",
+      reconnecting: "重连中..."
+    }
   },
   workspace: {
     label: "工作区",

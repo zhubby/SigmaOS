@@ -45,4 +45,31 @@ describe("event helpers", () => {
       })
     ).toBeNull();
   });
+
+  it("converts failed jobs into visible assistant messages", () => {
+    expect(
+      eventToTranscriptMessage({
+        id: 4,
+        type: "job.failed",
+        payload: { error: "Pi model is unavailable" },
+        createdAt: "2026-08-21T00:00:00.000Z"
+      })
+    ).toEqual({
+      id: "event:4",
+      role: "assistant",
+      content: "Agent failed: Pi model is unavailable",
+      createdAt: "2026-08-21T00:00:00.000Z"
+    });
+  });
+
+  it("ignores agent.failed events to avoid duplicate failure transcript entries", () => {
+    expect(
+      eventToTranscriptMessage({
+        id: 5,
+        type: "agent.failed",
+        payload: { error: "Pi model is unavailable" },
+        createdAt: "2026-08-21T00:00:00.000Z"
+      })
+    ).toBeNull();
+  });
 });

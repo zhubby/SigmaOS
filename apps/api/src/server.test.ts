@@ -1199,6 +1199,40 @@ describe("API server", () => {
     await server.close();
   });
 
+  it("clears saved model provider model names", async () => {
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    await server.inject({
+      method: "PATCH",
+      url: "/api/settings/model-provider",
+      payload: {
+        providerName: "anthropic",
+        baseUrl: "https://dashscope.aliyuncs.com/apps/anthropic",
+        model: "qwen3.8-max",
+        apiKey: "secret-token"
+      }
+    });
+
+    const response = await server.inject({
+      method: "PATCH",
+      url: "/api/settings/model-provider",
+      payload: {
+        model: ""
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      settings: {
+        providerName: "anthropic",
+        baseUrl: "https://dashscope.aliyuncs.com/apps/anthropic",
+        model: "",
+        apiKeyConfigured: true
+      }
+    });
+    expect(response.payload).not.toContain("secret-token");
+    await server.close();
+  });
+
   it("rejects unsupported model provider names", async () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({
@@ -1468,6 +1502,52 @@ describe("API server", () => {
         {
           role: "assistant",
           content: "hello.txt is available"
+        }
+      ]
+    });
+    await server.close();
+  });
+
+  it("includes failed jobs in chat transcripts without duplicating agent failure events", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const { job } = createUserMessageAndJob(db, {
+      sessionId: session.id,
+      content: "hello"
+    });
+    appendEvent(db, {
+      sessionId: session.id,
+      jobId: job.id,
+      type: "agent.failed",
+      payload: {
+        provider: "pi",
+        error: "Pi model is unavailable"
+      }
+    });
+    appendEvent(db, {
+      sessionId: session.id,
+      jobId: job.id,
+      type: "job.failed",
+      payload: {
+        error: "Pi model is unavailable"
+      }
+    });
+    const server = await buildServer({ config: testConfig(tempDir), db });
+
+    const response = await server.inject({
+      method: "GET",
+      url: `/api/sessions/${session.id}/transcript`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      transcript: [
+        {
+          role: "user",
+          content: "hello"
+        },
+        {
+          role: "assistant",
+          content: "Agent failed: Pi model is unavailable"
         }
       ]
     });

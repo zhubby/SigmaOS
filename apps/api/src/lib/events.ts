@@ -19,3 +19,11 @@ export function getAgentMessageContent(payload: unknown): string {
   }
   return "";
 }
+
+export function getFailedJobMessageContent(payload: unknown): string {
+  if (payload && typeof payload === "object" && "error" in payload) {
+    const error = (payload as { error?: unknown }).error;
+    return typeof error === "string" && error ? `Agent failed: ${error}` : "";
+  }
+  return "";
+}

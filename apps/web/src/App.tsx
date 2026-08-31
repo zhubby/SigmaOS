@@ -132,6 +132,7 @@ export function App() {
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [editorMeta, setEditorMeta] = useState<FileMeta | null>(null);
   const [message, setMessage] = useState("");
+  const [messageSubmitting, setMessageSubmitting] = useState(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [status, setStatus] = useState<AppStatus>("starting");
@@ -757,26 +758,36 @@ export function App() {
 
   async function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!session || !message.trim()) {
+    if (!session || !message.trim() || messageSubmitting) {
       return;
     }
 
     const content = message.trim();
     const now = new Date().toISOString();
+    const optimisticMessage = {
+      id: `local:${now}`,
+      role: "user" as const,
+      content,
+      createdAt: now
+    };
+
+    setMessageSubmitting(true);
     setMessage("");
-    setTranscript((current) => [
-      ...current,
-      {
-        id: `local:${now}`,
-        role: "user",
-        content,
-        createdAt: now
-      }
-    ]);
+    setError(null);
+    setTranscript((current) => [...current, optimisticMessage]);
     setStatus("queued");
-    const job = await sendMessage(session.id, content);
-    setActiveJobId(job.id);
-    void reloadSessions();
+    try {
+      const job = await sendMessage(session.id, content);
+      setActiveJobId(job.id);
+      void reloadSessions();
+    } catch (nextError) {
+      setTranscript((current) => current.filter((item) => item.id !== optimisticMessage.id));
+      setMessage((current) => (current.length > 0 ? current : content));
+      setError(toErrorMessage(nextError));
+      setStatus("error");
+    } finally {
+      setMessageSubmitting(false);
+    }
   }
 
   async function cancelActiveJob() {
@@ -1289,6 +1300,7 @@ export function App() {
         locale={resolvedLocale}
         activeJobId={activeJobId}
         hasSession={Boolean(session)}
+        messageSubmitting={messageSubmitting}
         transcriptRef={transcriptRef}
         onCreateAgent={() => void createAgent()}
         onDeleteSession={() => void deleteActiveSession()}
