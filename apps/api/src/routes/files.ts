@@ -262,7 +262,7 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
     Body: {
       sessionId?: string;
       rootId?: string;
-      operation?: "rename" | "trash" | "move" | "copy";
+      operation?: "mkdir" | "rename" | "trash" | "move" | "copy";
       sourcePath?: string;
       targetName?: string;
       targetPath?: string;
@@ -285,23 +285,32 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
     }
 
     const operation = request.body?.operation;
-    if (operation !== "rename" && operation !== "trash" && operation !== "move" && operation !== "copy") {
+    if (operation !== "mkdir" && operation !== "rename" && operation !== "trash" && operation !== "move" && operation !== "copy") {
       reply.status(400).send({ error: "Unsupported file proposal operation" });
       return;
     }
 
-    const source = await getMutableSource(root, request.body?.sourcePath ?? ".");
-    if ("error" in source) {
-      reply.status(source.statusCode).send({ error: source.error });
-      return;
-    }
+    let proposal:
+      | {
+          proposal: FileOperationProposal;
+        }
+      | { statusCode: number; error: string };
+    if (operation === "mkdir") {
+      proposal = await buildMkdirProposal(root, request.body?.targetPath);
+    } else {
+      const source = await getMutableSource(root, request.body?.sourcePath ?? ".");
+      if ("error" in source) {
+        reply.status(source.statusCode).send({ error: source.error });
+        return;
+      }
 
-    const proposal =
-      operation === "rename"
-        ? await buildRenameProposal(root, source.safe.relativePath, request.body?.targetName)
-        : operation === "trash"
-          ? buildTrashProposal(root, source.safe.relativePath)
-          : await buildTransferProposal(root, source.safe, operation, request.body?.targetPath);
+      proposal =
+        operation === "rename"
+          ? await buildRenameProposal(root, source.safe.relativePath, request.body?.targetName)
+          : operation === "trash"
+            ? buildTrashProposal(root, source.safe.relativePath)
+            : await buildTransferProposal(root, source.safe, operation, request.body?.targetPath);
+    }
     if ("error" in proposal) {
       reply.status(proposal.statusCode).send({ error: proposal.error });
       return;
@@ -506,6 +515,50 @@ async function getMutableSource(
   return { safe };
 }
 
+async function buildMkdirProposal(
+  root: NasRootRecord,
+  rawTargetPath: string | undefined
+): Promise<
+  | {
+      proposal: FileOperationProposal;
+    }
+  | { statusCode: number; error: string }
+> {
+  const normalizedTarget = normalizeMkdirTargetPath(rawTargetPath);
+  if ("error" in normalizedTarget) {
+    return normalizedTarget;
+  }
+
+  const target = await resolveSafeTargetPath(root.path, normalizedTarget.path);
+  if (target.relativePath === ".") {
+    return { statusCode: 400, error: "New folder must be inside the NAS root" };
+  }
+  if (await pathExistsNoSymlink(target.absolutePath)) {
+    return { statusCode: 409, error: "Mutation target already exists" };
+  }
+
+  const destination = await resolveSafeExistingPath(root.path, path.dirname(target.relativePath));
+  const destinationLinkStat = await lstat(destination.absolutePath);
+  if (destinationLinkStat.isSymbolicLink()) {
+    return { statusCode: 400, error: "Refusing to create a folder inside a symlinked folder" };
+  }
+  const destinationStat = await stat(destination.realPath);
+  if (!destinationStat.isDirectory()) {
+    return { statusCode: 400, error: "New folder destination must be a folder" };
+  }
+
+  return {
+    proposal: {
+      operation: "mkdir",
+      rootId: root.id,
+      targetPath: target.relativePath,
+      risk: "low",
+      reversible: true,
+      summary: `Create folder ${target.relativePath}`
+    }
+  };
+}
+
 async function buildRenameProposal(
   root: NasRootRecord,
   sourcePath: string,
@@ -615,6 +668,17 @@ function buildTrashProposal(
       summary: `Move ${sourcePath} to SigmaOS trash`
     }
   };
+}
+
+function normalizeMkdirTargetPath(rawTargetPath: string | undefined): { path: string } | { statusCode: number; error: string } {
+  const targetPath = rawTargetPath?.trim() ?? "";
+  if (!targetPath) {
+    return { statusCode: 400, error: "New folder path is required" };
+  }
+  if (targetPath.includes("\0") || path.isAbsolute(targetPath)) {
+    return { statusCode: 400, error: "New folder path must be relative inside the NAS root" };
+  }
+  return { path: targetPath };
 }
 
 function normalizeTargetName(rawTargetName: string | undefined): { name: string } | { statusCode: number; error: string } {

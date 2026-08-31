@@ -83,6 +83,7 @@ import { toErrorMessage } from "./lib/format.js";
 import { clampSplitWidth, readStoredSplitWidth, writeStoredSplitWidth } from "./lib/layout.js";
 import {
   createUploadBatch,
+  joinNasPath,
   pruneUploadBatchHistory,
   updateUploadBatch,
   updateUploadBatchItem,
@@ -1149,6 +1150,29 @@ export function App() {
     }
   }
 
+  async function requestFolderCreate(folderName: string) {
+    if (!session || !selectedRootId) {
+      throw new Error(t("workspace.actions.noSession"));
+    }
+
+    setStatus("queued");
+    setError(null);
+    try {
+      await proposeFileOperation({
+        sessionId: session.id,
+        rootId: selectedRootId,
+        operation: "mkdir",
+        targetPath: joinNasPath(currentPath, folderName)
+      });
+      await Promise.all([refreshWorkQueues(), reloadSessions()]);
+      setStatus("ready");
+    } catch (nextError) {
+      setStatus("error");
+      setError(toErrorMessage(nextError));
+      throw nextError;
+    }
+  }
+
   function applyApprovedSelectionChange(approval: PendingApproval | undefined) {
     if (!approval || !selectedFilePath) {
       return;
@@ -1382,6 +1406,7 @@ export function App() {
         onGoToBreadcrumb={goToBreadcrumb}
         onOpenEntry={openEntry}
         onOpenEditor={setEditorMeta}
+        onRequestCreateFolder={(folderName) => requestFolderCreate(folderName)}
         onRequestRename={(entry, targetName) => requestFileRename(entry, targetName)}
         onRequestTrash={(entry) => requestFileTrash(entry)}
         onRequestTransfer={(entry, operation, targetPath) => requestFileTransfer(entry, operation, targetPath)}

@@ -8,6 +8,7 @@ import {
   Copy,
   Files,
   FolderInput,
+  FolderPlus,
   GitBranch,
   HardDrive,
   Home,
@@ -154,6 +155,7 @@ export function WorkspacePane({
   onGoToBreadcrumb,
   onOpenEntry,
   onOpenEditor,
+  onRequestCreateFolder,
   onRequestRename,
   onRequestTrash,
   onRequestTransfer,
@@ -201,6 +203,7 @@ export function WorkspacePane({
   onGoToBreadcrumb: (index: number) => void;
   onOpenEntry: (entry: FileEntry) => void;
   onOpenEditor: (meta: FileMeta) => void;
+  onRequestCreateFolder: (folderName: string) => Promise<void>;
   onRequestRename: (entry: FileEntry, targetName: string) => Promise<void>;
   onRequestTrash: (entry: FileEntry) => Promise<void>;
   onRequestTransfer: (entry: FileEntry, operation: "move" | "copy", targetPath: string) => Promise<void>;
@@ -211,6 +214,8 @@ export function WorkspacePane({
   onRollback: (operation: FileOperation) => void;
 }) {
   const { t } = useTranslation();
+  const [createFolderOpen, setCreateFolderOpen] = useState(false);
+  const [folderName, setFolderName] = useState("");
   const [renameEntry, setRenameEntry] = useState<FileEntry | null>(null);
   const [renameName, setRenameName] = useState("");
   const [deleteState, setDeleteState] = useState<{ entry: FileEntry; step: "initial" | "final" } | null>(null);
@@ -267,6 +272,13 @@ export function WorkspacePane({
   const isPreviewLoading = previewLoading || (hasPreview && !previewMeta && !previewError);
   const canEditPreview = previewMeta?.kind === "file" && previewMeta.previewKind === "text";
   const isPreviewCollapsed = hasPreview && previewCollapsed;
+  const trimmedFolderName = folderName.trim();
+  const folderNameInvalid =
+    !trimmedFolderName ||
+    trimmedFolderName === "." ||
+    trimmedFolderName === ".." ||
+    trimmedFolderName.includes("/") ||
+    trimmedFolderName.includes("\\");
   const trimmedRenameName = renameName.trim();
   const renameNameInvalid =
     !trimmedRenameName ||
@@ -291,6 +303,7 @@ export function WorkspacePane({
         : t("workspace.actions.deleteFolderBody", { name: deleteState.entry.name })
       : t("workspace.actions.deleteBody", { name: deleteState.entry.name })
     : "";
+  const createFolderLocation = currentPath === "." ? t("common.root") : currentPath;
   const normalizedTransferDirectory =
     transferTargetDirectory.trim().replace(/\\/gu, "/").replace(/^\.\//u, "").replace(/\/+$/u, "") || ".";
   const transferTargetPath =
@@ -318,9 +331,19 @@ export function WorkspacePane({
     setIsDropActive(false);
   }, [activePanel, active, selectedRootId]);
 
+  function openCreateFolderDialog() {
+    setOperationError(null);
+    setRenameEntry(null);
+    setDeleteState(null);
+    setTransferState(null);
+    setCreateFolderOpen(true);
+    setFolderName("");
+  }
+
   function openRenameDialog(event: MouseEvent<HTMLButtonElement>, entry: FileEntry) {
     event.stopPropagation();
     setOperationError(null);
+    setCreateFolderOpen(false);
     setDeleteState(null);
     setRenameEntry(entry);
     setRenameName(entry.name);
@@ -329,6 +352,7 @@ export function WorkspacePane({
   function openDeleteDialog(event: MouseEvent<HTMLButtonElement>, entry: FileEntry) {
     event.stopPropagation();
     setOperationError(null);
+    setCreateFolderOpen(false);
     setRenameEntry(null);
     setDeleteState({ entry, step: "initial" });
   }
@@ -336,6 +360,7 @@ export function WorkspacePane({
   function openTransferDialog(event: MouseEvent<HTMLButtonElement>, entry: FileEntry, operation: "move" | "copy") {
     event.stopPropagation();
     setOperationError(null);
+    setCreateFolderOpen(false);
     setRenameEntry(null);
     setDeleteState(null);
     setTransferState({ entry, operation });
@@ -346,6 +371,8 @@ export function WorkspacePane({
     if (operationSubmitting) {
       return;
     }
+    setCreateFolderOpen(false);
+    setFolderName("");
     setRenameEntry(null);
     setDeleteState(null);
     setTransferState(null);
@@ -453,6 +480,25 @@ export function WorkspacePane({
         await onUploadSources(sources);
       }
     })();
+  }
+
+  async function submitCreateFolder(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!createFolderOpen || folderNameInvalid || operationSubmitting) {
+      return;
+    }
+
+    setOperationSubmitting(true);
+    setOperationError(null);
+    try {
+      await onRequestCreateFolder(trimmedFolderName);
+      setCreateFolderOpen(false);
+      setFolderName("");
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setOperationSubmitting(false);
+    }
   }
 
   async function submitRename(event: FormEvent<HTMLFormElement>) {
@@ -573,6 +619,16 @@ export function WorkspacePane({
                     aria-label={t("common.actions.refresh")}
                   >
                     <RefreshCw aria-hidden="true" size={18} />
+                  </button>
+                  <button
+                    className="icon-button files-header-button"
+                    type="button"
+                    onClick={openCreateFolderDialog}
+                    disabled={!selectedRootId || !sessionId}
+                    title={sessionId ? t("workspace.actions.newFolder") : t("workspace.actions.noSession")}
+                    aria-label={t("workspace.actions.newFolder")}
+                  >
+                    <FolderPlus aria-hidden="true" size={18} />
                   </button>
                   <button
                     className="icon-button files-header-button"
@@ -911,6 +967,51 @@ export function WorkspacePane({
           })}
         </nav>
       </div>
+
+      {createFolderOpen ? (
+        <div className="file-action-backdrop" role="presentation">
+          <form
+            className="file-action-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="file-create-folder-title"
+            onSubmit={(event) => void submitCreateFolder(event)}
+          >
+            <header>
+              <span className="eyebrow">{t("workspace.actions.newFolder")}</span>
+              <h2 id="file-create-folder-title">{createFolderLocation}</h2>
+            </header>
+
+            <label className="file-action-field">
+              <span>{t("workspace.actions.folderName")}</span>
+              <input
+                autoFocus
+                value={folderName}
+                onChange={(event) => setFolderName(event.target.value)}
+                aria-describedby={operationError ? "file-action-error" : "file-create-folder-hint"}
+              />
+            </label>
+
+            <p id="file-create-folder-hint" className="file-action-hint">
+              {t("workspace.actions.createFolderHint")}
+            </p>
+            {operationError ? (
+              <p id="file-action-error" className="file-action-error" role="alert">
+                {operationError}
+              </p>
+            ) : null}
+
+            <footer>
+              <button type="button" className="secondary-button" onClick={closeActionDialog} disabled={operationSubmitting}>
+                {t("common.actions.cancel")}
+              </button>
+              <button type="submit" className="primary-button" disabled={operationSubmitting || folderNameInvalid}>
+                {operationSubmitting ? t("common.actions.saving") : t("workspace.actions.requestCreateFolder")}
+              </button>
+            </footer>
+          </form>
+        </div>
+      ) : null}
 
       {renameEntry ? (
         <div className="file-action-backdrop" role="presentation">

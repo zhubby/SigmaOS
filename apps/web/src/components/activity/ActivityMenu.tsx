@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Clock3, FolderUp, LoaderCircle, RotateCcw, Square, Upload, X } from "lucide-react";
+import { Check, Clock3, FolderPlus, FolderUp, LoaderCircle, RotateCcw, Square, Upload, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { FileOperation } from "../../api.js";
 import { formatBytes } from "../../i18n/format.js";
@@ -230,18 +230,24 @@ export function ActivityMenu({
                   operation.status === "applied" &&
                   operation.metadata.reversible !== false &&
                   operation.metadata.rollbackAction !== true;
-                const OperationIcon = operation.operation === "upload" ? Upload : Square;
-                const title = operation.operation === "upload" ? t("workspace.uploadCompleted") : `${operation.operation} ${operation.status}`;
+                const OperationIcon = operation.operation === "upload" ? Upload : operation.operation === "mkdir" ? FolderPlus : Square;
+                const title =
+                  operation.operation === "upload"
+                    ? t("workspace.uploadCompleted")
+                    : operation.operation === "mkdir"
+                      ? `${t("workspace.actions.newFolder")} ${operation.status}`
+                      : `${operation.operation} ${operation.status}`;
+                const pathDetail = operation.sourcePath ?? operation.targetPath ?? t("common.dash");
                 return (
                   <li key={operation.id}>
-                    <OperationIcon aria-hidden="true" size={operation.operation === "upload" ? 14 : 8} />
+                    <OperationIcon aria-hidden="true" size={operation.operation === "upload" || operation.operation === "mkdir" ? 14 : 8} />
                     <span>
                       <strong>
                         {title}
                       </strong>
                       <small>
-                        {operation.sourcePath ?? t("common.dash")}
-                        {operation.targetPath ? ` -> ${operation.targetPath}` : ""}
+                        {pathDetail}
+                        {operation.sourcePath && operation.targetPath ? ` -> ${operation.targetPath}` : ""}
                       </small>
                     </span>
                     {canRollback ? (

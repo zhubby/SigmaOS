@@ -1708,6 +1708,49 @@ describe("API server", () => {
     await server.close();
   });
 
+  it("creates approval-gated folder proposals without changing files", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const server = await buildServer({ config: testConfig(tempDir), db });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/files/proposals",
+      payload: {
+        sessionId: session.id,
+        rootId: "local",
+        operation: "mkdir",
+        targetPath: "projects"
+      }
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({
+      job: {
+        sessionId: session.id,
+        status: "waiting_approval"
+      },
+      approval: {
+        sessionId: session.id,
+        kind: "file_operation",
+        status: "pending",
+        proposal: [
+          {
+            operation: "mkdir",
+            rootId: "local",
+            targetPath: "projects",
+            risk: "low",
+            reversible: true
+          }
+        ]
+      }
+    });
+    await expect(stat(path.join(rootDir, "projects"))).rejects.toThrow();
+    const approval = getApproval(db, response.json().approval.id);
+    expect(approval?.status).toBe("pending");
+    expect(getJob(db, response.json().job.id)?.status).toBe("waiting_approval");
+    await server.close();
+  });
+
   it("creates approval-gated rename proposals without changing files", async () => {
     const session = createSession(db, { rootId: "local" });
     const server = await buildServer({ config: testConfig(tempDir), db });
