@@ -93,7 +93,9 @@ export function splitWorkspaceMessagePaths(text: string, rootPath: string): Mess
 
     const quote = pathStart > 0 && QUOTE_CHARACTERS.has(text[pathStart - 1] ?? "") ? text[pathStart - 1] : null;
     const quotedEnd = quote ? text.indexOf(quote, pathStart) : -1;
-    let pathEnd = quotedEnd >= 0 ? quotedEnd : unquotedPathEnd(text, pathStart);
+    const lineStart = text.lastIndexOf("\n", pathStart - 1) + 1;
+    const isStandaloneLinePath = text.slice(lineStart, pathStart).trim().length === 0;
+    let pathEnd = quotedEnd >= 0 ? quotedEnd : isStandaloneLinePath ? unquotedLineEnd(text, pathStart) : unquotedPathEnd(text, pathStart);
     if (quotedEnd < 0) {
       const candidate = text.slice(pathStart, pathEnd);
       pathEnd -= candidate.length - candidate.replace(TRAILING_SENTENCE_PUNCTUATION, "").length;
@@ -244,4 +246,10 @@ function unquotedPathEnd(text: string, pathStart: number): number {
     pathEnd += 1;
   }
   return pathEnd;
+}
+
+function unquotedLineEnd(text: string, pathStart: number): number {
+  const remainingText = text.slice(pathStart);
+  const lineBreakOffset = remainingText.search(/\r?\n/u);
+  return lineBreakOffset < 0 ? text.length : pathStart + lineBreakOffset;
 }

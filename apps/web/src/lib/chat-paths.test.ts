@@ -76,6 +76,20 @@ describe("splitWorkspaceMessagePaths", () => {
     ]);
   });
 
+  it("keeps a standalone path with spaces together until the line break", () => {
+    expect(
+      splitWorkspaceMessagePaths("/srv/nas/My Files/report (1).pdf\nPlease inspect this file", "/srv/nas")
+    ).toEqual([
+      {
+        kind: "path",
+        value: "/srv/nas/My Files/report (1).pdf",
+        displayPath: "/srv/nas/My Files/report (1).pdf",
+        workspacePath: "My Files/report (1).pdf"
+      },
+      { kind: "text", value: "\nPlease inspect this file" }
+    ]);
+  });
+
   it("leaves external and root-relative paths as text", () => {
     const text = "See /srv/other/file.txt and docs/readme.md";
     expect(splitWorkspaceMessagePaths(text, "/srv/nas")).toEqual([{ kind: "text", value: text }]);

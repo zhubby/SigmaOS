@@ -138,6 +138,21 @@ describe("ChatMessageContent", () => {
     expect(html).not.toContain('data-workspace-path="/srv/other/private.txt"');
   });
 
+  it("renders a standalone user path with spaces as one button", () => {
+    const html = renderToStaticMarkup(
+      createElement(ChatMessageContent, {
+        role: "user",
+        content: "/srv/nas/My Files/report (1).pdf\n这个文件是什么内容",
+        rootPath: "/srv/nas",
+        onOpenWorkspacePath: () => undefined
+      })
+    );
+
+    expect(html).toContain('data-workspace-path="My Files/report (1).pdf"');
+    expect(html).toContain("/srv/nas/My Files/report (1).pdf");
+    expect(html).toContain("这个文件是什么内容");
+  });
+
   it("renders assistant text, inline code, and Markdown link paths as buttons", () => {
     const html = renderToStaticMarkup(
       createElement(ChatMessageContent, {
