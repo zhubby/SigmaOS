@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { AppStatus } from "../../config/status.js";
-import { ChatMessageContent, composerFeedbackState, shouldSubmitComposerMessage } from "./ChatPane.js";
+import { ChatMessageContent, composeAgentMessage, composerFeedbackState, shouldSubmitComposerMessage } from "./ChatPane.js";
 
 type ComposerKeyDownEvent = Parameters<typeof shouldSubmitComposerMessage>[0];
 
@@ -25,6 +25,14 @@ describe("shouldSubmitComposerMessage", () => {
 
   it("ignores enter while an IME composition is active", () => {
     expect(shouldSubmitComposerMessage(composerEvent("Enter", false, true))).toBe(false);
+  });
+});
+
+describe("composeAgentMessage", () => {
+  it("keeps an attached path as one message-level block", () => {
+    expect(composeAgentMessage("Inspect this", "/srv/nas/docs/readme.md")).toBe("/srv/nas/docs/readme.md\nInspect this");
+    expect(composeAgentMessage("", "/srv/nas/docs/readme.md")).toBe("/srv/nas/docs/readme.md");
+    expect(composeAgentMessage("Inspect this", null)).toBe("Inspect this");
   });
 });
 

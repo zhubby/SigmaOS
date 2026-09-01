@@ -1,4 +1,4 @@
-import { Fragment, FormEvent, KeyboardEvent, useEffect, useState, type ReactNode, type RefObject } from "react";
+import { Fragment, FormEvent, KeyboardEvent, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import ReactMarkdown from "react-markdown";
 import { useTranslation } from "react-i18next";
 import {
@@ -9,6 +9,7 @@ import {
   FileCog,
   LoaderCircle,
   MessageSquare,
+  MessageSquarePlus,
   Plus,
   Send,
   Settings,
@@ -57,6 +58,10 @@ type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 export function shouldSubmitComposerMessage(event: ComposerKeyDownEvent): boolean {
   return event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing;
+}
+
+export function composeAgentMessage(message: string, composerPath: string | null): string {
+  return [composerPath, message.trim()].filter(Boolean).join("\n");
 }
 
 export function composerFeedbackState({
@@ -157,6 +162,7 @@ export function ChatPane({
   transcript,
   activeApprovals,
   message,
+  composerPath,
   status,
   locale,
   modelSettings,
@@ -172,6 +178,7 @@ export function ChatPane({
   onReject,
   onSubmitMessage,
   onMessageChange,
+  onClearComposerPath,
   onCancelActiveJob,
   onOpenWorkspacePath
 }: {
@@ -183,6 +190,7 @@ export function ChatPane({
   transcript: TranscriptMessage[];
   activeApprovals: PendingApproval[];
   message: string;
+  composerPath: string | null;
   status: AppStatus;
   locale: SupportedLocale;
   modelSettings: ModelProviderSettings | null;
@@ -198,12 +206,14 @@ export function ChatPane({
   onReject: (approvalId: string) => void;
   onSubmitMessage: (event: FormEvent<HTMLFormElement>) => void;
   onMessageChange: (message: string) => void;
+  onClearComposerPath: () => void;
   onCancelActiveJob: () => void;
   onOpenWorkspacePath: (path: string) => void;
 }) {
   const { t } = useTranslation();
   const translate = t as Translate;
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const rootAgentTitle = t("chat.rootAgent");
   const hasConversationContent = transcript.length > 0 || activeApprovals.length > 0;
   const activeSessionTitle = activeSessionSummary ? sessionTitle(activeSessionSummary, rootAgentTitle) : t("chat.agent");
@@ -218,7 +228,18 @@ export function ChatPane({
     ? `${providerLabel(modelSettings.providerName, t)}/${modelSettings.model || t("settings.modelProvider.notSet")}`
     : t("settings.modelProvider.notLoaded");
 
+  useEffect(() => {
+    if (composerPath) {
+      composerTextareaRef.current?.focus();
+    }
+  }, [composerPath]);
+
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (composerPath && !message && (event.key === "Backspace" || event.key === "Delete")) {
+      event.preventDefault();
+      onClearComposerPath();
+      return;
+    }
     if (!shouldSubmitComposerMessage(event)) {
       return;
     }
@@ -394,7 +415,25 @@ export function ChatPane({
         </div>
 
         <form className="composer" onSubmit={onSubmitMessage} aria-busy={messageSubmitting}>
+          {composerPath ? (
+            <div className="composer-path-block" role="group" aria-label={t("workspace.actions.sendPathToAgent")}>
+              <div className="composer-path-content">
+                <MessageSquarePlus aria-hidden="true" size={15} />
+                <code title={composerPath}>{composerPath}</code>
+              </div>
+              <button
+                type="button"
+                className="composer-path-remove"
+                onClick={onClearComposerPath}
+                title={t("common.actions.removePath")}
+                aria-label={t("common.actions.removePath")}
+              >
+                <X aria-hidden="true" size={14} />
+              </button>
+            </div>
+          ) : null}
           <textarea
+            ref={composerTextareaRef}
             value={message}
             onChange={(event) => onMessageChange(event.target.value)}
             onKeyDown={handleComposerKeyDown}
@@ -421,7 +460,7 @@ export function ChatPane({
                 <CircleStop aria-hidden="true" size={16} />
                 <span>{t("common.actions.stop")}</span>
               </button>
-              <button className="primary-button" type="submit" disabled={!hasSession || !message.trim() || messageSubmitting}>
+              <button className="primary-button" type="submit" disabled={!hasSession || (!message.trim() && !composerPath) || messageSubmitting}>
                 <ComposerIcon aria-hidden="true" className={composerIconClass} size={16} />
                 <span>{t("common.actions.send")}</span>
               </button>

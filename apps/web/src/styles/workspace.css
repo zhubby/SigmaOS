@@ -361,7 +361,7 @@
 
 .file-row {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) 92px 90px 132px 134px;
+  grid-template-columns: minmax(150px, 1fr) 166px 90px 132px;
   align-items: center;
   width: 100%;
   min-height: 42px;
@@ -479,10 +479,10 @@
 }
 
 .workspace-grid.has-preview:not(.is-preview-collapsed) .file-row {
-  grid-template-columns: minmax(0, 1fr) 78px 74px 134px;
+  grid-template-columns: minmax(0, 1fr) 166px 132px;
 }
 
-.workspace-grid.has-preview:not(.is-preview-collapsed) .file-row > span:nth-child(4) {
+.workspace-grid.has-preview:not(.is-preview-collapsed) .file-row > span:nth-child(3) {
   display: none;
 }
 
@@ -491,7 +491,6 @@
     grid-template-columns: minmax(0, 1fr) 134px;
   }
 
-  .workspace-grid.has-preview:not(.is-preview-collapsed) .file-row > span:nth-child(2),
   .workspace-grid.has-preview:not(.is-preview-collapsed) .file-row > span:nth-child(3),
   .workspace-grid.has-preview:not(.is-preview-collapsed) .file-row > span:nth-child(4) {
     display: none;
@@ -650,10 +649,10 @@
   display: flex;
   justify-content: flex-end;
   gap: 4px;
-  opacity: 0;
+  opacity: 0.82;
   overflow: visible;
-  pointer-events: none;
-  transform: translateX(4px);
+  pointer-events: auto;
+  transform: translateX(0);
   transition:
     opacity 140ms ease,
     transform 140ms ease;
@@ -663,7 +662,6 @@
 .file-row:not(.file-row-head):hover .file-row-actions,
 .file-row:focus-within .file-row-actions {
   opacity: 1;
-  pointer-events: auto;
   transform: translateX(0);
 }
 
@@ -689,6 +687,18 @@
   border-color: rgb(255 255 255 / 14%);
   background: var(--surface-hover);
   transform: translateY(-1px);
+}
+
+.file-action-button-send {
+  color: var(--accent-soft-text);
+  border-color: rgb(88 101 242 / 24%);
+  background: var(--accent-soft-bg);
+}
+
+.file-action-button-send:hover:not(:disabled) {
+  color: white;
+  border-color: rgb(142 161 255 / 52%);
+  background: var(--accent);
 }
 
 .file-action-button.is-danger {

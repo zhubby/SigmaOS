@@ -212,6 +212,18 @@
   border-color: var(--approval-border-hover);
 }
 
+:root[data-theme="light"] .file-action-button-send {
+  color: var(--accent);
+  border-color: rgb(67 83 216 / 24%);
+  background: var(--accent-soft-bg);
+}
+
+:root[data-theme="light"] .file-action-button-send:hover:not(:disabled) {
+  color: white;
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
 :root[data-theme="light"] .session-delete-backdrop,
 :root[data-theme="light"] .file-action-backdrop {
   background: var(--modal-backdrop);

@@ -132,6 +132,15 @@ export function workspaceParentPath(workspacePath: string): string {
   return segments.slice(0, -1).join("/") || ".";
 }
 
+export function workspaceAbsolutePath(rootPath: string, workspacePath: string): string {
+  const normalizedRoot = rootPath.replace(/\\/gu, "/").replace(/\/+$/u, "") || "/";
+  const normalizedWorkspacePath = workspacePath.replace(/\\/gu, "/").replace(/^\/+|\/+$/gu, "");
+  if (!normalizedWorkspacePath || normalizedWorkspacePath === ".") {
+    return normalizedRoot;
+  }
+  return normalizedRoot === "/" ? `/${normalizedWorkspacePath}` : `${normalizedRoot}/${normalizedWorkspacePath}`;
+}
+
 export function remarkWorkspacePaths({ rootPath }: RemarkWorkspacePathsOptions) {
   return (tree: MarkdownNode) => transformMarkdownTextNodes(tree, rootPath);
 }

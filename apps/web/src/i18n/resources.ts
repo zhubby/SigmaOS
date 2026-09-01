@@ -21,7 +21,8 @@ export const en = {
       homeDirectory: "Home directory",
       newAgent: "New agent",
       systemSettings: "System settings",
-      resizePanes: "Resize panes"
+      resizePanes: "Resize panes",
+      removePath: "Remove attached path"
     },
     states: {
       configured: "Configured",
@@ -218,6 +219,8 @@ export const en = {
       requestCopy: "Request copy",
       extract: "Extract",
       extractEntry: "Extract {{name}}",
+      sendPathToAgent: "Send path to Agent",
+      sendPathToAgentEntry: "Send {{name}} path to Agent",
       deleteTitle: "Delete this file?",
       deleteBody: "{{name}} will be moved to SigmaOS trash after approval.",
       deleteFolderTitle: "Delete this folder?",
@@ -1066,7 +1069,8 @@ export const zhCN = {
       homeDirectory: "主目录",
       newAgent: "新建 agent",
       systemSettings: "系统设置",
-      resizePanes: "调整面板宽度"
+      resizePanes: "调整面板宽度",
+      removePath: "移除已附加路径"
     },
     states: {
       configured: "已配置",
@@ -1263,6 +1267,8 @@ export const zhCN = {
       requestCopy: "请求拷贝",
       extract: "解压",
       extractEntry: "解压 {{name}}",
+      sendPathToAgent: "发送路径到 Agent",
+      sendPathToAgentEntry: "发送 {{name}} 路径到 Agent",
       deleteTitle: "删除这个文件？",
       deleteBody: "{{name}} 会在审批通过后移动到 SigmaOS 回收站。",
       deleteFolderTitle: "删除这个文件夹？",

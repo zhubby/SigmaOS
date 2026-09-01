@@ -13,6 +13,7 @@ import {
   GitBranch,
   HardDrive,
   Home,
+  MessageSquarePlus,
   MonitorCog,
   Network,
   PanelRightClose,
@@ -28,10 +29,11 @@ import {
   type LucideIcon
 } from "lucide-react";
 import type { DockerOperation, FileEntry, FileListing, FileMeta, FileOperation, NasRoot, PendingApproval, TextPreview } from "../../api.js";
-import { describeFileVisual, FILE_TYPE_LABELS, isHiddenName } from "../../file-type-utils.js";
-import { formatBytes, formatDate, formatLocaleNumber } from "../../i18n/format.js";
+import { describeFileVisual, isHiddenName } from "../../file-type-utils.js";
+import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
 import { sortEntries, type FileSortDirection, type FileSortKey, type FileSortState } from "../../lib/file-listing-sort.js";
+import { formatFileModifiedAt } from "../../lib/format.js";
 import { ActivityMenu } from "../activity/ActivityMenu.js";
 import { CustomSelect } from "../common/CustomSelect.js";
 import { FileTypeIcon } from "../file/FileTypeIcon.js";
@@ -157,6 +159,7 @@ export function WorkspacePane({
   onGoToBreadcrumb,
   onOpenEntry,
   onOpenWorkspacePath,
+  onInsertWorkspacePath,
   onOpenEditor,
   onRequestCreateFolder,
   onRequestRename,
@@ -208,6 +211,7 @@ export function WorkspacePane({
   onGoToBreadcrumb: (index: number) => void;
   onOpenEntry: (entry: FileEntry) => void;
   onOpenWorkspacePath: (path: string) => void;
+  onInsertWorkspacePath: (path: string) => void;
   onOpenEditor: (meta: FileMeta) => void;
   onRequestCreateFolder: (folderName: string) => Promise<void>;
   onRequestRename: (entry: FileEntry, targetName: string) => Promise<void>;
@@ -763,7 +767,7 @@ export function WorkspacePane({
                       <span role="columnheader" aria-sort={fileSortAria(fileSort, "name")}>
                         {t("workspace.table.name")}
                       </span>
-                      <span role="columnheader">{t("workspace.table.type")}</span>
+                      <span role="columnheader" aria-label={t("workspace.table.actions")}>{t("workspace.table.actions")}</span>
                       <span className="file-column-sort" role="columnheader" aria-sort={fileSortAria(fileSort, "sizeBytes")}>
                         <button
                           type="button"
@@ -788,7 +792,6 @@ export function WorkspacePane({
                           {fileSort.key === "modifiedAt" ? <SortDirectionIcon direction={fileSort.direction} /> : null}
                         </button>
                       </span>
-                      <span role="columnheader" aria-label={t("workspace.table.actions")} />
                     </div>
                     {sortedEntries.map((entry) => {
                       const fileVisual = describeFileVisual(entry);
@@ -829,12 +832,20 @@ export function WorkspacePane({
                               </span>
                             ) : null}
                           </span>
-                          <span className={`file-type-label file-type-${fileVisual.kind}`} role="cell">
-                            {FILE_TYPE_LABELS[fileVisual.kind]}
-                          </span>
-                          <span role="cell">{displaySize}</span>
-                          <span role="cell">{entry.modifiedAt === EPOCH_DATE ? t("common.dash") : formatDate(entry.modifiedAt, locale)}</span>
                           <span className="file-row-actions" role="cell" aria-label={t("workspace.table.actions")}>
+                            <button
+                              type="button"
+                              className="file-action-button file-action-button-send"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onInsertWorkspacePath(entry.path);
+                              }}
+                              disabled={!entry.isSafe}
+                              title={t("workspace.actions.sendPathToAgent")}
+                              aria-label={t("workspace.actions.sendPathToAgentEntry", { name: entry.name })}
+                            >
+                              <MessageSquarePlus aria-hidden="true" size={14} />
+                            </button>
                             <button
                               type="button"
                               className="file-action-button"
@@ -875,6 +886,10 @@ export function WorkspacePane({
                             >
                               <Trash2 aria-hidden="true" size={14} />
                             </button>
+                          </span>
+                          <span role="cell">{displaySize}</span>
+                          <span role="cell">
+                            {entry.modifiedAt === EPOCH_DATE ? t("common.dash") : formatFileModifiedAt(entry.modifiedAt)}
                           </span>
                         </div>
                       );

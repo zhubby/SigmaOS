@@ -4,6 +4,7 @@ import {
   resolveWorkspaceMessageLink,
   resolveWorkspaceMessagePath,
   splitWorkspaceMessagePaths,
+  workspaceAbsolutePath,
   workspaceParentPath
 } from "./chat-paths.js";
 
@@ -115,5 +116,13 @@ describe("workspaceParentPath", () => {
   it("returns a root-relative parent directory", () => {
     expect(workspaceParentPath("docs/reference/file.md")).toBe("docs/reference");
     expect(workspaceParentPath("file.md")).toBe(".");
+  });
+});
+
+describe("workspaceAbsolutePath", () => {
+  it("joins a root-relative path to an absolute NAS root", () => {
+    expect(workspaceAbsolutePath("/srv/nas", "docs/readme.md")).toBe("/srv/nas/docs/readme.md");
+    expect(workspaceAbsolutePath("/", "docs/readme.md")).toBe("/docs/readme.md");
+    expect(workspaceAbsolutePath("/srv/nas/", ".")).toBe("/srv/nas");
   });
 });

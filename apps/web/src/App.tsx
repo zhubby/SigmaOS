@@ -50,7 +50,7 @@ import {
   type TextPreview,
   type TranscriptMessage
 } from "./api.js";
-import { ChatPane } from "./components/chat/ChatPane.js";
+import { ChatPane, composeAgentMessage } from "./components/chat/ChatPane.js";
 import { FileEditorModal } from "./components/editor/FileEditorModal.js";
 import { SettingsModal } from "./components/settings/SettingsModal.js";
 import { WorkspacePane } from "./components/workspace/WorkspacePane.js";
@@ -72,7 +72,7 @@ import {
   type LanguagePreference
 } from "./i18n/locale.js";
 import { eventToTranscriptMessage, getEventJobId } from "./lib/events.js";
-import { workspaceParentPath } from "./lib/chat-paths.js";
+import { workspaceAbsolutePath, workspaceParentPath } from "./lib/chat-paths.js";
 import {
   codeFontFamilyValue,
   normalizeCodeFontSettings,
@@ -135,6 +135,7 @@ export function App() {
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [editorMeta, setEditorMeta] = useState<FileMeta | null>(null);
   const [message, setMessage] = useState("");
+  const [composerPath, setComposerPath] = useState<string | null>(null);
   const [messageSubmitting, setMessageSubmitting] = useState(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -282,6 +283,7 @@ export function App() {
         git: loaded.git
       });
       setTranscript(nextTranscript);
+      setComposerPath(null);
       setSelectedFilePath(null);
       setPreviewMeta(null);
       setTextPreview(null);
@@ -606,6 +608,7 @@ export function App() {
       seenEvents.current.clear();
       setSession(nextSession);
       setActiveSessionId(nextSession.id);
+      setComposerPath(null);
       const nextTranscript = await getTranscript(nextSession.id);
       if (!isCurrentSessionViewRequest(sessionRequestId)) {
         return;
@@ -640,6 +643,7 @@ export function App() {
     seenEvents.current.clear();
     setSession(nextSession);
     setActiveSessionId(nextSession.id);
+    setComposerPath(null);
     setTranscript(nextTranscript);
     setStatus("ready");
     setMobileView("chat");
@@ -655,6 +659,7 @@ export function App() {
       return;
     }
     setTranscript(nextTranscript);
+    setComposerPath(null);
   }
 
   async function deleteActiveSession() {
@@ -672,6 +677,7 @@ export function App() {
       setSessions(nextSessions);
       setActiveJobId(null);
       setMessage("");
+      setComposerPath(null);
       await loadSessionIntoView(nextSession);
       await refreshWorkQueues();
       setStatus("ready");
@@ -755,11 +761,13 @@ export function App() {
 
   async function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!session || !message.trim() || messageSubmitting) {
+    const typedContent = message.trim();
+    const attachedPath = composerPath;
+    const content = composeAgentMessage(typedContent, attachedPath);
+    if (!session || !content || messageSubmitting) {
       return;
     }
 
-    const content = message.trim();
     const now = new Date().toISOString();
     const optimisticMessage = {
       id: `local:${now}`,
@@ -770,6 +778,7 @@ export function App() {
 
     setMessageSubmitting(true);
     setMessage("");
+    setComposerPath(null);
     setError(null);
     setTranscript((current) => [...current, optimisticMessage]);
     setStatus("queued");
@@ -781,7 +790,8 @@ export function App() {
       void reloadSessions();
     } catch (nextError) {
       setTranscript((current) => current.filter((item) => item.id !== optimisticMessage.id));
-      setMessage((current) => (current.length > 0 ? current : content));
+      setMessage((current) => (current.length > 0 ? current : typedContent));
+      setComposerPath((current) => current ?? attachedPath);
       setError(toErrorMessage(nextError));
       setStatus("error");
     } finally {
@@ -1229,6 +1239,7 @@ export function App() {
     beginSessionViewRequest();
     activeSearchQueryRef.current = "";
     setSearchQuery("");
+    setComposerPath(null);
     setSelectedRootId(rootId);
     setCurrentPath(".");
     setGitStatus(null);
@@ -1274,6 +1285,14 @@ export function App() {
       setPreviewCollapsed(false);
       setMobileView("workspace");
     }
+  }
+
+  function insertWorkspacePathInComposer(relativePath: string) {
+    if (!selectedRoot) {
+      return;
+    }
+    setComposerPath(workspaceAbsolutePath(selectedRoot.path, relativePath));
+    setMobileView("chat");
   }
 
   async function openWorkspacePath(pathname: string) {
@@ -1386,6 +1405,7 @@ export function App() {
         transcript={transcript}
         activeApprovals={activeApprovals}
         message={message}
+        composerPath={composerPath}
         status={status}
         locale={resolvedLocale}
         modelSettings={modelSettings}
@@ -1401,6 +1421,7 @@ export function App() {
         onReject={(approvalId) => void handleReject(approvalId)}
         onSubmitMessage={(event) => void submitMessage(event)}
         onMessageChange={setMessage}
+        onClearComposerPath={() => setComposerPath(null)}
         onCancelActiveJob={() => void cancelActiveJob()}
         onOpenWorkspacePath={(path) => void openWorkspacePath(path)}
       />
@@ -1475,6 +1496,7 @@ export function App() {
         onGoToBreadcrumb={goToBreadcrumb}
         onOpenEntry={openEntry}
         onOpenWorkspacePath={(path) => void openWorkspacePath(path)}
+        onInsertWorkspacePath={(path) => insertWorkspacePathInComposer(path)}
         onOpenEditor={setEditorMeta}
         onRequestCreateFolder={(folderName) => requestFolderCreate(folderName)}
         onRequestRename={(entry, targetName) => requestFileRename(entry, targetName)}

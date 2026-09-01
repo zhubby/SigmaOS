@@ -149,11 +149,7 @@
 
 @media (max-width: 1580px) {
   .file-row {
-    grid-template-columns: minmax(150px, 1fr) 92px 90px 124px;
-  }
-
-  .file-row > span:nth-child(4) {
-    display: none;
+    grid-template-columns: minmax(150px, 1fr) 166px 90px 124px;
   }
 }
 
@@ -307,11 +303,7 @@
   }
 
   .file-row {
-    grid-template-columns: minmax(150px, 1fr) 82px 84px 124px;
-  }
-
-  .file-row > span:nth-child(4) {
-    display: none;
+    grid-template-columns: minmax(150px, 1fr) 158px 84px 124px;
   }
 
   .management-header {
@@ -485,7 +477,7 @@
   }
 
   .file-row {
-    grid-template-columns: minmax(120px, 1fr) 78px 124px;
+    grid-template-columns: minmax(120px, 1fr) 142px;
   }
 
   .file-row > span:nth-child(3),
@@ -509,6 +501,15 @@
 
   .workspace-panel-tab span {
     display: none;
+  }
+
+  .file-row-actions {
+    gap: 1px;
+  }
+
+  .file-action-button {
+    width: 22px;
+    height: 22px;
   }
 
   .management-title-block h2 {
