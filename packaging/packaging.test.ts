@@ -45,6 +45,8 @@ describe("native packaging artifacts", () => {
     expect(control).toContain("samba");
     expect(control).toContain("nfs-kernel-server");
     expect(control).toContain("minidlna");
+    expect(control).toContain("unzip");
+    expect(control).toContain("unrar-free");
   });
 
   it("ships first-boot and appliance image scaffolding", async () => {
@@ -64,6 +66,8 @@ describe("native packaging artifacts", () => {
     expect(buildImage).toMatch(/--include=.*(^|,)git(,|\\|\s)/s);
     expect(buildImage).toMatch(/--include=.*(^|,)samba(,|\\|\s)/s);
     expect(manifest).toContain("tesseract-ocr");
+    expect(manifest).toContain("unzip");
+    expect(manifest).toContain("unrar-free");
     expect(manifest).toContain("sigmaos-maintenance.timer");
   });
 

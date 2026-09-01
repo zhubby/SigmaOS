@@ -245,6 +245,11 @@ export interface UploadFileResult {
   operation: FileOperation;
 }
 
+export interface ExtractFileResult {
+  operation: FileOperation;
+  targetPath: string;
+}
+
 export interface DockerProposalResult {
   message: AgentMessage;
   job: Job;
@@ -605,6 +610,18 @@ export async function proposeFileOperation(input: {
   });
   await ensureOk(response);
   return (await response.json()) as FileProposalResult;
+}
+
+export async function extractFile(input: { rootId: string; path: string }): Promise<ExtractFileResult> {
+  const response = await fetch("/api/files/extract", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(input)
+  });
+  await ensureOk(response);
+  return (await response.json()) as ExtractFileResult;
 }
 
 export async function uploadFile(input: {

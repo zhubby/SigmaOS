@@ -1,8 +1,50 @@
 import { randomUUID } from "node:crypto";
-import { cp, lstat, mkdir, rename, stat } from "node:fs/promises";
+import { createWriteStream } from "node:fs";
+import { cp, lstat, mkdir, readdir, rename, rm, stat } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
+import { Transform } from "node:stream";
 import type { FileOperationProposal, FileOperationRecord, NasRootRecord } from "@sigmaos/shared";
 import { isPathInside, resolveSafeExistingPath, toRootRelative, PathSafetyError } from "./path-safety.js";
+
+const MAX_ARCHIVE_ENTRIES = 10_000;
+const MAX_EXTRACTED_BYTES = 2 * 1024 * 1024 * 1024;
+
+export type ArchiveKind = "zip" | "tar" | "gzip" | "rar";
+
+export function archiveKindForPath(filePath: string): ArchiveKind | null {
+  const fileName = path.basename(filePath).toLocaleLowerCase();
+  if (fileName.endsWith(".tar.gz") || fileName.endsWith(".tgz")) {
+    return "tar";
+  }
+  if (fileName.endsWith(".zip")) {
+    return "zip";
+  }
+  if (fileName.endsWith(".tar")) {
+    return "tar";
+  }
+  if (fileName.endsWith(".gz")) {
+    return "gzip";
+  }
+  if (fileName.endsWith(".rar")) {
+    return "rar";
+  }
+  return null;
+}
+
+export function defaultExtractionTarget(filePath: string, kind = archiveKindForPath(filePath)): string | null {
+  if (!kind) {
+    return null;
+  }
+  const fileName = path.basename(filePath);
+  const stem = kind === "tar" && fileName.toLocaleLowerCase().endsWith(".tar.gz")
+    ? fileName.slice(0, -7)
+    : kind === "tar" && fileName.toLocaleLowerCase().endsWith(".tgz")
+      ? fileName.slice(0, -4)
+      : fileName.slice(0, -path.extname(fileName).length);
+  return path.join(path.dirname(filePath), stem || "extracted");
+}
 
 export interface AppliedMutation {
   proposal: FileOperationProposal;
@@ -39,6 +81,8 @@ export async function applyFileMutation(
       return applyTrash(root, proposal, trashRootPath);
     case "edit":
       return applyEditAuthorization(root, proposal);
+    case "extract":
+      return applyExtract(root, proposal);
     case "restore":
       throw new Error("Restore must use restoreTrashEntry with a persisted trash entry");
     case "tag":
@@ -109,6 +153,8 @@ export async function rollbackFileMutation(
       throw new Error("Trash rollback must restore the persisted trash entry");
     case "edit":
       throw new Error("Edit operations cannot be rolled back");
+    case "extract":
+      return rollbackByTrashingTarget(root, operation, trashRootPath);
     case "tag":
       return {
         operation: "tag",
@@ -282,6 +328,227 @@ async function applyTrash(
       absoluteTrashPath: trash.absoluteTrashPath
     }
   };
+}
+
+async function applyExtract(root: NasRootRecord, proposal: FileOperationProposal): Promise<AppliedMutation> {
+  if (!proposal.sourcePath || !proposal.targetPath) {
+    throw new Error("extract requires sourcePath and targetPath");
+  }
+
+  const kind = archiveKindForPath(proposal.sourcePath);
+  if (!kind) {
+    throw new Error("Unsupported archive format");
+  }
+  const source = await resolveSafeExistingPath(root.path, proposal.sourcePath);
+  const sourceLinkStat = await lstat(source.absolutePath);
+  if (sourceLinkStat.isSymbolicLink()) {
+    throw new Error("Refusing to extract through a symlink");
+  }
+  const sourceStat = await stat(source.realPath);
+  if (!sourceStat.isFile()) {
+    throw new Error("Archive source must be a file");
+  }
+
+  const target = await resolveSafeTargetPath(root.path, proposal.targetPath);
+  await assertNoSymlinkPathSegments(source.rootRealPath, path.dirname(target.absolutePath));
+  await assertTargetDoesNotExist(target.absolutePath);
+
+  if (kind === "gzip") {
+    await extractGzipFile(source.realPath, target.absolutePath);
+  } else {
+    await extractArchiveDirectory(kind, source.realPath, target.absolutePath);
+  }
+
+  return {
+    proposal,
+    sourcePath: source.relativePath,
+    targetPath: target.relativePath,
+    metadata: {
+      absoluteSourcePath: source.realPath,
+      absoluteTargetPath: target.absolutePath,
+      archiveKind: kind
+    }
+  };
+}
+
+async function extractArchiveDirectory(kind: ArchiveKind, sourcePath: string, targetPath: string): Promise<void> {
+  await mkdir(targetPath, { recursive: false });
+  try {
+    const entries = await listArchiveEntries(kind, sourcePath);
+    validateArchiveEntries(entries);
+    if (kind === "zip") {
+      await runCommand("unzip", ["-q", "-n", sourcePath, "-d", targetPath]);
+    } else if (kind === "tar") {
+      await runCommand("tar", ["-xkf", sourcePath, "-C", targetPath, "--no-same-owner", "--no-same-permissions"]);
+    } else {
+      try {
+        await runCommand("bsdtar", ["-xkf", sourcePath, "-C", targetPath, "--no-same-owner", "--no-same-permissions", "--safe-writes"]);
+      } catch (error) {
+        if (!isCommandNotFoundOrUnsupported(error)) {
+          throw error;
+        }
+        await runCommand("unrar", ["x", sourcePath, `${targetPath}${path.sep}`]);
+      }
+    }
+    await validateExtractedTree(targetPath);
+  } catch (error) {
+    await rm(targetPath, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+async function extractGzipFile(sourcePath: string, targetPath: string): Promise<void> {
+  const temporaryPath = `${targetPath}.${randomUUID()}.tmp`;
+  const output = createWriteStream(temporaryPath, { flags: "wx" });
+  let totalBytes = 0;
+  const limiter = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      totalBytes += chunk.length;
+      if (totalBytes > MAX_EXTRACTED_BYTES) {
+        callback(new Error("Extracted archive exceeds the size limit"));
+        return;
+      }
+      callback(null, chunk);
+    }
+  });
+  const child = spawn("gzip", ["-dc", sourcePath], { stdio: ["ignore", "pipe", "pipe"] });
+  const childExit = waitForChild(child);
+  let stderr = "";
+  child.stderr?.setEncoding("utf8");
+  child.stderr?.on("data", (chunk: string) => {
+    stderr += chunk;
+  });
+  try {
+    if (!child.stdout) {
+      throw new Error("Unable to start gzip extractor");
+    }
+    await pipeline(child.stdout, limiter, output);
+    const exitCode = await childExit;
+    if (exitCode !== 0) {
+      throw new Error(stderr.trim() || `gzip exited with code ${exitCode}`);
+    }
+    await rename(temporaryPath, targetPath);
+  } catch (error) {
+    child.kill();
+    await rm(temporaryPath, { force: true });
+    throw error;
+  }
+}
+
+async function listArchiveEntries(kind: ArchiveKind, sourcePath: string): Promise<string[]> {
+  const result = kind === "zip"
+    ? await runCommand("unzip", ["-Z1", sourcePath])
+    : kind === "tar"
+      ? await runCommand("tar", ["-tf", sourcePath])
+      : await listRarEntries(sourcePath);
+  return result.stdout.split(/\r?\n/u).filter(Boolean);
+}
+
+async function listRarEntries(sourcePath: string): Promise<{ stdout: string; stderr: string }> {
+  try {
+    return await runCommand("bsdtar", ["-tf", sourcePath]);
+  } catch (error) {
+    if (!isCommandNotFoundOrUnsupported(error)) {
+      throw error;
+    }
+    try {
+      return await runCommand("unrar", ["lb", sourcePath]);
+    } catch {
+      return await runCommand("unrar", ["l", sourcePath]);
+    }
+  }
+}
+
+function isCommandNotFoundOrUnsupported(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLocaleLowerCase() : String(error).toLocaleLowerCase();
+  return message.includes("enoent") || message.includes("not found") || message.includes("unrecognized archive") || message.includes("unsupported");
+}
+
+export function validateArchiveEntries(entries: string[]): void {
+  if (entries.length > MAX_ARCHIVE_ENTRIES) {
+    throw new Error(`Archive contains too many entries (limit ${MAX_ARCHIVE_ENTRIES})`);
+  }
+  for (const entry of entries) {
+    const normalized = entry.replaceAll("\\", "/");
+    if (!normalized || normalized.includes("\0") || path.posix.isAbsolute(normalized) || /^[a-z]:\//iu.test(normalized)) {
+      throw new Error("Archive contains an unsafe absolute path");
+    }
+    const segments = normalized.split("/").filter((segment) => segment.length > 0);
+    if (segments.some((segment) => segment === "..")) {
+      throw new Error("Archive contains a path traversal entry");
+    }
+  }
+}
+
+async function validateExtractedTree(rootPath: string): Promise<void> {
+  let entryCount = 0;
+  let totalBytes = 0;
+  const pending = [rootPath];
+  while (pending.length > 0) {
+    const currentPath = pending.pop();
+    if (!currentPath) {
+      continue;
+    }
+    const currentStat = await lstat(currentPath);
+    if (currentStat.isSymbolicLink()) {
+      throw new Error("Archives containing symbolic links are not supported");
+    }
+    if (!isPathInside(rootPath, currentPath)) {
+      throw new Error("Archive extraction escaped its destination");
+    }
+    entryCount += 1;
+    if (entryCount > MAX_ARCHIVE_ENTRIES) {
+      throw new Error(`Archive contains too many entries (limit ${MAX_ARCHIVE_ENTRIES})`);
+    }
+    if (currentStat.isFile()) {
+      totalBytes += currentStat.size;
+      if (totalBytes > MAX_EXTRACTED_BYTES) {
+        throw new Error("Extracted archive exceeds the size limit");
+      }
+    } else if (currentStat.isDirectory()) {
+      const children = await readdir(currentPath);
+      pending.push(...children.map((child) => path.join(currentPath, child)));
+    } else {
+      throw new Error("Archives containing special files are not supported");
+    }
+  }
+}
+
+async function runCommand(command: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr?.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.once("error", (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") {
+        reject(new Error(`${command} is not installed`));
+        return;
+      }
+      reject(error);
+    });
+    child.once("close", (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        reject(new Error(stderr.trim() || `${command} exited with code ${code ?? "unknown"}`));
+      }
+    });
+  });
+}
+
+async function waitForChild(child: ReturnType<typeof spawn>): Promise<number> {
+  return await new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code) => resolve(code ?? -1));
+  });
 }
 
 async function assertTargetDoesNotExist(absolutePath: string): Promise<void> {

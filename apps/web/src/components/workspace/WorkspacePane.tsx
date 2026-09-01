@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import {
   ArrowDown,
   ArrowUp,
+  ArchiveRestore,
   ChevronLeft,
   Container,
   Copy,
@@ -146,6 +147,7 @@ export function WorkspacePane({
   locale,
   codeFontSettings,
   resolvedTheme,
+  filesPanelActivationId,
   onSelectRoot,
   onGoHome,
   onGoUp,
@@ -160,6 +162,7 @@ export function WorkspacePane({
   onRequestRename,
   onRequestTrash,
   onRequestTransfer,
+  onRequestExtract,
   onUploadSources,
   onCancelUploadBatch,
   onWorkQueuesChanged,
@@ -195,6 +198,7 @@ export function WorkspacePane({
   locale: SupportedLocale;
   codeFontSettings: CodeFontSettings;
   resolvedTheme: ResolvedTheme;
+  filesPanelActivationId: number;
   onSelectRoot: (rootId: string) => void;
   onGoHome: () => void;
   onGoUp: () => void;
@@ -209,6 +213,7 @@ export function WorkspacePane({
   onRequestRename: (entry: FileEntry, targetName: string) => Promise<void>;
   onRequestTrash: (entry: FileEntry) => Promise<void>;
   onRequestTransfer: (entry: FileEntry, operation: "move" | "copy", targetPath: string) => Promise<void>;
+  onRequestExtract: (meta: FileMeta) => Promise<void>;
   onUploadSources: (sources: UploadSource[]) => void | Promise<void>;
   onCancelUploadBatch: (batchId: string) => void;
   onWorkQueuesChanged: () => void | Promise<void>;
@@ -232,7 +237,7 @@ export function WorkspacePane({
   const fileUploadInputRef = useRef<HTMLInputElement | null>(null);
   const folderUploadInputRef = useRef<HTMLInputElement | null>(null);
   const dragDepthRef = useRef(0);
-  const displayTitle = displayPath === "." ? t("common.root") : displayPath;
+  const displayTitle = folderTitle(displayPath, t("common.root"));
   const sortedEntries = useMemo(() => sortEntries(entries, fileSort), [entries, fileSort]);
   const gitChangeCount = gitStatus
     ? gitStatus.summary.staged + gitStatus.summary.modified + gitStatus.summary.untracked + gitStatus.summary.conflicted
@@ -273,6 +278,7 @@ export function WorkspacePane({
   const previewTitle = previewMeta?.name ?? selectedFileName;
   const isPreviewLoading = previewLoading || (hasPreview && !previewMeta && !previewError);
   const canEditPreview = previewMeta?.kind === "file" && previewMeta.previewKind === "text";
+  const canExtractPreview = previewMeta?.kind === "file" && isArchiveFileName(previewMeta.name);
   const isPreviewCollapsed = hasPreview && previewCollapsed;
   const trimmedFolderName = folderName.trim();
   const folderNameInvalid =
@@ -332,6 +338,12 @@ export function WorkspacePane({
     dragDepthRef.current = 0;
     setIsDropActive(false);
   }, [activePanel, active, selectedRootId]);
+
+  useEffect(() => {
+    if (filesPanelActivationId > 0) {
+      setActivePanel("files");
+    }
+  }, [filesPanelActivationId]);
 
   function openCreateFolderDialog() {
     setOperationError(null);
@@ -554,6 +566,22 @@ export function WorkspacePane({
     try {
       await onRequestTransfer(transferState.entry, transferState.operation, transferTargetPath);
       setTransferState(null);
+    } catch (error) {
+      setOperationError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setOperationSubmitting(false);
+    }
+  }
+
+  async function submitExtract(meta: FileMeta) {
+    if (operationSubmitting) {
+      return;
+    }
+
+    setOperationSubmitting(true);
+    setOperationError(null);
+    try {
+      await onRequestExtract(meta);
     } catch (error) {
       setOperationError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -898,6 +926,18 @@ export function WorkspacePane({
                               <PencilLine aria-hidden="true" size={14} />
                             </button>
                           ) : null}
+                          {canExtractPreview && previewMeta ? (
+                            <button
+                              type="button"
+                              className="preview-tool-button"
+                              onClick={() => void submitExtract(previewMeta)}
+                              disabled={operationSubmitting}
+                              title={t("workspace.actions.extract")}
+                              aria-label={t("workspace.actions.extractEntry", { name: previewMeta.name })}
+                            >
+                              <ArchiveRestore aria-hidden="true" size={14} />
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             className="preview-tool-button"
@@ -1148,6 +1188,19 @@ export function WorkspacePane({
 
     </section>
   );
+}
+
+function isArchiveFileName(name: string): boolean {
+  return /\.(?:zip|tar|gz|tgz|rar)$/iu.test(name);
+}
+
+export function folderTitle(displayPath: string, rootTitle: string): string {
+  const normalizedPath = displayPath.replace(/[\\/]+$/gu, "");
+  if (!normalizedPath || normalizedPath === ".") {
+    return rootTitle;
+  }
+
+  return normalizedPath.split(/[\\/]/u).filter(Boolean).pop() ?? rootTitle;
 }
 
 function gitFileStatusCode(status: NonNullable<FileEntry["gitStatus"]>): string {

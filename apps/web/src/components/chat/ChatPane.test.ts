@@ -113,4 +113,47 @@ describe("ChatMessageContent", () => {
     expect(html).toContain("**not markdown**");
     expect(html).not.toContain("<strong>");
   });
+
+  it("renders paths inside the selected root as buttons in user messages", () => {
+    const html = renderToStaticMarkup(
+      createElement(ChatMessageContent, {
+        role: "user",
+        content: "Open /srv/nas/docs/readme.md, not /srv/other/private.txt",
+        rootPath: "/srv/nas",
+        onOpenWorkspacePath: () => undefined
+      })
+    );
+
+    expect(html).toContain('class="message-path-button"');
+    expect(html).toContain('data-workspace-path="docs/readme.md"');
+    expect(html).toContain("/srv/other/private.txt");
+    expect(html).not.toContain('data-workspace-path="/srv/other/private.txt"');
+  });
+
+  it("renders assistant text, inline code, and Markdown link paths as buttons", () => {
+    const html = renderToStaticMarkup(
+      createElement(ChatMessageContent, {
+        role: "assistant",
+        content: [
+          "Open /srv/nas/docs/readme.md.",
+          "",
+          "`/srv/nas/My Files/report.pdf`",
+          "",
+          "[linked report](/srv/nas/reports/latest.pdf)",
+          "",
+          "```",
+          "/srv/nas/not-interactive.txt",
+          "```"
+        ].join("\n"),
+        rootPath: "/srv/nas",
+        onOpenWorkspacePath: () => undefined
+      })
+    );
+
+    expect(html.match(/class="message-path-button"/gu)).toHaveLength(3);
+    expect(html).toContain('data-workspace-path="docs/readme.md"');
+    expect(html).toContain('data-workspace-path="My Files/report.pdf"');
+    expect(html).toContain('data-workspace-path="reports/latest.pdf"');
+    expect(html).toContain('<pre class="message-code-block"><code>/srv/nas/not-interactive.txt');
+  });
 });

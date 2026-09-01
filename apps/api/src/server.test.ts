@@ -1869,6 +1869,55 @@ describe("API server", () => {
     await server.close();
   });
 
+  it("extracts an archive directly without creating an approval", async () => {
+    await execFileAsync("zip", ["-q", path.join(rootDir, "bundle.zip"), "hello.txt"], { cwd: rootDir });
+    const server = await buildServer({ config: testConfig(tempDir), db });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/files/extract",
+      payload: {
+        rootId: "local",
+        path: "bundle.zip"
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      operation: {
+        operation: "extract",
+        approvalId: null,
+        sourcePath: "bundle.zip",
+        targetPath: "bundle",
+        status: "applied"
+      }
+    });
+    await expect(readFile(path.join(rootDir, "bundle", "hello.txt"), "utf8")).resolves.toBe("hello");
+    expect(listPendingApprovals(db)).toHaveLength(0);
+    await server.close();
+  });
+
+  it("does not expose extraction through the approval proposal endpoint", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const server = await buildServer({ config: testConfig(tempDir), db });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/files/proposals",
+      payload: {
+        sessionId: session.id,
+        rootId: "local",
+        operation: "extract",
+        sourcePath: "bundle.zip"
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "Unsupported file proposal operation" });
+    expect(listPendingApprovals(db)).toHaveLength(0);
+    await server.close();
+  });
+
   it("rejects moving or copying a folder into itself", async () => {
     await mkdir(path.join(rootDir, "folder", "child"), { recursive: true });
     const session = createSession(db, { rootId: "local" });
@@ -2190,6 +2239,40 @@ describe("API server", () => {
     expect(response.statusCode).toBe(202);
     await expect(readFile(path.join(rootDir, "hello.txt"), "utf8")).resolves.toBe("hello");
     await expect(readFile(path.join(rootDir, "archive", "copied.txt"), "utf8")).resolves.toBe("hello");
+    await server.close();
+  });
+
+  it("applies an approved archive extraction operation", async () => {
+    await execFileAsync("zip", ["-q", path.join(rootDir, "bundle.zip"), "hello.txt"], { cwd: rootDir });
+    const session = createSession(db, { rootId: "local" });
+    const { job } = createUserMessageAndJob(db, {
+      sessionId: session.id,
+      content: "extract bundle.zip"
+    });
+    updateJobStatus(db, job.id, "waiting_approval");
+    const approval = createPendingApproval(db, {
+      jobId: job.id,
+      proposal: [
+        {
+          operation: "extract",
+          rootId: "local",
+          sourcePath: "bundle.zip",
+          targetPath: "bundle",
+          risk: "medium",
+          reversible: true,
+          summary: "Extract bundle.zip to bundle"
+        }
+      ]
+    });
+    const server = await buildServer({ config: testConfig(tempDir), db });
+
+    const response = await server.inject({
+      method: "POST",
+      url: `/api/approvals/${approval.id}/approve`
+    });
+
+    expect(response.statusCode).toBe(202);
+    await expect(readFile(path.join(rootDir, "bundle", "hello.txt"), "utf8")).resolves.toBe("hello");
     await server.close();
   });
 

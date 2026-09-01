@@ -15,4 +15,4 @@ Required host tools:
 - `systemd-nspawn`
 - `tar`
 
-The manifest records required runtime components: Node, Pi, SQLite, systemd units, OCR helpers, media helpers, and NAS health tooling. The resulting rootfs tarball is the handoff point for board-specific image tooling.
+The manifest records required runtime components: Node, Pi, SQLite, systemd units, OCR helpers, media helpers, archive helpers, and NAS health tooling. The resulting rootfs tarball is the handoff point for board-specific image tooling.

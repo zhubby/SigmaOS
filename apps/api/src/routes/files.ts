@@ -7,6 +7,9 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import {
   inferMimeType,
   inferPreviewKind,
+  applyFileMutation,
+  archiveKindForPath,
+  defaultExtractionTarget,
   isPathInside,
   listDir,
   readText,
@@ -285,7 +288,13 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
     }
 
     const operation = request.body?.operation;
-    if (operation !== "mkdir" && operation !== "rename" && operation !== "trash" && operation !== "move" && operation !== "copy") {
+    if (
+      operation !== "mkdir" &&
+      operation !== "rename" &&
+      operation !== "trash" &&
+      operation !== "move" &&
+      operation !== "copy"
+    ) {
       reply.status(400).send({ error: "Unsupported file proposal operation" });
       return;
     }
@@ -342,6 +351,50 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
       job,
       approval
     });
+  });
+
+  server.post<{
+    Body: {
+      rootId?: string;
+      path?: string;
+    };
+  }>("/api/files/extract", async (request, reply) => {
+    const root = resolveRoot(db, request.body?.rootId);
+    if (!root) {
+      reply.status(404).send({ error: "NAS root not found" });
+      return;
+    }
+
+    const source = await resolveSafeExistingPath(root.path, request.body?.path ?? ".");
+    const proposal = await buildExtractProposal(root, source);
+    if ("error" in proposal) {
+      reply.status(proposal.statusCode).send({ error: proposal.error });
+      return;
+    }
+
+    try {
+      const result = await applyFileMutation(root, proposal.proposal, path.join(config.dataDir, "trash"));
+      const operation = recordAppliedOperation(db, {
+        approvalId: null,
+        operation: result.proposal.operation,
+        sourcePath: result.sourcePath,
+        targetPath: result.targetPath,
+        status: "applied",
+        metadata: {
+          ...result.metadata,
+          rootId: root.id,
+          reversible: proposal.proposal.reversible
+        }
+      });
+
+      reply.status(201).send({
+        operation,
+        targetPath: result.targetPath
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      reply.status(400).send({ error: message });
+    }
   });
 
   server.get<{
@@ -448,6 +501,60 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
       git: gitView.git
     });
   });
+}
+
+async function buildExtractProposal(
+  root: NasRootRecord,
+  source: Awaited<ReturnType<typeof resolveSafeExistingPath>>
+): Promise<
+  | { proposal: FileOperationProposal }
+  | { statusCode: number; error: string }
+> {
+  const kind = archiveKindForPath(source.relativePath);
+  if (!kind) {
+    return { statusCode: 400, error: "File is not a supported archive" };
+  }
+  const sourceLinkStat = await lstat(source.absolutePath);
+  if (sourceLinkStat.isSymbolicLink()) {
+    return { statusCode: 400, error: "Refusing to extract through a symlink" };
+  }
+  const sourceStat = await stat(source.realPath);
+  if (!sourceStat.isFile()) {
+    return { statusCode: 400, error: "Archive source must be a file" };
+  }
+
+  const targetPath = defaultExtractionTarget(source.relativePath, kind);
+  if (!targetPath) {
+    return { statusCode: 400, error: "Unable to determine extraction target" };
+  }
+  const target = await resolveSafeTargetPath(root.path, targetPath);
+  if (target.relativePath === ".") {
+    return { statusCode: 400, error: "Extraction target must be inside the NAS root" };
+  }
+  if (await pathExistsNoSymlink(target.absolutePath)) {
+    return { statusCode: 409, error: "Extraction target already exists" };
+  }
+  const destination = await resolveSafeExistingPath(root.path, path.dirname(target.relativePath));
+  const destinationLinkStat = await lstat(destination.absolutePath);
+  if (destinationLinkStat.isSymbolicLink()) {
+    return { statusCode: 400, error: "Refusing to extract into a symlinked folder" };
+  }
+  const destinationStat = await stat(destination.realPath);
+  if (!destinationStat.isDirectory()) {
+    return { statusCode: 400, error: "Extraction destination must be a folder" };
+  }
+
+  return {
+    proposal: {
+      operation: "extract",
+      rootId: root.id,
+      sourcePath: source.relativePath,
+      targetPath: target.relativePath,
+      risk: "medium",
+      reversible: true,
+      summary: `Extract ${source.relativePath} to ${target.relativePath}`
+    }
+  };
 }
 
 function createUploadLimitStream(maxBytes: number): Transform {

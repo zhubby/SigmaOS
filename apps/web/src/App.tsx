@@ -6,6 +6,7 @@ import {
   cancelJob,
   createSession,
   deleteSession,
+  extractFile,
   getApprovals,
   getDockerOperations,
   getDockerSettings,
@@ -71,6 +72,7 @@ import {
   type LanguagePreference
 } from "./i18n/locale.js";
 import { eventToTranscriptMessage, getEventJobId } from "./lib/events.js";
+import { workspaceParentPath } from "./lib/chat-paths.js";
 import {
   codeFontFamilyValue,
   normalizeCodeFontSettings,
@@ -139,6 +141,7 @@ export function App() {
   const [status, setStatus] = useState<AppStatus>("starting");
   const [error, setError] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<MobileView>("chat");
+  const [filesPanelActivationId, setFilesPanelActivationId] = useState(0);
   const [splitWidth, setSplitWidth] = useState(() => readStoredSplitWidth());
   const [resizing, setResizing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1145,6 +1148,31 @@ export function App() {
     }
   }
 
+  async function requestFileExtract(meta: FileMeta) {
+    if (!selectedRootId) {
+      throw new Error(t("workspace.actions.noSession"));
+    }
+
+    setStatus("applying");
+    setError(null);
+    try {
+      const result = await extractFile({
+        rootId: selectedRootId,
+        path: meta.path
+      });
+      setOperations((current) => [
+        result.operation,
+        ...current.filter((operation) => operation.id !== result.operation.id)
+      ].slice(0, 100));
+      await refreshCurrentFileListing();
+      setStatus("ready");
+    } catch (nextError) {
+      setStatus("error");
+      setError(toErrorMessage(nextError));
+      throw nextError;
+    }
+  }
+
   async function requestFolderCreate(folderName: string) {
     if (!session || !selectedRootId) {
       throw new Error(t("workspace.actions.noSession"));
@@ -1253,18 +1281,31 @@ export function App() {
       return;
     }
 
+    setMobileView("workspace");
+    setFilesPanelActivationId((current) => current + 1);
+    setStatus("loading");
+    setError(null);
     setPreviewError(null);
+    const hadActiveSearch = Boolean(activeSearchQueryRef.current);
     try {
       const linkedMeta = await getFileMeta(selectedRootId, pathname);
       if (linkedMeta.kind === "directory") {
         await openDirectory(linkedMeta.path);
         return;
       }
+
+      activeSearchQueryRef.current = "";
+      setSearchQuery("");
+      const parentPath = workspaceParentPath(linkedMeta.path);
+      if (currentPathRef.current !== parentPath || hadActiveSearch) {
+        await openDirectory(parentPath);
+      }
       setSelectedFilePath(linkedMeta.path);
       setPreviewCollapsed(false);
-      setMobileView("workspace");
+      setStatus("ready");
     } catch (nextError) {
-      setPreviewError(toErrorMessage(nextError));
+      setError(toErrorMessage(nextError));
+      setStatus("error");
     }
   }
 
@@ -1361,6 +1402,7 @@ export function App() {
         onSubmitMessage={(event) => void submitMessage(event)}
         onMessageChange={setMessage}
         onCancelActiveJob={() => void cancelActiveJob()}
+        onOpenWorkspacePath={(path) => void openWorkspacePath(path)}
       />
 
       {error ? (
@@ -1423,6 +1465,7 @@ export function App() {
         locale={resolvedLocale}
         codeFontSettings={codeFontSettings}
         resolvedTheme={resolvedTheme}
+        filesPanelActivationId={filesPanelActivationId}
         onSelectRoot={selectRoot}
         onGoHome={goHome}
         onGoUp={goUp}
@@ -1437,6 +1480,7 @@ export function App() {
         onRequestRename={(entry, targetName) => requestFileRename(entry, targetName)}
         onRequestTrash={(entry) => requestFileTrash(entry)}
         onRequestTransfer={(entry, operation, targetPath) => requestFileTransfer(entry, operation, targetPath)}
+        onRequestExtract={(meta) => requestFileExtract(meta)}
         onUploadSources={(sources) => onUploadSources(sources)}
         onCancelUploadBatch={(batchId) => onCancelUploadBatch(batchId)}
         onWorkQueuesChanged={refreshWorkQueues}

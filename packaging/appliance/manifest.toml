@@ -42,6 +42,12 @@ ocr_media_helpers = [
 nas_health = [
   "smartmontools"
 ]
+archive_helpers = [
+  "gzip",
+  "unzip",
+  "libarchive-tools",
+  "unrar-free"
+]
 sharing = [
   "samba",
   "apache2",

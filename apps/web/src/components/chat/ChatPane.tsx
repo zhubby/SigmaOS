@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent, useEffect, useState, type RefObject } from "react";
+import { Fragment, FormEvent, KeyboardEvent, useEffect, useState, type ReactNode, type RefObject } from "react";
 import ReactMarkdown from "react-markdown";
 import { useTranslation } from "react-i18next";
 import {
@@ -32,6 +32,12 @@ import { providerLabel } from "../../config/settings.js";
 import { formatDate, formatRelativeTime, formatTime } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
 import { highlightSource } from "../../preview-utils.js";
+import {
+  remarkWorkspacePaths,
+  resolveWorkspaceMessageLink,
+  resolveWorkspaceMessagePath,
+  splitWorkspaceMessagePaths
+} from "../../lib/chat-paths.js";
 import { sessionTitle } from "../../lib/session.js";
 
 type ApprovalRisk = PendingApproval["proposal"][number]["risk"];
@@ -166,7 +172,8 @@ export function ChatPane({
   onReject,
   onSubmitMessage,
   onMessageChange,
-  onCancelActiveJob
+  onCancelActiveJob,
+  onOpenWorkspacePath
 }: {
   active: boolean;
   selectedRoot: NasRoot | undefined;
@@ -192,6 +199,7 @@ export function ChatPane({
   onSubmitMessage: (event: FormEvent<HTMLFormElement>) => void;
   onMessageChange: (message: string) => void;
   onCancelActiveJob: () => void;
+  onOpenWorkspacePath: (path: string) => void;
 }) {
   const { t } = useTranslation();
   const translate = t as Translate;
@@ -352,7 +360,12 @@ export function ChatPane({
                       <strong>{item.role === "assistant" ? t("chat.sigmaAgent") : t("chat.you")}</strong>
                       <time>{formatTime(item.createdAt, locale)}</time>
                     </header>
-                    <ChatMessageContent role={item.role} content={item.content} />
+                    <ChatMessageContent
+                      role={item.role}
+                      content={item.content}
+                      rootPath={selectedRoot?.path ?? null}
+                      onOpenWorkspacePath={onOpenWorkspacePath}
+                    />
                   </div>
                 </article>
               ))}
@@ -454,18 +467,69 @@ export function ChatPane({
   );
 }
 
-export function ChatMessageContent({ role, content }: Pick<TranscriptMessage, "role" | "content">) {
+export function ChatMessageContent({
+  role,
+  content,
+  rootPath = null,
+  onOpenWorkspacePath = () => undefined
+}: Pick<TranscriptMessage, "role" | "content"> & {
+  rootPath?: string | null;
+  onOpenWorkspacePath?: (path: string) => void;
+}) {
   if (role !== "assistant") {
-    return <p className="message-text">{content}</p>;
+    return (
+      <p className="message-text">
+        {rootPath ? (
+          <WorkspacePathText text={content} rootPath={rootPath} onOpenWorkspacePath={onOpenWorkspacePath} />
+        ) : (
+          content
+        )}
+      </p>
+    );
   }
 
   return (
     <div className="message-markdown">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={rootPath ? [remarkGfm, [remarkWorkspacePaths, { rootPath }]] : [remarkGfm]}
         components={{
-          a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
-          code: ({ className, children, node: _node }) => {
+          a: ({ node: _node, href, children, ...props }) => {
+            const target = rootPath ? resolveWorkspaceMessageLink(href, rootPath) : null;
+            if (target) {
+              return (
+                <WorkspacePathButton
+                  displayPath={target.displayPath}
+                  workspacePath={target.workspacePath}
+                  onOpenWorkspacePath={onOpenWorkspacePath}
+                >
+                  {children}
+                </WorkspacePathButton>
+              );
+            }
+            return (
+              <a {...props} href={href} target="_blank" rel="noreferrer">
+                {children}
+              </a>
+            );
+          },
+          code: ({ className, children, node }) => {
+            const source = String(children);
+            const isCodeBlock =
+              Boolean(className) ||
+              Boolean(node?.position && node.position.start.line !== node.position.end.line);
+            const target = !isCodeBlock && rootPath ? resolveWorkspaceMessagePath(source, rootPath) : null;
+            if (target) {
+              return (
+                <WorkspacePathButton
+                  displayPath={target.displayPath}
+                  workspacePath={target.workspacePath}
+                  onOpenWorkspacePath={onOpenWorkspacePath}
+                >
+                  {children}
+                </WorkspacePathButton>
+              );
+            }
+
             const language = markdownCodeLanguage(className);
             if (!language) {
               return <code className={className}>{children}</code>;
@@ -485,6 +549,55 @@ export function ChatMessageContent({ role, content }: Pick<TranscriptMessage, "r
         {content}
       </ReactMarkdown>
     </div>
+  );
+}
+
+function WorkspacePathText({
+  text,
+  rootPath,
+  onOpenWorkspacePath
+}: {
+  text: string;
+  rootPath: string;
+  onOpenWorkspacePath: (path: string) => void;
+}) {
+  return splitWorkspaceMessagePaths(text, rootPath).map((segment, index) =>
+    segment.kind === "text" ? (
+      <Fragment key={`text-${index}`}>{segment.value}</Fragment>
+    ) : (
+      <WorkspacePathButton
+        key={`path-${index}`}
+        displayPath={segment.displayPath}
+        workspacePath={segment.workspacePath}
+        onOpenWorkspacePath={onOpenWorkspacePath}
+      >
+        {segment.value}
+      </WorkspacePathButton>
+    )
+  );
+}
+
+function WorkspacePathButton({
+  children,
+  displayPath,
+  workspacePath,
+  onOpenWorkspacePath
+}: {
+  children: ReactNode;
+  displayPath: string;
+  workspacePath: string;
+  onOpenWorkspacePath: (path: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="message-path-button"
+      data-workspace-path={workspacePath}
+      aria-label={displayPath}
+      onClick={() => onOpenWorkspacePath(workspacePath)}
+    >
+      {children}
+    </button>
   );
 }
 
