@@ -1034,31 +1034,6 @@ export const en = {
     },
     column: "Column {{index}}",
     tableTruncated: "Showing {{rows}} of {{totalRows}} rows and {{columns}} of {{totalColumns}} columns."
-  },
-  files: {
-    labels: {
-      archive: "archive",
-      audio: "audio",
-      blocked: "blocked",
-      code: "code",
-      config: "config",
-      database: "database",
-      directory: "folder",
-      document: "document",
-      font: "font",
-      image: "image",
-      json: "JSON",
-      markdown: "markdown",
-      other: "file",
-      package: "package",
-      pdf: "PDF",
-      secure: "secret",
-      shell: "script",
-      spreadsheet: "table",
-      symlink: "link",
-      text: "text",
-      video: "video"
-    }
   }
 } as const;
 
@@ -2102,31 +2077,6 @@ export const zhCN = {
     },
     column: "列 {{index}}",
     tableTruncated: "显示 {{rows}} / {{totalRows}} 行，{{columns}} / {{totalColumns}} 列。"
-  },
-  files: {
-    labels: {
-      archive: "归档",
-      audio: "音频",
-      blocked: "已阻止",
-      code: "代码",
-      config: "配置",
-      database: "数据库",
-      directory: "文件夹",
-      document: "文档",
-      font: "字体",
-      image: "图片",
-      json: "JSON",
-      markdown: "Markdown",
-      other: "文件",
-      package: "包",
-      pdf: "PDF",
-      secure: "密钥",
-      shell: "脚本",
-      spreadsheet: "表格",
-      symlink: "链接",
-      text: "文本",
-      video: "视频"
-    }
   }
 } satisfies LocaleResource<typeof en>;
 

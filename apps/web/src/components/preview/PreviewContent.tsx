@@ -29,6 +29,7 @@ import {
   describeTextPreview,
   highlightSource,
   parseDelimitedTablePreview,
+  resolveMarkdownLink,
   type DelimitedTablePreview,
   type TextPreviewDescriptor
 } from "../../preview-utils.js";
@@ -42,7 +43,8 @@ export function PreviewContent({
   error,
   textPreview,
   previewFileSizeLimitBytes,
-  locale
+  locale,
+  onOpenWorkspacePath
 }: {
   blobUrl: string;
   videoUrl: string;
@@ -53,6 +55,7 @@ export function PreviewContent({
   textPreview: TextPreview | null;
   previewFileSizeLimitBytes: number;
   locale: SupportedLocale;
+  onOpenWorkspacePath: (path: string) => void;
 }) {
   const { t } = useTranslation();
 
@@ -90,7 +93,7 @@ export function PreviewContent({
     );
   }
   if (meta.previewKind === "text") {
-    return <TextPreviewPanel meta={meta} textPreview={textPreview} locale={locale} />;
+    return <TextPreviewPanel meta={meta} textPreview={textPreview} locale={locale} onOpenWorkspacePath={onOpenWorkspacePath} />;
   }
   if (meta.previewKind === "image") {
     return (
@@ -297,11 +300,13 @@ type Translate = TFunction<"translation">;
 function TextPreviewPanel({
   meta,
   textPreview,
-  locale
+  locale,
+  onOpenWorkspacePath
 }: {
   meta: FileMeta;
   textPreview: TextPreview | null;
   locale: SupportedLocale;
+  onOpenWorkspacePath: (path: string) => void;
 }) {
   const { t } = useTranslation();
   const content = textPreview?.content ?? "";
@@ -352,7 +357,7 @@ function TextPreviewPanel({
       </div>
 
       {activeMode === "rendered" ? (
-        <MarkdownPreview source={content} />
+        <MarkdownPreview source={content} currentFilePath={meta.path} onOpenWorkspacePath={onOpenWorkspacePath} />
       ) : activeMode === "table" && tablePreview ? (
         <DelimitedTable preview={tablePreview} locale={locale} />
       ) : (
@@ -362,13 +367,42 @@ function TextPreviewPanel({
   );
 }
 
-function MarkdownPreview({ source }: { source: string }) {
+function MarkdownPreview({
+  source,
+  currentFilePath,
+  onOpenWorkspacePath
+}: {
+  source: string;
+  currentFilePath: string;
+  onOpenWorkspacePath: (path: string) => void;
+}) {
   return (
     <div className="markdown-preview">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+          a: ({ node: _node, href, ...props }) => {
+            const target = resolveMarkdownLink(currentFilePath, href);
+            if (target.kind === "workspace") {
+              return (
+                <a
+                  {...props}
+                  href={href}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    onOpenWorkspacePath(target.path);
+                  }}
+                />
+              );
+            }
+            if (target.kind === "external") {
+              return <a {...props} href={href} target="_blank" rel="noreferrer" />;
+            }
+            if (target.kind === "invalid") {
+              return <a {...props} aria-disabled="true" onClick={(event) => event.preventDefault()} />;
+            }
+            return <a {...props} href={href} />;
+          },
           code: ({ className, children, node: _node }) => {
             const language = markdownCodeLanguage(className);
             if (!language) {

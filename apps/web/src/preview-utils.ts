@@ -46,6 +46,12 @@ export interface DelimitedTablePreview {
   truncatedColumns: boolean;
 }
 
+export type MarkdownLinkTarget =
+  | { kind: "workspace"; path: string }
+  | { kind: "document" }
+  | { kind: "external" }
+  | { kind: "invalid" };
+
 const MAX_TABLE_ROWS = 200;
 const MAX_TABLE_COLUMNS = 40;
 
@@ -169,6 +175,54 @@ export function highlightSource(source: string, language: string | null): Highli
       language: "plaintext"
     };
   }
+}
+
+export function resolveMarkdownLink(currentFilePath: string, href: string | undefined): MarkdownLinkTarget {
+  const rawHref = href?.trim() ?? "";
+  if (!rawHref) {
+    return { kind: "invalid" };
+  }
+  if (rawHref.startsWith("#") || rawHref.startsWith("?")) {
+    return { kind: "document" };
+  }
+  if (rawHref.startsWith("//") || /^[a-z][a-z\d+.-]*:/iu.test(rawHref)) {
+    return { kind: "external" };
+  }
+
+  const encodedPath = rawHref.split(/[?#]/u, 1)[0] ?? "";
+  let linkPath: string;
+  try {
+    linkPath = decodeURIComponent(encodedPath).replace(/\\/g, "/");
+  } catch {
+    return { kind: "invalid" };
+  }
+
+  const segments = linkPath.startsWith("/")
+    ? []
+    : currentFilePath
+        .replace(/\\/g, "/")
+        .split("/")
+        .filter(Boolean)
+        .slice(0, -1);
+
+  for (const segment of linkPath.split("/")) {
+    if (!segment || segment === ".") {
+      continue;
+    }
+    if (segment === "..") {
+      if (!segments.length) {
+        return { kind: "invalid" };
+      }
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+
+  return {
+    kind: "workspace",
+    path: segments.join("/") || "."
+  };
 }
 
 export function parseDelimitedTablePreview(

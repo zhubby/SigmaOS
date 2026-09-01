@@ -31,6 +31,30 @@ export interface FileVisualDescriptor {
   kind: FileVisualKind;
 }
 
+export const FILE_TYPE_LABELS = {
+  archive: "archive",
+  audio: "audio",
+  blocked: "blocked",
+  code: "code",
+  config: "config",
+  database: "database",
+  directory: "folder",
+  document: "document",
+  font: "font",
+  image: "image",
+  json: "JSON",
+  markdown: "markdown",
+  other: "file",
+  package: "package",
+  pdf: "PDF",
+  secure: "secret",
+  shell: "script",
+  spreadsheet: "table",
+  symlink: "link",
+  text: "text",
+  video: "video"
+} as const satisfies Record<FileVisualKind, string>;
+
 export function isHiddenName(name: string): boolean {
   return name.startsWith(".") && name !== "." && name !== "..";
 }

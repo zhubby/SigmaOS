@@ -1248,6 +1248,26 @@ export function App() {
     }
   }
 
+  async function openWorkspacePath(pathname: string) {
+    if (!selectedRootId) {
+      return;
+    }
+
+    setPreviewError(null);
+    try {
+      const linkedMeta = await getFileMeta(selectedRootId, pathname);
+      if (linkedMeta.kind === "directory") {
+        await openDirectory(linkedMeta.path);
+        return;
+      }
+      setSelectedFilePath(linkedMeta.path);
+      setPreviewCollapsed(false);
+      setMobileView("workspace");
+    } catch (nextError) {
+      setPreviewError(toErrorMessage(nextError));
+    }
+  }
+
   function goUp() {
     if (currentPath === ".") {
       return;
@@ -1411,6 +1431,7 @@ export function App() {
         onSearchQueryChange={setSearchQuery}
         onGoToBreadcrumb={goToBreadcrumb}
         onOpenEntry={openEntry}
+        onOpenWorkspacePath={(path) => void openWorkspacePath(path)}
         onOpenEditor={setEditorMeta}
         onRequestCreateFolder={(folderName) => requestFolderCreate(folderName)}
         onRequestRename={(entry, targetName) => requestFileRename(entry, targetName)}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeFileVisual, isHiddenName } from "./file-type-utils.js";
+import { describeFileVisual, FILE_TYPE_LABELS, isHiddenName } from "./file-type-utils.js";
 
 describe("file type utilities", () => {
   it("classifies entry safety and non-file kinds first", () => {
@@ -54,5 +54,31 @@ describe("file type utilities", () => {
     expect(isHiddenName("README.md")).toBe(false);
     expect(isHiddenName(".")).toBe(false);
     expect(isHiddenName("..")).toBe(false);
+  });
+
+  it("uses stable English labels for every file type", () => {
+    expect(FILE_TYPE_LABELS).toEqual({
+      archive: "archive",
+      audio: "audio",
+      blocked: "blocked",
+      code: "code",
+      config: "config",
+      database: "database",
+      directory: "folder",
+      document: "document",
+      font: "font",
+      image: "image",
+      json: "JSON",
+      markdown: "markdown",
+      other: "file",
+      package: "package",
+      pdf: "PDF",
+      secure: "secret",
+      shell: "script",
+      spreadsheet: "table",
+      symlink: "link",
+      text: "text",
+      video: "video"
+    });
   });
 });

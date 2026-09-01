@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeTextPreview, highlightSource, parseDelimitedTablePreview } from "./preview-utils.js";
+import { describeTextPreview, highlightSource, parseDelimitedTablePreview, resolveMarkdownLink } from "./preview-utils.js";
 
 describe("preview utilities", () => {
   it("detects common code and structured text preview types from file names", () => {
@@ -48,6 +48,38 @@ describe("preview utilities", () => {
     expect(highlightSource("<script>alert('x')</script>", "unknown").html).toBe(
       "&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;"
     );
+  });
+
+  it("resolves Markdown file links relative to the current preview", () => {
+    expect(resolveMarkdownLink("docs/guide/README.md", "./setup.md")).toEqual({
+      kind: "workspace",
+      path: "docs/guide/setup.md"
+    });
+    expect(resolveMarkdownLink("docs/guide/README.md", "../AGENTS.md#rules")).toEqual({
+      kind: "workspace",
+      path: "docs/AGENTS.md"
+    });
+    expect(resolveMarkdownLink("docs/guide/README.md", "/LICENSE")).toEqual({
+      kind: "workspace",
+      path: "LICENSE"
+    });
+    expect(resolveMarkdownLink("docs/guide/README.md", "assets/My%20File.pdf")).toEqual({
+      kind: "workspace",
+      path: "docs/guide/assets/My File.pdf"
+    });
+  });
+
+  it("keeps web and document links out of workspace path handling", () => {
+    expect(resolveMarkdownLink("README.md", "https://example.com/docs")).toEqual({ kind: "external" });
+    expect(resolveMarkdownLink("README.md", "mailto:hello@example.com")).toEqual({ kind: "external" });
+    expect(resolveMarkdownLink("README.md", "#install")).toEqual({ kind: "document" });
+    expect(resolveMarkdownLink("README.md", "?mode=source")).toEqual({ kind: "document" });
+  });
+
+  it("rejects invalid and root-escaping Markdown links", () => {
+    expect(resolveMarkdownLink("README.md", "../secret.txt")).toEqual({ kind: "invalid" });
+    expect(resolveMarkdownLink("README.md", "%E0%A4%A")).toEqual({ kind: "invalid" });
+    expect(resolveMarkdownLink("README.md", " ")).toEqual({ kind: "invalid" });
   });
 
   it("parses and truncates delimited table previews", () => {

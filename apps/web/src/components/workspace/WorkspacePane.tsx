@@ -27,7 +27,7 @@ import {
   type LucideIcon
 } from "lucide-react";
 import type { DockerOperation, FileEntry, FileListing, FileMeta, FileOperation, NasRoot, PendingApproval, TextPreview } from "../../api.js";
-import { describeFileVisual, isHiddenName } from "../../file-type-utils.js";
+import { describeFileVisual, FILE_TYPE_LABELS, isHiddenName } from "../../file-type-utils.js";
 import { formatBytes, formatDate, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
 import { sortEntries, type FileSortDirection, type FileSortKey, type FileSortState } from "../../lib/file-listing-sort.js";
@@ -154,6 +154,7 @@ export function WorkspacePane({
   onSearchQueryChange,
   onGoToBreadcrumb,
   onOpenEntry,
+  onOpenWorkspacePath,
   onOpenEditor,
   onRequestCreateFolder,
   onRequestRename,
@@ -202,6 +203,7 @@ export function WorkspacePane({
   onSearchQueryChange: (query: string) => void;
   onGoToBreadcrumb: (index: number) => void;
   onOpenEntry: (entry: FileEntry) => void;
+  onOpenWorkspacePath: (path: string) => void;
   onOpenEditor: (meta: FileMeta) => void;
   onRequestCreateFolder: (folderName: string) => Promise<void>;
   onRequestRename: (entry: FileEntry, targetName: string) => Promise<void>;
@@ -800,7 +802,7 @@ export function WorkspacePane({
                             ) : null}
                           </span>
                           <span className={`file-type-label file-type-${fileVisual.kind}`} role="cell">
-                            {t(`files.labels.${fileVisual.kind}`)}
+                            {FILE_TYPE_LABELS[fileVisual.kind]}
                           </span>
                           <span role="cell">{displaySize}</span>
                           <span role="cell">{entry.modifiedAt === EPOCH_DATE ? t("common.dash") : formatDate(entry.modifiedAt, locale)}</span>
@@ -919,6 +921,7 @@ export function WorkspacePane({
                         textPreview={textPreview}
                         previewFileSizeLimitBytes={previewFileSizeLimitBytes}
                         locale={locale}
+                        onOpenWorkspacePath={onOpenWorkspacePath}
                       />
                     </>
                   ) : null}
