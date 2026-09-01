@@ -361,7 +361,7 @@
 
 .file-row {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) 166px 90px 132px;
+  grid-template-columns: minmax(150px, 1fr) 180px 90px 132px;
   align-items: center;
   width: 100%;
   min-height: 42px;
@@ -427,6 +427,10 @@
   min-width: 0;
 }
 
+.file-actions-column {
+  padding-left: 8px;
+}
+
 .file-row > .file-column-sort {
   overflow: visible;
 }
@@ -479,7 +483,7 @@
 }
 
 .workspace-grid.has-preview:not(.is-preview-collapsed) .file-row {
-  grid-template-columns: minmax(0, 1fr) 166px 132px;
+  grid-template-columns: minmax(0, 1fr) 180px 132px;
 }
 
 .workspace-grid.has-preview:not(.is-preview-collapsed) .file-row > span:nth-child(3) {
@@ -488,7 +492,7 @@
 
 @container file-browser (max-width: 520px) {
   .workspace-grid.has-preview:not(.is-preview-collapsed) .file-row {
-    grid-template-columns: minmax(0, 1fr) 134px;
+    grid-template-columns: minmax(0, 1fr) 180px;
   }
 
   .workspace-grid.has-preview:not(.is-preview-collapsed) .file-row > span:nth-child(3),
@@ -648,21 +652,20 @@
 .file-row-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 4px;
-  opacity: 0.82;
+  gap: 6px;
+  opacity: 0;
   overflow: visible;
-  pointer-events: auto;
-  transform: translateX(0);
-  transition:
-    opacity 140ms ease,
-    transform 140ms ease;
+  padding-right: 8px;
+  pointer-events: none;
+  transition: opacity 140ms ease;
   white-space: normal;
 }
 
 .file-row:not(.file-row-head):hover .file-row-actions,
+.file-row:not(.file-row-head):focus-visible .file-row-actions,
 .file-row:focus-within .file-row-actions {
   opacity: 1;
-  transform: translateX(0);
+  pointer-events: auto;
 }
 
 .file-action-button {

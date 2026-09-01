@@ -767,7 +767,7 @@ export function WorkspacePane({
                       <span role="columnheader" aria-sort={fileSortAria(fileSort, "name")}>
                         {t("workspace.table.name")}
                       </span>
-                      <span role="columnheader" aria-label={t("workspace.table.actions")}>{t("workspace.table.actions")}</span>
+                      <span className="file-actions-column" role="columnheader" aria-label={t("workspace.table.actions")} />
                       <span className="file-column-sort" role="columnheader" aria-sort={fileSortAria(fileSort, "sizeBytes")}>
                         <button
                           type="button"

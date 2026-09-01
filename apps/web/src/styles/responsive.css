@@ -149,7 +149,7 @@
 
 @media (max-width: 1580px) {
   .file-row {
-    grid-template-columns: minmax(150px, 1fr) 166px 90px 124px;
+    grid-template-columns: minmax(150px, 1fr) 180px 90px 124px;
   }
 }
 
@@ -303,7 +303,7 @@
   }
 
   .file-row {
-    grid-template-columns: minmax(150px, 1fr) 158px 84px 124px;
+    grid-template-columns: minmax(150px, 1fr) 180px 84px 124px;
   }
 
   .management-header {
@@ -504,7 +504,8 @@
   }
 
   .file-row-actions {
-    gap: 1px;
+    gap: 4px;
+    padding-right: 8px;
   }
 
   .file-action-button {
