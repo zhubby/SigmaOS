@@ -121,7 +121,7 @@ export const en = {
     },
     messagePlaceholder: "Message Sigma Agent",
     messageAria: "Agent message",
-    messageHint: "Enter sends, Shift+Enter adds a line.",
+    modelConfiguration: "Model config",
     messageStatus: {
       sending: "Sending...",
       queued: "Waiting for agent reply...",
@@ -1189,7 +1189,7 @@ export const zhCN = {
     },
     messagePlaceholder: "给 Sigma Agent 发消息",
     messageAria: "Agent 消息",
-    messageHint: "Enter 发送，Shift+Enter 换行。",
+    modelConfiguration: "模型配置",
     messageStatus: {
       sending: "发送中...",
       queued: "等待 agent 回复...",

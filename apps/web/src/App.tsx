@@ -104,7 +104,7 @@ import {
   type ResolvedTheme,
   type ThemePreference
 } from "./lib/theme-settings.js";
-import { loadEntriesForSession, loadFileListingForView } from "./lib/session.js";
+import { loadEntriesForSession, loadFileListingForView, syncSessionPath } from "./lib/session.js";
 
 type MobileView = "chat" | "workspace";
 const MAX_UPLOAD_BATCHES = 8;
@@ -168,6 +168,7 @@ export function App() {
   const seenEvents = useRef(new Set<number>());
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const fileListingRequestId = useRef(0);
+  const sessionViewRequestId = useRef(0);
   const activeSearchQueryRef = useRef("");
   const currentPathRef = useRef(currentPath);
   const selectedRootIdRef = useRef(selectedRootId);
@@ -215,6 +216,24 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    getModelProviderSettings()
+      .then((settings) => {
+        if (!active) {
+          return;
+        }
+        setModelSettings(settings);
+        setModelSettingsForm(modelSettingsToForm(settings));
+      })
+      .catch(() => {
+        // Opening settings retries the request and exposes any error details.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!selectedRootId) {
       return;
     }
@@ -222,6 +241,7 @@ export function App() {
     let active = true;
     const rootId = selectedRootId;
     const fileRequestId = beginFileListingRequest();
+    const sessionRequestId = beginSessionViewRequest();
     async function loadRootWorkspace() {
       setStatus("loading");
       setError(null);
@@ -241,7 +261,11 @@ export function App() {
       }
       const nextTranscript = await getTranscript(loaded.session.id);
 
-      if (!active || !isCurrentFileListingRequest(fileRequestId)) {
+      if (
+        !active ||
+        !isCurrentFileListingRequest(fileRequestId) ||
+        !isCurrentSessionViewRequest(sessionRequestId)
+      ) {
         return;
       }
 
@@ -572,40 +596,23 @@ export function App() {
       return;
     }
 
+    const sessionRequestId = beginSessionViewRequest();
     try {
       setStatus("loading");
       setError(null);
       seenEvents.current.clear();
       setSession(nextSession);
       setActiveSessionId(nextSession.id);
-      setCurrentPath(nextSession.currentPath);
-      setSelectedFilePath(null);
-      setPreviewMeta(null);
-      setTextPreview(null);
-      setGitStatus(null);
-      activeSearchQueryRef.current = "";
-      setSearchQuery("");
-      const fileRequestId = beginFileListingRequest();
-      setPreviewCollapsed(false);
-      const [loaded, nextTranscript] = await Promise.all([
-        loadEntriesForSession(nextSession.rootId, nextSession),
-        getTranscript(nextSession.id)
-      ]);
-      if (!isCurrentFileListingRequest(fileRequestId)) {
+      const nextTranscript = await getTranscript(nextSession.id);
+      if (!isCurrentSessionViewRequest(sessionRequestId)) {
         return;
       }
-      setSession(loaded.session);
-      setCurrentPath(loaded.session.currentPath);
-      commitFileListing(fileRequestId, {
-        entries: loaded.entries,
-        git: loaded.git
-      });
       setTranscript(nextTranscript);
-      if (loaded.didResetPath) {
-        void reloadSessions();
-      }
       setStatus("ready");
     } catch (nextError) {
+      if (!isCurrentSessionViewRequest(sessionRequestId)) {
+        return;
+      }
       setError(toErrorMessage(nextError));
       setStatus("error");
     }
@@ -615,6 +622,7 @@ export function App() {
     if (!selectedRootId) {
       return;
     }
+    const sessionRequestId = beginSessionViewRequest();
     setStatus("creating-agent");
     setError(null);
     const nextSession = await createSession(selectedRootId, currentPath);
@@ -622,8 +630,11 @@ export function App() {
       getSessions(selectedRootId),
       getTranscript(nextSession.id)
     ]);
-    seenEvents.current.clear();
     setSessions(nextSessions);
+    if (!isCurrentSessionViewRequest(sessionRequestId)) {
+      return;
+    }
+    seenEvents.current.clear();
     setSession(nextSession);
     setActiveSessionId(nextSession.id);
     setTranscript(nextTranscript);
@@ -632,32 +643,14 @@ export function App() {
   }
 
   async function loadSessionIntoView(nextSession: Session | SessionSummary): Promise<void> {
+    const sessionRequestId = beginSessionViewRequest();
     seenEvents.current.clear();
     setSession(nextSession);
     setActiveSessionId(nextSession.id);
-    setCurrentPath(nextSession.currentPath);
-    setSelectedFilePath(null);
-    setPreviewMeta(null);
-    setTextPreview(null);
-    setPreviewError(null);
-    setGitStatus(null);
-    activeSearchQueryRef.current = "";
-    setSearchQuery("");
-    const fileRequestId = beginFileListingRequest();
-    setPreviewCollapsed(false);
-    const [loaded, nextTranscript] = await Promise.all([
-      loadEntriesForSession(nextSession.rootId, nextSession),
-      getTranscript(nextSession.id)
-    ]);
-    if (!isCurrentFileListingRequest(fileRequestId)) {
+    const nextTranscript = await getTranscript(nextSession.id);
+    if (!isCurrentSessionViewRequest(sessionRequestId)) {
       return;
     }
-    setSession(loaded.session);
-    setCurrentPath(loaded.session.currentPath);
-    commitFileListing(fileRequestId, {
-      entries: loaded.entries,
-      git: loaded.git
-    });
     setTranscript(nextTranscript);
   }
 
@@ -751,7 +744,7 @@ export function App() {
     commitFileListing(fileRequestId, nextListing);
     setCurrentPath(pathname);
     if (updatedSession) {
-      setSession(updatedSession);
+      setSession((current) => (current?.id === updatedSession.id ? updatedSession : current));
     }
     await reloadSessions();
     setStatus("ready");
@@ -778,7 +771,9 @@ export function App() {
     setTranscript((current) => [...current, optimisticMessage]);
     setStatus("queued");
     try {
-      const job = await sendMessage(session.id, content);
+      const syncedSession = await syncSessionPath(session, currentPath);
+      setSession((current) => (current?.id === syncedSession.id ? syncedSession : current));
+      const job = await sendMessage(syncedSession.id, content);
       setActiveJobId(job.id);
       void reloadSessions();
     } catch (nextError) {
@@ -1203,6 +1198,7 @@ export function App() {
 
   function selectRoot(rootId: string) {
     beginFileListingRequest();
+    beginSessionViewRequest();
     activeSearchQueryRef.current = "";
     setSearchQuery("");
     setSelectedRootId(rootId);
@@ -1213,6 +1209,15 @@ export function App() {
   function beginFileListingRequest(): number {
     fileListingRequestId.current += 1;
     return fileListingRequestId.current;
+  }
+
+  function beginSessionViewRequest(): number {
+    sessionViewRequestId.current += 1;
+    return sessionViewRequestId.current;
+  }
+
+  function isCurrentSessionViewRequest(requestId: number): boolean {
+    return sessionViewRequestId.current === requestId;
   }
 
   function isCurrentFileListingRequest(requestId: number): boolean {
@@ -1322,6 +1327,7 @@ export function App() {
         message={message}
         status={status}
         locale={resolvedLocale}
+        modelSettings={modelSettings}
         activeJobId={activeJobId}
         hasSession={Boolean(session)}
         messageSubmitting={messageSubmitting}

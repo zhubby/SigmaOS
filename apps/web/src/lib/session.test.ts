@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getFiles, searchFiles, updateSessionPath } from "../api.js";
-import { loadEntriesForSession, loadFileListingForView, sessionTitle } from "./session.js";
+import { loadEntriesForSession, loadFileListingForView, sessionTitle, syncSessionPath } from "./session.js";
 import type { FileEntry, FileListing, Session, SessionSummary } from "../api.js";
 
 vi.mock("../api.js", () => ({
@@ -135,5 +135,20 @@ describe("session helpers", () => {
       git: gitStatus
     });
     expect(mockedSearchFiles).toHaveBeenCalledWith("root-1", "docs", "match");
+  });
+
+  it("only updates a session path when the workspace path differs", async () => {
+    await expect(syncSessionPath(baseSession, ".")).resolves.toBe(baseSession);
+    expect(mockedUpdateSessionPath).not.toHaveBeenCalled();
+
+    const updatedSession: Session = {
+      id: "session-1",
+      rootId: "root-1",
+      currentPath: "docs"
+    };
+    mockedUpdateSessionPath.mockResolvedValueOnce(updatedSession);
+
+    await expect(syncSessionPath(baseSession, "docs")).resolves.toBe(updatedSession);
+    expect(mockedUpdateSessionPath).toHaveBeenCalledWith("session-1", "docs");
   });
 });

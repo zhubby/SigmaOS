@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent, useState, type RefObject } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useState, type RefObject } from "react";
 import ReactMarkdown from "react-markdown";
 import { useTranslation } from "react-i18next";
 import {
@@ -20,6 +20,7 @@ import {
 import remarkGfm from "remark-gfm";
 import type {
   DockerOperationProposal,
+  ModelProviderSettings,
   NasRoot,
   PendingApproval,
   SessionSummary,
@@ -27,7 +28,8 @@ import type {
   TranscriptMessage
 } from "../../api.js";
 import type { AppStatus } from "../../config/status.js";
-import { formatTime } from "../../i18n/format.js";
+import { providerLabel } from "../../config/settings.js";
+import { formatDate, formatRelativeTime, formatTime } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
 import { highlightSource } from "../../preview-utils.js";
 import { sessionTitle } from "../../lib/session.js";
@@ -94,6 +96,52 @@ export function composerFeedbackLabel(state: ComposerFeedbackState | null, t: Tr
   return null;
 }
 
+function SessionList({
+  sessions,
+  activeSessionId,
+  rootAgentTitle,
+  locale,
+  ariaLabel,
+  onSelectSession
+}: {
+  sessions: SessionSummary[];
+  activeSessionId: string;
+  rootAgentTitle: string;
+  locale: SupportedLocale;
+  ariaLabel: string;
+  onSelectSession: (session: SessionSummary) => void;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <nav className="session-list" aria-label={ariaLabel}>
+      {sessions.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          className={item.id === activeSessionId ? "session-item is-active" : "session-item"}
+          onClick={() => onSelectSession(item)}
+        >
+          <Bot aria-hidden="true" size={16} />
+          <span>
+            <strong>{sessionTitle(item, rootAgentTitle)}</strong>
+            <small>
+              <time dateTime={item.updatedAt} title={formatDate(item.updatedAt, locale)}>
+                {formatRelativeTime(item.updatedAt, locale, now)}
+              </time>
+            </small>
+          </span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 export function ChatPane({
   active,
   selectedRoot,
@@ -105,6 +153,7 @@ export function ChatPane({
   message,
   status,
   locale,
+  modelSettings,
   activeJobId,
   messageSubmitting,
   hasSession,
@@ -129,6 +178,7 @@ export function ChatPane({
   message: string;
   status: AppStatus;
   locale: SupportedLocale;
+  modelSettings: ModelProviderSettings | null;
   activeJobId: string | null;
   messageSubmitting: boolean;
   hasSession: boolean;
@@ -152,12 +202,13 @@ export function ChatPane({
   const showAgentStatus = status !== "ready" && status !== "error" && status !== "offline";
   const composerFeedback = composerFeedbackState({ activeJobId, messageSubmitting, status });
   const deleteDisabled = !activeSessionSummary || composerFeedback !== null || status === "cancelling";
-  const composerHintId = "composer-hint";
   const composerStatusId = "composer-status";
-  const composerDescribedBy = composerFeedback ? `${composerHintId} ${composerStatusId}` : composerHintId;
   const ComposerIcon = composerFeedback ? LoaderCircle : Send;
   const composerIconClass = composerFeedback ? "composer-spinner" : undefined;
   const composerStatusLabel = composerFeedbackLabel(composerFeedback, t);
+  const modelRoute = modelSettings
+    ? `${providerLabel(modelSettings.providerName, t)}/${modelSettings.model || t("settings.modelProvider.notSet")}`
+    : t("settings.modelProvider.notLoaded");
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (!shouldSubmitComposerMessage(event)) {
@@ -252,22 +303,14 @@ export function ChatPane({
           </button>
         </div>
 
-        <nav className="session-list" aria-label={t("chat.agentSessions")}>
-          {sessions.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={item.id === activeSessionId ? "session-item is-active" : "session-item"}
-              onClick={() => onSelectSession(item)}
-            >
-              <Bot aria-hidden="true" size={16} />
-              <span>
-                <strong>{sessionTitle(item, rootAgentTitle)}</strong>
-                <small>{item.currentPath === "." ? t("common.root") : item.currentPath}</small>
-              </span>
-            </button>
-          ))}
-        </nav>
+        <SessionList
+          sessions={sessions}
+          activeSessionId={activeSessionId}
+          rootAgentTitle={rootAgentTitle}
+          locale={locale}
+          ariaLabel={t("chat.agentSessions")}
+          onSelectSession={onSelectSession}
+        />
 
         {showAgentStatus ? (
           <div className="agent-footer">
@@ -344,29 +387,32 @@ export function ChatPane({
             onKeyDown={handleComposerKeyDown}
             placeholder={t("chat.messagePlaceholder")}
             aria-label={t("chat.messageAria")}
-            aria-describedby={composerDescribedBy}
+            aria-describedby={composerFeedback ? composerStatusId : undefined}
             rows={3}
           />
-          <div className="composer-meta">
-            <p id={composerHintId} className="composer-hint">
-              {t("chat.messageHint")}
-            </p>
-            {composerStatusLabel ? (
+          {composerStatusLabel ? (
+            <div className="composer-meta">
               <div id={composerStatusId} className="composer-status" role="status" aria-live="polite" data-state={composerFeedback}>
                 <LoaderCircle aria-hidden="true" className="composer-spinner" size={13} />
                 <span>{composerStatusLabel}</span>
               </div>
-            ) : null}
-          </div>
-          <div className="composer-actions">
-            <button className="secondary-button" type="button" onClick={onCancelActiveJob} disabled={!activeJobId}>
-              <CircleStop aria-hidden="true" size={16} />
-              <span>{t("common.actions.stop")}</span>
-            </button>
-            <button className="primary-button" type="submit" disabled={!hasSession || !message.trim() || messageSubmitting}>
-              <ComposerIcon aria-hidden="true" className={composerIconClass} size={16} />
-              <span>{t("common.actions.send")}</span>
-            </button>
+            </div>
+          ) : null}
+          <div className="composer-footer">
+            <div className="composer-model-config" title={modelRoute}>
+              <span>{t("chat.modelConfiguration")}</span>
+              <strong>{modelRoute}</strong>
+            </div>
+            <div className="composer-actions">
+              <button className="secondary-button" type="button" onClick={onCancelActiveJob} disabled={!activeJobId}>
+                <CircleStop aria-hidden="true" size={16} />
+                <span>{t("common.actions.stop")}</span>
+              </button>
+              <button className="primary-button" type="submit" disabled={!hasSession || !message.trim() || messageSubmitting}>
+                <ComposerIcon aria-hidden="true" className={composerIconClass} size={16} />
+                <span>{t("common.actions.send")}</span>
+              </button>
+            </div>
           </div>
         </form>
       </section>

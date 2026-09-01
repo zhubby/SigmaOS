@@ -56,6 +56,17 @@ export async function loadFileListingForView(rootId: string, currentPath: string
   };
 }
 
+export async function syncSessionPath(
+  targetSession: Session | SessionSummary,
+  currentPath: string
+): Promise<Session | SessionSummary> {
+  if (targetSession.currentPath === currentPath) {
+    return targetSession;
+  }
+
+  return updateSessionPath(targetSession.id, currentPath);
+}
+
 export function isRecoverablePathError(error: unknown): boolean {
   return error instanceof Error && (error.message === "Path not found" || error.message === "Path is not accessible");
 }

@@ -665,19 +665,8 @@
 
 .composer-meta {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-  min-height: 22px;
-}
-
-.composer-hint {
-  margin: 0;
-  color: var(--muted-2);
-  font-size: 11.5px;
-  font-weight: 800;
-  line-height: 1.3;
+  justify-content: flex-end;
 }
 
 .composer-status {
@@ -707,8 +696,50 @@
   animation: activity-upload-spin 1.1s linear infinite;
 }
 
+.composer-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.composer-model-config {
+  display: grid;
+  align-self: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.composer-model-config span,
+.composer-model-config strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-model-config span {
+  color: var(--muted-2);
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.composer-model-config strong {
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.25;
+}
+
 .composer-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
+}
+
+.composer-actions .primary-button,
+.composer-actions .secondary-button {
+  gap: 6px;
+  min-width: 80px;
+  padding: 0 10px;
 }

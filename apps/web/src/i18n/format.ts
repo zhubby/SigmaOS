@@ -29,6 +29,33 @@ export function formatTime(value: string, locale: SupportedLocale): string {
   }).format(new Date(value));
 }
 
+export function formatRelativeTime(value: string, locale: SupportedLocale, now = Date.now()): string {
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) {
+    return value;
+  }
+
+  const elapsedSeconds = Math.max(0, Math.floor((now - timestamp) / 1000));
+  const ranges: Array<{ limit: number; divisor: number; unit: Intl.RelativeTimeFormatUnit }> = [
+    { limit: 60, divisor: 1, unit: "second" },
+    { limit: 60 * 60, divisor: 60, unit: "minute" },
+    { limit: 24 * 60 * 60, divisor: 60 * 60, unit: "hour" },
+    { limit: 7 * 24 * 60 * 60, divisor: 24 * 60 * 60, unit: "day" },
+    { limit: 30 * 24 * 60 * 60, divisor: 7 * 24 * 60 * 60, unit: "week" },
+    { limit: 365 * 24 * 60 * 60, divisor: 30 * 24 * 60 * 60, unit: "month" },
+    { limit: Number.POSITIVE_INFINITY, divisor: 365 * 24 * 60 * 60, unit: "year" }
+  ];
+  const range = ranges.find((candidate) => elapsedSeconds < candidate.limit) ?? ranges[ranges.length - 1];
+  if (!range) {
+    return value;
+  }
+
+  return new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(
+    -Math.floor(elapsedSeconds / range.divisor),
+    range.unit
+  );
+}
+
 function formatNumber(value: number, locale: SupportedLocale, fractionDigits: number): string {
   return formatLocaleNumber(value, locale, {
     minimumFractionDigits: fractionDigits,
