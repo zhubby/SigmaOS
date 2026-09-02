@@ -260,7 +260,7 @@ function statusFor(entries: Array<{ name: string; gitStatus?: string }>, name: s
 }
 
 async function git(args: string[], cwd = rootDir): Promise<void> {
-  await execFileAsync("git", args, {
+  await execFileAsync("git", ["-c", "user.name=SigmaOS", "-c", "user.email=sigmaos@example.test", ...args], {
     cwd,
     env: {
       ...process.env,
@@ -270,5 +270,5 @@ async function git(args: string[], cwd = rootDir): Promise<void> {
 }
 
 async function gitCommit(message: string, cwd = rootDir): Promise<void> {
-  await git(["-c", "user.name=SigmaOS", "-c", "user.email=sigmaos@example.test", "commit", "-m", message], cwd);
+  await git(["commit", "-m", message], cwd);
 }
