@@ -3,12 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  acquireExecutionLock,
   detectDuplicateIndexedFiles,
   ensureNasRoots,
   getIndexRootStatus,
   openSigmaDb,
   queryIndexedText,
   upsertIndexedFile,
+  releaseExecutionLock,
   type SigmaDatabase
 } from "@sigmaos/db";
 import { runIndexOnce } from "./indexer.js";
@@ -290,5 +292,22 @@ describe("indexer", () => {
     expect(
       db.prepare("SELECT mime_type FROM indexed_files WHERE root_id = ? AND path = ?").pluck().get("local", "payload.bin")
     ).toBe("application/octet-stream");
+  });
+
+  it("does not supersede an already-running indexer", async () => {
+    const owner = "existing-indexer";
+    expect(acquireExecutionLock(db, { name: "indexer", owner })).toBe(true);
+
+    const result = await runIndexOnce({
+      db,
+      roots: [{ id: "local", name: "Local", path: rootDir }]
+    });
+
+    expect(result.roots[0]).toMatchObject({
+      status: "failed",
+      failures: [{ path: ".", reason: "already running" }]
+    });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM index_runs").get()).toEqual({ count: 0 });
+    expect(releaseExecutionLock(db, { name: "indexer", owner })).toBe(true);
   });
 });
