@@ -11,6 +11,7 @@ import {
   createSession,
   createUserMessageAndJob,
   ensureNasRoots,
+  finishIndexRun,
   getApproval,
   getDockerSettings,
   getDockerOperationByApproval,
@@ -25,6 +26,9 @@ import {
   listMessages,
   listPendingApprovals,
   openSigmaDb,
+  recordIndexFailure,
+  startIndexRun,
+  upsertIndexedFile,
   updateJobStatus,
   type SigmaDatabase
 } from "@sigmaos/db";
@@ -62,6 +66,93 @@ afterEach(async () => {
 });
 
 describe("API server", () => {
+  it("reports indexer status for configured roots", async () => {
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    const neverRun = await server.inject({
+      method: "GET",
+      url: "/api/indexer/status"
+    });
+
+    expect(neverRun.statusCode).toBe(200);
+    expect(neverRun.json()).toEqual({
+      roots: [
+        {
+          rootId: "local",
+          status: "never_run",
+          startedAt: null,
+          finishedAt: null,
+          scanned: 0,
+          indexed: 0,
+          unchanged: 0,
+          removed: 0,
+          skipped: 0,
+          failed: 0,
+          failures: []
+        }
+      ]
+    });
+
+    const run = startIndexRun(db, { rootId: "local" });
+    finishIndexRun(db, {
+      runId: run.id,
+      status: "completed",
+      scanned: 4,
+      indexed: 1,
+      unchanged: 3,
+      removed: 0,
+      skipped: 0,
+      failed: 0
+    });
+    const completed = await server.inject({
+      method: "GET",
+      url: "/api/indexer/status?rootId=local"
+    });
+    expect(completed.statusCode).toBe(200);
+    expect(completed.json()).toMatchObject({
+      roots: [{ rootId: "local", status: "completed", scanned: 4, unchanged: 3 }]
+    });
+
+    const failedRun = startIndexRun(db, { rootId: "local" });
+    recordIndexFailure(db, {
+      runId: failedRun.id,
+      path: "docs/private.txt",
+      reason: "permission denied"
+    });
+    finishIndexRun(db, {
+      runId: failedRun.id,
+      status: "failed",
+      scanned: 1,
+      indexed: 0,
+      unchanged: 0,
+      removed: 0,
+      skipped: 0,
+      failed: 1,
+      error: "one or more files failed"
+    });
+    const failed = await server.inject({
+      method: "GET",
+      url: "/api/indexer/status?rootId=local"
+    });
+    expect(failed.statusCode).toBe(200);
+    expect(failed.json()).toMatchObject({
+      roots: [
+        {
+          rootId: "local",
+          status: "failed",
+          failed: 1,
+          failures: [{ path: "docs/private.txt", reason: "permission denied" }]
+        }
+      ]
+    });
+
+    const missing = await server.inject({
+      method: "GET",
+      url: "/api/indexer/status?rootId=missing"
+    });
+    expect(missing.statusCode).toBe(404);
+    await server.close();
+  });
+
   it("does not allow cross-origin access by default", async () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({
@@ -2148,7 +2239,88 @@ describe("API server", () => {
         {
           name: "readme.txt",
           path: "docs/readme.txt",
-          kind: "file"
+          kind: "file",
+          sizeBytes: 0,
+          modifiedAt: new Date(0).toISOString()
+        }
+      ]
+    });
+    await server.close();
+  });
+
+  it("scopes filename fallback and validates the requested search directory", async () => {
+    await mkdir(path.join(rootDir, "docs"));
+    await mkdir(path.join(rootDir, "docs-old"));
+    await writeFile(path.join(rootDir, "docs", "alpha-note.txt"), "inside");
+    await writeFile(path.join(rootDir, "docs-old", "alpha-note.txt"), "outside");
+    const server = await buildServer({ config: testConfig(tempDir), db });
+
+    const scoped = await server.inject({
+      method: "GET",
+      url: "/api/search?rootId=local&path=docs&q=alpha"
+    });
+    expect(scoped.statusCode).toBe(200);
+    expect(scoped.json()).toMatchObject({
+      indexed: [],
+      files: [{ path: "docs/alpha-note.txt" }]
+    });
+
+    const traversal = await server.inject({
+      method: "GET",
+      url: "/api/search?rootId=local&path=..&q=alpha"
+    });
+    expect(traversal.statusCode).toBe(400);
+
+    const filePath = await server.inject({
+      method: "GET",
+      url: "/api/search?rootId=local&path=hello.txt&q=alpha"
+    });
+    expect(filePath.statusCode).toBe(400);
+    await server.close();
+  });
+
+  it("scopes indexed search to the requested directory and returns stored metadata", async () => {
+    await mkdir(path.join(rootDir, "docs"));
+    await mkdir(path.join(rootDir, "docs-old"));
+    await writeFile(path.join(rootDir, "docs", "readme.txt"), "alpha docs");
+    await writeFile(path.join(rootDir, "docs-old", "readme.txt"), "alpha old docs");
+    upsertIndexedFile(db, {
+      rootId: "local",
+      path: "docs/readme.txt",
+      name: "readme.txt",
+      mimeType: "text/plain",
+      sizeBytes: 10,
+      mtimeMs: 1_700_000_000_000,
+      hash: "docs-hash",
+      body: "alpha docs"
+    });
+    upsertIndexedFile(db, {
+      rootId: "local",
+      path: "docs-old/readme.txt",
+      name: "readme.txt",
+      mimeType: "text/plain",
+      sizeBytes: 14,
+      mtimeMs: 1_700_000_001_000,
+      hash: "docs-old-hash",
+      body: "alpha old docs"
+    });
+    const server = await buildServer({ config: testConfig(tempDir), db });
+
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/search?rootId=local&path=docs&q=alpha"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      files: [
+        {
+          name: "readme.txt",
+          path: "docs/readme.txt",
+          kind: "file",
+          mimeType: "text/plain",
+          sizeBytes: 10,
+          modifiedAt: new Date(1_700_000_000_000).toISOString()
         }
       ]
     });

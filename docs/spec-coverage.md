@@ -17,9 +17,12 @@
 
 ## Phase 3 - Indexing
 
-- `apps/indexer` scans configured NAS roots, hashes files, extracts basic metadata and text, writes `indexed_files` and `indexed_text`.
-- Search prefers SQLite FTS and falls back to filename search.
+- `apps/indexer` scans configured NAS roots without following symlinks, hashes changed files, extracts bounded text, and writes `indexed_files` and `indexed_text`.
+- Incremental scans skip unchanged size/mtime pairs, preserve the last successful record on file errors, and suppress stale cleanup after incomplete traversal.
+- Latest per-root run status and root-relative failures are persisted and exposed through `GET /api/indexer/status`.
+- Search prefers directory-scoped SQLite FTS with indexed metadata and falls back to directory-scoped filename search.
 - Duplicate detection uses indexed hashes for scheduler reports.
+- The systemd timer provides 30-minute eventual consistency; OCR, PDF/Office extraction, watchers, and mutation-triggered refresh are deferred.
 
 ## Phase 4 - Native Packaging
 

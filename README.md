@@ -30,6 +30,7 @@ The following surfaces are intentionally limited today:
 
 - Browse multiple configured NAS roots with breadcrumb navigation and Git status indicators.
 - Search the SQLite FTS index with a filesystem name-search fallback.
+- Incrementally refresh the index from file size and modification time without following symbolic links.
 - Preview text, source code, Markdown, CSV/TSV, images, audio, video, and PDF files.
 - Transcode unsupported browser video containers to a local MP4 cache with FFmpeg.
 - Edit bounded text files with modification-time conflict detection.
@@ -176,6 +177,17 @@ npm run index
 npm run schedule
 npm run maintenance
 ```
+
+The packaged `sigmaos-indexer.timer` runs every 30 minutes, so search is eventually consistent after uploads, edits, moves, and deletes. Run `npm run index` for an immediate development refresh. A failed file retains its last successful index entry, and an incomplete directory traversal does not remove stale entries that could not be verified.
+
+Inspect the latest run for every configured root, or one root, through the read-only status endpoint:
+
+```bash
+curl http://127.0.0.1:3010/api/indexer/status
+curl "http://127.0.0.1:3010/api/indexer/status?rootId=dev"
+```
+
+Status responses include scan, reindex, unchanged, removal, skip, and failure counts plus root-relative failure paths. Symbolic links are always skipped. OCR, PDF/Office content extraction, real-time filesystem watchers, and mutation-triggered reindexing remain outside the v1 indexer baseline.
 
 Configure an OpenAI or Anthropic provider, model, and API key in **Settings > Model Providers** before starting an AI turn. Provider secrets are stored in the local SQLite database; API reads only report whether a key is configured.
 

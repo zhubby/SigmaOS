@@ -24,6 +24,9 @@ import type {
   NasRootConfig,
   AgentEventRecord,
   AgentEventType,
+  IndexFailure,
+  IndexRootStatus,
+  IndexRunStatus,
   AgentMessageRecord,
   AgentSessionRecord,
   JobRecord,
@@ -86,6 +89,38 @@ type DbNasRootRow = {
   enabled: 0 | 1;
   created_at: string;
   updated_at: string;
+};
+
+type DbIndexedFileRow = {
+  id: string;
+  root_id: string;
+  path: string;
+  name: string;
+  mime_type: string | null;
+  size_bytes: number;
+  mtime_ms: number;
+  hash: string | null;
+  indexed_at: string;
+};
+
+type DbIndexRunRow = {
+  id: string;
+  root_id: string;
+  status: Exclude<IndexRunStatus, "never_run">;
+  started_at: string;
+  finished_at: string | null;
+  scanned: number;
+  indexed: number;
+  unchanged: number;
+  removed: number;
+  skipped: number;
+  failed: number;
+  error: string | null;
+};
+
+type DbIndexFailureRow = {
+  path: string;
+  reason: string;
 };
 
 type DbApprovalRow = {
@@ -674,26 +709,336 @@ export function listEvents(
   return rows.map(mapEvent);
 }
 
-export function queryIndexedText(
-  db: SigmaDatabase,
-  input: { rootId: string; query: string; limit?: number }
-): Array<{ fileId: string; path: string; name: string; snippet: string }> {
+export interface IndexedFileSnapshot {
+  id: string;
+  rootId: string;
+  path: string;
+  name: string;
+  mimeType: string | null;
+  sizeBytes: number;
+  mtimeMs: number;
+  hash: string | null;
+  indexedAt: string;
+  hasText: boolean;
+}
+
+export function listIndexedFilesForRoot(db: SigmaDatabase, rootId: string): IndexedFileSnapshot[] {
+  const textFileIds = new Set(
+    (db
+      .prepare("SELECT file_id FROM indexed_text WHERE root_id = ?")
+      .pluck()
+      .all(rootId) as string[])
+  );
   const rows = db
     .prepare(`
       SELECT
-        file_id as fileId,
-        path,
-        name,
-        snippet(indexed_text, 4, '<mark>', '</mark>', '...', 12) AS snippet
+        f.id,
+        f.root_id,
+        f.path,
+        f.name,
+        f.mime_type,
+        f.size_bytes,
+        f.mtime_ms,
+        f.hash,
+        f.indexed_at
+      FROM indexed_files f
+      WHERE f.root_id = ?
+    `)
+    .all(rootId) as DbIndexedFileRow[];
+
+  return rows.map((row) => ({
+    id: row.id,
+    rootId: row.root_id,
+    path: row.path,
+    name: row.name,
+    mimeType: row.mime_type,
+    sizeBytes: row.size_bytes,
+    mtimeMs: row.mtime_ms,
+    hash: row.hash,
+    indexedAt: row.indexed_at,
+    hasText: textFileIds.has(row.id)
+  }));
+}
+
+export function removeIndexedFile(db: SigmaDatabase, input: { rootId: string; path: string }): boolean {
+  const row = db
+    .prepare("SELECT id FROM indexed_files WHERE root_id = ? AND path = ?")
+    .get(input.rootId, input.path) as { id: string } | undefined;
+  if (!row) {
+    return false;
+  }
+
+  const tx = db.transaction(() => {
+    db.prepare("DELETE FROM indexed_text WHERE file_id = ?").run(row.id);
+    db.prepare("DELETE FROM indexed_files WHERE id = ?").run(row.id);
+  });
+  tx();
+  return true;
+}
+
+export function recoverInterruptedIndexRuns(
+  db: SigmaDatabase,
+  input: { rootId?: string; now?: Date } = {}
+): number {
+  const now = (input.now ?? new Date()).toISOString();
+  const tx = db.transaction(() => {
+    const rootRows = input.rootId
+      ? ([{ root_id: input.rootId }] as Array<{ root_id: string }>)
+      : (db.prepare("SELECT DISTINCT root_id FROM index_runs").all() as Array<{
+          root_id: string;
+        }>);
+    const result = input.rootId
+      ? db
+          .prepare(`
+            UPDATE index_runs
+            SET status = 'failed', finished_at = ?, error = 'interrupted/superseded'
+            WHERE root_id = ? AND status = 'running'
+          `)
+          .run(now, input.rootId)
+      : db
+          .prepare(`
+            UPDATE index_runs
+            SET status = 'failed', finished_at = ?, error = 'interrupted/superseded'
+            WHERE status = 'running'
+          `)
+          .run(now);
+
+    for (const row of rootRows) {
+      retainLatestFinalizedIndexRun(db, row.root_id);
+    }
+    return result.changes;
+  });
+  return tx();
+}
+
+function retainLatestFinalizedIndexRun(db: SigmaDatabase, rootId: string): void {
+  const runs = db
+    .prepare(`
+      SELECT id
+      FROM index_runs
+      WHERE root_id = ? AND status <> 'running'
+      ORDER BY COALESCE(finished_at, started_at) DESC, started_at DESC, rowid DESC
+    `)
+    .all(rootId) as Array<{ id: string }>;
+  const staleRunIds = runs.slice(1).map((run) => run.id);
+  if (staleRunIds.length === 0) {
+    return;
+  }
+
+  const placeholders = staleRunIds.map(() => "?").join(", ");
+  db.prepare(`DELETE FROM index_failures WHERE run_id IN (${placeholders})`).run(...staleRunIds);
+  db.prepare(`DELETE FROM index_runs WHERE id IN (${placeholders})`).run(...staleRunIds);
+}
+
+export function startIndexRun(
+  db: SigmaDatabase,
+  input: { rootId: string; now?: Date }
+): { id: string; rootId: string; startedAt: string } {
+  recoverInterruptedIndexRuns(db, {
+    rootId: input.rootId,
+    ...(input.now ? { now: input.now } : {})
+  });
+  const id = randomUUID();
+  const startedAt = (input.now ?? new Date()).toISOString();
+  db.prepare(`
+    INSERT INTO index_runs (id, root_id, status, started_at)
+    VALUES (?, ?, 'running', ?)
+  `).run(id, input.rootId, startedAt);
+  return { id, rootId: input.rootId, startedAt };
+}
+
+export function isIndexRunRunning(db: SigmaDatabase, runId: string): boolean {
+  return Boolean(
+    db
+      .prepare("SELECT 1 FROM index_runs WHERE id = ? AND status = 'running'")
+      .get(runId)
+  );
+}
+
+export function recordIndexFailure(
+  db: SigmaDatabase,
+  input: { runId: string; rootId?: string; path: string; reason: string; now?: Date }
+): void {
+  const run = db
+    .prepare("SELECT root_id FROM index_runs WHERE id = ?")
+    .get(input.runId) as { root_id: string } | undefined;
+  if (!run) {
+    throw new Error("Index run not found");
+  }
+  if (input.rootId !== undefined && run.root_id !== input.rootId) {
+    throw new Error("Index failure root does not match index run");
+  }
+  db.prepare(`
+    INSERT INTO index_failures (id, run_id, root_id, path, reason, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(randomUUID(), input.runId, run.root_id, input.path, input.reason, (input.now ?? new Date()).toISOString());
+}
+
+export function finishIndexRun(
+  db: SigmaDatabase,
+  input: {
+    runId: string;
+    status: Exclude<IndexRunStatus, "never_run" | "running">;
+    scanned: number;
+    indexed: number;
+    unchanged: number;
+    removed: number;
+    skipped: number;
+    failed: number;
+    error?: string | null;
+    finishedAt?: Date;
+  }
+): boolean {
+  const finishedAt = (input.finishedAt ?? new Date()).toISOString();
+  const tx = db.transaction(() => {
+    const run = db
+      .prepare("SELECT root_id FROM index_runs WHERE id = ?")
+      .get(input.runId) as { root_id: string } | undefined;
+    if (!run) {
+      // A superseded run may be cleaned up by the newer run before it reaches
+      // its finalization point. Treat that as an already-finalized no-op so an
+      // interrupted indexer cannot reject the whole process.
+      return false;
+    }
+
+    const update = db.prepare(`
+      UPDATE index_runs
+      SET status = ?, finished_at = ?, scanned = ?, indexed = ?, unchanged = ?, removed = ?, skipped = ?, failed = ?, error = ?
+      WHERE id = ? AND status = 'running'
+    `).run(
+      input.status,
+      finishedAt,
+      input.scanned,
+      input.indexed,
+      input.unchanged,
+      input.removed,
+      input.skipped,
+      input.failed,
+      input.error ?? null,
+      input.runId
+    );
+
+    if (update.changes === 0) {
+      return false;
+    }
+
+    db.prepare(`
+      DELETE FROM index_failures
+      WHERE run_id IN (
+        SELECT id FROM index_runs
+        WHERE root_id = ? AND id <> ? AND status <> 'running'
+      )
+    `).run(run.root_id, input.runId);
+    db.prepare(`
+      DELETE FROM index_runs
+      WHERE root_id = ? AND id <> ? AND status <> 'running'
+    `).run(run.root_id, input.runId);
+    return true;
+  });
+  return tx();
+}
+
+export function listIndexRootStatuses(db: SigmaDatabase, rootIds: string[]): IndexRootStatus[] {
+  return rootIds.map((rootId) => getIndexRootStatus(db, rootId));
+}
+
+export function getIndexRootStatus(db: SigmaDatabase, rootId: string): IndexRootStatus {
+  const row = db
+    .prepare(`
+      SELECT id, root_id, status, started_at, finished_at, scanned, indexed, unchanged, removed, skipped, failed, error
+      FROM index_runs
+      WHERE root_id = ?
+      ORDER BY CASE WHEN status = 'running' THEN 0 ELSE 1 END, started_at DESC
+      LIMIT 1
+    `)
+    .get(rootId) as DbIndexRunRow | undefined;
+
+  if (!row) {
+    return {
+      rootId,
+      status: "never_run",
+      startedAt: null,
+      finishedAt: null,
+      scanned: 0,
+      indexed: 0,
+      unchanged: 0,
+      removed: 0,
+      skipped: 0,
+      failed: 0,
+      failures: []
+    };
+  }
+
+  const failures = db
+    .prepare(`
+      SELECT path, reason
+      FROM index_failures
+      WHERE run_id = ?
+      ORDER BY created_at ASC, id ASC
+    `)
+    .all(row.id) as DbIndexFailureRow[];
+
+  return {
+    rootId: row.root_id,
+    status: row.status,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    scanned: row.scanned,
+    indexed: row.indexed,
+    unchanged: row.unchanged,
+    removed: row.removed,
+    skipped: row.skipped,
+    failed: row.failed,
+    failures: failures.map((failure): IndexFailure => ({
+      path: failure.path,
+      reason: failure.reason
+    }))
+  };
+}
+
+export function queryIndexedText(
+  db: SigmaDatabase,
+  input: { rootId: string; query: string; path?: string; limit?: number }
+): Array<{
+  fileId: string;
+  path: string;
+  name: string;
+  snippet: string;
+  sizeBytes: number | null;
+  mtimeMs: number | null;
+  mimeType: string | null;
+}> {
+  const searchPath = input.path ?? ".";
+  const pathPattern = searchPath === "." ? null : `${searchPath}/%`;
+  const rows = db
+    .prepare(`
+      SELECT
+        indexed_text.file_id as fileId,
+        indexed_text.path,
+        indexed_text.name,
+        snippet(indexed_text, 4, '<mark>', '</mark>', '...', 12) AS snippet,
+        f.size_bytes AS sizeBytes,
+        f.mtime_ms AS mtimeMs,
+        f.mime_type AS mimeType
       FROM indexed_text
-      WHERE root_id = ? AND indexed_text MATCH ?
+      LEFT JOIN indexed_files f ON f.id = indexed_text.file_id AND f.root_id = indexed_text.root_id
+      WHERE indexed_text.root_id = ?
+        AND indexed_text MATCH ?
+        AND (
+          ? IS NULL
+          OR indexed_text.path = ?
+          OR substr(indexed_text.path, 1, length(?) + 1) = ? || '/'
+        )
       LIMIT ?
     `)
-    .all(input.rootId, input.query, input.limit ?? 25) as Array<{
+    .all(input.rootId, input.query, pathPattern, searchPath, searchPath, searchPath, input.limit ?? 25) as Array<{
     fileId: string;
     path: string;
     name: string;
     snippet: string;
+    sizeBytes: number | null;
+    mtimeMs: number | null;
+    mimeType: string | null;
   }>;
 
   return rows;

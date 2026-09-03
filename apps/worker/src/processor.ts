@@ -82,6 +82,7 @@ export async function processNextJob({ db, config, agentRunner, allowLocalFallba
               return queryIndexedText(db, {
                 rootId: root.id,
                 query,
+                path: session.currentPath,
                 limit: 25
               });
             } catch {

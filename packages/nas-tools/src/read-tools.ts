@@ -9,6 +9,7 @@ export interface FileEntry {
   name: string;
   path: string;
   kind: "directory" | "file" | "symlink" | "other";
+  mimeType?: string;
   sizeBytes: number;
   modifiedAt: string;
   isSafe: boolean;

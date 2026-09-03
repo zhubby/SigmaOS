@@ -11,6 +11,7 @@ import {
   listEvents,
   listPendingApprovals,
   openSigmaDb,
+  upsertIndexedFile,
   type SigmaDatabase
 } from "@sigmaos/db";
 import type { PiAgentRunner } from "@sigmaos/agent";
@@ -127,6 +128,46 @@ describe("worker processor", () => {
       "agent.message"
     ]);
     await expect(readFile(path.join(rootDir, "alpha.txt"), "utf8")).resolves.toBe("alpha");
+  });
+
+  it("scopes local agent index searches to the session directory", async () => {
+    await mkdir(path.join(rootDir, "docs"));
+    const session = createSession(db, { rootId: "local", currentPath: "docs" });
+    createUserMessageAndJob(db, {
+      sessionId: session.id,
+      content: "search alpha"
+    });
+    upsertIndexedFile(db, {
+      rootId: "local",
+      path: "alpha.txt",
+      name: "alpha.txt",
+      mimeType: "text/plain",
+      sizeBytes: 5,
+      mtimeMs: 1,
+      body: "alpha outside"
+    });
+    upsertIndexedFile(db, {
+      rootId: "local",
+      path: "docs/inside.txt",
+      name: "inside.txt",
+      mimeType: "text/plain",
+      sizeBytes: 5,
+      mtimeMs: 1,
+      body: "alpha inside"
+    });
+
+    await expect(processNextJob({ db, config: testConfig(), allowLocalFallback: true })).resolves.toBe(true);
+
+    const queryEvent = listEvents(db, { sessionId: session.id }).find(
+      (event) => event.type === "tool_call.completed"
+    );
+    expect(queryEvent?.payload).toMatchObject({
+      name: "query_index",
+      output: {
+        count: 1,
+        matches: [{ path: "docs/inside.txt" }]
+      }
+    });
   });
 
   it("passes the saved Pi provider session back into the next job for the same SigmaOS session", async () => {

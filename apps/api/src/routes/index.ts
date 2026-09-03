@@ -4,6 +4,7 @@ import { registerApprovalRoutes } from "./approvals.js";
 import { registerDockerRoutes } from "./docker.js";
 import { registerFileRoutes } from "./files.js";
 import { registerHealthRoutes } from "./health.js";
+import { registerIndexerRoutes } from "./indexer.js";
 import { registerJobRoutes } from "./jobs.js";
 import { registerOperationRoutes } from "./operations.js";
 import { registerRootRoutes } from "./roots.js";
@@ -16,6 +17,7 @@ import { registerTerminalRoutes } from "./terminal.js";
 export function registerApiRoutes(server: FastifyInstance, context: ApiRouteContext): void {
   registerHealthRoutes(server, context);
   registerRootRoutes(server, context);
+  registerIndexerRoutes(server, context);
   registerSettingsRoutes(server, context);
   registerSystemRoutes(server, context);
   registerSessionRoutes(server, context);

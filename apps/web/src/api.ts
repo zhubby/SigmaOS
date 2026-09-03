@@ -5,6 +5,7 @@ import type {
   DockerSettingsRecord,
   GitDirectoryStatus,
   GitFileStatus,
+  IndexRootStatus,
   ModelProviderName as SharedModelProviderName,
   PublicModelProviderSettings,
   PublicShareSettings,
@@ -28,6 +29,7 @@ export interface FileEntry {
   name: string;
   path: string;
   kind: "directory" | "file" | "symlink" | "other";
+  mimeType?: string;
   sizeBytes: number;
   modifiedAt: string;
   isSafe: boolean;
@@ -43,6 +45,8 @@ export interface FileSearchResult {
   files: FileEntry[];
   git: GitDirectoryStatus | null;
 }
+
+export type IndexerRootStatus = IndexRootStatus;
 
 export interface Session {
   id: string;
@@ -537,6 +541,18 @@ export async function searchFiles(rootId: string, currentPath: string, query: st
   const response = await fetch(`/api/search?${params.toString()}`);
   await ensureOk(response);
   return (await response.json()) as FileSearchResult;
+}
+
+export async function getIndexerStatus(rootId?: string): Promise<IndexerRootStatus[]> {
+  const params = new URLSearchParams();
+  if (rootId) {
+    params.set("rootId", rootId);
+  }
+  const query = params.size ? `?${params.toString()}` : "";
+  const response = await fetch(`/api/indexer/status${query}`);
+  await ensureOk(response);
+  const body = (await response.json()) as { roots: IndexerRootStatus[] };
+  return body.roots;
 }
 
 export async function getFileMeta(rootId: string, currentPath: string): Promise<FileMeta> {

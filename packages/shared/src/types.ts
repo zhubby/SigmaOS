@@ -605,6 +605,29 @@ export interface NasRootRecord {
   updatedAt: string;
 }
 
+export type IndexRunStatus = "running" | "completed" | "failed" | "never_run";
+
+export interface IndexFailure {
+  path: string;
+  reason: string;
+}
+
+export interface IndexRootRunSummary {
+  rootId: string;
+  status: IndexRunStatus;
+  startedAt: string | null;
+  finishedAt: string | null;
+  scanned: number;
+  indexed: number;
+  unchanged: number;
+  removed: number;
+  skipped: number;
+  failed: number;
+  failures: IndexFailure[];
+}
+
+export type IndexRootStatus = IndexRootRunSummary;
+
 export interface ToolResult<T = unknown> {
   success: boolean;
   output: string;
