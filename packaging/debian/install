@@ -2,6 +2,7 @@ apps/api/dist/ usr/lib/sigmaos/apps/api/dist/
 apps/share-helper/dist/ usr/lib/sigmaos/apps/share-helper/dist/
 apps/worker/dist/ usr/lib/sigmaos/apps/worker/dist/
 apps/indexer/dist/ usr/lib/sigmaos/apps/indexer/dist/
+apps/backup/dist/ usr/lib/sigmaos/apps/backup/dist/
 apps/scheduler/dist/ usr/lib/sigmaos/apps/scheduler/dist/
 apps/web/dist/ usr/lib/sigmaos/apps/web/dist/
 node_modules/ usr/lib/sigmaos/node_modules/

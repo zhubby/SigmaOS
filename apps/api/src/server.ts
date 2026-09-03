@@ -8,6 +8,9 @@ import { registerApiRoutes } from "./routes/index.js";
 export type { ServerDependencies } from "./context.js";
 
 export async function buildServer({ config, db, docker, shares, system, terminal, videoTranscoder }: ServerDependencies): Promise<FastifyInstance> {
+  if (!isLoopbackHost(config.api.host)) {
+    throw new Error("SigmaOS API must bind to a loopback host");
+  }
   const server = Fastify({
     logger: {
       level: process.env.LOG_LEVEL ?? "info"
@@ -33,4 +36,9 @@ export async function buildServer({ config, db, docker, shares, system, terminal
   });
 
   return server;
+}
+
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1" || normalized === "[::1]";
 }

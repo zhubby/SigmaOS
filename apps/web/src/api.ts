@@ -5,6 +5,7 @@ import type {
   DockerSettingsRecord,
   GitDirectoryStatus,
   GitFileStatus,
+  IndexRootStatus,
   ModelProviderName as SharedModelProviderName,
   PublicModelProviderSettings,
   PublicShareSettings,
@@ -15,6 +16,10 @@ import type {
   ShareSummary as PublicShareSummary,
   SystemNetworkSummary,
   SystemStorageSummary
+  , BackupRunSummary,
+  RootReadiness,
+  IndexerAlert,
+  SystemHealthSummary
 } from "@sigmaos/shared";
 
 export interface NasRoot {
@@ -28,6 +33,7 @@ export interface FileEntry {
   name: string;
   path: string;
   kind: "directory" | "file" | "symlink" | "other";
+  mimeType?: string;
   sizeBytes: number;
   modifiedAt: string;
   isSafe: boolean;
@@ -43,6 +49,22 @@ export interface FileSearchResult {
   files: FileEntry[];
   git: GitDirectoryStatus | null;
 }
+
+export type IndexerRootStatus = IndexRootStatus;
+
+export interface BackupStatus {
+  enabled: boolean;
+  repositoryConfigured: boolean;
+  repositoryAvailable: boolean;
+  passwordConfigured: boolean;
+  repositoryPath: string | null;
+  stagingPath: string | null;
+  runs: BackupRunSummary[];
+  alerts: IndexerAlert[];
+}
+
+export interface ReadinessResponse { roots: RootReadiness[]; }
+export type SystemHealth = SystemHealthSummary;
 
 export interface Session {
   id: string;
@@ -537,6 +559,40 @@ export async function searchFiles(rootId: string, currentPath: string, query: st
   const response = await fetch(`/api/search?${params.toString()}`);
   await ensureOk(response);
   return (await response.json()) as FileSearchResult;
+}
+
+export async function getIndexerStatus(rootId?: string): Promise<IndexerRootStatus[]> {
+  const params = new URLSearchParams();
+  if (rootId) {
+    params.set("rootId", rootId);
+  }
+  const query = params.size ? `?${params.toString()}` : "";
+  const response = await fetch(`/api/indexer/status${query}`);
+  await ensureOk(response);
+  const body = (await response.json()) as { roots: IndexerRootStatus[] };
+  return body.roots;
+}
+
+export async function getRootReadiness(rootId?: string): Promise<RootReadiness[]> {
+  const params = new URLSearchParams();
+  if (rootId) params.set("rootId", rootId);
+  const query = params.size ? `?${params.toString()}` : "";
+  const response = await fetch(`/api/roots/readiness${query}`);
+  await ensureOk(response);
+  const body = (await response.json()) as ReadinessResponse;
+  return body.roots;
+}
+
+export async function getBackupStatus(): Promise<BackupStatus> {
+  const response = await fetch("/api/backup/status");
+  await ensureOk(response);
+  return (await response.json()) as BackupStatus;
+}
+
+export async function getSystemHealth(): Promise<SystemHealth> {
+  const response = await fetch("/api/system/health");
+  await ensureOk(response);
+  return (await response.json()) as SystemHealth;
 }
 
 export async function getFileMeta(rootId: string, currentPath: string): Promise<FileMeta> {

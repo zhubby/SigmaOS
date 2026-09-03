@@ -1,0 +1,10 @@
+[Unit]
+Description=Run SigmaOS health evaluator periodically
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

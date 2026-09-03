@@ -123,6 +123,30 @@ describe("loadConfig", () => {
     });
   });
 
+  it("defaults environment-configured production roots to required mounts", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-config-"));
+    const config = loadConfig(
+      {
+        SIGMAOS_CONFIG: path.join(tempDir, "missing.toml"),
+        SIGMAOS_ENVIRONMENT: "production",
+        SIGMAOS_NAS_ROOTS: "primary:Primary:/srv/nas"
+      } as NodeJS.ProcessEnv,
+      tempDir
+    );
+
+    expect(config.nasRoots).toEqual([
+      {
+        id: "primary",
+        name: "Primary",
+        path: "/srv/nas",
+        mountPolicy: "required",
+        expectedSource: null,
+        expectedUuid: null,
+        expectedFstype: null
+      }
+    ]);
+  });
+
   it("loads share settings from TOML", async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-config-"));
     const configPath = path.join(tempDir, "config.toml");

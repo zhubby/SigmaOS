@@ -16,7 +16,10 @@ units = [
   "sigmaos-worker@1.service",
   "sigmaos-indexer.timer",
   "sigmaos-scheduler.timer",
-  "sigmaos-maintenance.timer"
+  "sigmaos-maintenance.timer",
+  "sigmaos-backup-daily.timer",
+  "sigmaos-backup-weekly.timer",
+  "sigmaos-health.timer"
 ]
 
 [packages]
@@ -27,6 +30,7 @@ base = [
   "nodejs",
   "npm",
   "sqlite3",
+  "restic",
   "git",
   "rsync"
 ]

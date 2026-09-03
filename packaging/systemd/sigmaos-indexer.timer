@@ -2,6 +2,7 @@
 Description=Run SigmaOS NAS indexer periodically
 
 [Timer]
+# Periodic full traversal provides eventual consistency; operators can start the service for an immediate refresh.
 OnBootSec=5min
 OnUnitActiveSec=30min
 Persistent=true

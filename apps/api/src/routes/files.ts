@@ -483,15 +483,23 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
       return;
     }
 
-    const indexed = safeQueryIndex(db, root.id, query);
+    const searchPath = request.query.path ?? ".";
+    const safeSearchPath = await resolveSafeExistingPath(root.path, searchPath);
+    const searchStat = await stat(safeSearchPath.realPath);
+    if (!searchStat.isDirectory()) {
+      reply.status(400).send({ error: "Search path must be a directory" });
+      return;
+    }
+
+    const indexed = safeQueryIndex(db, root.id, query, safeSearchPath.relativePath);
     const files = indexed.length
       ? indexed.map(indexMatchToFileEntry)
       : await searchFiles(root, {
           query,
-          path: request.query.path ?? ".",
+          path: safeSearchPath.relativePath,
           limit: 50
         });
-    const gitView = await getDirectoryGitView(root.path, request.query.path ?? ".", files);
+    const gitView = await getDirectoryGitView(root.path, safeSearchPath.relativePath, files);
 
     reply.send({
       root,

@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "concurrently -n api,worker,web -c blue,green,magenta \"npm run dev -w @sigmaos/api\" \"npm run dev -w @sigmaos/worker\" \"npm run dev -w @sigmaos/web\"",
     "index": "npm run once -w @sigmaos/indexer",
+    "backup": "npm run dev -w @sigmaos/backup",
     "schedule": "npm run dev -w @sigmaos/scheduler",
     "maintenance": "npm run dev -w @sigmaos/scheduler -- --maintenance",
     "postinstall": "node scripts/fix-node-pty-permissions.mjs",

@@ -89,11 +89,12 @@ export function parseRangeHeader(
   };
 }
 
-export function safeQueryIndex(db: SigmaDatabase, rootId: string, query: string) {
+export function safeQueryIndex(db: SigmaDatabase, rootId: string, query: string, searchPath = ".") {
   try {
     return queryIndexedText(db, {
       rootId,
       query,
+      path: searchPath,
       limit: 25
     });
   } catch {
@@ -104,13 +105,17 @@ export function safeQueryIndex(db: SigmaDatabase, rootId: string, query: string)
 export function indexMatchToFileEntry(match: {
   path: string;
   name: string;
+  sizeBytes: number | null;
+  mtimeMs: number | null;
+  mimeType: string | null;
 }): FileEntry {
   return {
     name: match.name,
     path: match.path,
     kind: "file",
-    sizeBytes: 0,
-    modifiedAt: new Date(0).toISOString(),
+    ...(match.mimeType ? { mimeType: match.mimeType } : {}),
+    sizeBytes: match.sizeBytes ?? 0,
+    modifiedAt: new Date(match.mtimeMs ?? 0).toISOString(),
     isSafe: true
   };
 }

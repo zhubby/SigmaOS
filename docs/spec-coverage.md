@@ -17,9 +17,12 @@
 
 ## Phase 3 - Indexing
 
-- `apps/indexer` scans configured NAS roots, hashes files, extracts basic metadata and text, writes `indexed_files` and `indexed_text`.
-- Search prefers SQLite FTS and falls back to filename search.
+- `apps/indexer` scans configured NAS roots without following symlinks, hashes changed files, extracts bounded text, and writes `indexed_files` and `indexed_text`.
+- Incremental scans skip unchanged size/mtime pairs, preserve the last successful record on file errors, and suppress stale cleanup after incomplete traversal.
+- Latest per-root run status and root-relative failures are persisted and exposed through `GET /api/indexer/status`.
+- Search prefers directory-scoped SQLite FTS with indexed metadata and falls back to directory-scoped filename search.
 - Duplicate detection uses indexed hashes for scheduler reports.
+- The systemd timer provides 30-minute eventual consistency; OCR, PDF/Office extraction, watchers, and mutation-triggered refresh are deferred.
 
 ## Phase 4 - Native Packaging
 
@@ -36,6 +39,16 @@
 - `packaging/appliance` contains rootfs manifest and image build script for Node, Pi, SQLite, systemd, OCR/media helpers, and NAS health tooling.
 
 ## Verification
+
+## Phase 6 - P0 production operations
+
+- Production/development configuration boundaries, loopback API enforcement, `/srv` path validation and backup path overlap checks.
+- Mount readiness identity checks with persisted status and indexer cleanup gates.
+- Persisted index/backup runs, failures, health alerts and execution locks.
+- Local encrypted restic validate/init/daily/weekly/check/restore CLI with SQLite online snapshot and staging-only restore.
+- Read-only readiness, backup and aggregate health APIs; `/health` remains liveness-only.
+- Dedicated backup and health systemd timers plus restic Debian/appliance dependency.
+
 
 - `npm run typecheck`
 - `npm test`
