@@ -2,6 +2,7 @@
 Description=SigmaOS NAS indexer
 Documentation=/usr/share/doc/sigmaos/README.md
 After=local-fs.target
+RequiresMountsFor=/srv/nas
 
 [Service]
 Type=oneshot

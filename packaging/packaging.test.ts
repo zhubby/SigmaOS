@@ -12,7 +12,10 @@ describe("native packaging artifacts", () => {
       "sigmaos-worker@.service",
       "sigmaos-indexer.service",
       "sigmaos-scheduler.service",
-      "sigmaos-maintenance.service"
+      "sigmaos-maintenance.service",
+      "sigmaos-backup-daily.service",
+      "sigmaos-backup-weekly.service",
+      "sigmaos-health.service"
     ];
 
     for (const serviceName of serviceNames) {
@@ -27,6 +30,8 @@ describe("native packaging artifacts", () => {
     await expect(readPackagingFile("systemd", "sigmaos-maintenance.timer")).resolves.toContain(
       "OnCalendar=daily"
     );
+    await expect(readPackagingFile("systemd", "sigmaos-backup-daily.service")).resolves.toContain("LoadCredential=restic-password");
+    await expect(readPackagingFile("systemd", "sigmaos-backup-weekly.timer")).resolves.toContain("OnCalendar=Sun");
   });
 
   it("declares Debian install paths required by the spec", async () => {
@@ -37,6 +42,7 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("usr/lib/sigmaos/apps/share-helper/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/worker/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/indexer/dist/");
+    expect(install).toContain("usr/lib/sigmaos/apps/backup/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/scheduler/dist/");
     expect(install).toContain("etc/sigmaos/");
     expect(install).toContain("lib/systemd/system/");
@@ -47,6 +53,7 @@ describe("native packaging artifacts", () => {
     expect(control).toContain("minidlna");
     expect(control).toContain("unzip");
     expect(control).toContain("unrar-free");
+    expect(control).toContain("restic");
   });
 
   it("ships first-boot and appliance image scaffolding", async () => {
@@ -69,6 +76,14 @@ describe("native packaging artifacts", () => {
     expect(manifest).toContain("unzip");
     expect(manifest).toContain("unrar-free");
     expect(manifest).toContain("sigmaos-maintenance.timer");
+    expect(manifest).toContain("sigmaos-backup-daily.timer");
+    expect(manifest).toContain("sigmaos-backup-weekly.timer");
+    expect(manifest).toContain("sigmaos-health.timer");
+    expect(buildImage).toContain("sigmaos-backup-daily.timer");
+    expect(buildImage).toContain("sigmaos-backup-weekly.timer");
+    expect(buildImage).toContain("sigmaos-health.timer");
+    expect(firstBoot).toContain("password_file = \"/etc/sigmaos/restic-password\"");
+    expect(firstBoot).not.toContain("restic-password\" =");
   });
 
   it("ships a constrained root helper for host share configuration", async () => {

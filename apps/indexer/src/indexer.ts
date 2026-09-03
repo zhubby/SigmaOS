@@ -3,12 +3,20 @@ import { createHash } from "node:crypto";
 import { lstat, open, opendir, realpath } from "node:fs/promises";
 import path from "node:path";
 import {
+  acquireExecutionLock,
   finishIndexRun,
+  getIndexRootStatus,
+  getRootReadiness,
+  heartbeatExecutionLock,
+  isExecutionLockOwner,
   isIndexRunRunning,
   listIndexedFilesForRoot,
   removeIndexedFile,
   recordIndexFailure,
+  releaseExecutionLock,
   startIndexRun,
+  updateIndexRunProgress,
+  upsertRootReadiness,
   upsertIndexedFile,
   type SigmaDatabase
 } from "@sigmaos/db";
@@ -19,6 +27,8 @@ import {
   PathSafetyError,
   resolveSafeExistingPath
 } from "@sigmaos/nas-tools";
+import { checkMountReadiness, type MountCommandRunner } from "@sigmaos/nas-tools";
+import { randomUUID } from "node:crypto";
 
 const DEFAULT_IGNORES = new Set([".git", ".sigmaos", "node_modules", "dist", "coverage"]);
 const TEXT_PREVIEW_BYTES = 128 * 1024;
@@ -31,17 +41,39 @@ export interface IndexRunSummary {
 export async function runIndexOnce(input: {
   db: SigmaDatabase;
   roots: NasRootConfig[];
+  mountCommandRunner?: MountCommandRunner;
 }): Promise<IndexRunSummary> {
+  const owner = randomUUID();
+  if (!acquireExecutionLock(input.db, { name: "indexer", owner })) {
+    return { roots: input.roots.map((root) => ({ rootId: root.id, status: "failed", startedAt: null, finishedAt: new Date().toISOString(), scanned: 0, indexed: 0, unchanged: 0, removed: 0, skipped: 0, failed: 0, failures: [{ path: ".", reason: "already running" }] })) };
+  }
+  if (!acquireExecutionLock(input.db, { name: "maintenance", owner })) {
+    releaseExecutionLock(input.db, { name: "indexer", owner });
+    return { roots: input.roots.map((root) => ({ rootId: root.id, status: "failed", startedAt: null, finishedAt: new Date().toISOString(), scanned: 0, indexed: 0, unchanged: 0, removed: 0, skipped: 0, failed: 0, failures: [{ path: ".", reason: "already running" }] })) };
+  }
   const summaries: IndexRootRunSummary[] = [];
-  for (const root of input.roots) {
-    summaries.push(await indexRoot(input.db, root));
+  try {
+    for (const root of input.roots) {
+      summaries.push(await indexRoot(input.db, root, input.mountCommandRunner, owner));
+      heartbeatExecutionLock(input.db, { name: "indexer", owner });
+      heartbeatExecutionLock(input.db, { name: "maintenance", owner });
+    }
+  } finally {
+    releaseExecutionLock(input.db, { name: "indexer", owner });
+    releaseExecutionLock(input.db, { name: "maintenance", owner });
   }
 
   return { roots: summaries };
 }
 
-async function indexRoot(db: SigmaDatabase, root: NasRootConfig): Promise<IndexRootRunSummary> {
+async function indexRoot(db: SigmaDatabase, root: NasRootConfig, mountCommandRunner?: MountCommandRunner, owner?: string): Promise<IndexRootRunSummary> {
   const run = startIndexRun(db, { rootId: root.id });
+  const readiness = await checkMountReadiness(root, mountCommandRunner ? { commandRunner: mountCommandRunner } : {});
+  const priorReadiness = getRootReadiness(db, root.id);
+  upsertRootReadiness(db, readiness);
+  if (!priorReadiness || priorReadiness.status !== readiness.status || priorReadiness.source !== readiness.source || priorReadiness.uuid !== readiness.uuid || priorReadiness.fstype !== readiness.fstype) {
+    console.log(JSON.stringify({ event: "indexer.readiness.changed", rootId: root.id, status: readiness.status, reason: readiness.reason }));
+  }
   const failures: IndexFailure[] = [];
   const summary: IndexRootRunSummary = {
     rootId: root.id,
@@ -54,19 +86,84 @@ async function indexRoot(db: SigmaDatabase, root: NasRootConfig): Promise<IndexR
     removed: 0,
     skipped: 0,
     failed: 0,
-    failures
+    failures,
+    readiness,
+    progress: { phase: "starting", currentPath: null, lastProgressAt: run.startedAt },
+    metrics: {
+      durationMs: null,
+      scanRate: null,
+      bytes: 0,
+      fileCount: 0,
+      textFileCount: 0,
+      indexSizeBytes: null,
+      freshnessMs: null,
+      consecutiveFailures: 0
+    }
   };
+  if (readiness.status !== "ready") {
+    const failure = { path: ".", reason: readiness.reason ?? readiness.status };
+    failures.push(failure);
+    recordIndexFailure(db, { runId: run.id, rootId: root.id, path: failure.path, reason: failure.reason });
+    return finalizeIndexRun(db, run.id, summary, false, readiness.reason ?? readiness.status);
+  }
   const existing = new Map(listIndexedFilesForRoot(db, root.id).map((file) => [file.path, file]));
   const seenPaths = new Set<string>();
   const ignoredPaths = new Set<string>();
   let traversalComplete = true;
+  let bytes = 0;
+  let textFileCount = 0;
+  let lastProgressMs = Date.now();
+  let lastLeaseHeartbeatMs = 0;
+  let leaseLost = false;
+  let mountChangeRecorded = false;
+  const touchLease = (): void => {
+    if (!owner || leaseLost) return;
+    const now = Date.now();
+    if (now - lastLeaseHeartbeatMs < 1_000) return;
+    lastLeaseHeartbeatMs = now;
+    if (!heartbeatExecutionLock(db, { name: "indexer", owner }) || !heartbeatExecutionLock(db, { name: "maintenance", owner })) {
+      leaseLost = true;
+    }
+  };
+  const initialIdentity = `${readiness.source ?? ""}|${readiness.uuid ?? ""}|${readiness.fstype ?? ""}`;
+  const maybeProgress = (phase: string, currentPath: string | null): void => {
+    touchLease();
+    if (leaseLost) return;
+    const now = Date.now();
+    if (summary.scanned % 250 === 0 || now - lastProgressMs >= 1000) {
+      const at = new Date(now).toISOString();
+      summary.progress = { phase, currentPath, lastProgressAt: at };
+      summary.metrics = {
+        ...(summary.metrics as NonNullable<IndexRootRunSummary["metrics"]>),
+        bytes,
+        fileCount: summary.indexed + summary.unchanged,
+        textFileCount
+      };
+      updateIndexRunProgress(db, {
+        runId: run.id,
+        scanned: summary.scanned,
+        indexed: summary.indexed,
+        unchanged: summary.unchanged,
+        removed: summary.removed,
+        skipped: summary.skipped,
+        failed: summary.failed,
+        phase,
+        currentPath,
+        bytes,
+        fileCount: summary.indexed + summary.unchanged,
+        textFileCount
+      });
+      lastProgressMs = now;
+      console.log(JSON.stringify({ event: "indexer.run.progress", rootId: root.id, runId: run.id, phase, currentPath }));
+    }
+  };
 
   const addFailureReason = (
     failurePath: string,
     reason: string,
     options: { countAsFailed?: boolean } = {}
   ): void => {
-    if (!isIndexRunRunning(db, run.id)) {
+    if (leaseLost || !isIndexRunRunning(db, run.id)) {
       return;
     }
     const failure = { path: rootRelativeFailurePath(failurePath), reason };
@@ -90,8 +187,30 @@ async function indexRoot(db: SigmaDatabase, root: NasRootConfig): Promise<IndexR
     addFailureReason(failurePath, stableErrorReason(error), options);
   };
 
+  const ensureMountStable = async (): Promise<boolean> => {
+    if (leaseLost || !isIndexRunRunning(db, run.id)) {
+      traversalComplete = false;
+      return false;
+    }
+    const currentReadiness = await checkMountReadiness(
+      root,
+      mountCommandRunner ? { commandRunner: mountCommandRunner } : {}
+    );
+    upsertRootReadiness(db, currentReadiness);
+    const currentIdentity = `${currentReadiness.source ?? ""}|${currentReadiness.uuid ?? ""}|${currentReadiness.fstype ?? ""}`;
+    if (currentReadiness.status !== "ready" || currentIdentity !== initialIdentity) {
+      traversalComplete = false;
+      if (!mountChangeRecorded) {
+        mountChangeRecorded = true;
+        addFailureReason(".", "mount identity changed during indexing", { countAsFailed: false });
+      }
+      return false;
+    }
+    return true;
+  };
+
   const removeExistingPath = (relativePath: string): void => {
-    if (!isIndexRunRunning(db, run.id)) {
+    if (leaseLost || !isIndexRunRunning(db, run.id)) {
       return;
     }
     if (removeIndexedFile(db, { rootId: root.id, path: relativePath })) {
@@ -180,7 +299,8 @@ async function indexRoot(db: SigmaDatabase, root: NasRootConfig): Promise<IndexR
   };
 
   async function walk(directoryPath: string): Promise<void> {
-    if (!isIndexRunRunning(db, run.id)) {
+    touchLease();
+    if (leaseLost || !isIndexRunRunning(db, run.id)) {
       traversalComplete = false;
       return;
     }
@@ -199,7 +319,8 @@ async function indexRoot(db: SigmaDatabase, root: NasRootConfig): Promise<IndexR
 
     try {
       for await (const entry of directory) {
-        if (!isIndexRunRunning(db, run.id)) {
+        touchLease();
+        if (leaseLost || !isIndexRunRunning(db, run.id)) {
           traversalComplete = false;
           return;
         }
@@ -214,6 +335,7 @@ async function indexRoot(db: SigmaDatabase, root: NasRootConfig): Promise<IndexR
         const absolutePath = path.join(directoryPath, entry.name);
         const relativePath = relativePathFor(rootSafe.rootRealPath, absolutePath);
         summary.scanned += 1;
+        maybeProgress("scanning", relativePath);
 
         let kind: "directory" | "file" | "symlink" | "other";
         try {
@@ -276,6 +398,7 @@ async function indexRoot(db: SigmaDatabase, root: NasRootConfig): Promise<IndexR
           const prior = existing.get(relativePath);
           if (prior && prior.hasText && prior.sizeBytes === safeStat.size && prior.mtimeMs === mtimeMs) {
             summary.unchanged += 1;
+            maybeProgress("scanning", relativePath);
             continue;
           }
 
@@ -283,10 +406,21 @@ async function indexRoot(db: SigmaDatabase, root: NasRootConfig): Promise<IndexR
           const content = await readAndHashFile({
             filePath: safe.realPath,
             rootRealPath: rootSafe.rootRealPath,
-            includeText: mimeType === "text/plain"
+            includeText: mimeType === "text/plain",
+            onProgress: () => {
+              touchLease();
+              if (leaseLost) {
+                const error = new Error("indexer execution lease lost") as NodeJS.ErrnoException;
+                error.code = "ELOCKLOST";
+                throw error;
+              }
+            }
           });
-          if (!isIndexRunRunning(db, run.id)) {
+          if (leaseLost || !isIndexRunRunning(db, run.id)) {
             traversalComplete = false;
+            return;
+          }
+          if (!(await ensureMountStable())) {
             return;
           }
           upsertIndexedFile(db, {
@@ -300,7 +434,14 @@ async function indexRoot(db: SigmaDatabase, root: NasRootConfig): Promise<IndexR
             body: content.body
           });
           summary.indexed += 1;
+          bytes += content.sizeBytes;
+          if (content.body) textFileCount += 1;
+          maybeProgress("indexing", relativePath);
         } catch (error) {
+          if (leaseLost || errorCode(error) === "ELOCKLOST") {
+            traversalComplete = false;
+            return;
+          }
           if (isMissingError(error)) {
             removeExistingPath(relativePath);
             continue;
@@ -319,11 +460,23 @@ async function indexRoot(db: SigmaDatabase, root: NasRootConfig): Promise<IndexR
   }
 
   await walk(rootSafe.realPath);
+  const finalReadiness = await checkMountReadiness(root, mountCommandRunner ? { commandRunner: mountCommandRunner } : {});
+  upsertRootReadiness(db, finalReadiness);
+  if (finalReadiness.status !== readiness.status || finalReadiness.source !== readiness.source || finalReadiness.uuid !== readiness.uuid || finalReadiness.fstype !== readiness.fstype) {
+    console.log(JSON.stringify({ event: "indexer.readiness.changed", rootId: root.id, status: finalReadiness.status, reason: finalReadiness.reason }));
+  }
+  if (finalReadiness.status !== "ready" || `${finalReadiness.source ?? ""}|${finalReadiness.uuid ?? ""}|${finalReadiness.fstype ?? ""}` !== initialIdentity) {
+    traversalComplete = false;
+    if (!mountChangeRecorded) {
+      mountChangeRecorded = true;
+      addFailureReason(".", "mount identity changed during indexing", { countAsFailed: false });
+    }
+  }
   if (traversalComplete && isIndexRunRunning(db, run.id)) {
     await cleanupUnseenIndexedPaths();
   }
 
-  const superseded = !isIndexRunRunning(db, run.id);
+  const superseded = leaseLost || !isExecutionLockOwner(db, { name: "indexer", owner: owner ?? "" }) || !isIndexRunRunning(db, run.id);
   const failed = superseded || failures.length > 0 || !traversalComplete;
   return finalizeIndexRun(
     db,
@@ -334,9 +487,10 @@ async function indexRoot(db: SigmaDatabase, root: NasRootConfig): Promise<IndexR
       ? "interrupted/superseded"
       : !traversalComplete
         ? "directory traversal incomplete"
-        : failed
-          ? "one or more files failed"
-          : null
+      : failed
+        ? "one or more files failed"
+        : null,
+    { bytes, fileCount: summary.indexed + summary.unchanged, textFileCount }
   );
 }
 
@@ -345,12 +499,17 @@ function finalizeIndexRun(
   runId: string,
   summary: IndexRootRunSummary,
   completed: boolean,
-  error: string | null
+  error: string | null,
+  metrics?: { bytes: number; fileCount: number; textFileCount: number }
 ): IndexRootRunSummary {
   const finishedAt = new Date();
   summary.status = completed ? "completed" : "failed";
   summary.finishedAt = finishedAt.toISOString();
-  finishIndexRun(db, {
+  const durationMs = Math.max(0, finishedAt.getTime() - Date.parse(summary.startedAt ?? finishedAt.toISOString()));
+  const baseMetrics = summary.metrics ?? { durationMs: null, scanRate: null, bytes: 0, fileCount: 0, textFileCount: 0, indexSizeBytes: null, freshnessMs: null, consecutiveFailures: 0 };
+  summary.progress = { ...(summary.progress ?? { phase: null, currentPath: null, lastProgressAt: null }), phase: completed ? "completed" : "failed", lastProgressAt: finishedAt.toISOString() };
+  summary.metrics = { ...baseMetrics, durationMs, scanRate: durationMs > 0 ? summary.scanned / (durationMs / 1000) : null, bytes: metrics?.bytes ?? baseMetrics.bytes, fileCount: metrics?.fileCount ?? baseMetrics.fileCount, textFileCount: metrics?.textFileCount ?? baseMetrics.textFileCount };
+  const finalized = finishIndexRun(db, {
     runId,
     status: summary.status,
     scanned: summary.scanned,
@@ -360,8 +519,22 @@ function finalizeIndexRun(
     skipped: summary.skipped,
     failed: summary.failed,
     error,
-    finishedAt
+    finishedAt,
+    durationMs,
+    bytes: summary.metrics.bytes,
+    fileCount: summary.metrics.fileCount,
+    textFileCount: summary.metrics.textFileCount,
+    phase: summary.progress.phase,
+    currentPath: summary.progress.currentPath,
+    lastProgressAt: summary.progress.lastProgressAt
   });
+  if (finalized) {
+    const persisted = getIndexRootStatus(db, summary.rootId, finishedAt);
+    if (persisted.metrics) {
+      summary.metrics = persisted.metrics;
+    }
+  }
+  console.log(JSON.stringify({ event: completed ? "indexer.run.completed" : "indexer.run.failed", runId, rootId: summary.rootId, status: summary.status, scanned: summary.scanned, indexed: summary.indexed, failed: summary.failed, removed: summary.removed, error }));
   return summary;
 }
 
@@ -468,6 +641,7 @@ async function readAndHashFile(input: {
   filePath: string;
   rootRealPath: string;
   includeText: boolean;
+  onProgress?: () => void;
 }): Promise<{ sizeBytes: number; mtimeMs: number; hash: string; body: string }> {
   const handle = await open(input.filePath, READ_ONLY_NOFOLLOW);
   try {
@@ -489,6 +663,7 @@ async function readAndHashFile(input: {
       if (bytesRead === 0) {
         break;
       }
+      input.onProgress?.();
       const bytes = chunk.subarray(0, bytesRead);
       hash.update(bytes);
       if (preview && previewBytes < TEXT_PREVIEW_BYTES) {

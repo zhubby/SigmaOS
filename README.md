@@ -21,7 +21,7 @@ The following surfaces are intentionally limited today:
 - Virtual machine management is a non-functional UI preview.
 - Network and storage management are observational; the API does not apply host configuration.
 - OCR is reserved as an indexer hook but is not implemented.
-- Backup maintenance reports configuration state but does not perform backups.
+- Local restic backup is opt-in; after explicit repository initialization, daily/weekly services perform encrypted snapshots and staging-only restore.
 - The appliance builder produces a generic root filesystem tarball, not a board-specific boot image.
 
 ## What is implemented
@@ -61,7 +61,7 @@ The following surfaces are intentionally limited today:
 
 - Debian package definitions for `amd64` and `arm64` release artifacts.
 - Hardened `systemd` units for the API, worker, indexer, scheduler, maintenance, and share helper.
-- Timers for indexing every 30 minutes, scheduled reports every 6 hours, and daily maintenance.
+- Timers for indexing every 30 minutes, scheduled reports every 6 hours, daily/weekly restic backups, health evaluation every 15 minutes, and daily maintenance.
 - A Debian Bookworm rootfs scaffold built with `mmdebstrap` and `systemd-nspawn`.
 
 ## Architecture
@@ -238,6 +238,12 @@ Environment variables override the corresponding TOML values. The most useful de
 
 ## Build and verification
 
+### P0 operations
+
+Production mode requires loopback API binding and mounted NAS roots under `/srv`. The indexer records progress, failures, readiness and recent run metrics in SQLite; inspect them with `/api/indexer/status`, `/api/roots/readiness` and `/api/system/health`.
+
+Local restic backup is opt-in. Configure a repository and protected password file, run `backup validate`, then explicitly run `backup init`. Daily and weekly timers never initialize repositories implicitly. Restore always writes to isolated staging and never promotes over an active NAS root.
+
 ```bash
 npm run typecheck
 npm run lint
@@ -275,6 +281,7 @@ See [`packaging/appliance/README.md`](packaging/appliance/README.md) for image-b
 ```text
 apps/
   api/            Fastify API and host adapters
+  backup/         Restic validate, backup, check, and staging restore CLI
   indexer/        NAS scanner and SQLite FTS indexer
   scheduler/      Reports and database maintenance
   share-helper/   Privileged share configuration service

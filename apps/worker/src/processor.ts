@@ -77,12 +77,12 @@ export async function processNextJob({ db, config, agentRunner, allowLocalFallba
             });
           },
           isCancelled: () => getJob(db, job.id)?.status === "cancelled",
-          queryIndex: async (query) => {
+          queryIndex: async (query, currentPath) => {
             try {
               return queryIndexedText(db, {
                 rootId: root.id,
                 query,
-                path: session.currentPath,
+                path: currentPath,
                 limit: 25
               });
             } catch {

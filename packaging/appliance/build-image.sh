@@ -31,12 +31,12 @@ install -d "$OUT_DIR"
 mmdebstrap \
   --architectures="$ARCH" \
   --variant=minbase \
-  --include=systemd-sysv,ca-certificates,curl,nodejs,npm,sqlite3,git,rsync,gzip,unzip,libarchive-tools,unrar-free,tesseract-ocr,poppler-utils,ffmpeg,imagemagick,smartmontools,samba,apache2,apache2-utils,vsftpd,libpam-pwdfile,nfs-kernel-server,minidlna \
+  --include=systemd-sysv,ca-certificates,curl,nodejs,npm,sqlite3,restic,git,rsync,gzip,unzip,libarchive-tools,unrar-free,tesseract-ocr,poppler-utils,ffmpeg,imagemagick,smartmontools,samba,apache2,apache2-utils,vsftpd,libpam-pwdfile,nfs-kernel-server,minidlna \
   "$SUITE" "$ROOTFS"
 
 cp "$DEB_PATH" "$ROOTFS/tmp/sigmaos.deb"
 systemd-nspawn -D "$ROOTFS" /bin/sh -eu -c "apt-get update && apt-get install -y /tmp/sigmaos.deb && rm /tmp/sigmaos.deb"
-systemd-nspawn -D "$ROOTFS" systemctl enable sigmaos-share-helper.service sigmaos-api.service sigmaos-worker@1.service sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer
+systemd-nspawn -D "$ROOTFS" systemctl enable sigmaos-share-helper.service sigmaos-api.service sigmaos-worker@1.service sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer sigmaos-backup-daily.timer sigmaos-backup-weekly.timer sigmaos-health.timer
 
 tar --numeric-owner -C "$ROOTFS" -cpf "$TARBALL" .
 printf "SigmaOS appliance rootfs written to %s\n" "$TARBALL"

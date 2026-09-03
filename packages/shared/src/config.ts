@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { accessSync, existsSync, readFileSync, constants as fsConstants } from "node:fs";
 import path from "node:path";
 import { parse } from "smol-toml";
 import type {
@@ -12,6 +12,7 @@ import type {
 } from "./types.js";
 
 interface TomlConfig {
+  environment?: "development" | "production";
   data_dir?: string;
   api?: {
     host?: string;
@@ -92,7 +93,30 @@ interface TomlConfig {
     id?: string;
     name?: string;
     path?: string;
+    mount_policy?: "required" | "optional";
+    expected_source?: string;
+    expected_uuid?: string;
+    expected_fstype?: string;
   }>;
+  backup?: {
+    enabled?: boolean;
+    repository?: string;
+    repository_path?: string;
+    password_file?: string;
+    staging_path?: string;
+    require_mount?: boolean;
+    retry_count?: number;
+    timeout_ms?: number;
+    keep_daily?: number;
+    keep_weekly?: number;
+  };
+  health?: {
+    stale_index_warning_ms?: number;
+    stale_index_critical_ms?: number;
+    stalled_run_ms?: number;
+    consecutive_failure_threshold?: number;
+    backup_stale_ms?: number;
+  };
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): SigmaConfig {
@@ -103,13 +127,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
     workspaceRoot,
     env.SIGMAOS_DATA_DIR ?? fileConfig.data_dir ?? ".sigmaos"
   );
-  const nasRoots = loadNasRoots(env, fileConfig, workspaceRoot);
+  const environment = loadEnvironment(env, fileConfig);
+  const nasRoots = loadNasRoots(env, fileConfig, workspaceRoot, environment);
+  const backup = loadBackupConfig(env, fileConfig, workspaceRoot, dataDir, environment);
+  const health = loadHealthConfig(env, fileConfig);
+  const apiHost = env.SIGMAOS_API_HOST ?? fileConfig.api?.host ?? "127.0.0.1";
+  validateConfig({ environment, apiHost, dataDir, nasRoots, backup });
 
   return {
+    environment,
     dataDir,
     databasePath: env.SIGMAOS_DATABASE_PATH ?? path.join(dataDir, "sigmaos.sqlite"),
     api: {
-      host: env.SIGMAOS_API_HOST ?? fileConfig.api?.host ?? "127.0.0.1",
+      host: apiHost,
       port: toPort(env.SIGMAOS_API_PORT, fileConfig.api?.port ?? 3010),
       allowedOrigins: loadAllowedOrigins(env, fileConfig)
     },
@@ -141,7 +171,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
       composeRoots: loadDockerComposeRoots(env, fileConfig, workspaceRoot)
     },
     shares: loadShareConfig(env, fileConfig),
-    nasRoots
+    nasRoots,
+    backup,
+    health
   };
 }
 
@@ -157,29 +189,126 @@ function loadTomlConfig(configPath: string): TomlConfig {
 function loadNasRoots(
   env: NodeJS.ProcessEnv,
   fileConfig: TomlConfig,
-  cwd: string
+  cwd: string,
+  environment: "development" | "production"
 ): NasRootConfig[] {
   if (env.SIGMAOS_NAS_ROOTS) {
     return env.SIGMAOS_NAS_ROOTS.split(",")
       .map((entry, index) => parseNasRootEnv(entry.trim(), index, cwd))
-      .filter((root): root is NasRootConfig => root !== null);
+      .filter((root): root is NasRootConfig => root !== null)
+      .map((root) => ({ ...root, mountPolicy: root.mountPolicy ?? (environment === "production" ? "required" : "optional"), expectedSource: root.expectedSource ?? null, expectedUuid: root.expectedUuid ?? null, expectedFstype: root.expectedFstype ?? null }));
   }
 
   if (fileConfig.nas_roots?.length) {
     return fileConfig.nas_roots.map((root, index) => ({
       id: root.id ?? `root-${index + 1}`,
       name: root.name ?? root.id ?? `Root ${index + 1}`,
-      path: path.resolve(cwd, root.path ?? cwd)
+      path: path.resolve(cwd, root.path ?? cwd),
+      mountPolicy: root.mount_policy ?? (environment === "production" ? "required" : "optional"),
+      expectedSource: normalizeText(root.expected_source),
+      expectedUuid: normalizeText(root.expected_uuid),
+      expectedFstype: normalizeText(root.expected_fstype)
     }));
   }
 
-  return [
-    {
-      id: "local",
-      name: "System root",
-      path: systemRootPath(cwd)
+  const fallback = { id: "local", name: "System root", path: systemRootPath(cwd) };
+  return environment === "production"
+    ? [{ ...fallback, mountPolicy: "required", expectedSource: null, expectedUuid: null, expectedFstype: null }]
+    : [fallback];
+}
+
+function loadEnvironment(env: NodeJS.ProcessEnv, fileConfig: TomlConfig): "development" | "production" {
+  const value = (env.SIGMAOS_ENVIRONMENT ?? fileConfig.environment ?? "development").trim().toLowerCase();
+  return value === "production" ? "production" : "development";
+}
+
+function loadBackupConfig(
+  env: NodeJS.ProcessEnv,
+  fileConfig: TomlConfig,
+  cwd: string,
+  dataDir: string,
+  environment: "development" | "production"
+): NonNullable<SigmaConfig["backup"]> {
+  const source = fileConfig.backup;
+  const repositoryRaw = normalizeText(env.SIGMAOS_BACKUP_REPOSITORY ?? env.SIGMAOS_BACKUP_REPOSITORY_PATH ?? source?.repository_path ?? source?.repository);
+  const passwordFileRaw = normalizeText(env.SIGMAOS_BACKUP_PASSWORD_FILE ?? source?.password_file);
+  const stagingRaw = normalizeText(env.SIGMAOS_BACKUP_STAGING_PATH ?? source?.staging_path);
+  const enabled = toBoolean(env.SIGMAOS_BACKUP_ENABLED, source?.enabled ?? Boolean(repositoryRaw));
+  const result = {
+    enabled,
+    repositoryPath: repositoryRaw ? path.resolve(cwd, repositoryRaw) : null,
+    passwordFile: passwordFileRaw ? path.resolve(cwd, passwordFileRaw) : null,
+    stagingPath: stagingRaw ? path.resolve(cwd, stagingRaw) : path.join(dataDir, "backup-staging"),
+    requireMount: toBoolean(env.SIGMAOS_BACKUP_REQUIRE_MOUNT, source?.require_mount ?? environment === "production"),
+    retryCount: toPositiveInteger(env.SIGMAOS_BACKUP_RETRY_COUNT, source?.retry_count ?? 2),
+    timeoutMs: toPositiveInteger(env.SIGMAOS_BACKUP_TIMEOUT_MS, source?.timeout_ms ?? 300_000),
+    keepDaily: toPositiveInteger(env.SIGMAOS_BACKUP_KEEP_DAILY, source?.keep_daily ?? 7),
+    keepWeekly: toPositiveInteger(env.SIGMAOS_BACKUP_KEEP_WEEKLY, source?.keep_weekly ?? 4)
+  };
+  if (result.enabled && result.passwordFile) {
+    try {
+      accessSync(result.passwordFile, fsConstants.R_OK);
+    } catch {
+      throw new Error(`Backup password file is not readable: ${result.passwordFile}`);
     }
-  ];
+  }
+  return result;
+}
+
+function loadHealthConfig(env: NodeJS.ProcessEnv, fileConfig: TomlConfig): NonNullable<SigmaConfig["health"]> {
+  const source = fileConfig.health;
+  return {
+    staleIndexWarningMs: toPositiveInteger(env.SIGMAOS_HEALTH_STALE_INDEX_WARNING_MS, source?.stale_index_warning_ms ?? 2 * 60 * 60 * 1000),
+    staleIndexCriticalMs: toPositiveInteger(env.SIGMAOS_HEALTH_STALE_INDEX_CRITICAL_MS, source?.stale_index_critical_ms ?? 6 * 60 * 60 * 1000),
+    stalledRunMs: toPositiveInteger(env.SIGMAOS_HEALTH_STALLED_RUN_MS, source?.stalled_run_ms ?? 15 * 60 * 1000),
+    consecutiveFailureThreshold: toPositiveInteger(env.SIGMAOS_HEALTH_CONSECUTIVE_FAILURE_THRESHOLD, source?.consecutive_failure_threshold ?? 2),
+    backupStaleMs: toPositiveInteger(env.SIGMAOS_HEALTH_BACKUP_STALE_MS, source?.backup_stale_ms ?? 26 * 60 * 60 * 1000)
+  };
+}
+
+function validateConfig(input: {
+  environment: "development" | "production";
+  apiHost: string;
+  dataDir: string;
+  nasRoots: NasRootConfig[];
+  backup: NonNullable<SigmaConfig["backup"]>;
+}): void {
+  if (!isLoopbackHost(input.apiHost)) {
+    throw new Error("SigmaOS API must bind to a loopback host");
+  }
+  if (input.environment !== "production") return;
+  for (const root of input.nasRoots) {
+    if (root.mountPolicy === "required" && !isUnder(root.path, "/srv")) {
+      throw new Error(`Production NAS root must be under /srv: ${root.path}`);
+    }
+  }
+  const backup = input.backup;
+  if (!backup.enabled) return;
+  if (!backup.repositoryPath || !isUnder(path.resolve("/srv"), backup.repositoryPath)) {
+    throw new Error("Production backup repository must be configured under /srv");
+  }
+  if (isUnder(backup.repositoryPath, input.dataDir) || isUnder(input.dataDir, backup.repositoryPath)) {
+    throw new Error("Backup repository must not overlap dataDir");
+  }
+  for (const root of input.nasRoots) {
+    if (isUnder(backup.repositoryPath, root.path) || isUnder(root.path, backup.repositoryPath) || isUnder(backup.stagingPath, root.path) || isUnder(root.path, backup.stagingPath)) {
+      throw new Error("Backup paths must not overlap NAS roots");
+    }
+  }
+  if (isUnder(backup.repositoryPath, backup.stagingPath) || isUnder(backup.stagingPath, backup.repositoryPath)) {
+    throw new Error("Backup repository and staging paths must not overlap");
+  }
+}
+
+function isUnder(candidate: string, parent: string): boolean {
+  const child = path.resolve(candidate);
+  const base = path.resolve(parent);
+  return child === base || child.startsWith(`${base}${path.sep}`);
+}
+
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1" || normalized === "[::1]";
 }
 
 function loadDockerComposeRoots(

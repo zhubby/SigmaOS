@@ -213,6 +213,32 @@ describe("indexer", () => {
     }
   );
 
+  it("skips publishing files when the mount identity changes during a scan", async () => {
+    const root = { id: "local", name: "Local", path: rootDir, mountPolicy: "required" as const };
+    let checks = 0;
+    const mountCommandRunner = {
+      run: async () => {
+        const first = checks++ === 0;
+        return JSON.stringify({
+          filesystems: [{
+            source: first ? "/dev/nas-a" : "/dev/nas-b",
+            uuid: first ? "uuid-a" : "uuid-b",
+            fstype: "ext4",
+            target: rootDir
+          }]
+        });
+      }
+    };
+
+    const result = await runIndexOnce({ db, roots: [root], mountCommandRunner });
+
+    expect(result.roots[0]).toMatchObject({ status: "failed", indexed: 0, removed: 0 });
+    expect(result.roots[0]?.failures).toEqual([
+      { path: ".", reason: "mount identity changed during indexing" }
+    ]);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM indexed_files WHERE root_id = ?").get("local")).toEqual({ count: 0 });
+  });
+
   it("continues with later roots when one root is unavailable", async () => {
     const missingRoot = path.join(tempDir, "missing");
     ensureNasRoots(db, [

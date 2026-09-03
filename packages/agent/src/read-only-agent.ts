@@ -21,7 +21,7 @@ export interface ReadOnlyAgentInput {
   message: string;
   emit: (event: AgentEmitEvent) => void | Promise<void>;
   isCancelled?: () => boolean;
-  queryIndex?: (query: string) => Promise<IndexMatch[]>;
+  queryIndex?: (query: string, path: string) => Promise<IndexMatch[]>;
   proposeChanges?: (proposal: FileOperationProposal[]) => Promise<PendingApprovalRecord>;
 }
 
@@ -238,7 +238,7 @@ async function runIndexSearch(input: ReadOnlyAgentInput, query: string): Promise
   });
 
   try {
-    const matches = await input.queryIndex!(query);
+    const matches = await input.queryIndex!(query, input.session.currentPath);
     if (isCancelled(input)) {
       return { status: "cancelled" };
     }

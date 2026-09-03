@@ -78,6 +78,106 @@ export interface NasRootConfig {
   id: string;
   name: string;
   path: string;
+  mountPolicy?: MountPolicy;
+  expectedSource?: string | null;
+  expectedUuid?: string | null;
+  expectedFstype?: string | null;
+}
+
+export type DeploymentMode = "development" | "production";
+export type MountPolicy = "required" | "optional";
+export type RootReadinessStatus = "ready" | "not_ready" | "unknown" | "config_invalid";
+
+export interface RootReadiness {
+  rootId: string;
+  status: RootReadinessStatus;
+  checkedAt: string | null;
+  reason: string | null;
+  source: string | null;
+  uuid: string | null;
+  fstype: string | null;
+}
+
+export interface BackupConfig {
+  enabled: boolean;
+  repositoryPath: string | null;
+  passwordFile: string | null;
+  stagingPath: string;
+  requireMount: boolean;
+  retryCount: number;
+  timeoutMs: number;
+  keepDaily: number;
+  keepWeekly: number;
+}
+
+export type BackupRunKind = "daily" | "weekly" | "check" | "restore";
+export type BackupRunStatus = "never_run" | "validating" | "running" | "completed" | "failed" | "interrupted";
+
+export interface BackupFailure {
+  rootId?: string;
+  path?: string;
+  reason: string;
+  code?: string;
+}
+
+export interface BackupRunSummary {
+  id: string;
+  kind: BackupRunKind;
+  status: BackupRunStatus;
+  startedAt: string | null;
+  finishedAt: string | null;
+  snapshotIds: string[];
+  files: number;
+  bytes: number;
+  verified: boolean;
+  error: string | null;
+  failures: BackupFailure[];
+}
+
+export type HealthAlertSeverity = "warning" | "critical";
+export type HealthAlertStatus = "active" | "resolved";
+
+export interface IndexerMetrics {
+  durationMs: number | null;
+  scanRate: number | null;
+  bytes: number;
+  fileCount: number;
+  textFileCount: number;
+  indexSizeBytes: number | null;
+  freshnessMs: number | null;
+  consecutiveFailures: number;
+}
+
+export interface IndexerProgress {
+  phase: string | null;
+  currentPath: string | null;
+  lastProgressAt: string | null;
+}
+
+export interface IndexerAlert {
+  id: string;
+  code: string;
+  rootId: string | null;
+  severity: HealthAlertSeverity;
+  status: HealthAlertStatus;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  resolvedAt: string | null;
+  details: string | null;
+}
+
+export interface SystemHealthSummary {
+  status: "ready" | "degraded" | "failed";
+  checkedAt: string;
+  issues: Array<{
+    code: string;
+    severity: HealthAlertSeverity;
+    rootId?: string;
+    message: string;
+  }>;
+  roots: RootReadiness[];
+  indexerFreshnessMs: number | null;
+  backupFreshnessMs: number | null;
 }
 
 export interface DockerComposeRootConfig {
@@ -195,6 +295,7 @@ export interface PublicShareSettings extends Omit<ShareSettingsRecord, "account"
 }
 
 export interface SigmaConfig {
+  environment?: DeploymentMode;
   dataDir: string;
   databasePath: string;
   api: {
@@ -217,6 +318,14 @@ export interface SigmaConfig {
   docker: DockerConfig;
   shares: ShareConfig;
   nasRoots: NasRootConfig[];
+  backup?: BackupConfig;
+  health?: {
+    staleIndexWarningMs: number;
+    staleIndexCriticalMs: number;
+    stalledRunMs: number;
+    consecutiveFailureThreshold: number;
+    backupStaleMs: number;
+  };
 }
 
 export const MODEL_PROVIDER_NAMES = ["openai", "anthropic"] as const;
@@ -603,6 +712,10 @@ export interface NasRootRecord {
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
+  mountPolicy?: MountPolicy;
+  expectedSource?: string | null;
+  expectedUuid?: string | null;
+  expectedFstype?: string | null;
 }
 
 export type IndexRunStatus = "running" | "completed" | "failed" | "never_run";
@@ -624,6 +737,11 @@ export interface IndexRootRunSummary {
   skipped: number;
   failed: number;
   failures: IndexFailure[];
+  progress?: IndexerProgress;
+  metrics?: IndexerMetrics;
+  history?: IndexRootRunSummary[];
+  readiness?: RootReadiness;
+  alerts?: IndexerAlert[];
 }
 
 export type IndexRootStatus = IndexRootRunSummary;

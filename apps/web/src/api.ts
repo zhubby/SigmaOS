@@ -16,6 +16,10 @@ import type {
   ShareSummary as PublicShareSummary,
   SystemNetworkSummary,
   SystemStorageSummary
+  , BackupRunSummary,
+  RootReadiness,
+  IndexerAlert,
+  SystemHealthSummary
 } from "@sigmaos/shared";
 
 export interface NasRoot {
@@ -47,6 +51,20 @@ export interface FileSearchResult {
 }
 
 export type IndexerRootStatus = IndexRootStatus;
+
+export interface BackupStatus {
+  enabled: boolean;
+  repositoryConfigured: boolean;
+  repositoryAvailable: boolean;
+  passwordConfigured: boolean;
+  repositoryPath: string | null;
+  stagingPath: string | null;
+  runs: BackupRunSummary[];
+  alerts: IndexerAlert[];
+}
+
+export interface ReadinessResponse { roots: RootReadiness[]; }
+export type SystemHealth = SystemHealthSummary;
 
 export interface Session {
   id: string;
@@ -553,6 +571,28 @@ export async function getIndexerStatus(rootId?: string): Promise<IndexerRootStat
   await ensureOk(response);
   const body = (await response.json()) as { roots: IndexerRootStatus[] };
   return body.roots;
+}
+
+export async function getRootReadiness(rootId?: string): Promise<RootReadiness[]> {
+  const params = new URLSearchParams();
+  if (rootId) params.set("rootId", rootId);
+  const query = params.size ? `?${params.toString()}` : "";
+  const response = await fetch(`/api/roots/readiness${query}`);
+  await ensureOk(response);
+  const body = (await response.json()) as ReadinessResponse;
+  return body.roots;
+}
+
+export async function getBackupStatus(): Promise<BackupStatus> {
+  const response = await fetch("/api/backup/status");
+  await ensureOk(response);
+  return (await response.json()) as BackupStatus;
+}
+
+export async function getSystemHealth(): Promise<SystemHealth> {
+  const response = await fetch("/api/system/health");
+  await ensureOk(response);
+  return (await response.json()) as SystemHealth;
 }
 
 export async function getFileMeta(rootId: string, currentPath: string): Promise<FileMeta> {

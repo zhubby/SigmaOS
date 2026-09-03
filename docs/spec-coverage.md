@@ -40,6 +40,16 @@
 
 ## Verification
 
+## Phase 6 - P0 production operations
+
+- Production/development configuration boundaries, loopback API enforcement, `/srv` path validation and backup path overlap checks.
+- Mount readiness identity checks with persisted status and indexer cleanup gates.
+- Persisted index/backup runs, failures, health alerts and execution locks.
+- Local encrypted restic validate/init/daily/weekly/check/restore CLI with SQLite online snapshot and staging-only restore.
+- Read-only readiness, backup and aggregate health APIs; `/health` remains liveness-only.
+- Dedicated backup and health systemd timers plus restic Debian/appliance dependency.
+
+
 - `npm run typecheck`
 - `npm test`
 - `npm run lint`

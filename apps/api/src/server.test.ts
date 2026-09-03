@@ -29,6 +29,7 @@ import {
   recordIndexFailure,
   startIndexRun,
   upsertIndexedFile,
+  upsertHealthAlert,
   updateJobStatus,
   type SigmaDatabase
 } from "@sigmaos/db";
@@ -150,6 +151,68 @@ describe("API server", () => {
       url: "/api/indexer/status?rootId=missing"
     });
     expect(missing.statusCode).toBe(404);
+    await server.close();
+  });
+
+  it("exposes P0 readiness, backup, and aggregate health as read-only status", async () => {
+    const repositoryPath = path.join(tempDir, "backup-repository");
+    const passwordFile = path.join(tempDir, "restic-password");
+    await mkdir(repositoryPath);
+    await writeFile(passwordFile, "test-secret\n");
+    upsertHealthAlert(db, {
+      code: "backup_failed",
+      severity: "critical",
+      details: "latest backup failed"
+    });
+    const config = {
+      ...testConfig(tempDir),
+      environment: "development" as const,
+      backup: {
+        enabled: true,
+        repositoryPath,
+        passwordFile,
+        stagingPath: path.join(tempDir, "backup-staging"),
+        requireMount: false,
+        retryCount: 1,
+        timeoutMs: 1_000,
+        keepDaily: 7,
+        keepWeekly: 4
+      }
+    };
+    const server = await buildServer({ config, db });
+
+    const readiness = await server.inject({ method: "GET", url: "/api/roots/readiness" });
+    expect(readiness.statusCode).toBe(200);
+    expect(readiness.json()).toMatchObject({
+      roots: [{ rootId: "local", status: "unknown", reason: "never checked" }]
+    });
+
+    const backup = await server.inject({ method: "GET", url: "/api/backup/status" });
+    expect(backup.statusCode).toBe(200);
+    expect(backup.json()).toMatchObject({
+      enabled: true,
+      repositoryConfigured: true,
+      repositoryAvailable: true,
+      passwordConfigured: true,
+      alerts: [{ code: "backup_failed", severity: "critical" }]
+    });
+    expect(JSON.stringify(backup.json())).not.toContain("test-secret");
+
+    const health = await server.inject({ method: "GET", url: "/api/system/health" });
+    expect(health.statusCode).toBe(200);
+    const healthBody = health.json();
+    expect(healthBody).toMatchObject({
+      status: "failed",
+      roots: [{ rootId: "local", status: "unknown" }]
+    });
+    expect(healthBody.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "backup_failed", severity: "critical" })
+      ])
+    );
+
+    const unknownRoot = await server.inject({ method: "GET", url: "/api/roots/readiness?rootId=missing" });
+    expect(unknownRoot.statusCode).toBe(404);
     await server.close();
   });
 

@@ -34,6 +34,15 @@ import type {
   ModelProviderName,
   ModelProviderSettingsRecord,
   NasRootRecord,
+  RootReadiness,
+  RootReadinessStatus,
+  BackupFailure,
+  BackupRunKind,
+  BackupRunStatus,
+  BackupRunSummary,
+  HealthAlertSeverity,
+  HealthAlertStatus,
+  IndexerAlert,
   PendingApprovalRecord,
   ShareDefinitionConfig,
   ShareOperationAction,
@@ -89,6 +98,10 @@ type DbNasRootRow = {
   enabled: 0 | 1;
   created_at: string;
   updated_at: string;
+  mount_policy: "required" | "optional";
+  expected_source: string | null;
+  expected_uuid: string | null;
+  expected_fstype: string | null;
 };
 
 type DbIndexedFileRow = {
@@ -116,11 +129,63 @@ type DbIndexRunRow = {
   skipped: number;
   failed: number;
   error: string | null;
+  duration_ms: number | null;
+  bytes: number;
+  file_count: number;
+  text_file_count: number;
+  phase: string | null;
+  current_path: string | null;
+  last_progress_at: string | null;
 };
+
+type DbIndexHistoryRow = DbIndexRunRow & { failures_json: string };
 
 type DbIndexFailureRow = {
   path: string;
   reason: string;
+};
+
+type DbBackupRunRow = {
+  id: string;
+  kind: BackupRunKind;
+  status: Exclude<BackupRunStatus, "never_run">;
+  started_at: string;
+  finished_at: string | null;
+  snapshot_ids_json: string;
+  files: number;
+  bytes: number;
+  verified: 0 | 1;
+  error: string | null;
+};
+
+type DbBackupFailureRow = {
+  root_id: string | null;
+  path: string | null;
+  code: string | null;
+  reason: string;
+};
+
+type DbReadinessRow = {
+  root_id: string;
+  status: RootReadinessStatus;
+  checked_at: string;
+  reason: string | null;
+  source: string | null;
+  uuid: string | null;
+  fstype: string | null;
+};
+
+type DbAlertRow = {
+  id: string;
+  code: string;
+  scope: string;
+  root_id: string | null;
+  severity: HealthAlertSeverity;
+  status: HealthAlertStatus;
+  first_seen_at: string;
+  last_seen_at: string;
+  resolved_at: string | null;
+  details: string | null;
 };
 
 type DbApprovalRow = {
@@ -230,13 +295,21 @@ export const DEFAULT_PI_TOOL_POLICY_SETTINGS: Omit<PiToolPolicySettingsRecord, "
 
 export function ensureNasRoots(db: SigmaDatabase, roots: NasRootConfig[]): void {
   const now = new Date().toISOString();
+  const existingRoot = db.prepare(
+    "SELECT path, mount_policy, expected_source, expected_uuid, expected_fstype FROM nas_roots WHERE id = ?"
+  );
+  const clearReadiness = db.prepare("DELETE FROM nas_root_readiness WHERE root_id = ?");
   const upsert = db.prepare(`
-    INSERT INTO nas_roots (id, name, path, enabled, created_at, updated_at)
-    VALUES (@id, @name, @path, 1, @createdAt, @updatedAt)
+    INSERT INTO nas_roots (id, name, path, enabled, mount_policy, expected_source, expected_uuid, expected_fstype, created_at, updated_at)
+    VALUES (@id, @name, @path, 1, @mountPolicy, @expectedSource, @expectedUuid, @expectedFstype, @createdAt, @updatedAt)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       path = excluded.path,
       enabled = 1,
+      mount_policy = excluded.mount_policy,
+      expected_source = excluded.expected_source,
+      expected_uuid = excluded.expected_uuid,
+      expected_fstype = excluded.expected_fstype,
       updated_at = excluded.updated_at
   `);
   const disableMissing = db.prepare(`
@@ -247,10 +320,35 @@ export function ensureNasRoots(db: SigmaDatabase, roots: NasRootConfig[]): void 
 
   const tx = db.transaction((items: NasRootConfig[]) => {
     for (const root of items) {
+      const previous = existingRoot.get(root.id) as {
+        path: string;
+        mount_policy: string;
+        expected_source: string | null;
+        expected_uuid: string | null;
+        expected_fstype: string | null;
+      } | undefined;
+      const nextMountPolicy = root.mountPolicy ?? "optional";
+      const nextExpectedSource = root.expectedSource ?? null;
+      const nextExpectedUuid = root.expectedUuid ?? null;
+      const nextExpectedFstype = root.expectedFstype ?? null;
+      if (
+        previous &&
+        (previous.path !== root.path ||
+          previous.mount_policy !== nextMountPolicy ||
+          previous.expected_source !== nextExpectedSource ||
+          previous.expected_uuid !== nextExpectedUuid ||
+          previous.expected_fstype !== nextExpectedFstype)
+      ) {
+        clearReadiness.run(root.id);
+      }
       upsert.run({
         id: root.id,
         name: root.name,
         path: root.path,
+        mountPolicy: nextMountPolicy,
+        expectedSource: nextExpectedSource,
+        expectedUuid: nextExpectedUuid,
+        expectedFstype: nextExpectedFstype,
         createdAt: now,
         updatedAt: now
       });
@@ -262,15 +360,15 @@ export function ensureNasRoots(db: SigmaDatabase, roots: NasRootConfig[]): void 
 }
 
 export function listNasRoots(db: SigmaDatabase): NasRootRecord[] {
-  const rows = db
-    .prepare("SELECT id, name, path, enabled, created_at, updated_at FROM nas_roots WHERE enabled = 1 ORDER BY name")
+    const rows = db
+    .prepare("SELECT id, name, path, enabled, mount_policy, expected_source, expected_uuid, expected_fstype, created_at, updated_at FROM nas_roots WHERE enabled = 1 ORDER BY name")
     .all() as DbNasRootRow[];
   return rows.map(mapNasRoot);
 }
 
 export function getNasRoot(db: SigmaDatabase, rootId: string): NasRootRecord | null {
   const row = db
-    .prepare("SELECT id, name, path, enabled, created_at, updated_at FROM nas_roots WHERE id = ? AND enabled = 1")
+    .prepare("SELECT id, name, path, enabled, mount_policy, expected_source, expected_uuid, expected_fstype, created_at, updated_at FROM nas_roots WHERE id = ? AND enabled = 1")
     .get(rootId) as DbNasRootRow | undefined;
   return row ? mapNasRoot(row) : null;
 }
@@ -805,10 +903,24 @@ export function recoverInterruptedIndexRuns(
 
     for (const row of rootRows) {
       retainLatestFinalizedIndexRun(db, row.root_id);
+      retainRecentInterruptedIndexRun(db, row.root_id);
     }
     return result.changes;
   });
   return tx();
+}
+
+function retainRecentInterruptedIndexRun(db: SigmaDatabase, rootId: string): void {
+  const rows = db.prepare(`
+    SELECT id FROM index_runs
+    WHERE root_id = ? AND status = 'failed' AND error = 'interrupted/superseded'
+    ORDER BY COALESCE(finished_at, started_at) DESC, rowid DESC
+  `).all(rootId) as Array<{ id: string }>;
+  const stale = rows.slice(1).map((row) => row.id);
+  if (!stale.length) return;
+  const placeholders = stale.map(() => "?").join(",");
+  db.prepare(`DELETE FROM index_failures WHERE run_id IN (${placeholders})`).run(...stale);
+  db.prepare(`DELETE FROM index_runs WHERE id IN (${placeholders})`).run(...stale);
 }
 
 function retainLatestFinalizedIndexRun(db: SigmaDatabase, rootId: string): void {
@@ -821,13 +933,21 @@ function retainLatestFinalizedIndexRun(db: SigmaDatabase, rootId: string): void 
     `)
     .all(rootId) as Array<{ id: string }>;
   const staleRunIds = runs.slice(1).map((run) => run.id);
-  if (staleRunIds.length === 0) {
-    return;
+  if (staleRunIds.length > 0) {
+    for (const run of staleRunIds) archiveIndexRun(db, run);
+    const placeholders = staleRunIds.map(() => "?").join(", ");
+    db.prepare(`DELETE FROM index_failures WHERE run_id IN (${placeholders})`).run(...staleRunIds);
+    db.prepare(`DELETE FROM index_runs WHERE id IN (${placeholders})`).run(...staleRunIds);
   }
+  const archivedStale = db.prepare("SELECT id FROM index_run_history WHERE root_id = ? ORDER BY started_at DESC LIMIT -1 OFFSET 29").all(rootId) as Array<{ id: string }>;
+  for (const { id } of archivedStale) db.prepare("DELETE FROM index_run_history WHERE id = ?").run(id);
+}
 
-  const placeholders = staleRunIds.map(() => "?").join(", ");
-  db.prepare(`DELETE FROM index_failures WHERE run_id IN (${placeholders})`).run(...staleRunIds);
-  db.prepare(`DELETE FROM index_runs WHERE id IN (${placeholders})`).run(...staleRunIds);
+function archiveIndexRun(db: SigmaDatabase, runId: string): void {
+  const row = db.prepare(`SELECT id, root_id, status, started_at, finished_at, scanned, indexed, unchanged, removed, skipped, failed, error, duration_ms, bytes, file_count, text_file_count, phase, current_path, last_progress_at FROM index_runs WHERE id = ? AND status <> 'running'`).get(runId) as DbIndexRunRow | undefined;
+  if (!row) return;
+  const failures = db.prepare("SELECT path, reason FROM index_failures WHERE run_id = ? ORDER BY created_at ASC, id ASC").all(runId) as DbIndexFailureRow[];
+  db.prepare(`INSERT OR REPLACE INTO index_run_history (id, root_id, status, started_at, finished_at, scanned, indexed, unchanged, removed, skipped, failed, error, duration_ms, bytes, file_count, text_file_count, phase, current_path, last_progress_at, failures_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(row.id, row.root_id, row.status, row.started_at, row.finished_at, row.scanned, row.indexed, row.unchanged, row.removed, row.skipped, row.failed, row.error, row.duration_ms, row.bytes, row.file_count, row.text_file_count, row.phase, row.current_path, row.last_progress_at, JSON.stringify(failures));
 }
 
 export function startIndexRun(
@@ -886,6 +1006,13 @@ export function finishIndexRun(
     skipped: number;
     failed: number;
     error?: string | null;
+    durationMs?: number | null;
+    bytes?: number;
+    fileCount?: number;
+    textFileCount?: number;
+    phase?: string | null;
+    currentPath?: string | null;
+    lastProgressAt?: string | null;
     finishedAt?: Date;
   }
 ): boolean {
@@ -903,7 +1030,7 @@ export function finishIndexRun(
 
     const update = db.prepare(`
       UPDATE index_runs
-      SET status = ?, finished_at = ?, scanned = ?, indexed = ?, unchanged = ?, removed = ?, skipped = ?, failed = ?, error = ?
+      SET status = ?, finished_at = ?, scanned = ?, indexed = ?, unchanged = ?, removed = ?, skipped = ?, failed = ?, error = ?, duration_ms = ?, bytes = ?, file_count = ?, text_file_count = ?, phase = ?, current_path = ?, last_progress_at = ?
       WHERE id = ? AND status = 'running'
     `).run(
       input.status,
@@ -915,6 +1042,13 @@ export function finishIndexRun(
       input.skipped,
       input.failed,
       input.error ?? null,
+      input.durationMs ?? null,
+      input.bytes ?? 0,
+      input.fileCount ?? input.indexed,
+      input.textFileCount ?? 0,
+      input.phase ?? null,
+      input.currentPath ?? null,
+      input.lastProgressAt ?? finishedAt,
       input.runId
     );
 
@@ -922,30 +1056,66 @@ export function finishIndexRun(
       return false;
     }
 
-    db.prepare(`
-      DELETE FROM index_failures
-      WHERE run_id IN (
-        SELECT id FROM index_runs
-        WHERE root_id = ? AND id <> ? AND status <> 'running'
-      )
-    `).run(run.root_id, input.runId);
-    db.prepare(`
-      DELETE FROM index_runs
-      WHERE root_id = ? AND id <> ? AND status <> 'running'
-    `).run(run.root_id, input.runId);
+    retainLatestFinalizedIndexRun(db, run.root_id);
     return true;
   });
   return tx();
+}
+
+export function updateIndexRunProgress(
+  db: SigmaDatabase,
+  input: {
+    runId: string;
+    scanned: number;
+    indexed: number;
+    unchanged: number;
+    removed: number;
+    skipped: number;
+    failed: number;
+    phase?: string | null;
+    currentPath?: string | null;
+    bytes?: number;
+    fileCount?: number;
+    textFileCount?: number;
+    at?: Date;
+  }
+): boolean {
+  const at = (input.at ?? new Date()).toISOString();
+  const result = db.prepare(`
+    UPDATE index_runs
+    SET scanned = ?, indexed = ?, unchanged = ?, removed = ?, skipped = ?, failed = ?,
+      phase = ?, current_path = ?, bytes = ?, file_count = ?, text_file_count = ?, last_progress_at = ?
+    WHERE id = ? AND status = 'running'
+  `).run(
+    input.scanned, input.indexed, input.unchanged, input.removed, input.skipped, input.failed,
+    input.phase ?? null, input.currentPath ?? null, input.bytes ?? 0, input.fileCount ?? input.indexed,
+    input.textFileCount ?? 0, at, input.runId
+  );
+  return result.changes === 1;
+}
+
+export function listIndexRunHistory(db: SigmaDatabase, rootId: string, limit = 30): IndexRootStatus[] {
+  const currentRows = db.prepare(`
+    SELECT id, root_id, status, started_at, finished_at, scanned, indexed, unchanged, removed, skipped, failed, error,
+      duration_ms, bytes, file_count, text_file_count, phase, current_path, last_progress_at
+    FROM index_runs WHERE root_id = ?
+  `).all(rootId) as DbIndexRunRow[];
+  const archivedRows = db.prepare(`SELECT id, root_id, status, started_at, finished_at, scanned, indexed, unchanged, removed, skipped, failed, error, duration_ms, bytes, file_count, text_file_count, phase, current_path, last_progress_at, failures_json FROM index_run_history WHERE root_id = ? ORDER BY started_at DESC LIMIT ?`).all(rootId, limit) as DbIndexHistoryRow[];
+  const rows = [...currentRows.map((row) => ({ row, failures: db.prepare("SELECT path, reason FROM index_failures WHERE run_id = ? ORDER BY created_at ASC, id ASC").all(row.id) as DbIndexFailureRow[] })), ...archivedRows.map((row) => ({ row, failures: JSON.parse(row.failures_json) as DbIndexFailureRow[] }))].sort((a, b) => b.row.started_at.localeCompare(a.row.started_at)).slice(0, limit);
+  return rows.map(({ row, failures }) => {
+    return mapIndexRun(row, failures);
+  });
 }
 
 export function listIndexRootStatuses(db: SigmaDatabase, rootIds: string[]): IndexRootStatus[] {
   return rootIds.map((rootId) => getIndexRootStatus(db, rootId));
 }
 
-export function getIndexRootStatus(db: SigmaDatabase, rootId: string): IndexRootStatus {
+export function getIndexRootStatus(db: SigmaDatabase, rootId: string, now = new Date()): IndexRootStatus {
   const row = db
     .prepare(`
-      SELECT id, root_id, status, started_at, finished_at, scanned, indexed, unchanged, removed, skipped, failed, error
+      SELECT id, root_id, status, started_at, finished_at, scanned, indexed, unchanged, removed, skipped, failed, error,
+        duration_ms, bytes, file_count, text_file_count, phase, current_path, last_progress_at
       FROM index_runs
       WHERE root_id = ?
       ORDER BY CASE WHEN status = 'running' THEN 0 ELSE 1 END, started_at DESC
@@ -978,6 +1148,46 @@ export function getIndexRootStatus(db: SigmaDatabase, rootId: string): IndexRoot
     `)
     .all(row.id) as DbIndexFailureRow[];
 
+  const status = mapIndexRun(row, failures);
+  if (status.metrics) {
+    status.metrics.indexSizeBytes = getIndexSizeBytes(db);
+    status.metrics.consecutiveFailures = countConsecutiveIndexFailures(db, rootId);
+    status.metrics.freshnessMs = getIndexFreshnessMs(db, rootId, now);
+  }
+  return status;
+}
+
+function countConsecutiveIndexFailures(db: SigmaDatabase, rootId: string): number {
+  const rows = db.prepare("SELECT status, started_at FROM index_runs WHERE root_id = ? UNION ALL SELECT status, started_at FROM index_run_history WHERE root_id = ? ORDER BY started_at DESC LIMIT 30").all(rootId, rootId) as Array<{ status: string; started_at: string }>;
+  let count = 0;
+  for (const row of rows) {
+    if (row.status !== "failed") break;
+    count += 1;
+  }
+  return count;
+}
+
+function getIndexFreshnessMs(db: SigmaDatabase, rootId: string, now = new Date()): number | null {
+  const row = db
+    .prepare("SELECT MAX(indexed_at) AS indexed_at FROM indexed_files WHERE root_id = ?")
+    .get(rootId) as { indexed_at: string | null } | undefined;
+  if (!row?.indexed_at) return null;
+  const timestamp = Date.parse(row.indexed_at);
+  return Number.isFinite(timestamp) ? Math.max(0, now.getTime() - timestamp) : null;
+}
+
+function getIndexSizeBytes(db: SigmaDatabase): number | null {
+  try {
+    const row = db.prepare("SELECT SUM(pgsize) AS size FROM dbstat WHERE name IN ('indexed_files', 'indexed_text')").get() as { size: number | null };
+    return row.size ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function mapIndexRun(row: DbIndexRunRow, failures: DbIndexFailureRow[]): IndexRootStatus {
+  const durationMs = row.duration_ms ?? (row.finished_at ? Math.max(0, Date.parse(row.finished_at) - Date.parse(row.started_at)) : null);
+  const freshnessMs = row.finished_at ? Math.max(0, Date.now() - Date.parse(row.finished_at)) : null;
   return {
     rootId: row.root_id,
     status: row.status,
@@ -989,10 +1199,22 @@ export function getIndexRootStatus(db: SigmaDatabase, rootId: string): IndexRoot
     removed: row.removed,
     skipped: row.skipped,
     failed: row.failed,
-    failures: failures.map((failure): IndexFailure => ({
-      path: failure.path,
-      reason: failure.reason
-    }))
+    failures: failures.map((failure): IndexFailure => ({ path: failure.path, reason: failure.reason })),
+    progress: {
+      phase: row.phase,
+      currentPath: row.current_path,
+      lastProgressAt: row.last_progress_at
+    },
+    metrics: {
+      durationMs,
+      scanRate: durationMs && durationMs > 0 ? row.scanned / (durationMs / 1000) : null,
+      bytes: row.bytes,
+      fileCount: row.file_count,
+      textFileCount: row.text_file_count,
+      indexSizeBytes: null,
+      freshnessMs,
+      consecutiveFailures: 0
+    }
   };
 }
 
@@ -1042,6 +1264,151 @@ export function queryIndexedText(
   }>;
 
   return rows;
+}
+
+export function upsertRootReadiness(db: SigmaDatabase, input: RootReadiness | (Omit<RootReadiness, "checkedAt"> & { checkedAt?: Date | string | null })): RootReadiness {
+  const checkedAt = input.checkedAt instanceof Date ? input.checkedAt.toISOString() : input.checkedAt ?? new Date().toISOString();
+  db.prepare(`
+    INSERT INTO nas_root_readiness (root_id, status, checked_at, reason, source, uuid, fstype)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(root_id) DO UPDATE SET status = excluded.status, checked_at = excluded.checked_at,
+      reason = excluded.reason, source = excluded.source, uuid = excluded.uuid, fstype = excluded.fstype
+  `).run(input.rootId, input.status, checkedAt, input.reason, input.source, input.uuid, input.fstype);
+  return { ...input, checkedAt };
+}
+
+export function getRootReadiness(db: SigmaDatabase, rootId: string): RootReadiness | null {
+  const row = db.prepare("SELECT root_id, status, checked_at, reason, source, uuid, fstype FROM nas_root_readiness WHERE root_id = ?")
+    .get(rootId) as DbReadinessRow | undefined;
+  return row ? mapReadiness(row) : null;
+}
+
+export function listRootReadiness(db: SigmaDatabase, rootIds?: string[]): RootReadiness[] {
+  const rows = rootIds !== undefined
+    ? rootIds.length
+      ? db.prepare(`SELECT root_id, status, checked_at, reason, source, uuid, fstype FROM nas_root_readiness WHERE root_id IN (${rootIds.map(() => "?").join(",")})`).all(...rootIds)
+      : []
+    : db.prepare("SELECT root_id, status, checked_at, reason, source, uuid, fstype FROM nas_root_readiness ORDER BY root_id").all();
+  return (rows as DbReadinessRow[]).map(mapReadiness);
+}
+
+function mapReadiness(row: DbReadinessRow): RootReadiness {
+  return { rootId: row.root_id, status: row.status, checkedAt: row.checked_at, reason: row.reason, source: row.source, uuid: row.uuid, fstype: row.fstype };
+}
+
+export function startBackupRun(db: SigmaDatabase, input: { kind: BackupRunKind; now?: Date }): BackupRunSummary {
+  const now = (input.now ?? new Date()).toISOString();
+  const id = randomUUID();
+  db.prepare("UPDATE backup_runs SET status = 'interrupted', finished_at = ?, error = 'interrupted' WHERE status IN ('validating', 'running')").run(now);
+  db.prepare("INSERT INTO backup_runs (id, kind, status, started_at) VALUES (?, ?, 'running', ?)").run(id, input.kind, now);
+  return { id, kind: input.kind, status: "running", startedAt: now, finishedAt: null, snapshotIds: [], files: 0, bytes: 0, verified: false, error: null, failures: [] };
+}
+
+export function recordBackupFailure(db: SigmaDatabase, input: { runId: string; rootId?: string | null; path?: string | null; code?: string | null; reason: string; now?: Date }): void {
+  db.prepare("INSERT INTO backup_failures (id, run_id, root_id, path, code, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(randomUUID(), input.runId, input.rootId ?? null, input.path ?? null, input.code ?? null, input.reason, (input.now ?? new Date()).toISOString());
+}
+
+export function finishBackupRun(db: SigmaDatabase, input: { runId: string; status: Exclude<BackupRunStatus, "never_run" | "validating" | "running">; snapshotIds?: string[]; files?: number; bytes?: number; verified?: boolean; error?: string | null; finishedAt?: Date }): BackupRunSummary | null {
+  const finishedAt = (input.finishedAt ?? new Date()).toISOString();
+  const result = db.prepare(`UPDATE backup_runs SET status = ?, finished_at = ?, snapshot_ids_json = ?, files = ?, bytes = ?, verified = ?, error = ? WHERE id = ? AND status IN ('validating', 'running')`)
+    .run(input.status, finishedAt, JSON.stringify(input.snapshotIds ?? []), input.files ?? 0, input.bytes ?? 0, input.verified ? 1 : 0, input.error ?? null, input.runId);
+  if (result.changes !== 1) return null;
+  return getBackupRun(db, input.runId);
+}
+
+export function getBackupRun(db: SigmaDatabase, runId: string): BackupRunSummary | null {
+  const row = db.prepare("SELECT id, kind, status, started_at, finished_at, snapshot_ids_json, files, bytes, verified, error FROM backup_runs WHERE id = ?")
+    .get(runId) as DbBackupRunRow | undefined;
+  return row ? mapBackupRun(db, row) : null;
+}
+
+export function listBackupRuns(db: SigmaDatabase, limit = 30): BackupRunSummary[] {
+  const rows = db.prepare("SELECT id, kind, status, started_at, finished_at, snapshot_ids_json, files, bytes, verified, error FROM backup_runs ORDER BY started_at DESC LIMIT ?").all(limit) as DbBackupRunRow[];
+  return rows.map((row) => mapBackupRun(db, row));
+}
+
+function mapBackupRun(db: SigmaDatabase, row: DbBackupRunRow): BackupRunSummary {
+  const failures = db.prepare("SELECT root_id, path, code, reason FROM backup_failures WHERE run_id = ? ORDER BY created_at ASC, id ASC").all(row.id) as DbBackupFailureRow[];
+  let snapshotIds: string[] = [];
+  try {
+    const parsed = JSON.parse(row.snapshot_ids_json) as unknown;
+    if (Array.isArray(parsed)) {
+      snapshotIds = parsed.filter((value): value is string => typeof value === "string");
+    }
+  } catch {
+    snapshotIds = [];
+  }
+  return {
+    id: row.id, kind: row.kind, status: row.status, startedAt: row.started_at, finishedAt: row.finished_at,
+    snapshotIds, files: row.files, bytes: row.bytes,
+    verified: row.verified === 1, error: row.error,
+    failures: failures.map((failure): BackupFailure => ({
+      ...(failure.root_id ? { rootId: failure.root_id } : {}),
+      ...(failure.path ? { path: failure.path } : {}),
+      ...(failure.code ? { code: failure.code } : {}),
+      reason: failure.reason
+    }))
+  };
+}
+
+export function upsertHealthAlert(db: SigmaDatabase, input: { code: string; scope?: string; rootId?: string | null; severity: HealthAlertSeverity; details?: string | null; now?: Date }): IndexerAlert {
+  const now = (input.now ?? new Date()).toISOString();
+  const scope = input.scope ?? input.rootId ?? "system";
+  const id = randomUUID();
+  db.prepare(`
+    INSERT INTO health_alerts (id, code, scope, root_id, severity, status, first_seen_at, last_seen_at, details)
+    VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)
+    ON CONFLICT(code, scope) DO UPDATE SET status = 'active', severity = excluded.severity,
+      last_seen_at = excluded.last_seen_at, resolved_at = NULL, details = excluded.details
+  `).run(id, input.code, scope, input.rootId ?? null, input.severity, now, now, input.details ?? null);
+  const row = db.prepare("SELECT id, code, scope, root_id, severity, status, first_seen_at, last_seen_at, resolved_at, details FROM health_alerts WHERE code = ? AND scope = ?").get(input.code, scope) as DbAlertRow;
+  return mapAlert(row);
+}
+
+export function resolveHealthAlert(db: SigmaDatabase, input: { code: string; scope?: string; now?: Date }): boolean {
+  const scope = input.scope ?? "system";
+  const result = db.prepare("UPDATE health_alerts SET status = 'resolved', resolved_at = ?, last_seen_at = ? WHERE code = ? AND scope = ? AND status = 'active'").run((input.now ?? new Date()).toISOString(), (input.now ?? new Date()).toISOString(), input.code, scope);
+  return result.changes === 1;
+}
+
+export function listHealthAlerts(db: SigmaDatabase, input: { status?: HealthAlertStatus; limit?: number } = {}): IndexerAlert[] {
+  const rows = input.status
+    ? db.prepare("SELECT id, code, scope, root_id, severity, status, first_seen_at, last_seen_at, resolved_at, details FROM health_alerts WHERE status = ? ORDER BY last_seen_at DESC LIMIT ?").all(input.status, input.limit ?? 100)
+    : db.prepare("SELECT id, code, scope, root_id, severity, status, first_seen_at, last_seen_at, resolved_at, details FROM health_alerts ORDER BY last_seen_at DESC LIMIT ?").all(input.limit ?? 100);
+  return (rows as DbAlertRow[]).map(mapAlert);
+}
+
+function mapAlert(row: DbAlertRow): IndexerAlert {
+  return { id: row.id, code: row.code, rootId: row.root_id, severity: row.severity, status: row.status, firstSeenAt: row.first_seen_at, lastSeenAt: row.last_seen_at, resolvedAt: row.resolved_at, details: row.details };
+}
+
+export function acquireExecutionLock(db: SigmaDatabase, input: { name: string; owner: string; staleAfterMs?: number; now?: Date }): boolean {
+  const nowDate = input.now ?? new Date();
+  const now = nowDate.toISOString();
+  const cutoff = new Date(nowDate.getTime() - (input.staleAfterMs ?? 30 * 60 * 1000)).toISOString();
+  const result = db.prepare(`
+    INSERT INTO execution_locks (name, owner, acquired_at, heartbeat_at) VALUES (?, ?, ?, ?)
+    ON CONFLICT(name) DO UPDATE SET owner = excluded.owner, acquired_at = excluded.acquired_at, heartbeat_at = excluded.heartbeat_at
+      WHERE execution_locks.heartbeat_at < ?
+  `).run(input.name, input.owner, now, now, cutoff);
+  return result.changes === 1;
+}
+
+export function isExecutionLockOwner(db: SigmaDatabase, input: { name: string; owner: string }): boolean {
+  return Boolean(
+    db.prepare("SELECT 1 FROM execution_locks WHERE name = ? AND owner = ?").get(input.name, input.owner)
+  );
+}
+
+export function heartbeatExecutionLock(db: SigmaDatabase, input: { name: string; owner: string; now?: Date }): boolean {
+  const result = db.prepare("UPDATE execution_locks SET heartbeat_at = ? WHERE name = ? AND owner = ?").run((input.now ?? new Date()).toISOString(), input.name, input.owner);
+  return result.changes === 1;
+}
+
+export function releaseExecutionLock(db: SigmaDatabase, input: { name: string; owner: string }): boolean {
+  const result = db.prepare("DELETE FROM execution_locks WHERE name = ? AND owner = ?").run(input.name, input.owner);
+  return result.changes === 1;
 }
 
 export function upsertIndexedFile(
@@ -2134,6 +2501,10 @@ function mapNasRoot(row: DbNasRootRow): NasRootRecord {
     name: row.name,
     path: row.path,
     enabled: row.enabled === 1,
+    mountPolicy: row.mount_policy ?? "optional",
+    expectedSource: row.expected_source,
+    expectedUuid: row.expected_uuid,
+    expectedFstype: row.expected_fstype,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };

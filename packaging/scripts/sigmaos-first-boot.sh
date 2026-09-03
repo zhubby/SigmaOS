@@ -34,7 +34,7 @@ if [ -z "$NAS_ROOT_PATH" ]; then
   NAS_ROOT_PATH="$(ask_default "NAS root path" "/srv/nas")"
 fi
 
-install -d -m 0750 "$DATA_DIR" "$DATA_DIR/trash" "$DATA_DIR/pi-sessions" "$DATA_DIR/reports"
+install -d -m 0750 "$DATA_DIR" "$DATA_DIR/trash" "$DATA_DIR/pi-sessions" "$DATA_DIR/reports" "$DATA_DIR/backup-staging" /srv/backup
 install -d -m 0755 "$(dirname "$CONFIG_PATH")" "$NAS_ROOT_PATH"
 
 umask 077
@@ -74,6 +74,25 @@ account_username = "sigma-share"
 id = "$NAS_ROOT_ID"
 name = "$NAS_ROOT_NAME"
 path = "$NAS_ROOT_PATH"
+mount_policy = "required"
+
+[backup]
+enabled = false
+repository_path = "/srv/backup/restic"
+password_file = "/etc/sigmaos/restic-password"
+staging_path = "$DATA_DIR/backup-staging"
+require_mount = true
+retry_count = 2
+timeout_ms = 300000
+keep_daily = 7
+keep_weekly = 4
+
+[health]
+stale_index_warning_ms = 7200000
+stale_index_critical_ms = 21600000
+stalled_run_ms = 900000
+consecutive_failure_threshold = 2
+backup_stale_ms = 93600000
 EOF_CONFIG
 
 if id sigmaos >/dev/null 2>&1; then

@@ -2,6 +2,7 @@
 Description=SigmaOS scheduler tasks
 Documentation=/usr/share/doc/sigmaos/README.md
 After=local-fs.target
+RequiresMountsFor=/srv/nas /srv/backup
 
 [Service]
 Type=oneshot

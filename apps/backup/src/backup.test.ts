@@ -1,0 +1,124 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { ensureNasRoots, openSigmaDb, type SigmaDatabase } from "@sigmaos/db";
+import type { SigmaConfig } from "@sigmaos/shared";
+import { initBackup, runBackup, validateBackup } from "./backup.js";
+
+let tempDir: string | undefined;
+let db: SigmaDatabase | undefined;
+
+afterEach(async () => {
+  db?.close();
+  db = undefined;
+  if (tempDir) await rm(tempDir, { recursive: true, force: true });
+  tempDir = undefined;
+});
+
+function config(root: string, repository: string, passwordFile: string): SigmaConfig {
+  return {
+    environment: "development",
+    dataDir: path.join(path.dirname(root), "data"),
+    databasePath: path.join(path.dirname(root), "sigmaos.sqlite"),
+    api: { host: "127.0.0.1", port: 3010, allowedOrigins: [] },
+    worker: { pollMs: 50 },
+    admin: { displayName: "Test", authMode: "local-only" },
+    model: { provider: "pi", piCommand: "pi", localEndpoint: null },
+    docker: { enabled: false, socketPath: "/var/run/docker.sock", composeCommand: "docker", operationTimeoutMs: 120000, consoleShells: ["/bin/sh"], composeRoots: [] },
+    shares: { enabled: false, helperSocketPath: "/run/sigmaos/share-helper.sock", account: { username: "share", password: null }, shares: [] },
+    nasRoots: [{ id: "local", name: "Local", path: root, mountPolicy: "optional" }],
+    backup: { enabled: true, repositoryPath: repository, passwordFile, stagingPath: path.join(path.dirname(root), "staging"), requireMount: false, retryCount: 1, timeoutMs: 1000, keepDaily: 7, keepWeekly: 4 },
+    health: { staleIndexWarningMs: 7200000, staleIndexCriticalMs: 21600000, stalledRunMs: 900000, consecutiveFailureThreshold: 2, backupStaleMs: 93600000 }
+  };
+}
+
+describe("backup workflow", () => {
+  it("validates credentials and records a completed restic run", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-backup-"));
+    const root = path.join(tempDir, "root");
+    const repo = path.join(tempDir, "repo");
+    await mkdir(root);
+    await mkdir(repo);
+    const password = path.join(tempDir, "password");
+    await writeFile(password, "secret\n");
+    db = openSigmaDb(path.join(tempDir, "sigmaos.sqlite"));
+    ensureNasRoots(db, [{ id: "local", name: "Local", path: root }]);
+    const calls: string[][] = [];
+    const restic = { run: async (args: string[]) => { calls.push(args); if (args[0] === "snapshots") return { stdout: calls.filter((entry) => entry[0] === "backup").length ? '[{"id":"abc123"}]' : "[]", stderr: "", code: 0 }; return { stdout: '{"id":"abc123"}\n', stderr: "", code: 0 }; } };
+    const cfg = config(root, repo, password);
+    await expect(validateBackup({ db, config: cfg, restic })).resolves.toMatchObject({ ok: true });
+    const result = await runBackup({ db, config: cfg, restic });
+    expect(result).toMatchObject({ status: "completed", snapshotIds: ["abc123"], verified: true });
+    expect(calls.some((args) => args[0] === "backup")).toBe(true);
+  });
+
+  it("continues backing up ready roots but skips retention when another root is unavailable", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-backup-"));
+    const badRoot = path.join(tempDir, "bad-root");
+    const goodRoot = path.join(tempDir, "good-root");
+    const repo = path.join(tempDir, "repo");
+    await mkdir(badRoot);
+    await mkdir(goodRoot);
+    await mkdir(repo);
+    const password = path.join(tempDir, "password");
+    await writeFile(password, "secret\n");
+    db = openSigmaDb(path.join(tempDir, "sigmaos.sqlite"));
+    ensureNasRoots(db, [
+      { id: "bad", name: "Bad", path: badRoot, mountPolicy: "required" },
+      { id: "good", name: "Good", path: goodRoot, mountPolicy: "optional" }
+    ]);
+    const calls: string[][] = [];
+    const restic = {
+      run: async (args: string[]) => {
+        calls.push(args);
+        if (args[0] === "snapshots") return { stdout: '[{"id":"visible"}]', stderr: "", code: 0 };
+        return { stdout: '{"id":"visible"}\n', stderr: "", code: 0 };
+      }
+    };
+    const base = config(goodRoot, repo, password);
+    const cfg: SigmaConfig = {
+      ...base,
+      nasRoots: [
+        { id: "bad", name: "Bad", path: badRoot, mountPolicy: "required" },
+        { id: "good", name: "Good", path: goodRoot, mountPolicy: "optional" }
+      ]
+    };
+    const result = await runBackup({
+      db,
+      config: cfg,
+      restic,
+      mountCommandRunner: {
+        run: async (_command, args) => JSON.stringify({
+          filesystems: [{ source: "/dev/root", uuid: "root", fstype: "ext4", target: args[2] === badRoot ? "/" : badRoot }]
+        })
+      }
+    });
+    expect(result.status).toBe("failed");
+    expect(result.failures).toEqual(expect.arrayContaining([{ rootId: "bad", path: ".", code: "ROOT_NOT_READY", reason: "path is not covered by a dedicated mount" }]));
+    expect(calls.some((args) => args[0] === "backup" && args.at(-1) === goodRoot)).toBe(true);
+    expect(calls.some((args) => args[0] === "forget")).toBe(false);
+  });
+
+  it("allows explicit init to create a repository directory that does not exist yet", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-backup-"));
+    const root = path.join(tempDir, "root");
+    const repo = path.join(tempDir, "nested", "repo");
+    await mkdir(root);
+    await mkdir(path.dirname(repo), { recursive: true });
+    const password = path.join(tempDir, "password");
+    await writeFile(password, "secret\n");
+    db = openSigmaDb(path.join(tempDir, "sigmaos.sqlite"));
+    ensureNasRoots(db, [{ id: "local", name: "Local", path: root }]);
+    const calls: string[][] = [];
+    const restic = {
+      run: async (args: string[]) => {
+        calls.push(args);
+        return { stdout: "", stderr: "", code: 0 };
+      }
+    };
+
+    await expect(initBackup({ db, config: config(root, repo, password), restic })).resolves.toBeUndefined();
+    expect(calls).toEqual([["init", "--repo", repo]]);
+  });
+});
