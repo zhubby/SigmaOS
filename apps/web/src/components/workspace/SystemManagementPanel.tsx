@@ -1247,7 +1247,6 @@ function notifySummaryIssues(
   const signature = issues.map((issue) => `${issue.source}:${issue.message}`).join("\u0000");
   if (!signature) {
     reportedIssueSignature.current = null;
-    onNotifyError(null);
     return;
   }
   if (reportedIssueSignature.current === signature) {

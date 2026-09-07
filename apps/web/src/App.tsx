@@ -1202,8 +1202,16 @@ export function App() {
 
   async function handleApprove(approvalId: string) {
     const approval = approvals.find((item) => item.id === approvalId);
+    const requestRootId = selectedRootIdRef.current;
+    const requestStoragePoolId = selectedStoragePoolIdRef.current;
     setStatus("applying");
     await approveRequest(approvalId);
+    if (
+      selectedRootIdRef.current !== requestRootId ||
+      selectedStoragePoolIdRef.current !== requestStoragePoolId
+    ) {
+      return;
+    }
     applyApprovedSelectionChange(approval);
     await Promise.all([refreshWorkQueues(), refreshFiles()]);
     setStatus("ready");
@@ -1248,6 +1256,18 @@ export function App() {
   }
 
   function handleEditorSaved(result: SaveEditableTextResult) {
+    if (
+      result.operation.metadata.rootId &&
+      result.operation.metadata.rootId !== selectedRootIdRef.current
+    ) {
+      return;
+    }
+    if (
+      result.operation.metadata.storagePoolId &&
+      result.operation.metadata.storagePoolId !== selectedStoragePoolIdRef.current
+    ) {
+      return;
+    }
     if (result.meta.path === selectedFilePath) {
       setPreviewMeta(result.meta);
       setTextPreview(result.textPreview);
@@ -1347,6 +1367,8 @@ export function App() {
     if (!selectedRootId || !selectedStoragePoolId) {
       throw new Error(t("workspace.actions.noSession"));
     }
+    const requestRootId = selectedRootId;
+    const requestStoragePoolId = selectedStoragePoolId;
 
     setStatus("applying");
     setError(null);
@@ -1356,6 +1378,12 @@ export function App() {
         storagePoolId: selectedStoragePoolId,
         path: meta.path
       });
+      if (
+        selectedRootIdRef.current !== requestRootId ||
+        selectedStoragePoolIdRef.current !== requestStoragePoolId
+      ) {
+        return;
+      }
       setOperations((current) => [
         result.operation,
         ...current.filter((operation) => operation.id !== result.operation.id)
