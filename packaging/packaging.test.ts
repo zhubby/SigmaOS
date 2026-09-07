@@ -60,6 +60,7 @@ describe("native packaging artifacts", () => {
     expect(control).toContain("unrar-free");
     expect(control).toContain("restic");
     expect(control).toContain("mdadm");
+    expect(control).toContain("btrfs-progs");
     expect(control).toContain("smartmontools");
   });
 
@@ -81,7 +82,9 @@ describe("native packaging artifacts", () => {
     expect(buildImage).toMatch(/--include=.*(^|,)samba(,|\\|\s)/s);
     expect(manifest).toContain("tesseract-ocr");
     expect(manifest).toContain("mdadm");
+    expect(manifest).toContain("btrfs-progs");
     expect(manifest).toContain("smartmontools");
+    expect(buildImage).toContain("btrfs-progs");
     expect(manifest).toContain("unzip");
     expect(manifest).toContain("unrar-free");
     expect(manifest).toContain("sigmaos-maintenance.timer");

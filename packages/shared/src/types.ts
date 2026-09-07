@@ -952,7 +952,7 @@ export interface ShareOperationRecord {
 }
 
 export type StorageRaidLevel = "0" | "1" | "5" | "6" | "10";
-export type StorageFilesystem = "ext4";
+export type StorageFilesystem = "ext4" | "btrfs";
 export type StorageOperationStatus = "proposed" | "approved" | "applied" | "failed";
 
 export interface StorageOperationProposal {

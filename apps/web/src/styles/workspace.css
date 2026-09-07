@@ -1713,7 +1713,7 @@
 
 .storage-pool-fields {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(170px, 0.72fr);
+  grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(140px, 0.8fr));
   gap: 11px;
 }
 

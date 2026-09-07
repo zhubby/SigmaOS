@@ -22,6 +22,7 @@ export function registerStorageRoutes(server: FastifyInstance, context: ApiRoute
       name?: string;
       raidLevel?: string;
       devices?: string[];
+      filesystem?: string;
       confirm?: boolean;
     };
   }>("/api/storage/proposals", async (request, reply) => {

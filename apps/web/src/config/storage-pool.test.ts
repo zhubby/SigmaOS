@@ -25,6 +25,7 @@ const baseDisk: StorageDisk = {
 const form = (overrides: Partial<StoragePoolFormState> = {}): StoragePoolFormState => ({
   name: "media",
   raidLevel: "1",
+  filesystem: "ext4",
   devices: ["/dev/sda", "/dev/sdb"],
   ...overrides
 });

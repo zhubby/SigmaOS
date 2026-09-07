@@ -9,6 +9,7 @@ import type {
   ShareDefinitionConfig,
   ShareProtocol,
   ShareSettingsRecord,
+  StorageFilesystem,
   StorageOperationProposal,
   StorageRaidLevel
 } from "@sigmaos/shared";
@@ -525,7 +526,7 @@ export interface StoragePoolOperationResult {
   name: string;
   raidLevel: StorageRaidLevel;
   devices: string[];
-  filesystem: "ext4";
+  filesystem: StorageFilesystem;
   mountpoint: string;
   mdDevice: string;
   uuid: string;
@@ -556,7 +557,7 @@ export function validateStorageOperationRequest(value: unknown): StorageOperatio
     !Array.isArray(devices) ||
     !devices.every((device): device is string => typeof device === "string" && /^\/dev\/[A-Za-z0-9._-]+$/u.test(device)) ||
     new Set(devices).size !== devices.length ||
-    value.filesystem !== "ext4" ||
+    !isStorageFilesystem(value.filesystem) ||
     typeof mountpoint !== "string" ||
     mountpoint !== path.posix.join("/srv/nas", name) ||
     value.risk !== "high"
@@ -572,7 +573,7 @@ export function validateStorageOperationRequest(value: unknown): StorageOperatio
     name,
     raidLevel,
     devices,
-    filesystem: "ext4",
+    filesystem: value.filesystem,
     mountpoint,
     risk: "high",
     summary: typeof value.summary === "string" ? value.summary : `Create storage pool ${name}`
@@ -624,7 +625,7 @@ async function applyStoragePoolOperationNow(
     ]);
     created = true;
     await runner.run("udevadm", ["settle"]);
-    await runner.run("mkfs.ext4", ["-F", "-L", proposal.name, mdDevice]);
+    await runner.run(filesystemCommand(proposal.filesystem), filesystemArguments(proposal.filesystem, proposal.name, mdDevice));
     await mkdir(mountpoint, { recursive: true });
     await runner.run("mount", [mdDevice, mountpoint]);
     mounted = true;
@@ -633,7 +634,7 @@ async function applyStoragePoolOperationNow(
     if (!uuid || !/^[A-Fa-f0-9-]+$/u.test(uuid)) {
       throw new Error("Unable to read the new pool UUID");
     }
-    await appendFstabEntry(uuid, mountpoint, options.fstabPath ?? "/etc/fstab");
+    await appendFstabEntry(uuid, mountpoint, proposal.filesystem, options.fstabPath ?? "/etc/fstab");
     return {
       action: proposal.action,
       name: proposal.name,
@@ -798,13 +799,30 @@ async function assertPathMissing(target: string): Promise<void> {
   throw new Error(`Target device already exists: ${target}`);
 }
 
-async function appendFstabEntry(uuid: string, mountpoint: string, fstabPath: string): Promise<void> {
+function isStorageFilesystem(value: unknown): value is StorageFilesystem {
+  return value === "ext4" || value === "btrfs";
+}
+
+function filesystemCommand(filesystem: StorageFilesystem): string {
+  return filesystem === "btrfs" ? "mkfs.btrfs" : "mkfs.ext4";
+}
+
+function filesystemArguments(filesystem: StorageFilesystem, label: string, device: string): string[] {
+  return filesystem === "btrfs" ? ["-f", "-L", label, device] : ["-F", "-L", label, device];
+}
+
+async function appendFstabEntry(
+  uuid: string,
+  mountpoint: string,
+  filesystem: StorageFilesystem,
+  fstabPath: string
+): Promise<void> {
   const current = await readFile(fstabPath, "utf8");
   const lines = current.split("\n");
   if (lines.some((line) => line.trim() && !line.trimStart().startsWith("#") && line.split(/\s+/u)[1] === mountpoint)) {
     throw new Error(`Mountpoint already exists in ${fstabPath}: ${mountpoint}`);
   }
-  const entry = `UUID=${uuid} ${mountpoint} ext4 defaults,nofail,x-systemd.device-timeout=30s 0 2`;
+  const entry = `UUID=${uuid} ${mountpoint} ${filesystem} defaults,nofail,x-systemd.device-timeout=30s 0 2`;
   const next = `${current.trimEnd()}\n${entry}\n`;
   const tempPath = `${fstabPath}.${process.pid}-${randomUUID()}.sigmaos.tmp`;
   await writeFile(tempPath, next, { encoding: "utf8", mode: 0o644 });

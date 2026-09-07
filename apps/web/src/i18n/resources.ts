@@ -109,6 +109,7 @@ export const en = {
       storageApproval: "Review the disks that will be erased and formatted.",
       poolName: "Pool name",
       raidLevel: "RAID level",
+      filesystem: "Filesystem",
       devices: "Disks",
       mountpoint: "Mountpoint",
       root: "Root",
@@ -573,12 +574,17 @@ export const en = {
         createPool: "Create pool",
         directApplyConfirmation: "I understand this permanently erases the selected disks and creates the pool immediately.",
         diskSelectionDescription: "Only unused whole disks can be selected. The system disk and formatted disks are blocked.",
-        eraseWarning: "Creating this pool permanently erases every selected disk, formats it as ext4, and mounts it below /srv/nas.",
+        eraseWarning: "Creating this pool permanently erases every selected disk, formats it as {{filesystem}}, and mounts it below /srv/nas.",
         raidMinimum: "{{count}} disks minimum",
         fields: {
           name: "Pool name",
           raid: "RAID level",
+          filesystem: "Filesystem",
           devices: "Disks to use"
+        },
+        filesystems: {
+          ext4: "ext4",
+          btrfs: "Btrfs"
         },
         values: {
           directApply: "Direct apply"
@@ -1198,6 +1204,7 @@ export const zhCN = {
       storageApproval: "请确认将被擦除并格式化的磁盘。",
       poolName: "池名称",
       raidLevel: "RAID 级别",
+      filesystem: "文件系统",
       devices: "磁盘",
       mountpoint: "挂载点",
       root: "根目录",
@@ -1662,12 +1669,17 @@ export const zhCN = {
         createPool: "创建存储池",
         directApplyConfirmation: "我确认这会永久擦除选中的磁盘，并立即创建存储池。",
         diskSelectionDescription: "只能选择未使用的整块磁盘；系统盘和已格式化磁盘会被阻止。",
-        eraseWarning: "创建存储池会永久擦除所有选中磁盘，格式化为 ext4，并挂载到 /srv/nas 下。",
+        eraseWarning: "创建存储池会永久擦除所有选中磁盘，格式化为 {{filesystem}}，并挂载到 /srv/nas 下。",
         raidMinimum: "至少 {{count}} 块磁盘",
         fields: {
           name: "池名称",
           raid: "RAID 级别",
+          filesystem: "文件系统",
           devices: "使用的磁盘"
+        },
+        filesystems: {
+          ext4: "ext4",
+          btrfs: "Btrfs"
         },
         values: {
           directApply: "直接执行"

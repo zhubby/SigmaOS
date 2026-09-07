@@ -2,6 +2,7 @@ import http from "node:http";
 import path from "node:path";
 import type {
   StorageOperationProposal,
+  StorageFilesystem,
   StorageRaidLevel,
   SystemStorageSummary
 } from "@sigmaos/shared";
@@ -21,6 +22,7 @@ export interface StoragePoolProposalInput {
   name?: string;
   raidLevel?: string;
   devices?: string[];
+  filesystem?: string;
 }
 
 export function buildStoragePoolProposal(
@@ -34,6 +36,7 @@ export function buildStoragePoolProposal(
   }
 
   const raidLevel = parseRaidLevel(input.raidLevel);
+  const filesystem = parseStorageFilesystem(input.filesystem);
   const devices = [...new Set(input.devices ?? [])];
   const minimum = RAID_MINIMUMS[raidLevel];
   if (devices.length < minimum) {
@@ -75,10 +78,10 @@ export function buildStoragePoolProposal(
     name,
     raidLevel,
     devices,
-    filesystem: "ext4",
+    filesystem,
     mountpoint,
     risk: "high",
-    summary: `Create RAID ${raidLevel} pool ${name} at ${mountpoint} using ${devices.join(", ")}. All selected disks will be erased.`
+    summary: `Create RAID ${raidLevel} pool ${name} at ${mountpoint} using ${devices.join(", ")}. All selected disks will be erased and formatted as ${filesystem}.`
   };
 }
 
@@ -134,6 +137,16 @@ function parseRaidLevel(value: string | undefined): StorageRaidLevel {
     return value;
   }
   throw new Error("Unsupported RAID level");
+}
+
+function parseStorageFilesystem(value: string | undefined): StorageFilesystem {
+  if (value === undefined || value === "ext4") {
+    return "ext4";
+  }
+  if (value === "btrfs") {
+    return "btrfs";
+  }
+  throw new Error("Unsupported storage filesystem");
 }
 
 function normalizeMountRoot(value: string): string {

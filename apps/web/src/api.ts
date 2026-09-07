@@ -13,6 +13,7 @@ import type {
   PublicSystemInfo,
   ShareOperationRecord,
   ShareOperationProposal as SharedShareOperationProposal,
+  StorageFilesystem as SharedStorageFilesystem,
   StorageOperationProposal as SharedStorageOperationProposal,
   StorageOperationRecord,
   StorageRaidLevel as SharedStorageRaidLevel,
@@ -174,6 +175,7 @@ export interface FileOperation {
 }
 
 export type StorageOperation = StorageOperationRecord;
+export type StorageFilesystem = SharedStorageFilesystem;
 export type StorageRaidLevel = SharedStorageRaidLevel;
 
 export interface AgentEvent {
@@ -447,6 +449,7 @@ export async function createStoragePool(input: {
   name: string;
   raidLevel: StorageRaidLevel;
   devices: string[];
+  filesystem: StorageFilesystem;
   confirm: boolean;
 }): Promise<{
   message: AgentMessage;

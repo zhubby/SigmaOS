@@ -21,12 +21,15 @@ import {
   getSystemStorage,
   createStoragePool,
   type NetworkSummary,
+  type StorageFilesystem,
   type StorageSummary,
   type StorageRaidLevel
 } from "../../api.js";
 import {
   isStorageDiskSelectable,
   raidMinimum,
+  STORAGE_FILESYSTEMS,
+  STORAGE_RAID_LEVELS,
   storageDiskAvailability,
   validateStoragePoolForm,
   type StoragePoolFormState,
@@ -271,6 +274,7 @@ export function SystemStorageManagementPanel({
   const [form, setForm] = useState<StoragePoolFormState>({
     name: "",
     raidLevel: "1",
+    filesystem: "ext4",
     devices: []
   });
 
@@ -358,11 +362,12 @@ export function SystemStorageManagementPanel({
         name: form.name.trim(),
         raidLevel: form.raidLevel,
         devices: form.devices,
+        filesystem: form.filesystem,
         confirm: true
       });
       setNotice(t("workspace.management.storage.poolCreated"));
       setCreateOpen(false);
-      setForm({ name: "", raidLevel: "1", devices: [] });
+      setForm({ name: "", raidLevel: "1", filesystem: "ext4", devices: [] });
       setConfirmed(false);
       await onWorkQueuesChanged();
     } catch (nextError) {
@@ -591,9 +596,25 @@ export function SystemStorageManagementPanel({
                       setForm((current) => ({ ...current, raidLevel: event.target.value as StorageRaidLevel }));
                     }}
                   >
-                    {(["1", "5", "6", "10", "0"] as StorageRaidLevel[]).map((level) => (
+                    {STORAGE_RAID_LEVELS.map((level) => (
                       <option key={level} value={level}>
                         RAID {level} ({t("workspace.management.storage.raidMinimum", { count: raidMinimum(level) })})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>{t("workspace.management.storage.fields.filesystem")}</span>
+                  <select
+                    value={form.filesystem}
+                    onChange={(event) => {
+                      setNotice(null);
+                      setForm((current) => ({ ...current, filesystem: event.target.value as StorageFilesystem }));
+                    }}
+                  >
+                    {STORAGE_FILESYSTEMS.map((filesystem) => (
+                      <option key={filesystem} value={filesystem}>
+                        {t(`workspace.management.storage.filesystems.${filesystem}`)}
                       </option>
                     ))}
                   </select>
@@ -640,7 +661,11 @@ export function SystemStorageManagementPanel({
 
               <div className="management-inline-message is-warning" role="alert">
                 <CircleAlert aria-hidden="true" size={15} />
-                <span>{t("workspace.management.storage.eraseWarning")}</span>
+                <span>
+                  {t("workspace.management.storage.eraseWarning", {
+                    filesystem: t(`workspace.management.storage.filesystems.${form.filesystem}`)
+                  })}
+                </span>
               </div>
 
               <label className="storage-pool-confirmation">
