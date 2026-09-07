@@ -52,7 +52,12 @@ export interface GitDirectoryStatus {
   summary: GitStatusSummary;
 }
 
-export type PendingApprovalKind = "file_operation" | "pi_tool_call" | "docker_operation" | "share_operation";
+export type PendingApprovalKind =
+  | "file_operation"
+  | "pi_tool_call"
+  | "docker_operation"
+  | "share_operation"
+  | "storage_operation";
 
 export type PiToolName = "read" | "bash" | "edit" | "write" | "grep" | "find" | "ls";
 
@@ -624,7 +629,7 @@ export interface SystemStorageSummary {
   status: SystemCollectionStatus;
   capabilities: {
     backend: "mdadm";
-    canCreatePool: false;
+    canCreatePool: true;
     canDeletePool: false;
     canApplyConfiguration: false;
   };
@@ -946,6 +951,32 @@ export interface ShareOperationRecord {
   updatedAt: string;
 }
 
+export type StorageRaidLevel = "0" | "1" | "5" | "6" | "10";
+export type StorageFilesystem = "ext4";
+export type StorageOperationStatus = "proposed" | "approved" | "applied" | "failed";
+
+export interface StorageOperationProposal {
+  action: "create_pool";
+  name: string;
+  raidLevel: StorageRaidLevel;
+  devices: string[];
+  filesystem: StorageFilesystem;
+  mountpoint: string;
+  risk: "high";
+  summary: string;
+}
+
+export interface StorageOperationRecord {
+  id: string;
+  approvalId: string | null;
+  action: "create_pool";
+  targetId: string;
+  status: StorageOperationStatus;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DockerConsoleAuthorizationRecord {
   id: string;
   operationId: string;
@@ -962,7 +993,8 @@ export type PendingApprovalProposal =
   | FileOperationProposal
   | PiToolCallApproval
   | DockerOperationProposal
-  | ShareOperationProposal;
+  | ShareOperationProposal
+  | StorageOperationProposal;
 
 export interface PendingApprovalRecord {
   id: string;

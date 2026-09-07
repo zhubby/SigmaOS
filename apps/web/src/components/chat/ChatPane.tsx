@@ -7,6 +7,7 @@ import {
   CircleStop,
   Container,
   FileCog,
+  HardDrive,
   LoaderCircle,
   MessageSquare,
   MessageSquarePlus,
@@ -26,6 +27,7 @@ import type {
   PendingApproval,
   SessionSummary,
   ShareOperationProposal,
+  StorageOperationProposal,
   TranscriptMessage
 } from "../../api.js";
 import type { AppStatus } from "../../config/status.js";
@@ -42,7 +44,7 @@ import {
 import { sessionTitle } from "../../lib/session.js";
 
 type ApprovalRisk = PendingApproval["proposal"][number]["risk"];
-type ApprovalCardKind = "file" | "tool" | "docker" | "share";
+type ApprovalCardKind = "file" | "tool" | "docker" | "share" | "storage";
 type ComposerKeyDownEvent = Pick<KeyboardEvent<HTMLTextAreaElement>, "key" | "shiftKey" | "nativeEvent">;
 type ComposerFeedbackState = "sending" | "queued" | "running" | "reconnecting";
 
@@ -252,7 +254,15 @@ export function ChatPane({
     const risk = approval.proposal[0]?.risk ?? "low";
     const card = approvalCard(approval, translate);
     const CardIcon =
-      card.kind === "tool" ? TerminalSquare : card.kind === "docker" ? Container : card.kind === "share" ? Share2 : FileCog;
+      card.kind === "tool"
+        ? TerminalSquare
+        : card.kind === "docker"
+          ? Container
+          : card.kind === "share"
+            ? Share2
+            : card.kind === "storage"
+              ? HardDrive
+              : FileCog;
 
     return (
       <article className="approval-card" aria-label={t("chat.pendingApprovals")}>
@@ -765,6 +775,31 @@ function approvalCard(approval: PendingApproval, t: Translate): ApprovalCard {
     };
   }
 
+  if (approval.kind === "storage_operation") {
+    const storageOperation = approval.proposal.find(isStorageOperationProposal);
+    if (!storageOperation) {
+      return {
+        kind: "storage",
+        title: t("chat.approvalCards.storageTitle"),
+        detail: t("chat.approvalCards.storageApproval"),
+        meta: t("chat.approvalCards.storageOperation"),
+        items: []
+      };
+    }
+    return {
+      kind: "storage",
+      title: t("chat.approvalCards.storageTitle"),
+      detail: storageOperation.summary,
+      meta: t("chat.approvalCards.storageOperation"),
+      items: [
+        { label: t("chat.approvalCards.poolName"), value: storageOperation.name },
+        { label: t("chat.approvalCards.raidLevel"), value: `RAID ${storageOperation.raidLevel}` },
+        { label: t("chat.approvalCards.devices"), value: storageOperation.devices.join(", ") },
+        { label: t("chat.approvalCards.mountpoint"), value: storageOperation.mountpoint }
+      ]
+    };
+  }
+
   const fileOperations = approval.proposal.filter((proposal) => "operation" in proposal);
   const firstOperation = fileOperations[0];
   const affectedPaths = Array.from(
@@ -798,6 +833,10 @@ function isDockerOperationProposal(proposal: PendingApproval["proposal"][number]
 
 function isShareOperationProposal(proposal: PendingApproval["proposal"][number]): proposal is ShareOperationProposal {
   return "action" in proposal && proposal.action === "apply_settings" && "settings" in proposal;
+}
+
+function isStorageOperationProposal(proposal: PendingApproval["proposal"][number]): proposal is StorageOperationProposal {
+  return "action" in proposal && proposal.action === "create_pool" && "devices" in proposal;
 }
 
 function dockerActionLabel(

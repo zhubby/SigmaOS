@@ -13,6 +13,9 @@ import type {
   PublicSystemInfo,
   ShareOperationRecord,
   ShareOperationProposal as SharedShareOperationProposal,
+  StorageOperationProposal as SharedStorageOperationProposal,
+  StorageOperationRecord,
+  StorageRaidLevel as SharedStorageRaidLevel,
   ShareSummary as PublicShareSummary,
   SystemNetworkSummary,
   SystemStorageSummary
@@ -140,18 +143,20 @@ export interface DockerOperationProposal {
 }
 
 export type ShareOperationProposal = SharedShareOperationProposal;
+export type StorageOperationProposal = SharedStorageOperationProposal;
 
 export type PendingApprovalProposal =
   | FileOperationProposal
   | PiToolCallApproval
   | DockerOperationProposal
-  | ShareOperationProposal;
+  | ShareOperationProposal
+  | StorageOperationProposal;
 
 export interface PendingApproval {
   id: string;
   jobId: string;
   sessionId: string;
-  kind: "file_operation" | "pi_tool_call" | "docker_operation" | "share_operation";
+  kind: "file_operation" | "pi_tool_call" | "docker_operation" | "share_operation" | "storage_operation";
   status: string;
   proposal: PendingApprovalProposal[];
   createdAt: string;
@@ -167,6 +172,9 @@ export interface FileOperation {
   metadata: Record<string, unknown>;
   createdAt: string;
 }
+
+export type StorageOperation = StorageOperationRecord;
+export type StorageRaidLevel = SharedStorageRaidLevel;
 
 export interface AgentEvent {
   id: number;
@@ -431,6 +439,32 @@ export async function proposeShareSettings(input: {
     job: Job;
     approval: PendingApproval;
     operation: ShareOperation;
+  };
+}
+
+export async function createStoragePool(input: {
+  sessionId: string;
+  name: string;
+  raidLevel: StorageRaidLevel;
+  devices: string[];
+  confirm: boolean;
+}): Promise<{
+  message: AgentMessage;
+  job: Job;
+  operation: StorageOperation;
+}> {
+  const response = await fetch("/api/storage/proposals", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(input)
+  });
+  await ensureOk(response);
+  return (await response.json()) as {
+    message: AgentMessage;
+    job: Job;
+    operation: StorageOperation;
   };
 }
 

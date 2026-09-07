@@ -11,7 +11,6 @@ Group=sigmaos
 Environment=SIGMAOS_CONFIG=/etc/sigmaos/config.toml
 WorkingDirectory=/var/lib/sigmaos
 StateDirectory=sigmaos
-RuntimeDirectory=sigmaos
 LogsDirectory=sigmaos
 ExecStart=/usr/bin/node /usr/lib/sigmaos/apps/scheduler/dist/index.js --maintenance
 ProtectSystem=strict

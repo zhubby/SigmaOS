@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "build": "tsup src/index.ts --format esm --platform node --target node22 --external better-sqlite3 --out-dir dist"
+    "build": "cd ../.. && tsup apps/api/src/index.ts --format esm --platform node --target node22 --external=better-sqlite3 --external=@fastify/cors --external=@fastify/static --external=@fastify/websocket --external=fastify --external=node-pty --out-dir apps/api/dist"
   },
   "dependencies": {
     "@fastify/cors": "^11.1.0",

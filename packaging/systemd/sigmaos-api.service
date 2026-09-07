@@ -12,7 +12,6 @@ Environment=SIGMAOS_CONFIG=/etc/sigmaos/config.toml
 Environment=SIGMAOS_WEB_DIST=/usr/lib/sigmaos/apps/web/dist
 WorkingDirectory=/var/lib/sigmaos
 StateDirectory=sigmaos
-RuntimeDirectory=sigmaos
 LogsDirectory=sigmaos
 ExecStart=/usr/bin/node /usr/lib/sigmaos/apps/api/dist/index.js
 Restart=on-failure

@@ -8,7 +8,7 @@
     "dev": "tsx src/index.ts",
     "once": "tsx src/index.ts",
     "start": "node dist/index.js",
-    "build": "tsup src/index.ts --format esm --platform node --target node22 --external better-sqlite3 --out-dir dist"
+    "build": "cd ../.. && tsup apps/backup/src/index.ts --format esm --platform node --target node22 --external=better-sqlite3 --out-dir apps/backup/dist"
   },
   "dependencies": {
     "@sigmaos/db": "0.1.0",

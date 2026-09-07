@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import http from "node:http";
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -7,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   appendEvent,
   createPendingApproval,
+  createStorageOperationApproval,
   createPiToolCallApproval,
   createSession,
   createUserMessageAndJob,
@@ -19,6 +21,7 @@ import {
   getJob,
   getSession,
   getShareOperationByApproval,
+  getStorageOperationByApproval,
   getShareSettings,
   getTrashEntry,
   listEvents,
@@ -39,7 +42,8 @@ import type {
   DockerOperationProposal,
   ShareApplyRequest,
   ShareApplyResult,
-  SigmaConfig
+  SigmaConfig,
+  StorageOperationProposal
 } from "@sigmaos/shared";
 import type { DockerComposeRuntime } from "./lib/docker-compose.js";
 import type { DockerEngineRuntime, DockerExecStream } from "./lib/docker-client.js";
@@ -635,7 +639,7 @@ describe("API server", () => {
         status: "ready",
         capabilities: {
           backend: "mdadm",
-          canCreatePool: false,
+          canCreatePool: true,
           canDeletePool: false
         },
         metrics: {
@@ -733,6 +737,161 @@ describe("API server", () => {
       ])
     );
     await server.close();
+  });
+
+  it("creates storage pools directly after explicit confirmation", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const config = testConfig(tempDir);
+    const socketPath = path.join(tempDir, "storage-helper.sock");
+    config.shares.helperSocketPath = socketPath;
+    let helperProposal: unknown = null;
+    const helperServer = http.createServer(async (request, response) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      helperProposal = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      const body = JSON.stringify({
+        action: "create_pool",
+        name: "media",
+        raidLevel: "1",
+        devices: ["/dev/sda", "/dev/sdb"],
+        filesystem: "ext4",
+        mountpoint: "/srv/nas/media",
+        mdDevice: "/dev/md/media",
+        uuid: "11111111-2222-3333-4444-555555555555"
+      });
+      response.writeHead(200, { "content-type": "application/json", "content-length": Buffer.byteLength(body) });
+      response.end(body);
+    });
+    await listenOnUnixSocket(helperServer, socketPath);
+
+    const server = await buildServer({
+      config,
+      db,
+      system: { commandRunner: availableStorageCommandRunner() }
+    });
+
+    const missingConfirmation = await server.inject({
+      method: "POST",
+      url: "/api/storage/proposals",
+      payload: {
+        sessionId: session.id,
+        name: "media",
+        raidLevel: "1",
+        devices: ["/dev/sda", "/dev/sdb"]
+      }
+    });
+    expect(missingConfirmation.statusCode).toBe(400);
+    expect(missingConfirmation.json()).toEqual({
+      error: "Storage pool creation requires explicit confirmation"
+    });
+
+    const proposed = await server.inject({
+      method: "POST",
+      url: "/api/storage/proposals",
+      payload: {
+        sessionId: session.id,
+        name: "media",
+        raidLevel: "1",
+        devices: ["/dev/sda", "/dev/sdb"],
+        confirm: true
+      }
+    });
+    expect(proposed.statusCode).toBe(202);
+    expect(proposed.json()).toMatchObject({
+      job: { status: "completed" },
+      operation: {
+        action: "create_pool",
+        status: "applied",
+        approvalId: null
+      }
+    });
+    expect(proposed.json().approval).toBeUndefined();
+    expect(helperProposal).toMatchObject({ action: "create_pool", name: "media" });
+    expect(listPendingApprovals(db)).toHaveLength(0);
+
+    const unsafe = await server.inject({
+      method: "POST",
+      url: "/api/storage/proposals",
+      payload: {
+        sessionId: session.id,
+        name: "system",
+        raidLevel: "1",
+        devices: ["/dev/nvme0n1", "/dev/sda"],
+        confirm: true
+      }
+    });
+    expect(unsafe.statusCode).toBe(400);
+    expect(unsafe.json()).toEqual({ error: expect.stringContaining("not present") });
+
+    await server.close();
+    await closeHttpServer(helperServer);
+  });
+
+  it("applies an approved storage pool through the privileged helper", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const config = testConfig(tempDir);
+    const socketPath = path.join(tempDir, "storage-helper.sock");
+    config.shares.helperSocketPath = socketPath;
+    let helperProposal: unknown = null;
+    const helperServer = http.createServer(async (request, response) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      helperProposal = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      const body = JSON.stringify({
+        action: "create_pool",
+        name: "media",
+        raidLevel: "1",
+        devices: ["/dev/sda", "/dev/sdb"],
+        filesystem: "ext4",
+        mountpoint: "/srv/nas/media",
+        mdDevice: "/dev/md/media",
+        uuid: "11111111-2222-3333-4444-555555555555"
+      });
+      response.writeHead(200, { "content-type": "application/json", "content-length": Buffer.byteLength(body) });
+      response.end(body);
+    });
+    await listenOnUnixSocket(helperServer, socketPath);
+
+    const proposal: StorageOperationProposal = {
+      action: "create_pool",
+      name: "media",
+      raidLevel: "1",
+      devices: ["/dev/sda", "/dev/sdb"],
+      filesystem: "ext4",
+      mountpoint: "/srv/nas/media",
+      risk: "high",
+      summary: "Create RAID 1 pool media at /srv/nas/media using /dev/sda, /dev/sdb. All selected disks will be erased."
+    };
+    const { job } = createUserMessageAndJob(db, {
+      sessionId: session.id,
+      content: proposal.summary,
+      status: "waiting_approval"
+    });
+    const { approval } = createStorageOperationApproval(db, {
+      jobId: job.id,
+      proposal
+    });
+    const server = await buildServer({
+      config,
+      db,
+      system: { commandRunner: availableStorageCommandRunner() }
+    });
+    const approved = await server.inject({
+      method: "POST",
+      url: `/api/approvals/${approval.id}/approve`
+    });
+
+    expect(approved.statusCode).toBe(202);
+    expect(helperProposal).toMatchObject({ action: "create_pool", name: "media" });
+    expect(getStorageOperationByApproval(db, approval.id)).toMatchObject({ status: "applied" });
+    expect(getApproval(db, approval.id)?.status).toBe("applied");
+    expect(getJob(db, job.id)?.status).toBe("completed");
+    await server.close();
+    await closeHttpServer(helperServer);
   });
 
   it("scopes SMART command failures to the affected disk", async () => {
@@ -2843,6 +3002,38 @@ function storageCommandRunner({
               ata_smart_error_log: { summary: { count: 0 } }
             })
         })
+  });
+}
+
+function availableStorageCommandRunner(): FakeSystemCommandRunner {
+  return new FakeSystemCommandRunner({
+    "lsblk --json --bytes --output NAME,KNAME,PATH,TYPE,SIZE,MODEL,SERIAL,TRAN,ROTA,FSTYPE,LABEL,UUID,MOUNTPOINTS,PKNAME": JSON.stringify({
+      blockdevices: [
+        { name: "sda", path: "/dev/sda", type: "disk", size: 1000, model: "Disk A", serial: "disk-a", tran: "sata", rota: 1, mountpoints: [] },
+        { name: "sdb", path: "/dev/sdb", type: "disk", size: 1000, model: "Disk B", serial: "disk-b", tran: "sata", rota: 1, mountpoints: [] },
+        { name: "sdc", path: "/dev/sdc", type: "disk", size: 1000, model: "Disk C", serial: "disk-c", tran: "sata", rota: 1, mountpoints: [] },
+        { name: "sdd", path: "/dev/sdd", type: "disk", size: 1000, model: "Disk D", serial: "disk-d", tran: "sata", rota: 1, mountpoints: [] }
+      ]
+    }),
+    "findmnt --json --bytes --output SOURCE,TARGET,FSTYPE,SIZE,USED,AVAIL,USE%": JSON.stringify({ filesystems: [] }),
+    "mdadm --detail --scan": "",
+    "smartctl --scan-open --json": JSON.stringify({ devices: [] })
+  });
+}
+
+async function listenOnUnixSocket(server: http.Server, socketPath: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(socketPath, () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+}
+
+async function closeHttpServer(server: http.Server): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
   });
 }
 

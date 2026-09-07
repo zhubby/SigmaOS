@@ -1,5 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { chmod, chown, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, chmod, chown, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   NasRootConfig,
@@ -7,7 +8,9 @@ import type {
   ShareApplyResult,
   ShareDefinitionConfig,
   ShareProtocol,
-  ShareSettingsRecord
+  ShareSettingsRecord,
+  StorageOperationProposal,
+  StorageRaidLevel
 } from "@sigmaos/shared";
 
 export interface HelperCommandRunner {
@@ -29,6 +32,11 @@ export interface ShareHelperOptions {
   commandRunner?: HelperCommandRunner;
   credentialGroup?: string;
   managedRoots?: string[];
+}
+
+export interface StorageHelperRequest {
+  command: "mdadm" | "smartctl";
+  args: string[];
 }
 
 export interface ResolvedShare {
@@ -477,4 +485,373 @@ function groupId(group: string): Promise<number> {
       resolve(gid);
     });
   });
+}
+
+export function validateStorageHelperRequest(value: unknown): StorageHelperRequest {
+  if (!isRecord(value) || (value.command !== "mdadm" && value.command !== "smartctl") || !Array.isArray(value.args)) {
+    throw new Error("Invalid storage helper request");
+  }
+  const args = value.args;
+  if (!args.every((arg): arg is string => typeof arg === "string" && arg.length > 0 && arg.length < 256)) {
+    throw new Error("Invalid storage helper arguments");
+  }
+
+  if (value.command === "mdadm") {
+    const validScan = args.length === 2 && args[0] === "--detail" && args[1] === "--scan";
+    const validDetail = args.length === 2 && args[0] === "--detail" && isDevicePath(args[1]!);
+    if (!validScan && !validDetail) {
+      throw new Error("Unsupported mdadm request");
+    }
+  } else {
+    const validScan = args.length === 2 && args[0] === "--scan-open" && args[1] === "--json";
+    const validAll =
+      (args.length === 3 && args[0] === "--all" && args[1] === "--json" && isDevicePath(args[2]!)) ||
+      (args.length === 5 &&
+        args[0] === "--all" &&
+        args[1] === "--json" &&
+        args[2] === "-d" &&
+        /^[a-z0-9_-]+$/u.test(args[3]!) &&
+        isDevicePath(args[4]!));
+    if (!validScan && !validAll) {
+      throw new Error("Unsupported smartctl request");
+    }
+  }
+
+  return { command: value.command, args };
+}
+
+export interface StoragePoolOperationResult {
+  action: "create_pool";
+  name: string;
+  raidLevel: StorageRaidLevel;
+  devices: string[];
+  filesystem: "ext4";
+  mountpoint: string;
+  mdDevice: string;
+  uuid: string;
+}
+
+export interface StoragePoolOperationOptions {
+  fstabPath?: string;
+  mountRoot?: string;
+  mdDeviceRoot?: string;
+  mdadmRuntimePath?: string;
+  mdSysBlockPath?: string;
+}
+
+let storageOperationQueue = Promise.resolve();
+
+export function validateStorageOperationRequest(value: unknown): StorageOperationProposal {
+  if (!isRecord(value) || value.action !== "create_pool") {
+    throw new Error("Invalid storage operation request");
+  }
+  const name = value.name;
+  const raidLevel = value.raidLevel;
+  const devices = value.devices;
+  const mountpoint = value.mountpoint;
+  if (
+    typeof name !== "string" ||
+    !/^[a-z][a-z0-9_-]{0,31}$/u.test(name) ||
+    !isStorageRaidLevel(raidLevel) ||
+    !Array.isArray(devices) ||
+    !devices.every((device): device is string => typeof device === "string" && /^\/dev\/[A-Za-z0-9._-]+$/u.test(device)) ||
+    new Set(devices).size !== devices.length ||
+    value.filesystem !== "ext4" ||
+    typeof mountpoint !== "string" ||
+    mountpoint !== path.posix.join("/srv/nas", name) ||
+    value.risk !== "high"
+  ) {
+    throw new Error("Invalid storage operation request");
+  }
+  const minimum = storageRaidMinimum(raidLevel);
+  if (devices.length < minimum || (raidLevel === "10" && devices.length % 2 !== 0)) {
+    throw new Error(`Invalid disk count for RAID ${raidLevel}`);
+  }
+  return {
+    action: "create_pool",
+    name,
+    raidLevel,
+    devices,
+    filesystem: "ext4",
+    mountpoint,
+    risk: "high",
+    summary: typeof value.summary === "string" ? value.summary : `Create storage pool ${name}`
+  };
+}
+
+export function applyStoragePoolOperation(
+  request: StorageOperationProposal,
+  runner: HelperCommandRunner = new NodeHelperCommandRunner(),
+  options: StoragePoolOperationOptions = {}
+): Promise<StoragePoolOperationResult> {
+  const operation = storageOperationQueue.then(() => applyStoragePoolOperationNow(request, runner, options));
+  storageOperationQueue = operation.then(
+    () => undefined,
+    () => undefined
+  );
+  return operation;
+}
+
+async function applyStoragePoolOperationNow(
+  request: StorageOperationProposal,
+  runner: HelperCommandRunner,
+  options: StoragePoolOperationOptions
+): Promise<StoragePoolOperationResult> {
+  const proposal = validateStorageOperationRequest(request);
+  await assertStorageDevicesAvailable(proposal, runner);
+  await mkdir(options.mdadmRuntimePath ?? "/run/mdadm", { recursive: true });
+  const mountpoint = options.mountRoot ? path.posix.join(options.mountRoot, proposal.name) : proposal.mountpoint;
+  const mountpointExisted = await assertMountpointAvailable(mountpoint, options.mountRoot ?? "/srv/nas");
+
+  const mdDevice = options.mdDeviceRoot ? path.posix.join(options.mdDeviceRoot, proposal.name) : `/dev/md/${proposal.name}`;
+  if (await cleanupOrphanMdDevices(runner, options.mdSysBlockPath)) {
+    await runner.run("udevadm", ["settle"]);
+  }
+  await assertPathMissing(mdDevice);
+  await mkdir(path.posix.dirname(mdDevice), { recursive: true });
+  let created = false;
+  let mounted = false;
+  try {
+    await runner.run("mdadm", [
+      "--create",
+      mdDevice,
+      "--run",
+      "--force",
+      "--metadata=1.2",
+      `--level=${proposal.raidLevel}`,
+      `--raid-devices=${proposal.devices.length}`,
+      ...proposal.devices
+    ]);
+    created = true;
+    await runner.run("udevadm", ["settle"]);
+    await runner.run("mkfs.ext4", ["-F", "-L", proposal.name, mdDevice]);
+    await mkdir(mountpoint, { recursive: true });
+    await runner.run("mount", [mdDevice, mountpoint]);
+    mounted = true;
+    await runner.run("findmnt", ["--target", mountpoint, "--output", "SOURCE,FSTYPE", "--noheadings"]);
+    const uuid = (await runner.run("blkid", ["-s", "UUID", "-o", "value", mdDevice])).trim();
+    if (!uuid || !/^[A-Fa-f0-9-]+$/u.test(uuid)) {
+      throw new Error("Unable to read the new pool UUID");
+    }
+    await appendFstabEntry(uuid, mountpoint, options.fstabPath ?? "/etc/fstab");
+    return {
+      action: proposal.action,
+      name: proposal.name,
+      raidLevel: proposal.raidLevel,
+      devices: proposal.devices,
+      filesystem: proposal.filesystem,
+      mountpoint: proposal.mountpoint,
+      mdDevice,
+      uuid
+    };
+  } catch (error) {
+    if (mounted) {
+      await bestEffort(runner, "umount", [mountpoint]);
+    }
+    if (!mountpointExisted) {
+      await bestEffortFilesystemCleanup(mountpoint);
+    }
+    if (created) {
+      await bestEffort(runner, "mdadm", ["--stop", mdDevice]);
+    } else {
+      await bestEffortOrphanMdCleanup(runner, options.mdSysBlockPath);
+    }
+    throw error;
+  }
+}
+
+export async function cleanupOrphanMdDevices(
+  runner: HelperCommandRunner,
+  sysBlockPath = "/sys/block"
+): Promise<boolean> {
+  let entries: string[];
+  try {
+    entries = await readdir(sysBlockPath);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+
+  let cleaned = false;
+  for (const entry of entries.filter((candidate) => /^md\d+$/u.test(candidate)).sort()) {
+    const deviceRoot = path.join(sysBlockPath, entry);
+    let state: string;
+    try {
+      state = (await readFile(path.join(deviceRoot, "md", "array_state"), "utf8")).trim().toLowerCase();
+    } catch (error) {
+      if (isNodeError(error) && error.code === "ENOENT") {
+        continue;
+      }
+      throw error;
+    }
+    if (state !== "clear") {
+      continue;
+    }
+
+    let holders: string[];
+    try {
+      holders = await readdir(path.join(deviceRoot, "md", "holders"));
+    } catch (error) {
+      if (isNodeError(error) && error.code === "ENOENT") {
+        holders = [];
+      } else {
+        throw error;
+      }
+    }
+    if (holders.length) {
+      continue;
+    }
+
+    await runner.run("mdadm", ["--stop", `/dev/${entry}`]);
+    cleaned = true;
+  }
+  return cleaned;
+}
+
+async function bestEffortOrphanMdCleanup(runner: HelperCommandRunner, sysBlockPath?: string): Promise<void> {
+  try {
+    if (await cleanupOrphanMdDevices(runner, sysBlockPath)) {
+      await runner.run("udevadm", ["settle"]);
+    }
+  } catch {
+    // Preserve the original operation error; cleanup is only a mitigation.
+  }
+}
+
+async function assertStorageDevicesAvailable(
+  proposal: StorageOperationProposal,
+  runner: HelperCommandRunner
+): Promise<void> {
+  const output = await runner.run("lsblk", [
+    "--json",
+    "--bytes",
+    "--tree",
+    "--output",
+    "PATH,TYPE,FSTYPE,MOUNTPOINTS,PKNAME",
+    ...proposal.devices
+  ]);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output) as unknown;
+  } catch {
+    throw new Error("Unable to validate block devices");
+  }
+  const rows = isRecord(parsed) && Array.isArray(parsed.blockdevices) ? parsed.blockdevices : [];
+  const byPath = new Map(
+    rows
+      .filter(isRecord)
+      .map((row) => [stringField(row, "path"), row] as const)
+      .filter((entry): entry is readonly [string, Record<string, unknown>] => Boolean(entry[0]))
+  );
+  for (const device of proposal.devices) {
+    const row = byPath.get(device);
+    if (!row || stringField(row, "type") !== "disk") {
+      throw new Error(`Block device is not an available whole disk: ${device}`);
+    }
+    assertStorageNodeUnused(row, device);
+    const children = Array.isArray(row.children) ? row.children : [];
+    for (const child of children) {
+      if (isRecord(child)) {
+        assertStorageNodeUnused(child, device);
+      }
+    }
+  }
+}
+
+function assertStorageNodeUnused(row: Record<string, unknown>, device: string): void {
+  const filesystem = stringField(row, "fstype");
+  const mountpoints = row.mountpoints;
+  if (filesystem || (Array.isArray(mountpoints) && mountpoints.some((mountpoint) => typeof mountpoint === "string" && mountpoint))) {
+    throw new Error(`Block device contains a filesystem or mount and cannot be used: ${device}`);
+  }
+}
+
+async function assertMountpointAvailable(mountpoint: string, mountRoot: string): Promise<boolean> {
+  if (path.posix.dirname(mountpoint) !== path.posix.resolve(mountRoot)) {
+    throw new Error("Storage pool mountpoint is outside /srv/nas");
+  }
+  try {
+    const entries = await readdir(mountpoint);
+    if (entries.length) {
+      throw new Error(`Storage pool mountpoint is not empty: ${mountpoint}`);
+    }
+    return true;
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function assertPathMissing(target: string): Promise<void> {
+  try {
+    await access(target);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return;
+    }
+    throw new Error(`Target device already exists: ${target}`);
+  }
+  throw new Error(`Target device already exists: ${target}`);
+}
+
+async function appendFstabEntry(uuid: string, mountpoint: string, fstabPath: string): Promise<void> {
+  const current = await readFile(fstabPath, "utf8");
+  const lines = current.split("\n");
+  if (lines.some((line) => line.trim() && !line.trimStart().startsWith("#") && line.split(/\s+/u)[1] === mountpoint)) {
+    throw new Error(`Mountpoint already exists in ${fstabPath}: ${mountpoint}`);
+  }
+  const entry = `UUID=${uuid} ${mountpoint} ext4 defaults,nofail,x-systemd.device-timeout=30s 0 2`;
+  const next = `${current.trimEnd()}\n${entry}\n`;
+  const tempPath = `${fstabPath}.${process.pid}-${randomUUID()}.sigmaos.tmp`;
+  await writeFile(tempPath, next, { encoding: "utf8", mode: 0o644 });
+  try {
+    await rename(tempPath, fstabPath);
+  } catch (error) {
+    await rm(tempPath, { force: true });
+    throw error;
+  }
+}
+
+async function bestEffortFilesystemCleanup(target: string): Promise<void> {
+  try {
+    await rm(target, { force: true });
+  } catch {
+    // Only remove an empty directory created for this operation.
+  }
+}
+
+async function bestEffort(runner: HelperCommandRunner, command: string, args: string[]): Promise<void> {
+  try {
+    await runner.run(command, args);
+  } catch {
+    // Preserve the original operation error; cleanup is only a mitigation.
+  }
+}
+
+function isStorageRaidLevel(value: unknown): value is StorageRaidLevel {
+  return value === "0" || value === "1" || value === "5" || value === "6" || value === "10";
+}
+
+function storageRaidMinimum(level: StorageRaidLevel): number {
+  return level === "0" || level === "1" ? 2 : level === "5" ? 3 : 4;
+}
+
+function stringField(value: Record<string, unknown>, key: string): string | null {
+  return typeof value[key] === "string" ? value[key] : null;
+}
+
+function isNodeError(value: unknown): value is NodeJS.ErrnoException {
+  return value instanceof Error && typeof (value as NodeJS.ErrnoException).code === "string";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isDevicePath(value: string): boolean {
+  return /^\/dev\/[A-Za-z0-9._-]+$/u.test(value);
 }

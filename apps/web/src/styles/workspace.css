@@ -1685,11 +1685,225 @@
   color: var(--danger-text);
 }
 
+.management-inline-message.is-warning {
+  color: var(--warning-text);
+  background: var(--warning-bg);
+}
+
 .management-inline-message span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.management-modal.storage-pool-modal {
+  width: min(620px, 100%);
+  max-height: min(730px, calc(100dvh - 36px));
+}
+
+.storage-pool-form {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
+.storage-pool-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(170px, 0.72fr);
+  gap: 11px;
+}
+
+.storage-pool-fields label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.storage-pool-fields label > span,
+.storage-disk-selection h3 {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.storage-pool-fields input,
+.storage-pool-fields select {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+}
+
+.storage-disk-selection {
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  padding: 14px;
+  background: var(--channel-bg);
+}
+
+.storage-disk-selection h3 {
+  margin: 0 0 5px;
+  line-height: 1.3;
+}
+
+.storage-disk-selection > p {
+  margin: 0 0 11px;
+  color: var(--muted-2);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.storage-disk-options {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.storage-disk-option {
+  display: grid;
+  grid-template-columns: 17px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  min-height: 54px;
+  padding: 9px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: var(--subtle-bg);
+}
+
+.storage-disk-option:has(input:checked) {
+  border-color: var(--accent-soft-text);
+  background: var(--accent-soft-bg);
+}
+
+.storage-disk-option[data-state="ready"] em {
+  color: var(--success-text);
+}
+
+.storage-disk-option[data-state="mounted"] em,
+.storage-disk-option[data-state="formatted"] em,
+.storage-disk-option[data-state="array"] em {
+  color: var(--muted-2);
+}
+
+.storage-disk-option input {
+  width: 15px;
+  height: 15px;
+}
+
+.storage-disk-option > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.storage-disk-option strong,
+.storage-disk-option small,
+.storage-disk-option em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.storage-disk-option strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.storage-disk-option small,
+.storage-disk-option em {
+  color: var(--muted-2);
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.storage-pool-form .management-inline-message span {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.storage-pool-form .management-inline-message {
+  align-items: flex-start;
+  line-height: 1.4;
+}
+
+.storage-pool-form .management-inline-message svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.storage-pool-confirmation {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  color: var(--muted);
+  background: var(--subtle-bg);
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.storage-pool-confirmation input {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin: 1px 0 0;
+}
+
+.storage-pool-confirmation span {
+  min-width: 0;
+}
+
+.storage-pool-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.storage-pool-form-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  color: var(--muted);
+  background: var(--surface);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 800;
+}
+
+.storage-pool-form-actions button.is-primary {
+  border-color: var(--accent-soft-text);
+  color: white;
+  background: var(--accent);
+}
+
+.storage-pool-form-actions button:disabled {
+  opacity: 0.64;
 }
 
 .system-issue-list span {
@@ -2200,7 +2414,7 @@
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: var(--panel);
+  background: var(--modal-bg);
   box-shadow: 0 18px 60px rgb(0 0 0 / 34%);
 }
 

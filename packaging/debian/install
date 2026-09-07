@@ -12,3 +12,4 @@ packaging/etc/config.toml etc/sigmaos/
 packaging/scripts/sigmaos-first-boot.sh usr/lib/sigmaos/scripts/
 packaging/systemd/*.service lib/systemd/system/
 packaging/systemd/*.timer lib/systemd/system/
+packaging/tmpfiles.d/sigmaos.conf usr/lib/tmpfiles.d/

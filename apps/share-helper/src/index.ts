@@ -3,21 +3,38 @@ import { chmod, chown, mkdir, rm } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import type { ShareApplyRequest } from "@sigmaos/shared";
-import { applyHostShareSettings, safeShareHelperMessage } from "./helper.js";
+import {
+  applyHostShareSettings,
+  applyStoragePoolOperation,
+  safeShareHelperMessage,
+  validateStorageOperationRequest,
+  validateStorageHelperRequest,
+  type StorageHelperRequest
+} from "./helper.js";
 
 const SOCKET_PATH = process.env.SIGMAOS_SHARE_HELPER_SOCKET_PATH ?? "/run/sigmaos/share-helper.sock";
 const SOCKET_GROUP = process.env.SIGMAOS_SHARE_HELPER_GROUP ?? "sigmaos";
 const MAX_BODY_BYTES = 1024 * 1024;
+const COMMAND_TIMEOUT_MS = 5_000;
+const COMMAND_MAX_BUFFER = 4 * 1024 * 1024;
 
 const server = http.createServer(async (request, response) => {
-  if (request.method !== "POST" || request.url !== "/apply") {
+  if (
+    request.method !== "POST" ||
+    (request.url !== "/apply" && request.url !== "/storage-command" && request.url !== "/storage-operation")
+  ) {
     sendJson(response, 404, { error: "Not found" });
     return;
   }
 
   try {
     const body = await readJsonBody(request);
-    const result = await applyHostShareSettings(body as ShareApplyRequest);
+    const result =
+      request.url === "/apply"
+        ? await applyHostShareSettings(body as ShareApplyRequest)
+        : request.url === "/storage-command"
+          ? { stdout: await runStorageCommand(validateStorageHelperRequest(body)) }
+          : await applyStoragePoolOperation(validateStorageOperationRequest(body));
     sendJson(response, 200, result);
   } catch (error) {
     sendJson(response, 400, {
@@ -75,6 +92,31 @@ function sendJson(response: http.ServerResponse, statusCode: number, body: unkno
 function closeServer(): void {
   server.close(() => {
     process.exit(0);
+  });
+}
+
+async function runStorageCommand(request: StorageHelperRequest): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      request.command,
+      request.args,
+      {
+        timeout: COMMAND_TIMEOUT_MS,
+        maxBuffer: COMMAND_MAX_BUFFER
+      },
+      (error, stdout, stderr) => {
+        if (!error) {
+          resolve(stdout);
+          return;
+        }
+        if (stdout.trim()) {
+          resolve(stdout);
+          return;
+        }
+        const message = stderr.trim() || error.message;
+        reject(new Error(message));
+      }
+    );
   });
 }
 
