@@ -919,7 +919,9 @@ export function App() {
       if (updatedSession) {
         setSession((current) => (current?.id === updatedSession.id ? updatedSession : current));
       }
-      await reloadSessions();
+      if (!(await reloadSessions(requestRootId))) {
+        return;
+      }
       setStatus("ready");
     } catch (nextError) {
       if (
