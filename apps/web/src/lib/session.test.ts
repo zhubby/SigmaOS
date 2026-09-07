@@ -76,13 +76,13 @@ describe("session helpers", () => {
   it("loads entries for the current session path without resetting", async () => {
     mockedGetFiles.mockResolvedValueOnce({ entries: [fileEntry], git: gitStatus });
 
-    await expect(loadEntriesForSession("root-1", { ...baseSession, currentPath: "docs" })).resolves.toEqual({
+    await expect(loadEntriesForSession("root-1", { ...baseSession, currentPath: "docs" }, "pool-1")).resolves.toEqual({
       session: { ...baseSession, currentPath: "docs" },
       entries: [fileEntry],
       git: gitStatus,
       didResetPath: false
     });
-    expect(mockedGetFiles).toHaveBeenCalledWith("root-1", "docs");
+    expect(mockedGetFiles).toHaveBeenCalledWith("root-1", "docs", "pool-1");
     expect(mockedUpdateSessionPath).not.toHaveBeenCalled();
   });
 
@@ -95,26 +95,26 @@ describe("session helpers", () => {
     mockedGetFiles.mockRejectedValueOnce(new Error("Path not found")).mockResolvedValueOnce({ entries: [fileEntry], git: gitStatus });
     mockedUpdateSessionPath.mockResolvedValueOnce(resetSession);
 
-    await expect(loadEntriesForSession("root-1", { ...baseSession, currentPath: "missing" })).resolves.toEqual({
+    await expect(loadEntriesForSession("root-1", { ...baseSession, currentPath: "missing" }, "pool-1")).resolves.toEqual({
       session: resetSession,
       entries: [fileEntry],
       git: gitStatus,
       didResetPath: true
     });
     expect(mockedUpdateSessionPath).toHaveBeenCalledWith("session-1", ".");
-    expect(mockedGetFiles).toHaveBeenNthCalledWith(1, "root-1", "missing");
-    expect(mockedGetFiles).toHaveBeenNthCalledWith(2, "root-1", ".");
+    expect(mockedGetFiles).toHaveBeenNthCalledWith(1, "root-1", "missing", "pool-1");
+    expect(mockedGetFiles).toHaveBeenNthCalledWith(2, "root-1", ".", "pool-1");
   });
 
   it("rethrows root path and non-recoverable load errors", async () => {
     const rootError = new Error("Path not found");
     mockedGetFiles.mockRejectedValueOnce(rootError);
-    await expect(loadEntriesForSession("root-1", baseSession)).rejects.toThrow(rootError);
+    await expect(loadEntriesForSession("root-1", baseSession, "pool-1")).rejects.toThrow(rootError);
     expect(mockedUpdateSessionPath).not.toHaveBeenCalled();
 
     const permissionError = new Error("Permission denied");
     mockedGetFiles.mockRejectedValueOnce(permissionError);
-    await expect(loadEntriesForSession("root-1", { ...baseSession, currentPath: "locked" })).rejects.toThrow(
+    await expect(loadEntriesForSession("root-1", { ...baseSession, currentPath: "locked" }, "pool-1")).rejects.toThrow(
       permissionError
     );
     expect(mockedUpdateSessionPath).not.toHaveBeenCalled();
@@ -122,19 +122,19 @@ describe("session helpers", () => {
 
   it("loads file listings in the active directory or search mode", async () => {
     mockedGetFiles.mockResolvedValueOnce({ entries: [fileEntry], git: gitStatus });
-    await expect(loadFileListingForView("root-1", ".", " ")).resolves.toEqual({
+    await expect(loadFileListingForView("root-1", ".", " ", "pool-1")).resolves.toEqual({
       entries: [fileEntry],
       git: gitStatus
     });
-    expect(mockedGetFiles).toHaveBeenCalledWith("root-1", ".");
+    expect(mockedGetFiles).toHaveBeenCalledWith("root-1", ".", "pool-1");
     expect(mockedSearchFiles).not.toHaveBeenCalled();
 
     mockedSearchFiles.mockResolvedValueOnce({ files: [{ ...fileEntry, name: "match.txt" }], git: gitStatus });
-    await expect(loadFileListingForView("root-1", "docs", " match ")).resolves.toEqual({
+    await expect(loadFileListingForView("root-1", "docs", " match ", "pool-1")).resolves.toEqual({
       entries: [{ ...fileEntry, name: "match.txt" }],
       git: gitStatus
     });
-    expect(mockedSearchFiles).toHaveBeenCalledWith("root-1", "docs", "match");
+    expect(mockedSearchFiles).toHaveBeenCalledWith("root-1", "docs", "match", "pool-1");
   });
 
   it("only updates a session path when the workspace path differs", async () => {

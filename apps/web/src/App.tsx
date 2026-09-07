@@ -1,6 +1,6 @@
 import { FormEvent, KeyboardEvent, PointerEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, MessageSquare, PanelRight, Settings, X } from "lucide-react";
+import { AlertTriangle, CircleAlert, CircleCheck, MessageSquare, PanelRight, Settings, X } from "lucide-react";
 import {
   approveRequest,
   cancelJob,
@@ -18,6 +18,7 @@ import {
   getRoots,
   getSessions,
   getSystemInfo,
+  getSystemStorage,
   getTextPreview,
   getTranscript,
   getModelProviderSettings,
@@ -47,6 +48,7 @@ import {
   type Session,
   type SessionSummary,
   type SystemInfo,
+  type StorageSummary,
   type TextPreview,
   type TranscriptMessage
 } from "./api.js";
@@ -106,7 +108,7 @@ import {
   type ResolvedTheme,
   type ThemePreference
 } from "./lib/theme-settings.js";
-import { loadEntriesForSession, loadFileListingForView, syncSessionPath } from "./lib/session.js";
+import { loadFileListingForView, syncSessionPath } from "./lib/session.js";
 
 type MobileView = "chat" | "workspace";
 const MAX_UPLOAD_BATCHES = 8;
@@ -115,6 +117,8 @@ export function App() {
   const { t } = useTranslation();
   const [roots, setRoots] = useState<NasRoot[]>([]);
   const [selectedRootId, setSelectedRootId] = useState("");
+  const [selectedStoragePoolId, setSelectedStoragePoolId] = useState("");
+  const [storageSummary, setStorageSummary] = useState<StorageSummary | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [activeSessionId, setActiveSessionId] = useState("");
   const [session, setSession] = useState<Session | null>(null);
@@ -141,6 +145,8 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [status, setStatus] = useState<AppStatus>("starting");
   const [error, setError] = useState<string | null>(null);
+  const [successNotice, setSuccessNotice] = useState<string | null>(null);
+  const [warningNotice, setWarningNotice] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<MobileView>("chat");
   const [filesPanelActivationId, setFilesPanelActivationId] = useState(0);
   const [splitWidth, setSplitWidth] = useState(() => readStoredSplitWidth());
@@ -161,7 +167,6 @@ export function App() {
   );
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
-  const [settingsError, setSettingsError] = useState<string | null>(null);
   const [languagePreference, setLanguagePreference] = useState<LanguagePreference>(() => readStoredLanguagePreference());
   const [themePreference, setThemePreference] = useState<ThemePreference>(() => readStoredThemePreference());
   const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(() => readSystemTheme());
@@ -176,16 +181,68 @@ export function App() {
   const activeSearchQueryRef = useRef("");
   const currentPathRef = useRef(currentPath);
   const selectedRootIdRef = useRef(selectedRootId);
+  const selectedStoragePoolIdRef = useRef(selectedStoragePoolId);
   const uploadBatchSequenceRef = useRef(0);
   const uploadAbortControllersRef = useRef(new Map<string, Set<AbortController>>());
   const cancelledUploadBatchesRef = useRef(new Set<string>());
 
   const selectedRoot = roots.find((root) => root.id === selectedRootId);
-  const hasRootSwitcher = roots.length > 1;
+  const storagePoolOptions = useMemo(() => {
+    const options = new Map<string, {
+      id: string;
+      rootId: string;
+      name: string;
+      path: string;
+      filesystem: string | null;
+      status: "ready" | "warning" | "offline" | "unknown";
+    }>();
+    for (const root of roots) {
+      for (const pool of storageSummary?.pools ?? []) {
+        if (pool.status === "offline" || options.has(pool.id)) {
+          continue;
+        }
+        const poolPath = relativeStoragePoolPath(root.path, pool.mountpoint);
+        if (!poolPath) {
+          continue;
+        }
+        options.set(pool.id, {
+          id: pool.id,
+          rootId: root.id,
+          name: pool.name,
+          path: poolPath,
+          filesystem: pool.filesystem,
+          status: pool.status
+        });
+      }
+    }
+    return [...options.values()];
+  }, [roots, storageSummary]);
+  const selectedStoragePool = useMemo(
+    () => storagePoolOptions.find((pool) => pool.id === selectedStoragePoolId),
+    [selectedStoragePoolId, storagePoolOptions]
+  );
   const activeSessionSummary = sessions.find((item) => item.id === activeSessionId);
-  const activeApprovals = approvals.filter((approval) => !session || approval.sessionId === session.id);
-  const blobUrl = selectedRootId && selectedFilePath ? getFileBlobUrl(selectedRootId, selectedFilePath) : "";
-  const videoUrl = selectedRootId && selectedFilePath ? getFileVideoUrl(selectedRootId, selectedFilePath) : "";
+  const activeApprovals = approvals.filter((approval) => {
+    if (!session || approval.sessionId !== session.id) {
+      return false;
+    }
+    return approval.proposal.every((proposal) => {
+      if (!("storagePoolId" in proposal)) {
+        return true;
+      }
+      return proposal.storagePoolId === selectedStoragePoolId;
+    });
+  });
+  const visibleUploadBatches = useMemo(
+    () => uploadBatches.filter((batch) => batch.storagePoolId === selectedStoragePoolId),
+    [selectedStoragePoolId, uploadBatches]
+  );
+  const blobUrl = selectedRootId && selectedStoragePoolId && selectedFilePath
+    ? getFileBlobUrl(selectedRootId, selectedFilePath, selectedStoragePoolId)
+    : "";
+  const videoUrl = selectedRootId && selectedStoragePoolId && selectedFilePath
+    ? getFileVideoUrl(selectedRootId, selectedFilePath, selectedStoragePoolId)
+    : "";
   const resolvedLocale = resolveSupportedLocale(i18n.resolvedLanguage ?? i18n.language);
   const resolvedTheme = resolveThemePreference(themePreference, systemTheme);
   const displayPath = currentPath;
@@ -202,18 +259,23 @@ export function App() {
 
   useEffect(() => {
     let active = true;
-    getRoots()
-      .then((nextRoots) => {
-        if (!active) {
-          return;
-        }
-        setRoots(nextRoots);
-        setSelectedRootId(nextRoots[0]?.id ?? "");
-      })
-      .catch((nextError: unknown) => {
-        setError(toErrorMessage(nextError));
+    Promise.allSettled([getRoots(), getSystemStorage()]).then(([rootsResult, storageResult]) => {
+      if (!active) {
+        return;
+      }
+      if (rootsResult.status === "fulfilled") {
+        setRoots(rootsResult.value);
+        setSelectedRootId(rootsResult.value[0]?.id ?? "");
+      } else {
+        setError(toErrorMessage(rootsResult.reason));
         setStatus("offline");
-      });
+      }
+      if (storageResult.status === "fulfilled") {
+        setStorageSummary(storageResult.value);
+      } else {
+        setError(toErrorMessage(storageResult.reason));
+      }
+    });
     return () => {
       active = false;
     };
@@ -244,12 +306,10 @@ export function App() {
 
     let active = true;
     const rootId = selectedRootId;
-    const fileRequestId = beginFileListingRequest();
     const sessionRequestId = beginSessionViewRequest();
     async function loadRootWorkspace() {
       setStatus("loading");
       setError(null);
-      activeSearchQueryRef.current = "";
       const nextSessions = await getSessions(rootId);
       let nextSession: Session | SessionSummary | null = nextSessions[0] ?? null;
       let nextSessionList = nextSessions;
@@ -259,36 +319,18 @@ export function App() {
         nextSessionList = await getSessions(rootId);
       }
 
-      const loaded = await loadEntriesForSession(rootId, nextSession);
-      if (loaded.didResetPath) {
-        nextSessionList = await getSessions(rootId);
-      }
-      const nextTranscript = await getTranscript(loaded.session.id);
+      const nextTranscript = await getTranscript(nextSession.id);
 
-      if (
-        !active ||
-        !isCurrentFileListingRequest(fileRequestId) ||
-        !isCurrentSessionViewRequest(sessionRequestId)
-      ) {
+      if (!active || !isCurrentSessionViewRequest(sessionRequestId)) {
         return;
       }
 
       seenEvents.current.clear();
       setSessions(nextSessionList);
-      setSession(loaded.session);
-      setActiveSessionId(loaded.session.id);
-      setCurrentPath(loaded.session.currentPath);
-      commitFileListing(fileRequestId, {
-        entries: loaded.entries,
-        git: loaded.git
-      });
+      setSession(nextSession);
+      setActiveSessionId(nextSession.id);
       setTranscript(nextTranscript);
       setComposerPath(null);
-      setSelectedFilePath(null);
-      setPreviewMeta(null);
-      setTextPreview(null);
-      setPreviewError(null);
-      setPreviewCollapsed(false);
       setStatus("ready");
       void refreshWorkQueues();
     }
@@ -305,6 +347,65 @@ export function App() {
       active = false;
     };
   }, [selectedRootId]);
+
+  useEffect(() => {
+    if (!selectedStoragePoolId || selectedStoragePool) {
+      return;
+    }
+
+    beginFileListingRequest();
+    setSelectedStoragePoolId("");
+    setCurrentPath(".");
+    setEntries([]);
+    setGitStatus(null);
+    setSelectedFilePath(null);
+    setPreviewMeta(null);
+    setTextPreview(null);
+    setPreviewError(null);
+    setEditorMeta(null);
+    setWarningNotice(t("workspace.storagePoolUnavailable"));
+  }, [selectedStoragePool, selectedStoragePoolId, t]);
+
+  useEffect(() => {
+    if (!selectedStoragePool) {
+      return;
+    }
+
+    let active = true;
+    const pool = selectedStoragePool;
+    const fileRequestId = beginFileListingRequest();
+    setStatus("loading");
+    setError(null);
+    setSearchQuery("");
+    activeSearchQueryRef.current = "";
+    setSelectedFilePath(null);
+    setPreviewMeta(null);
+    setTextPreview(null);
+    setPreviewError(null);
+    setPreviewCollapsed(false);
+    setEditorMeta(null);
+
+    getFiles(pool.rootId, pool.path, pool.id)
+      .then((listing) => {
+        if (!active || !isCurrentFileListingRequest(fileRequestId)) {
+          return;
+        }
+        setCurrentPath(pool.path);
+        commitFileListing(fileRequestId, listing);
+        setStatus("ready");
+      })
+      .catch((nextError: unknown) => {
+        if (!active || !isCurrentFileListingRequest(fileRequestId)) {
+          return;
+        }
+        setError(toErrorMessage(nextError));
+        setStatus("error");
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedStoragePool]);
 
   useEffect(() => {
     if (!session) {
@@ -377,7 +478,7 @@ export function App() {
 
   useEffect(() => {
     void refreshWorkQueues();
-  }, [session?.id]);
+  }, [selectedStoragePoolId, session?.id]);
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({
@@ -387,7 +488,7 @@ export function App() {
   }, [activeApprovals.length, transcript.length]);
 
   useEffect(() => {
-    if (!selectedRootId || !selectedFilePath) {
+    if (!selectedRootId || !selectedStoragePoolId || !selectedFilePath) {
       setPreviewMeta(null);
       setTextPreview(null);
       setPreviewError(null);
@@ -397,15 +498,18 @@ export function App() {
 
     let active = true;
     const rootId = selectedRootId;
+    const storagePoolId = selectedStoragePoolId;
     const filePath = selectedFilePath;
     async function loadPreview() {
       setPreviewLoading(true);
       setPreviewError(null);
       setTextPreview(null);
-      const meta = await getFileMeta(rootId, filePath);
+      const meta = await getFileMeta(rootId, filePath, storagePoolId);
       const withinPreviewLimit = !isPreviewOverFileSizeLimit(meta, previewFileSizeLimitBytes);
       const nextTextPreview =
-        meta.previewKind === "text" && withinPreviewLimit ? await getTextPreview(rootId, filePath) : null;
+        meta.previewKind === "text" && withinPreviewLimit
+          ? await getTextPreview(rootId, filePath, storagePoolId)
+          : null;
       if (!active) {
         return;
       }
@@ -425,7 +529,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [previewFileSizeLimitBytes, selectedRootId, selectedFilePath]);
+  }, [previewFileSizeLimitBytes, selectedRootId, selectedStoragePoolId, selectedFilePath]);
 
   useEffect(() => {
     if (!resizing) {
@@ -459,6 +563,10 @@ export function App() {
   useEffect(() => {
     selectedRootIdRef.current = selectedRootId;
   }, [selectedRootId]);
+
+  useEffect(() => {
+    selectedStoragePoolIdRef.current = selectedStoragePoolId;
+  }, [selectedStoragePoolId]);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function" || themePreference !== "system") {
@@ -498,11 +606,19 @@ export function App() {
     setSessions(await getSessions(selectedRootId));
   }
 
+  async function refreshStorageSummary() {
+    try {
+      setStorageSummary(await getSystemStorage());
+    } catch (nextError) {
+      setError(toErrorMessage(nextError));
+    }
+  }
+
   async function openSettings() {
     setSettingsOpen(true);
     setActiveSettingsSection("overview");
     setSettingsLoading(true);
-    setSettingsError(null);
+    setError(null);
     setSystemInfoError(null);
     try {
       const [settingsResult, toolPolicyResult, dockerSettingsResult, systemInfoResult] = await Promise.allSettled([
@@ -536,13 +652,19 @@ export function App() {
 
       if (systemInfoResult.status === "fulfilled") {
         setSystemInfo(systemInfoResult.value);
+        const volumeErrors = systemInfoResult.value.storage.volumes
+          .filter((volume) => volume.status === "error" && volume.error)
+          .map((volume) => `${volume.label}: ${volume.error}`);
+        errors.push(...volumeErrors);
       } else {
         setSystemInfo(null);
-        setSystemInfoError(toErrorMessage(systemInfoResult.reason));
+        const message = toErrorMessage(systemInfoResult.reason);
+        setSystemInfoError(message);
+        errors.push(message);
       }
 
       if (errors.length > 0) {
-        setSettingsError(errors.join("\n"));
+        setError(errors.join("\n"));
       }
     } finally {
       setSettingsLoading(false);
@@ -552,7 +674,7 @@ export function App() {
   async function saveSettings(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSettingsSaving(true);
-    setSettingsError(null);
+    setError(null);
     try {
       const [settings, toolPolicy, nextDockerSettings] = await Promise.all([
         saveModelProviderSettings({
@@ -587,10 +709,12 @@ export function App() {
         setSystemInfo(refreshedSystemInfo);
         setSystemInfoError(null);
       } catch (refreshError) {
-        setSystemInfoError(toErrorMessage(refreshError));
+        const message = toErrorMessage(refreshError);
+        setSystemInfoError(message);
+        setError(message);
       }
     } catch (nextError) {
-      setSettingsError(toErrorMessage(nextError));
+      setError(toErrorMessage(nextError));
     } finally {
       setSettingsSaving(false);
     }
@@ -690,29 +814,39 @@ export function App() {
   }
 
   async function refreshFiles() {
-    if (!selectedRootId) {
+    if (!selectedRootId || !selectedStoragePoolId) {
       return;
     }
+    const requestRootId = selectedRootId;
+    const requestStoragePoolId = selectedStoragePoolId;
     setStatus(activeSearchQueryRef.current ? "searching" : "loading");
-    const committed = await refreshCurrentFileListing();
-    if (committed) {
-      setStatus("ready");
+    try {
+      const committed = await refreshCurrentFileListing();
+      if (committed && selectedRootIdRef.current === requestRootId && selectedStoragePoolIdRef.current === requestStoragePoolId) {
+        setStatus("ready");
+      }
+    } catch (nextError) {
+      if (selectedRootIdRef.current !== requestRootId || selectedStoragePoolIdRef.current !== requestStoragePoolId) {
+        return;
+      }
+      setError(toErrorMessage(nextError));
+      setStatus("error");
     }
   }
 
   async function refreshCurrentFileListing(query = activeSearchQueryRef.current): Promise<boolean> {
-    if (!selectedRootId) {
+    if (!selectedRootId || !selectedStoragePoolId) {
       return false;
     }
     const fileRequestId = beginFileListingRequest();
-    const listing = await loadFileListingForView(selectedRootId, currentPath, query);
+    const listing = await loadFileListingForView(selectedRootId, currentPath, query, selectedStoragePoolId);
     return commitFileListing(fileRequestId, listing);
   }
 
   async function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const query = searchQuery.trim();
-    if (!selectedRootId || !query) {
+    if (!selectedRootId || !selectedStoragePoolId || !query) {
       activeSearchQueryRef.current = "";
       await refreshFiles();
       return;
@@ -721,17 +855,31 @@ export function App() {
     setStatus("searching");
     activeSearchQueryRef.current = query;
     const fileRequestId = beginFileListingRequest();
-    const result = await searchFiles(selectedRootId, currentPath, query);
-    if (!commitFileListing(fileRequestId, { entries: result.files, git: result.git })) {
-      return;
+    try {
+      const result = await searchFiles(selectedRootId, currentPath, query, selectedStoragePoolId);
+      if (!commitFileListing(fileRequestId, { entries: result.files, git: result.git })) {
+        return;
+      }
+      setSelectedFilePath(null);
+      setPreviewCollapsed(false);
+      setStatus("ready");
+    } catch (nextError) {
+      if (!isCurrentFileListingRequest(fileRequestId)) {
+        return;
+      }
+      setError(toErrorMessage(nextError));
+      setStatus("error");
     }
-    setSelectedFilePath(null);
-    setPreviewCollapsed(false);
-    setStatus("ready");
   }
 
   async function openDirectory(pathname: string) {
-    if (!selectedRootId) {
+    if (!selectedRootId || !selectedStoragePool) {
+      return;
+    }
+    const requestRootId = selectedRootId;
+    const requestStoragePoolId = selectedStoragePool.id;
+    if (!isPathWithinStoragePool(pathname, selectedStoragePool.path)) {
+      setError(String(t("workspace.pathOutsideStoragePool")));
       return;
     }
     setStatus("loading");
@@ -743,20 +891,36 @@ export function App() {
     setTextPreview(null);
     setPreviewCollapsed(false);
     const fileRequestId = beginFileListingRequest();
-    const [nextListing, updatedSession] = await Promise.all([
-      getFiles(selectedRootId, pathname),
-      session ? updateSessionPath(session.id, pathname) : Promise.resolve(null)
-    ]);
-    if (!isCurrentFileListingRequest(fileRequestId)) {
-      return;
+    try {
+      const [nextListing, updatedSession] = await Promise.all([
+        getFiles(selectedRootId, pathname, selectedStoragePool.id),
+        session && session.rootId === selectedRootId ? updateSessionPath(session.id, pathname) : Promise.resolve(null)
+      ]);
+      if (
+        !isCurrentFileListingRequest(fileRequestId) ||
+        selectedRootIdRef.current !== requestRootId ||
+        selectedStoragePoolIdRef.current !== requestStoragePoolId
+      ) {
+        return;
+      }
+      commitFileListing(fileRequestId, nextListing);
+      setCurrentPath(pathname);
+      if (updatedSession) {
+        setSession((current) => (current?.id === updatedSession.id ? updatedSession : current));
+      }
+      await reloadSessions();
+      setStatus("ready");
+    } catch (nextError) {
+      if (
+        !isCurrentFileListingRequest(fileRequestId) ||
+        selectedRootIdRef.current !== requestRootId ||
+        selectedStoragePoolIdRef.current !== requestStoragePoolId
+      ) {
+        return;
+      }
+      setError(toErrorMessage(nextError));
+      setStatus("error");
     }
-    commitFileListing(fileRequestId, nextListing);
-    setCurrentPath(pathname);
-    if (updatedSession) {
-      setSession((current) => (current?.id === updatedSession.id ? updatedSession : current));
-    }
-    await reloadSessions();
-    setStatus("ready");
   }
 
   async function submitMessage(event: FormEvent<HTMLFormElement>) {
@@ -905,7 +1069,8 @@ export function App() {
 
   async function onUploadSources(sources: UploadSource[]) {
     const rootId = selectedRootIdRef.current;
-    if (!rootId || !sources.length) {
+    const storagePoolId = selectedStoragePoolIdRef.current;
+    if (!rootId || !storagePoolId || !sources.length || !selectedStoragePool) {
       return;
     }
 
@@ -913,6 +1078,7 @@ export function App() {
     const uploadBatch = createUploadBatch({
       id: batchId,
       rootId,
+      storagePoolId,
       currentPath: currentPathRef.current,
       sources
     });
@@ -943,6 +1109,7 @@ export function App() {
         try {
           const result = await uploadFile({
             rootId,
+            storagePoolId,
             path: item.targetPath,
             file: item.file,
             signal: controller.signal,
@@ -955,7 +1122,9 @@ export function App() {
           });
 
           markUploadItemCompleted(batchId, item.id);
-          setOperations((current) => [result.operation, ...current.filter((operation) => operation.id !== result.operation.id)].slice(0, 100));
+          if (selectedStoragePoolIdRef.current === storagePoolId) {
+            setOperations((current) => [result.operation, ...current.filter((operation) => operation.id !== result.operation.id)].slice(0, 100));
+          }
         } catch (error) {
           if (cancelledUploadBatchesRef.current.has(batchId) || (error instanceof DOMException && error.name === "AbortError")) {
             cancelled = true;
@@ -980,6 +1149,7 @@ export function App() {
         if (selectedRootIdRef.current === rootId && currentPathRef.current === uploadBatch.targetPath && !activeSearchQueryRef.current) {
           await refreshCurrentFileListing().catch((nextError: unknown) => {
             setError(toErrorMessage(nextError));
+            setStatus("error");
           });
         }
       }
@@ -1003,17 +1173,29 @@ export function App() {
   }
 
   async function refreshWorkQueues() {
+    const queueSessionId = session?.id ?? null;
+    const queueStoragePoolId = selectedStoragePoolIdRef.current;
     try {
       const [nextApprovals, nextOperations, nextDockerOperations] = await Promise.all([
         getApprovals(),
         getOperations(),
-        getDockerOperations(session?.id ?? null)
+        getDockerOperations(queueSessionId)
       ]);
+      if (queueSessionId !== (session?.id ?? null) || queueStoragePoolId !== selectedStoragePoolIdRef.current) {
+        return;
+      }
       setApprovals(nextApprovals);
-      setOperations(nextOperations);
+      setOperations(
+        queueStoragePoolId
+          ? nextOperations.filter((operation) => operation.metadata.storagePoolId === queueStoragePoolId)
+          : []
+      );
       setDockerOperations(nextDockerOperations);
       setOperationsReady(true);
     } catch (nextError) {
+      if (queueSessionId !== (session?.id ?? null) || queueStoragePoolId !== selectedStoragePoolIdRef.current) {
+        return;
+      }
       setError(toErrorMessage(nextError));
     }
   }
@@ -1088,7 +1270,7 @@ export function App() {
   }
 
   async function requestFileRename(entry: FileEntry, targetName: string) {
-    if (!session || !selectedRootId) {
+    if (!session || !selectedRootId || !selectedStoragePoolId) {
       throw new Error(t("workspace.actions.noSession"));
     }
 
@@ -1098,6 +1280,7 @@ export function App() {
       await proposeFileOperation({
         sessionId: session.id,
         rootId: selectedRootId,
+        storagePoolId: selectedStoragePoolId,
         operation: "rename",
         sourcePath: entry.path,
         targetName
@@ -1112,7 +1295,7 @@ export function App() {
   }
 
   async function requestFileTrash(entry: FileEntry) {
-    if (!session || !selectedRootId) {
+    if (!session || !selectedRootId || !selectedStoragePoolId) {
       throw new Error(t("workspace.actions.noSession"));
     }
 
@@ -1122,6 +1305,7 @@ export function App() {
       await proposeFileOperation({
         sessionId: session.id,
         rootId: selectedRootId,
+        storagePoolId: selectedStoragePoolId,
         operation: "trash",
         sourcePath: entry.path
       });
@@ -1135,7 +1319,7 @@ export function App() {
   }
 
   async function requestFileTransfer(entry: FileEntry, operation: "move" | "copy", targetPath: string) {
-    if (!session || !selectedRootId) {
+    if (!session || !selectedRootId || !selectedStoragePool) {
       throw new Error(t("workspace.actions.noSession"));
     }
 
@@ -1145,9 +1329,10 @@ export function App() {
       await proposeFileOperation({
         sessionId: session.id,
         rootId: selectedRootId,
+        storagePoolId: selectedStoragePool.id,
         operation,
         sourcePath: entry.path,
-        targetPath
+        targetPath: joinNasPath(selectedStoragePool.path, targetPath)
       });
       await Promise.all([refreshWorkQueues(), reloadSessions()]);
       setStatus("ready");
@@ -1159,7 +1344,7 @@ export function App() {
   }
 
   async function requestFileExtract(meta: FileMeta) {
-    if (!selectedRootId) {
+    if (!selectedRootId || !selectedStoragePoolId) {
       throw new Error(t("workspace.actions.noSession"));
     }
 
@@ -1168,6 +1353,7 @@ export function App() {
     try {
       const result = await extractFile({
         rootId: selectedRootId,
+        storagePoolId: selectedStoragePoolId,
         path: meta.path
       });
       setOperations((current) => [
@@ -1184,7 +1370,7 @@ export function App() {
   }
 
   async function requestFolderCreate(folderName: string) {
-    if (!session || !selectedRootId) {
+    if (!session || !selectedRootId || !selectedStoragePool) {
       throw new Error(t("workspace.actions.noSession"));
     }
 
@@ -1194,6 +1380,7 @@ export function App() {
       await proposeFileOperation({
         sessionId: session.id,
         rootId: selectedRootId,
+        storagePoolId: selectedStoragePool.id,
         operation: "mkdir",
         targetPath: joinNasPath(currentPath, folderName)
       });
@@ -1234,15 +1421,40 @@ export function App() {
     }
   }
 
-  function selectRoot(rootId: string) {
+  function selectStoragePool(poolId: string) {
+    const pool = storagePoolOptions.find((item) => item.id === poolId);
+    if (!pool) {
+      return;
+    }
+
     beginFileListingRequest();
-    beginSessionViewRequest();
+    selectedRootIdRef.current = pool.rootId;
+    selectedStoragePoolIdRef.current = pool.id;
+    currentPathRef.current = pool.path;
+    if (pool.rootId !== selectedRootId) {
+      beginSessionViewRequest();
+      seenEvents.current.clear();
+      setSessions([]);
+      setSession(null);
+      setActiveSessionId("");
+      setTranscript([]);
+      setActiveJobId(null);
+    }
     activeSearchQueryRef.current = "";
     setSearchQuery("");
     setComposerPath(null);
-    setSelectedRootId(rootId);
-    setCurrentPath(".");
+    setWarningNotice(null);
+    setSelectedFilePath(null);
+    setPreviewMeta(null);
+    setTextPreview(null);
+    setPreviewError(null);
+    setPreviewCollapsed(false);
+    setEditorMeta(null);
+    setEntries([]);
     setGitStatus(null);
+    setSelectedStoragePoolId(pool.id);
+    setSelectedRootId(pool.rootId);
+    setCurrentPath(pool.path);
   }
 
   function beginFileListingRequest(): number {
@@ -1296,7 +1508,8 @@ export function App() {
   }
 
   async function openWorkspacePath(pathname: string) {
-    if (!selectedRootId) {
+    if (!selectedRootId || !selectedStoragePool) {
+      setWarningNotice(t("workspace.selectStoragePoolBody"));
       return;
     }
 
@@ -1305,9 +1518,17 @@ export function App() {
     setStatus("loading");
     setError(null);
     setPreviewError(null);
+    const requestRootId = selectedRootId;
+    const requestStoragePoolId = selectedStoragePool.id;
     const hadActiveSearch = Boolean(activeSearchQueryRef.current);
     try {
-      const linkedMeta = await getFileMeta(selectedRootId, pathname);
+      const linkedMeta = await getFileMeta(selectedRootId, pathname, selectedStoragePool.id);
+      if (
+        selectedRootIdRef.current !== requestRootId ||
+        selectedStoragePoolIdRef.current !== requestStoragePoolId
+      ) {
+        return;
+      }
       if (linkedMeta.kind === "directory") {
         await openDirectory(linkedMeta.path);
         return;
@@ -1318,35 +1539,48 @@ export function App() {
       const parentPath = workspaceParentPath(linkedMeta.path);
       if (currentPathRef.current !== parentPath || hadActiveSearch) {
         await openDirectory(parentPath);
+        if (
+          selectedRootIdRef.current !== requestRootId ||
+          selectedStoragePoolIdRef.current !== requestStoragePoolId
+        ) {
+          return;
+        }
       }
       setSelectedFilePath(linkedMeta.path);
       setPreviewCollapsed(false);
       setStatus("ready");
     } catch (nextError) {
+      if (
+        selectedRootIdRef.current !== requestRootId ||
+        selectedStoragePoolIdRef.current !== requestStoragePoolId
+      ) {
+        return;
+      }
       setError(toErrorMessage(nextError));
       setStatus("error");
     }
   }
 
   function goUp() {
-    if (currentPath === ".") {
+    if (!selectedStoragePool || currentPath === selectedStoragePool.path) {
       return;
     }
     const nextPath = currentPath.split("/").slice(0, -1).join("/") || ".";
     void openDirectory(nextPath);
   }
 
-  function goHome() {
-    const nextPath = selectedRoot?.homePath;
-    if (!nextPath) {
+  function goToBreadcrumb(index: number) {
+    if (!selectedStoragePool) {
       return;
     }
-    void openDirectory(nextPath);
+    const nextPath = index < 0 ? selectedStoragePool.path : breadcrumbs.slice(0, index + 1).join("/");
+    void openDirectory(nextPath || selectedStoragePool.path);
   }
 
-  function goToBreadcrumb(index: number) {
-    const nextPath = index < 0 ? "." : breadcrumbs.slice(0, index + 1).join("/");
-    void openDirectory(nextPath || ".");
+  function goToStoragePool() {
+    if (selectedStoragePool) {
+      void openDirectory(selectedStoragePool.path);
+    }
   }
 
   function startResize(event: PointerEvent<HTMLButtonElement>) {
@@ -1426,23 +1660,59 @@ export function App() {
         onOpenWorkspacePath={(path) => void openWorkspacePath(path)}
       />
 
-      {error ? (
-        <div className="app-notification-region" aria-live="assertive">
-          <section className="app-notification" role="alert">
-            <AlertTriangle aria-hidden="true" size={18} />
-            <div>
-              <strong>{t("notifications.errorTitle")}</strong>
-              <span>{error}</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setError(null)}
-              aria-label={t("common.actions.dismissNotification")}
-              title={t("common.actions.dismissNotification")}
-            >
-              <X aria-hidden="true" size={15} />
-            </button>
-          </section>
+      {error || successNotice || warningNotice ? (
+        <div className="app-notification-region">
+          {error ? (
+            <section className="app-notification" data-tone="error" role="alert">
+              <AlertTriangle aria-hidden="true" size={18} />
+              <div>
+                <strong>{t("notifications.errorTitle")}</strong>
+                <span>{error}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setError(null)}
+                aria-label={t("common.actions.dismissNotification")}
+                title={t("common.actions.dismissNotification")}
+              >
+                <X aria-hidden="true" size={15} />
+              </button>
+            </section>
+          ) : null}
+          {successNotice ? (
+            <section className="app-notification" data-tone="success" role="status">
+              <CircleCheck aria-hidden="true" size={18} />
+              <div>
+                <strong>{t("notifications.successTitle")}</strong>
+                <span>{successNotice}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSuccessNotice(null)}
+                aria-label={t("common.actions.dismissNotification")}
+                title={t("common.actions.dismissNotification")}
+              >
+                <X aria-hidden="true" size={15} />
+              </button>
+            </section>
+          ) : null}
+          {warningNotice ? (
+            <section className="app-notification" data-tone="warning" role="status">
+              <CircleAlert aria-hidden="true" size={18} />
+              <div>
+                <strong>{t("notifications.warningTitle")}</strong>
+                <span>{warningNotice}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWarningNotice(null)}
+                aria-label={t("common.actions.dismissNotification")}
+                title={t("common.actions.dismissNotification")}
+              >
+                <X aria-hidden="true" size={15} />
+              </button>
+            </section>
+          ) : null}
         </div>
       ) : null}
 
@@ -1461,7 +1731,8 @@ export function App() {
         roots={roots}
         selectedRoot={selectedRoot}
         selectedRootId={selectedRootId}
-        hasRootSwitcher={hasRootSwitcher}
+        storagePools={storagePoolOptions}
+        selectedStoragePoolId={selectedStoragePoolId}
         currentPath={currentPath}
         displayPath={displayPath}
         breadcrumbs={breadcrumbs}
@@ -1478,7 +1749,7 @@ export function App() {
         previewCollapsed={previewCollapsed}
         searchQuery={searchQuery}
         operations={operations}
-        uploadBatches={uploadBatches}
+        uploadBatches={visibleUploadBatches}
         dockerOperations={dockerOperations}
         operationsReady={operationsReady}
         sessionId={session?.id ?? null}
@@ -1487,13 +1758,13 @@ export function App() {
         codeFontSettings={codeFontSettings}
         resolvedTheme={resolvedTheme}
         filesPanelActivationId={filesPanelActivationId}
-        onSelectRoot={selectRoot}
-        onGoHome={goHome}
+        onSelectStoragePool={selectStoragePool}
         onGoUp={goUp}
         onRefreshFiles={() => void refreshFiles()}
         onSubmitSearch={(event) => void submitSearch(event)}
         onSearchQueryChange={setSearchQuery}
         onGoToBreadcrumb={goToBreadcrumb}
+        onGoToStoragePool={goToStoragePool}
         onOpenEntry={openEntry}
         onOpenWorkspacePath={(path) => void openWorkspacePath(path)}
         onInsertWorkspacePath={(path) => insertWorkspacePathInComposer(path)}
@@ -1505,7 +1776,13 @@ export function App() {
         onRequestExtract={(meta) => requestFileExtract(meta)}
         onUploadSources={(sources) => onUploadSources(sources)}
         onCancelUploadBatch={(batchId) => onCancelUploadBatch(batchId)}
-        onWorkQueuesChanged={refreshWorkQueues}
+        onWorkQueuesChanged={() => {
+          void refreshWorkQueues();
+          void refreshStorageSummary();
+        }}
+        onNotifyError={setError}
+        onNotifySuccess={setSuccessNotice}
+        onNotifyWarning={setWarningNotice}
         onTogglePreviewCollapsed={() => setPreviewCollapsed((collapsed) => !collapsed)}
         onRollback={(operation) => void handleRollback(operation)}
       />
@@ -1513,17 +1790,18 @@ export function App() {
       {editorMeta ? (
         <FileEditorModal
           rootId={selectedRootId}
+          storagePoolId={selectedStoragePoolId}
           meta={editorMeta}
           locale={resolvedLocale}
           onClose={() => setEditorMeta(null)}
           onSaved={handleEditorSaved}
+          onNotifyError={setError}
         />
       ) : null}
 
       {settingsOpen ? (
         <SettingsModal
           activeSection={activeSettingsSection}
-          error={settingsError}
           form={modelSettingsForm}
           loading={settingsLoading}
           saving={settingsSaving}
@@ -1579,4 +1857,51 @@ function renamedPath(candidatePath: string, sourcePath: string, targetPath: stri
     return `${targetPath}${candidatePath.slice(sourcePath.length)}`;
   }
   return null;
+}
+
+function relativeStoragePoolPath(rootPath: string, mountpoint: string | null): string | null {
+  if (!mountpoint) {
+    return null;
+  }
+
+  const normalize = (value: string) => {
+    const normalized = value.replaceAll("\\", "/").replace(/\/+/gu, "/").replace(/\/$/u, "");
+    return normalized || "/";
+  };
+  const normalizedRoot = normalize(rootPath);
+  const normalizedMountpoint = normalize(mountpoint);
+  if (normalizedMountpoint === normalizedRoot) {
+    return ".";
+  }
+
+  const prefix = normalizedRoot === "/" ? "/" : `${normalizedRoot}/`;
+  if (!normalizedMountpoint.startsWith(prefix)) {
+    return null;
+  }
+
+  const relativePath = normalizedMountpoint.slice(prefix.length).replace(/^\/+|\/+$/gu, "");
+  if (!relativePath || relativePath.split("/").some((segment) => segment === "." || segment === "..")) {
+    return null;
+  }
+  return relativePath;
+}
+
+export function isPathWithinStoragePool(pathname: string, poolPath: string): boolean {
+  const normalizedPath = pathname.replaceAll("\\", "/").replace(/^\.\/+/, "");
+  if (normalizedPath.split("/").some((segment) => segment === ".." || segment.length === 0)) {
+    return false;
+  }
+  if (!normalizedPath || normalizedPath === ".") {
+    return poolPath === ".";
+  }
+  if (normalizedPath.startsWith("/")) {
+    return false;
+  }
+
+  const normalizedPoolPath = poolPath.replaceAll("\\", "/").replace(/^\.\/+/, "").replace(/\/+$/u, "");
+  if (!normalizedPoolPath || normalizedPoolPath === ".") {
+    return true;
+  }
+
+  return normalizedPath === normalizedPoolPath || normalizedPath.startsWith(`${normalizedPoolPath}/`);
 }

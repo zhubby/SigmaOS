@@ -12,7 +12,6 @@ import {
   FolderPlus,
   GitBranch,
   HardDrive,
-  Home,
   MessageSquarePlus,
   MonitorCog,
   Network,
@@ -38,7 +37,13 @@ import { ActivityMenu } from "../activity/ActivityMenu.js";
 import { CustomSelect } from "../common/CustomSelect.js";
 import { FileTypeIcon } from "../file/FileTypeIcon.js";
 import { PreviewContent, previewIcon } from "../preview/PreviewContent.js";
-import { collectUploadSourcesFromDataTransfer, collectUploadSourcesFromFileList, type UploadBatchState, type UploadSource } from "../../lib/uploads.js";
+import {
+  collectUploadSourcesFromDataTransfer,
+  collectUploadSourcesFromFileList,
+  joinNasPath,
+  type UploadBatchState,
+  type UploadSource
+} from "../../lib/uploads.js";
 import { WorkspaceManagementPanel, type ManagementPanelId } from "./WorkspaceManagementPanel.js";
 import { LocalTerminalPanel } from "./LocalTerminalPanel.js";
 import type { CodeFontSettings } from "../../lib/editor-settings.js";
@@ -97,6 +102,15 @@ const WORKSPACE_PANELS = [
   Icon: LucideIcon;
 }>;
 
+export interface FileStoragePoolOption {
+  id: string;
+  rootId: string;
+  name: string;
+  path: string;
+  filesystem: string | null;
+  status: "ready" | "warning" | "offline" | "unknown";
+}
+
 function nextFileSort(current: FileSortState, key: FileSortKey): FileSortState {
   if (current.key !== key) {
     return { key, direction: "desc" };
@@ -124,7 +138,8 @@ export function WorkspacePane({
   roots,
   selectedRoot,
   selectedRootId,
-  hasRootSwitcher,
+  storagePools,
+  selectedStoragePoolId,
   currentPath,
   displayPath,
   breadcrumbs,
@@ -150,13 +165,13 @@ export function WorkspacePane({
   codeFontSettings,
   resolvedTheme,
   filesPanelActivationId,
-  onSelectRoot,
-  onGoHome,
+  onSelectStoragePool,
   onGoUp,
   onRefreshFiles,
   onSubmitSearch,
   onSearchQueryChange,
   onGoToBreadcrumb,
+  onGoToStoragePool,
   onOpenEntry,
   onOpenWorkspacePath,
   onInsertWorkspacePath,
@@ -169,6 +184,9 @@ export function WorkspacePane({
   onUploadSources,
   onCancelUploadBatch,
   onWorkQueuesChanged,
+  onNotifyError,
+  onNotifySuccess,
+  onNotifyWarning,
   onTogglePreviewCollapsed,
   onRollback
 }: {
@@ -176,7 +194,8 @@ export function WorkspacePane({
   roots: NasRoot[];
   selectedRoot: NasRoot | undefined;
   selectedRootId: string;
-  hasRootSwitcher: boolean;
+  storagePools: FileStoragePoolOption[];
+  selectedStoragePoolId: string;
   currentPath: string;
   displayPath: string;
   breadcrumbs: string[];
@@ -202,13 +221,13 @@ export function WorkspacePane({
   codeFontSettings: CodeFontSettings;
   resolvedTheme: ResolvedTheme;
   filesPanelActivationId: number;
-  onSelectRoot: (rootId: string) => void;
-  onGoHome: () => void;
+  onSelectStoragePool: (poolId: string) => void;
   onGoUp: () => void;
   onRefreshFiles: () => void;
   onSubmitSearch: (event: FormEvent<HTMLFormElement>) => void;
   onSearchQueryChange: (query: string) => void;
   onGoToBreadcrumb: (index: number) => void;
+  onGoToStoragePool: () => void;
   onOpenEntry: (entry: FileEntry) => void;
   onOpenWorkspacePath: (path: string) => void;
   onInsertWorkspacePath: (path: string) => void;
@@ -221,6 +240,9 @@ export function WorkspacePane({
   onUploadSources: (sources: UploadSource[]) => void | Promise<void>;
   onCancelUploadBatch: (batchId: string) => void;
   onWorkQueuesChanged: () => void | Promise<void>;
+  onNotifyError: (message: string | null) => void;
+  onNotifySuccess: (message: string | null) => void;
+  onNotifyWarning: (message: string | null) => void;
   onTogglePreviewCollapsed: () => void;
   onRollback: (operation: FileOperation) => void;
 }) {
@@ -232,7 +254,6 @@ export function WorkspacePane({
   const [deleteState, setDeleteState] = useState<{ entry: FileEntry; step: "initial" | "final" } | null>(null);
   const [transferState, setTransferState] = useState<{ entry: FileEntry; operation: "move" | "copy" } | null>(null);
   const [transferTargetDirectory, setTransferTargetDirectory] = useState(currentPath);
-  const [operationError, setOperationError] = useState<string | null>(null);
   const [operationSubmitting, setOperationSubmitting] = useState(false);
   const [activePanel, setActivePanel] = useState<WorkspacePanelId>("files");
   const [terminalMounted, setTerminalMounted] = useState(false);
@@ -241,7 +262,15 @@ export function WorkspacePane({
   const fileUploadInputRef = useRef<HTMLInputElement | null>(null);
   const folderUploadInputRef = useRef<HTMLInputElement | null>(null);
   const dragDepthRef = useRef(0);
-  const displayTitle = folderTitle(displayPath, t("common.root"));
+  const selectedStoragePool = storagePools.find((pool) => pool.id === selectedStoragePoolId);
+  const hasStoragePool = Boolean(selectedStoragePool);
+  const storagePoolPathDepth = selectedStoragePool?.path.split("/").filter(Boolean).length ?? 0;
+  const visibleBreadcrumbs = selectedStoragePool ? breadcrumbs.slice(storagePoolPathDepth) : breadcrumbs;
+  const displayTitle = !selectedStoragePool
+    ? t("workspace.selectStoragePoolTitle")
+    : displayPath === selectedStoragePool.path
+      ? selectedStoragePool.name
+      : folderTitle(displayPath, selectedStoragePool.name);
   const sortedEntries = useMemo(() => sortEntries(entries, fileSort), [entries, fileSort]);
   const gitChangeCount = gitStatus
     ? gitStatus.summary.staged + gitStatus.summary.modified + gitStatus.summary.untracked + gitStatus.summary.conflicted
@@ -271,11 +300,12 @@ export function WorkspacePane({
         .join("\n")
     : "";
   const gitStatusState = gitStatus && (gitStatus.dirty || gitStatus.ahead > 0 || gitStatus.behind > 0) ? "warning" : "ready";
-  const rootOptions = roots.map((root) => ({
-    value: root.id,
-    label: root.name
+  const storagePoolOptions = storagePools.map((pool) => ({
+    value: pool.id,
+    label: pool.filesystem ? `${pool.name} · ${pool.filesystem}` : pool.name
   }));
-  const selectedRootLabel = rootOptions.find((root) => root.value === selectedRootId)?.label ?? selectedRootId;
+  const selectedStoragePoolLabel =
+    storagePoolOptions.find((pool) => pool.value === selectedStoragePoolId)?.label ?? selectedStoragePoolId;
   const entryCount = formatLocaleNumber(sortedEntries.length, locale);
   const hasPreview = Boolean(selectedFilePath);
   const selectedFileName = selectedFilePath?.split("/").pop() ?? "";
@@ -315,18 +345,28 @@ export function WorkspacePane({
         : t("workspace.actions.deleteFolderBody", { name: deleteState.entry.name })
       : t("workspace.actions.deleteBody", { name: deleteState.entry.name })
     : "";
-  const createFolderLocation = currentPath === "." ? t("common.root") : currentPath;
-  const normalizedTransferDirectory =
-    transferTargetDirectory.trim().replace(/\\/gu, "/").replace(/^\.\//u, "").replace(/\/+$/u, "") || ".";
+  const createFolderLocation = selectedStoragePool ? poolRelativePath(currentPath, selectedStoragePool.path) : t("common.root");
+  const transferDirectoryDisplay = selectedStoragePool
+    ? poolRelativePath(transferTargetDirectory, selectedStoragePool.path)
+    : transferTargetDirectory;
+  const rawTransferDirectory = transferDirectoryDisplay.trim().replace(/\\/gu, "/");
+  const normalizedTransferDirectory = rawTransferDirectory.replace(/^\.\//u, "").replace(/\/+$/u, "") || ".";
   const transferTargetPath =
     normalizedTransferDirectory === "."
       ? transferState?.entry.name ?? ""
       : `${normalizedTransferDirectory}/${transferState?.entry.name ?? ""}`;
-  const transferTargetInvalid =
+  const transferDirectoryInvalid =
     !transferTargetDirectory.trim() ||
-    normalizedTransferDirectory.startsWith("/") ||
-    normalizedTransferDirectory.split("/").some((segment) => segment === ".." || segment === "") ||
-    transferTargetPath === transferState?.entry.path;
+    rawTransferDirectory.startsWith("/") ||
+    normalizedTransferDirectory.split("/").some((segment) => segment === ".." || segment === "");
+  const transferTargetRootPath = transferDirectoryInvalid
+    ? ""
+    : selectedStoragePool
+      ? joinNasPath(selectedStoragePool.path, transferTargetPath)
+      : transferTargetPath;
+  const transferTargetInvalid =
+    transferDirectoryInvalid ||
+    transferTargetRootPath === transferState?.entry.path;
 
   useEffect(() => {
     const input = folderUploadInputRef.current;
@@ -341,7 +381,17 @@ export function WorkspacePane({
   useEffect(() => {
     dragDepthRef.current = 0;
     setIsDropActive(false);
-  }, [activePanel, active, selectedRootId]);
+  }, [activePanel, active, selectedRootId, selectedStoragePoolId]);
+
+  useEffect(() => {
+    setCreateFolderOpen(false);
+    setFolderName("");
+    setRenameEntry(null);
+    setRenameName("");
+    setDeleteState(null);
+    setTransferState(null);
+    setTransferTargetDirectory(".");
+  }, [selectedStoragePool?.path, selectedStoragePoolId]);
 
   useEffect(() => {
     if (filesPanelActivationId > 0) {
@@ -350,7 +400,6 @@ export function WorkspacePane({
   }, [filesPanelActivationId]);
 
   function openCreateFolderDialog() {
-    setOperationError(null);
     setRenameEntry(null);
     setDeleteState(null);
     setTransferState(null);
@@ -360,7 +409,6 @@ export function WorkspacePane({
 
   function openRenameDialog(event: MouseEvent<HTMLButtonElement>, entry: FileEntry) {
     event.stopPropagation();
-    setOperationError(null);
     setCreateFolderOpen(false);
     setDeleteState(null);
     setRenameEntry(entry);
@@ -369,7 +417,6 @@ export function WorkspacePane({
 
   function openDeleteDialog(event: MouseEvent<HTMLButtonElement>, entry: FileEntry) {
     event.stopPropagation();
-    setOperationError(null);
     setCreateFolderOpen(false);
     setRenameEntry(null);
     setDeleteState({ entry, step: "initial" });
@@ -377,12 +424,11 @@ export function WorkspacePane({
 
   function openTransferDialog(event: MouseEvent<HTMLButtonElement>, entry: FileEntry, operation: "move" | "copy") {
     event.stopPropagation();
-    setOperationError(null);
     setCreateFolderOpen(false);
     setRenameEntry(null);
     setDeleteState(null);
     setTransferState({ entry, operation });
-    setTransferTargetDirectory(currentPath);
+    setTransferTargetDirectory(selectedStoragePool ? poolRelativePath(currentPath, selectedStoragePool.path) : ".");
   }
 
   function closeActionDialog() {
@@ -394,7 +440,6 @@ export function WorkspacePane({
     setRenameEntry(null);
     setDeleteState(null);
     setTransferState(null);
-    setOperationError(null);
   }
 
   function openEntryFromRow(entry: FileEntry) {
@@ -451,7 +496,7 @@ export function WorkspacePane({
   }
 
   function handleGridDragEnter(event: DragEvent<HTMLDivElement>) {
-    if (activePanel !== "files" || !selectedRootId || !isFileDrag(event)) {
+    if (activePanel !== "files" || !hasStoragePool || !isFileDrag(event)) {
       return;
     }
 
@@ -461,7 +506,7 @@ export function WorkspacePane({
   }
 
   function handleGridDragOver(event: DragEvent<HTMLDivElement>) {
-    if (activePanel !== "files" || !selectedRootId || !isFileDrag(event)) {
+    if (activePanel !== "files" || !hasStoragePool || !isFileDrag(event)) {
       return;
     }
 
@@ -485,7 +530,7 @@ export function WorkspacePane({
   }
 
   function handleGridDrop(event: DragEvent<HTMLDivElement>) {
-    if (activePanel !== "files" || !selectedRootId || !isFileDrag(event)) {
+    if (activePanel !== "files" || !hasStoragePool || !isFileDrag(event)) {
       return;
     }
 
@@ -507,13 +552,12 @@ export function WorkspacePane({
     }
 
     setOperationSubmitting(true);
-    setOperationError(null);
     try {
       await onRequestCreateFolder(trimmedFolderName);
       setCreateFolderOpen(false);
       setFolderName("");
     } catch (error) {
-      setOperationError(error instanceof Error ? error.message : String(error));
+      onNotifyError(error instanceof Error ? error.message : String(error));
     } finally {
       setOperationSubmitting(false);
     }
@@ -526,13 +570,12 @@ export function WorkspacePane({
     }
 
     setOperationSubmitting(true);
-    setOperationError(null);
     try {
       await onRequestRename(renameEntry, trimmedRenameName);
       setRenameEntry(null);
       setRenameName("");
     } catch (error) {
-      setOperationError(error instanceof Error ? error.message : String(error));
+      onNotifyError(error instanceof Error ? error.message : String(error));
     } finally {
       setOperationSubmitting(false);
     }
@@ -548,12 +591,11 @@ export function WorkspacePane({
     }
 
     setOperationSubmitting(true);
-    setOperationError(null);
     try {
       await onRequestTrash(deleteState.entry);
       setDeleteState(null);
     } catch (error) {
-      setOperationError(error instanceof Error ? error.message : String(error));
+      onNotifyError(error instanceof Error ? error.message : String(error));
     } finally {
       setOperationSubmitting(false);
     }
@@ -566,12 +608,11 @@ export function WorkspacePane({
     }
 
     setOperationSubmitting(true);
-    setOperationError(null);
     try {
       await onRequestTransfer(transferState.entry, transferState.operation, transferTargetPath);
       setTransferState(null);
     } catch (error) {
-      setOperationError(error instanceof Error ? error.message : String(error));
+      onNotifyError(error instanceof Error ? error.message : String(error));
     } finally {
       setOperationSubmitting(false);
     }
@@ -583,11 +624,10 @@ export function WorkspacePane({
     }
 
     setOperationSubmitting(true);
-    setOperationError(null);
     try {
       await onRequestExtract(meta);
     } catch (error) {
-      setOperationError(error instanceof Error ? error.message : String(error));
+      onNotifyError(error instanceof Error ? error.message : String(error));
     } finally {
       setOperationSubmitting(false);
     }
@@ -617,7 +657,9 @@ export function WorkspacePane({
         <div className="workspace-stage" data-panel={activePanel}>
           {activePanel === "files" ? (
             <>
-              <header className={`management-header files-header${hasRootSwitcher ? " has-root-switcher" : ""}`}>
+              <header
+                className={`management-header files-header${storagePools.length > 0 ? " has-storage-pool-switcher" : ""}`}
+              >
                 <div className="management-title-block files-title-block">
                   <span className="eyebrow">{t("workspace.filesEyebrow")}</span>
                   <h2>{displayTitle}</h2>
@@ -628,18 +670,8 @@ export function WorkspacePane({
                   <button
                     className="icon-button files-header-button"
                     type="button"
-                    onClick={onGoHome}
-                    disabled={!selectedRoot?.homePath || currentPath === selectedRoot.homePath}
-                    title={t("common.actions.homeDirectory")}
-                    aria-label={t("common.actions.homeDirectory")}
-                  >
-                    <Home aria-hidden="true" size={18} />
-                  </button>
-                  <button
-                    className="icon-button files-header-button"
-                    type="button"
                     onClick={onGoUp}
-                    disabled={currentPath === "."}
+                    disabled={!selectedStoragePool || currentPath === selectedStoragePool.path}
                     title={t("common.actions.up")}
                     aria-label={t("common.actions.up")}
                   >
@@ -649,6 +681,7 @@ export function WorkspacePane({
                     className="icon-button files-header-button"
                     type="button"
                     onClick={onRefreshFiles}
+                    disabled={!hasStoragePool}
                     title={t("common.actions.refresh")}
                     aria-label={t("common.actions.refresh")}
                   >
@@ -658,7 +691,7 @@ export function WorkspacePane({
                     className="icon-button files-header-button"
                     type="button"
                     onClick={openCreateFolderDialog}
-                    disabled={!selectedRootId || !sessionId}
+                    disabled={!hasStoragePool || !sessionId}
                     title={sessionId ? t("workspace.actions.newFolder") : t("workspace.actions.noSession")}
                     aria-label={t("workspace.actions.newFolder")}
                   >
@@ -668,7 +701,7 @@ export function WorkspacePane({
                     className="icon-button files-header-button"
                     type="button"
                     onClick={triggerFileUpload}
-                    disabled={!selectedRootId}
+                    disabled={!hasStoragePool}
                     title={t("workspace.uploadFiles")}
                     aria-label={t("workspace.uploadFiles")}
                   >
@@ -678,7 +711,7 @@ export function WorkspacePane({
                     className="icon-button files-header-button"
                     type="button"
                     onClick={triggerFolderUpload}
-                    disabled={!selectedRootId}
+                    disabled={!hasStoragePool}
                     title={t("workspace.uploadFolder")}
                     aria-label={t("workspace.uploadFolder")}
                   >
@@ -694,27 +727,32 @@ export function WorkspacePane({
                   />
                 </div>
 
-                <div className={`files-navigation-bar${hasRootSwitcher ? " has-root-switcher" : ""}`}>
-                  {hasRootSwitcher ? (
-                    <div className="root-control">
-                      <label htmlFor="root-select">{t("workspace.rootLabel")}</label>
-                      <CustomSelect
-                        id="root-select"
-                        value={selectedRootId}
-                        options={rootOptions}
-                        ariaLabel={`${t("workspace.rootLabel")}: ${selectedRootLabel}`}
-                        onChange={onSelectRoot}
-                      />
-                    </div>
-                  ) : null}
+                <div
+                  className={`files-navigation-bar${storagePools.length > 0 ? " has-storage-pool-switcher" : ""}`}
+                >
+                  <div className="root-control storage-pool-control">
+                    <label htmlFor="storage-pool-select">{t("workspace.storagePoolLabel")}</label>
+                    <CustomSelect
+                      id="storage-pool-select"
+                      value={selectedStoragePoolId}
+                      options={storagePoolOptions}
+                      ariaLabel={`${t("workspace.storagePoolLabel")}: ${selectedStoragePoolLabel}`}
+                      onChange={onSelectStoragePool}
+                      placeholder={t("workspace.storagePoolPlaceholder")}
+                    />
+                  </div>
 
                   <nav className="breadcrumbs" aria-label={t("workspace.breadcrumbs")}>
-                    <button type="button" onClick={() => onGoToBreadcrumb(-1)}>
+                    <button type="button" onClick={onGoToStoragePool} disabled={!selectedStoragePool}>
                       <HardDrive aria-hidden="true" size={14} />
-                      <span>{t("common.root")}</span>
+                      <span>{selectedStoragePool?.name ?? t("workspace.storagePoolPlaceholder")}</span>
                     </button>
-                    {breadcrumbs.map((crumb, index) => (
-                      <button key={`${crumb}-${index}`} type="button" onClick={() => onGoToBreadcrumb(index)}>
+                    {visibleBreadcrumbs.map((crumb, index) => (
+                      <button
+                        key={`${crumb}-${index}`}
+                        type="button"
+                        onClick={() => onGoToBreadcrumb(selectedStoragePool ? storagePoolPathDepth + index : index)}
+                      >
                         <span>{crumb}</span>
                       </button>
                     ))}
@@ -727,6 +765,7 @@ export function WorkspacePane({
                       onChange={(event) => onSearchQueryChange(event.target.value)}
                       placeholder={t("workspace.searchPlaceholder")}
                       aria-label={t("workspace.searchAria")}
+                      disabled={!hasStoragePool}
                     />
                   </form>
                 </div>
@@ -752,7 +791,12 @@ export function WorkspacePane({
                   <header className="management-section-header files-list-header">
                     <div className="files-list-title-block">
                       <h3>{t("workspace.filesListTitle")}</h3>
-                      <p className="files-list-summary">{t("workspace.filesListDescription", { total: entryCount, root: selectedRootLabel })}</p>
+                      <p className="files-list-summary">
+                        {t("workspace.filesListDescription", {
+                          total: entryCount,
+                          root: selectedStoragePool?.name ?? t("workspace.storagePoolPlaceholder")
+                        })}
+                      </p>
                     </div>
                     {gitStatus ? (
                       <span className="management-status-pill files-git-status" data-state={gitStatusState} title={gitTooltip} aria-label={gitTooltip}>
@@ -762,7 +806,8 @@ export function WorkspacePane({
                     ) : null}
                   </header>
 
-                  <div className="file-list" role="table" aria-label={t("workspace.table.files")}>
+                  {hasStoragePool ? (
+                    <div className="file-list" role="table" aria-label={t("workspace.table.files")}>
                     <div className="file-row file-row-head" role="row">
                       <span role="columnheader" aria-sort={fileSortAria(fileSort, "name")}>
                         {t("workspace.table.name")}
@@ -894,7 +939,17 @@ export function WorkspacePane({
                         </div>
                       );
                     })}
-                  </div>
+                    </div>
+                  ) : (
+                    <div className="workspace-empty-state" role="status">
+                      <HardDrive aria-hidden="true" size={28} />
+                      <strong>{t("workspace.selectStoragePoolTitle")}</strong>
+                      <p>{t("workspace.selectStoragePoolBody")}</p>
+                      <button type="button" className="secondary-button" onClick={() => selectPanel("storage")}>
+                        {t("workspace.openStorageManagement")}
+                      </button>
+                    </div>
+                  )}
                 </section>
 
                 <section
@@ -992,6 +1047,9 @@ export function WorkspacePane({
               dockerOperations={dockerOperations}
               locale={locale}
               onWorkQueuesChanged={onWorkQueuesChanged}
+              onNotifyError={onNotifyError}
+              onNotifySuccess={onNotifySuccess}
+              onNotifyWarning={onNotifyWarning}
             />
           )}
           {terminalMounted ? (
@@ -1000,6 +1058,7 @@ export function WorkspacePane({
               root={selectedRoot}
               codeFontSettings={codeFontSettings}
               resolvedTheme={resolvedTheme}
+              onNotifyError={onNotifyError}
             />
           ) : null}
         </div>
@@ -1046,19 +1105,13 @@ export function WorkspacePane({
                 autoFocus
                 value={folderName}
                 onChange={(event) => setFolderName(event.target.value)}
-                aria-describedby={operationError ? "file-action-error" : "file-create-folder-hint"}
+                aria-describedby="file-create-folder-hint"
               />
             </label>
 
             <p id="file-create-folder-hint" className="file-action-hint">
               {t("workspace.actions.createFolderHint")}
             </p>
-            {operationError ? (
-              <p id="file-action-error" className="file-action-error" role="alert">
-                {operationError}
-              </p>
-            ) : null}
-
             <footer>
               <button type="button" className="secondary-button" onClick={closeActionDialog} disabled={operationSubmitting}>
                 {t("common.actions.cancel")}
@@ -1085,16 +1138,11 @@ export function WorkspacePane({
                 autoFocus
                 value={renameName}
                 onChange={(event) => setRenameName(event.target.value)}
-                aria-describedby={operationError ? "file-action-error" : undefined}
+                aria-describedby="file-rename-hint"
               />
             </label>
 
-            <p className="file-action-hint">{t("workspace.actions.renameHint")}</p>
-            {operationError ? (
-              <p id="file-action-error" className="file-action-error" role="alert">
-                {operationError}
-              </p>
-            ) : null}
+            <p id="file-rename-hint" className="file-action-hint">{t("workspace.actions.renameHint")}</p>
 
             <footer>
               <button type="button" className="secondary-button" onClick={closeActionDialog} disabled={operationSubmitting}>
@@ -1121,12 +1169,6 @@ export function WorkspacePane({
             </header>
 
             <p className="file-action-copy">{deleteBody}</p>
-            {operationError ? (
-              <p id="file-action-error" className="file-action-error" role="alert">
-                {operationError}
-              </p>
-            ) : null}
-
             <footer>
               <button type="button" className="secondary-button" onClick={closeActionDialog} disabled={operationSubmitting}>
                 {t("common.actions.cancel")}
@@ -1160,7 +1202,7 @@ export function WorkspacePane({
             </header>
 
             <div className="file-transfer-route" aria-label={t("workspace.actions.transferPreview")}>
-              <span>{transferState.entry.path}</span>
+              <span>{selectedStoragePool ? poolRelativePath(transferState.entry.path, selectedStoragePool.path) : transferState.entry.path}</span>
               <FolderInput aria-hidden="true" size={15} />
               <strong>{transferTargetPath || t("workspace.actions.chooseFolder")}</strong>
             </div>
@@ -1172,19 +1214,13 @@ export function WorkspacePane({
                 value={transferTargetDirectory}
                 onChange={(event) => setTransferTargetDirectory(event.target.value)}
                 placeholder="."
-                aria-describedby={operationError ? "file-action-error" : "file-transfer-hint"}
+                aria-describedby="file-transfer-hint"
               />
             </label>
 
             <p id="file-transfer-hint" className="file-action-hint">
               {t("workspace.actions.transferHint")}
             </p>
-            {operationError ? (
-              <p id="file-action-error" className="file-action-error" role="alert">
-                {operationError}
-              </p>
-            ) : null}
-
             <footer>
               <button type="button" className="secondary-button" onClick={closeActionDialog} disabled={operationSubmitting}>
                 {t("common.actions.cancel")}
@@ -1216,6 +1252,14 @@ export function folderTitle(displayPath: string, rootTitle: string): string {
   }
 
   return normalizedPath.split(/[\\/]/u).filter(Boolean).pop() ?? rootTitle;
+}
+
+function poolRelativePath(pathname: string, poolPath: string): string {
+  if (pathname === poolPath) {
+    return ".";
+  }
+  const prefix = `${poolPath}/`;
+  return pathname.startsWith(prefix) ? pathname.slice(prefix.length) || "." : pathname;
 }
 
 function gitFileStatusCode(status: NonNullable<FileEntry["gitStatus"]>): string {

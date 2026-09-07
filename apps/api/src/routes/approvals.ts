@@ -36,9 +36,10 @@ import {
   toPublicShareOperation
 } from "../lib/share-service.js";
 import { applyStoragePoolOperation } from "../lib/storage-service.js";
+import { StorageScopeError, resolveStoragePoolScope, validateStoragePoolProposal } from "../lib/storage-scope.js";
 
 export function registerApprovalRoutes(server: FastifyInstance, context: ApiRouteContext): void {
-  const { config, db } = context;
+  const { config, db, system } = context;
   const currentConfig = () => effectiveDockerConfig(config, getDockerSettings(db));
   server.get("/api/approvals", async () => ({
     approvals: listPendingApprovals(db)
@@ -259,6 +260,14 @@ export function registerApprovalRoutes(server: FastifyInstance, context: ApiRout
           throw new Error(`NAS root ${proposal.rootId} is not configured`);
         }
 
+        if (proposal.storagePoolId !== undefined) {
+          if (typeof proposal.storagePoolId !== "string" || !proposal.storagePoolId.trim()) {
+            throw new StorageScopeError("Storage pool selection is invalid", 400);
+          }
+          const scope = await resolveStoragePoolScope(db, system, proposal.rootId, proposal.storagePoolId);
+          await validateStoragePoolProposal(scope, proposal);
+        }
+
         const result = await applyFileMutation(root, proposal, path.join(config.dataDir, "trash"));
         if (result.proposal.operation === "trash" && result.metadata.trashEntryId && result.targetPath) {
           createTrashEntry(db, {
@@ -266,7 +275,10 @@ export function registerApprovalRoutes(server: FastifyInstance, context: ApiRout
             rootId: root.id,
             originalPath: result.sourcePath ?? proposal.sourcePath ?? ".",
             trashPath: path.join(config.dataDir, "trash", result.targetPath),
-            metadata: result.metadata
+            metadata: {
+              ...result.metadata,
+              ...(proposal.storagePoolId ? { storagePoolId: proposal.storagePoolId } : {})
+            }
           });
         }
 
@@ -280,6 +292,7 @@ export function registerApprovalRoutes(server: FastifyInstance, context: ApiRout
             metadata: {
               ...result.metadata,
               rootId: root.id,
+              ...(proposal.storagePoolId ? { storagePoolId: proposal.storagePoolId } : {}),
               reversible: proposal.reversible
             }
           })
@@ -295,7 +308,8 @@ export function registerApprovalRoutes(server: FastifyInstance, context: ApiRout
         type: "job.failed",
         payload: { error: message }
       });
-      reply.status(400).send({ error: message });
+      const statusCode = getErrorStatusCode(error, 400);
+      reply.status(statusCode).send({ error: message });
       return;
     }
 
@@ -450,6 +464,13 @@ export function registerApprovalRoutes(server: FastifyInstance, context: ApiRout
       status: "rejected"
     });
   });
+}
+
+function getErrorStatusCode(error: unknown, fallback: number): number {
+  const statusCode = (error as { statusCode?: unknown }).statusCode;
+  return typeof statusCode === "number" && ((statusCode >= 400 && statusCode < 500) || statusCode === 503)
+    ? statusCode
+    : fallback;
 }
 
 function dockerOperationProposal(approval: PendingApprovalRecord): DockerOperationProposal | null {

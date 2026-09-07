@@ -761,6 +761,7 @@ export interface ToolResult<T = unknown> {
 export interface FileOperationProposal {
   operation: FileMutationOperation;
   rootId: string;
+  storagePoolId?: string;
   sourcePath?: string;
   targetPath?: string;
   tag?: string;

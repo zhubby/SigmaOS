@@ -9,7 +9,7 @@ import {
 import type { ApiRouteContext } from "../context.js";
 import { restoreTrashEntry, rollbackRegularOperation, rollbackTrashOperation } from "../lib/operations.js";
 
-export function registerOperationRoutes(server: FastifyInstance, { config, db }: ApiRouteContext): void {
+export function registerOperationRoutes(server: FastifyInstance, { config, db, system }: ApiRouteContext): void {
   server.get("/api/operations", async () => ({
     operations: listFileOperations(db, { limit: 100 })
   }));
@@ -17,7 +17,7 @@ export function registerOperationRoutes(server: FastifyInstance, { config, db }:
   server.post<{
     Params: { id: string };
   }>("/api/trash/:id/restore", async (request, reply) => {
-    const { entry, root, restored } = await restoreTrashEntry(db, request.params.id);
+    const { entry, root, restored } = await restoreTrashEntry(db, request.params.id, system);
     const operation = recordAppliedOperation(db, {
       approvalId: null,
       operation: "restore",
@@ -27,6 +27,9 @@ export function registerOperationRoutes(server: FastifyInstance, { config, db }:
       metadata: {
         ...restored.metadata,
         rootId: root.id,
+        ...(typeof entry.metadata.storagePoolId === "string"
+          ? { storagePoolId: entry.metadata.storagePoolId }
+          : {}),
         trashEntryId: entry.id,
         reversible: true
       }
@@ -55,8 +58,8 @@ export function registerOperationRoutes(server: FastifyInstance, { config, db }:
     try {
       const rolledBack =
         operation.operation === "trash"
-          ? await rollbackTrashOperation(db, operation)
-          : await rollbackRegularOperation(db, operation, trashRootPath);
+          ? await rollbackTrashOperation(db, operation, system)
+          : await rollbackRegularOperation(db, operation, trashRootPath, system);
 
       const rollbackRecord = recordAppliedOperation(db, {
         approvalId: null,
@@ -82,7 +85,15 @@ export function registerOperationRoutes(server: FastifyInstance, { config, db }:
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      reply.status(400).send({ error: message });
+      const statusCode = getErrorStatusCode(error, 400);
+      reply.status(statusCode).send({ error: message });
     }
   });
+}
+
+function getErrorStatusCode(error: unknown, fallback: number): number {
+  const statusCode = (error as { statusCode?: unknown }).statusCode;
+  return typeof statusCode === "number" && ((statusCode >= 400 && statusCode < 500) || statusCode === 503)
+    ? statusCode
+    : fallback;
 }

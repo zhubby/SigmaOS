@@ -83,14 +83,6 @@
   background: var(--neutral-status-bg);
 }
 
-:root[data-theme="light"] .settings-error,
-:root[data-theme="light"] .settings-inline-error,
-:root[data-theme="light"] .file-action-error {
-  border-color: var(--danger-border);
-  color: var(--danger-text);
-  background: var(--danger-bg);
-}
-
 :root[data-theme="light"] .chat-delete-session-button,
 :root[data-theme="light"] .file-action-button.is-danger,
 :root[data-theme="light"] .risk-pill[data-risk="high"] {
@@ -273,16 +265,6 @@
 
 :root[data-theme="light"] .editor-backdrop {
   background: var(--editor-backdrop);
-}
-
-:root[data-theme="light"] .editor-alert {
-  border-bottom-color: var(--alert-danger-border);
-  color: var(--alert-danger-text);
-  background: var(--alert-danger-bg);
-}
-
-:root[data-theme="light"] .editor-alert button {
-  background: var(--subtle-bg-strong);
 }
 
 :root[data-theme="light"] .editor-code-surface {

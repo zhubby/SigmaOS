@@ -110,6 +110,7 @@ export interface AgentMessage {
 export interface FileOperationProposal {
   operation: string;
   rootId: string;
+  storagePoolId?: string;
   sourcePath?: string;
   targetPath?: string;
   tag?: string;
@@ -577,21 +578,28 @@ export async function getTranscript(sessionId: string): Promise<TranscriptMessag
   return body.transcript;
 }
 
-export async function getFiles(rootId: string, currentPath: string): Promise<FileListing> {
+export async function getFiles(rootId: string, currentPath: string, storagePoolId: string): Promise<FileListing> {
   const params = new URLSearchParams({
     rootId,
-    path: currentPath
+    path: currentPath,
+    storagePoolId
   });
   const response = await fetch(`/api/files?${params.toString()}`);
   await ensureOk(response);
   return (await response.json()) as FileListing;
 }
 
-export async function searchFiles(rootId: string, currentPath: string, query: string): Promise<FileSearchResult> {
+export async function searchFiles(
+  rootId: string,
+  currentPath: string,
+  query: string,
+  storagePoolId: string
+): Promise<FileSearchResult> {
   const params = new URLSearchParams({
     rootId,
     path: currentPath,
-    q: query
+    q: query,
+    storagePoolId
   });
   const response = await fetch(`/api/search?${params.toString()}`);
   await ensureOk(response);
@@ -632,10 +640,11 @@ export async function getSystemHealth(): Promise<SystemHealth> {
   return (await response.json()) as SystemHealth;
 }
 
-export async function getFileMeta(rootId: string, currentPath: string): Promise<FileMeta> {
+export async function getFileMeta(rootId: string, currentPath: string, storagePoolId: string): Promise<FileMeta> {
   const params = new URLSearchParams({
     rootId,
-    path: currentPath
+    path: currentPath,
+    storagePoolId
   });
   const response = await fetch(`/api/files/meta?${params.toString()}`);
   await ensureOk(response);
@@ -643,10 +652,16 @@ export async function getFileMeta(rootId: string, currentPath: string): Promise<
   return body.meta;
 }
 
-export async function getTextPreview(rootId: string, currentPath: string, maxBytes = 64 * 1024): Promise<TextPreview> {
+export async function getTextPreview(
+  rootId: string,
+  currentPath: string,
+  storagePoolId: string,
+  maxBytes = 64 * 1024
+): Promise<TextPreview> {
   const params = new URLSearchParams({
     rootId,
     path: currentPath,
+    storagePoolId,
     maxBytes: String(maxBytes)
   });
   const response = await fetch(`/api/files/text?${params.toString()}`);
@@ -654,10 +669,11 @@ export async function getTextPreview(rootId: string, currentPath: string, maxByt
   return (await response.json()) as TextPreview;
 }
 
-export async function getEditableText(rootId: string, currentPath: string): Promise<EditableText> {
+export async function getEditableText(rootId: string, currentPath: string, storagePoolId: string): Promise<EditableText> {
   const params = new URLSearchParams({
     rootId,
-    path: currentPath
+    path: currentPath,
+    storagePoolId
   });
   const response = await fetch(`/api/files/edit-text?${params.toString()}`);
   await ensureOk(response);
@@ -666,6 +682,7 @@ export async function getEditableText(rootId: string, currentPath: string): Prom
 
 export async function saveEditableText(input: {
   rootId: string;
+  storagePoolId: string;
   currentPath: string;
   content: string;
   expectedModifiedAt: string | null;
@@ -677,6 +694,7 @@ export async function saveEditableText(input: {
     },
     body: JSON.stringify({
       rootId: input.rootId,
+      storagePoolId: input.storagePoolId,
       path: input.currentPath,
       content: input.content,
       expectedModifiedAt: input.expectedModifiedAt
@@ -689,6 +707,7 @@ export async function saveEditableText(input: {
 export async function proposeFileOperation(input: {
   sessionId: string;
   rootId: string;
+  storagePoolId: string;
   operation: "mkdir" | "rename" | "trash" | "move" | "copy";
   sourcePath?: string;
   targetName?: string;
@@ -705,7 +724,7 @@ export async function proposeFileOperation(input: {
   return (await response.json()) as FileProposalResult;
 }
 
-export async function extractFile(input: { rootId: string; path: string }): Promise<ExtractFileResult> {
+export async function extractFile(input: { rootId: string; storagePoolId: string; path: string }): Promise<ExtractFileResult> {
   const response = await fetch("/api/files/extract", {
     method: "POST",
     headers: {
@@ -719,6 +738,7 @@ export async function extractFile(input: { rootId: string; path: string }): Prom
 
 export async function uploadFile(input: {
   rootId: string;
+  storagePoolId: string;
   path: string;
   file: File;
   signal?: AbortSignal;
@@ -727,6 +747,7 @@ export async function uploadFile(input: {
   return await new Promise<UploadFileResult>((resolve, reject) => {
     const params = new URLSearchParams({
       rootId: input.rootId,
+      storagePoolId: input.storagePoolId,
       path: input.path
     });
     const xhr = new XMLHttpRequest();
@@ -784,18 +805,20 @@ export async function uploadFile(input: {
   });
 }
 
-export function getFileBlobUrl(rootId: string, currentPath: string): string {
+export function getFileBlobUrl(rootId: string, currentPath: string, storagePoolId: string): string {
   const params = new URLSearchParams({
     rootId,
-    path: currentPath
+    path: currentPath,
+    storagePoolId
   });
   return `/api/files/blob?${params.toString()}`;
 }
 
-export function getFileVideoUrl(rootId: string, currentPath: string): string {
+export function getFileVideoUrl(rootId: string, currentPath: string, storagePoolId: string): string {
   const params = new URLSearchParams({
     rootId,
-    path: currentPath
+    path: currentPath,
+    storagePoolId
   });
   return `/api/files/video?${params.toString()}`;
 }

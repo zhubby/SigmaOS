@@ -23,12 +23,14 @@ export function LocalTerminalPanel({
   active,
   root,
   codeFontSettings,
-  resolvedTheme
+  resolvedTheme,
+  onNotifyError
 }: {
   active: boolean;
   root: NasRoot | undefined;
   codeFontSettings: CodeFontSettings;
   resolvedTheme: ResolvedTheme;
+  onNotifyError: (message: string | null) => void;
 }) {
   const { t } = useTranslation();
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
@@ -39,7 +41,6 @@ export function LocalTerminalPanel({
   const [connectionRoot, setConnectionRoot] = useState<NasRoot | null>(root ?? null);
   const [connectionKey, setConnectionKey] = useState(0);
   const [status, setStatus] = useState<TerminalStatus>("connecting");
-  const [error, setError] = useState<string | null>(null);
 
   activeRef.current = active;
 
@@ -70,7 +71,6 @@ export function LocalTerminalPanel({
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
     setStatus("connecting");
-    setError(null);
 
     const fitAndResize = () => {
       if (disposed || !activeRef.current || host.clientWidth === 0 || host.clientHeight === 0) {
@@ -111,7 +111,7 @@ export function LocalTerminalPanel({
       }
       if (message.type === "error") {
         setStatus("error");
-        setError(message.error ?? t("workspace.terminal.connectionError"));
+        onNotifyError(message.error ?? t("workspace.terminal.connectionError"));
       }
       if (message.type === "exit") {
         setStatus("exited");
@@ -120,13 +120,13 @@ export function LocalTerminalPanel({
     socket.addEventListener("error", () => {
       if (!disposed) {
         setStatus("error");
-        setError(t("workspace.terminal.connectionError"));
+        onNotifyError(t("workspace.terminal.connectionError"));
       }
     });
     socket.addEventListener("close", () => {
       if (!disposed) {
         setStatus((current) => (current === "exited" || current === "error" ? current : "disconnected"));
-        setError((current) => current ?? t("workspace.terminal.disconnectedError"));
+        onNotifyError(t("workspace.terminal.disconnectedError"));
       }
     });
 
@@ -140,7 +140,7 @@ export function LocalTerminalPanel({
       terminalRef.current = null;
       terminal.dispose();
     };
-  }, [connectionKey, connectionRoot]);
+  }, [connectionKey, connectionRoot, onNotifyError, t]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -197,7 +197,6 @@ export function LocalTerminalPanel({
           </button>
         </div>
       </header>
-      {error ? <p className="workspace-terminal-error" role="alert">{error}</p> : null}
       <div ref={terminalHostRef} className="workspace-terminal" />
     </section>
   );

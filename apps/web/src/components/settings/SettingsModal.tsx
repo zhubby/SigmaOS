@@ -69,7 +69,6 @@ import { CustomSelect } from "../common/CustomSelect.js";
 
 interface SettingsModalProps {
   activeSection: SettingsSectionId;
-  error: string | null;
   form: ModelProviderFormState;
   dockerForm: DockerSettingsFormState;
   loading: boolean;
@@ -110,7 +109,6 @@ type Translate = (key: string, options?: Record<string, unknown>) => unknown;
 
 export function SettingsModal({
   activeSection,
-  error,
   form,
   dockerForm,
   loading,
@@ -237,13 +235,6 @@ export function SettingsModal({
               <X aria-hidden="true" size={18} />
             </button>
           </header>
-
-          {error ? (
-            <div className="settings-error" role="alert">
-              <AlertTriangle aria-hidden="true" size={17} />
-              <span>{error}</span>
-            </div>
-          ) : null}
 
           {activeSection === "overview" ? (
             <SettingsOverview
@@ -484,7 +475,6 @@ export function SettingsModal({
           {activeSection === "advanced" ? (
             <SettingsAdvancedPage
               systemInfo={systemInfo}
-              systemInfoError={systemInfoError}
               loading={loading}
               locale={resolvedLocale}
             />
@@ -579,12 +569,6 @@ function SettingsOverview({
               </article>
             ))}
           </div>
-          {systemInfoError ? (
-            <div className="settings-inline-error" role="status">
-              <AlertTriangle aria-hidden="true" size={15} />
-              <span>{t("settings.system.loadFailed", { error: systemInfoError })}</span>
-            </div>
-          ) : null}
         </section>
 
         <section className="settings-section-card">
@@ -1078,7 +1062,7 @@ function SettingsStorageRow({
           locale={locale}
         />
       ) : (
-        <em data-state="missing">{volume.error ?? t("common.states.unavailable")}</em>
+        <em data-state="missing">{t("common.states.unavailable")}</em>
       )}
       <dl>
         <div>
@@ -1981,12 +1965,10 @@ function SettingsSecurityPage({
 
 function SettingsAdvancedPage({
   systemInfo,
-  systemInfoError,
   loading,
   locale
 }: {
   systemInfo: SystemInfo | null;
-  systemInfoError: string | null;
   loading: boolean;
   locale: SupportedLocale;
 }) {
@@ -2010,12 +1992,6 @@ function SettingsAdvancedPage({
               </div>
               <span data-state={statusState}>{statusLabel}</span>
             </header>
-            {systemInfoError ? (
-              <div className="settings-inline-error" role="status">
-                <AlertTriangle aria-hidden="true" size={15} />
-                <span>{t("settings.system.loadFailed", { error: systemInfoError })}</span>
-              </div>
-            ) : null}
           </section>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import os from "node:os";
@@ -9,6 +9,7 @@ import {
   applyFileMutation,
   archiveKindForPath,
   defaultExtractionTarget,
+  restoreTrashPath,
   resolveSafeTargetPath,
   rollbackFileMutation,
   validateArchiveEntries
@@ -129,6 +130,46 @@ describe("approval-gated mutation tools", () => {
     await expect(resolveSafeTargetPath(root.path, "../escape.txt")).rejects.toThrow("escapes");
   });
 
+  it("rejects mkdir through a parent symlink", async () => {
+    const outsideDir = path.join(tempDir, "outside");
+    await mkdir(outsideDir);
+    await symlink(outsideDir, path.join(rootDir, "link"));
+
+    await expect(
+      applyFileMutation(
+        root,
+        {
+          operation: "mkdir",
+          rootId: root.id,
+          targetPath: "link/created",
+          risk: "medium",
+          reversible: true,
+          summary: "Create directory"
+        },
+        trashDir
+      )
+    ).rejects.toThrow("symlink");
+    await expect(stat(path.join(outsideDir, "created"))).rejects.toThrow();
+  });
+
+  it("rejects trash restore through a parent symlink", async () => {
+    const outsideDir = path.join(tempDir, "outside");
+    const trashSource = path.join(trashDir, "deleted.txt");
+    await mkdir(outsideDir);
+    await mkdir(trashDir);
+    await writeFile(trashSource, "deleted");
+    await symlink(outsideDir, path.join(rootDir, "link"));
+
+    await expect(
+      restoreTrashPath(root, {
+        trashPath: trashSource,
+        originalPath: "link/restored.txt"
+      })
+    ).rejects.toThrow("symlink");
+    await expect(stat(path.join(outsideDir, "restored.txt"))).rejects.toThrow();
+    await expect(stat(trashSource)).resolves.toBeTruthy();
+  });
+
   it("moves files only when apply is called", async () => {
     await applyFileMutation(
       root,
@@ -238,6 +279,33 @@ describe("approval-gated mutation tools", () => {
 
     await expect(readFile(path.join(rootDir, "source.txt"), "utf8")).resolves.toBe("hello");
     await expect(stat(path.join(rootDir, "target.txt"))).rejects.toThrow();
+  });
+
+  it("rejects move rollback through a parent symlink", async () => {
+    const outsideDir = path.join(tempDir, "outside");
+    await mkdir(outsideDir);
+    await writeFile(path.join(rootDir, "moved.txt"), "moved");
+    await symlink(outsideDir, path.join(rootDir, "link"));
+
+    await expect(
+      rollbackFileMutation(
+        root,
+        {
+          id: "operation-1",
+          approvalId: "approval-1",
+          operation: "move",
+          sourcePath: "link/original.txt",
+          targetPath: "moved.txt",
+          status: "applied",
+          metadata: { rootId: root.id },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        },
+        trashDir
+      )
+    ).rejects.toThrow("symlink");
+    await expect(readFile(path.join(rootDir, "moved.txt"), "utf8")).resolves.toBe("moved");
+    await expect(stat(path.join(outsideDir, "original.txt"))).rejects.toThrow();
   });
 
   it("rolls uploaded files back into trash", async () => {

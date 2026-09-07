@@ -30,6 +30,7 @@ describe("upload batches", () => {
     const batch = createUploadBatch({
       id: "batch-1",
       rootId: "root-1",
+      storagePoolId: "pool-1",
       currentPath: "docs/incoming",
       sources: [{ file, relativePath: "album\\day-one/photo.jpg" }]
     });
@@ -37,6 +38,7 @@ describe("upload batches", () => {
     expect(batch).toMatchObject({
       id: "batch-1",
       rootId: "root-1",
+      storagePoolId: "pool-1",
       targetPath: "docs/incoming",
       status: "queued",
       currentItemId: "batch-1:0",
@@ -70,6 +72,7 @@ function makeBatch(id: string, status: UploadStatus, createdAt: string): UploadB
   return {
     id,
     rootId: "root-1",
+    storagePoolId: "pool-1",
     targetPath: ".",
     createdAt,
     status,

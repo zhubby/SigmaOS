@@ -17,10 +17,20 @@ export interface LoadedSessionEntries {
 
 export async function loadEntriesForSession(
   rootId: string,
-  targetSession: Session | SessionSummary
+  targetSession: Session | SessionSummary,
+  storagePoolId?: string
 ): Promise<LoadedSessionEntries> {
+  if (!storagePoolId) {
+    return {
+      session: targetSession,
+      entries: [],
+      git: null,
+      didResetPath: false
+    };
+  }
+
   try {
-    const listing = await getFiles(rootId, targetSession.currentPath);
+    const listing = await getFiles(rootId, targetSession.currentPath, storagePoolId);
     return {
       session: targetSession,
       entries: listing.entries,
@@ -33,7 +43,7 @@ export async function loadEntriesForSession(
     }
 
     const resetSession = await updateSessionPath(targetSession.id, ".");
-    const listing = await getFiles(rootId, resetSession.currentPath);
+    const listing = await getFiles(rootId, resetSession.currentPath, storagePoolId);
     return {
       session: resetSession,
       entries: listing.entries,
@@ -43,13 +53,18 @@ export async function loadEntriesForSession(
   }
 }
 
-export async function loadFileListingForView(rootId: string, currentPath: string, query: string): Promise<FileListing> {
+export async function loadFileListingForView(
+  rootId: string,
+  currentPath: string,
+  query: string,
+  storagePoolId: string
+): Promise<FileListing> {
   const trimmedQuery = query.trim();
   if (!trimmedQuery) {
-    return getFiles(rootId, currentPath);
+    return getFiles(rootId, currentPath, storagePoolId);
   }
 
-  const result = await searchFiles(rootId, currentPath, trimmedQuery);
+  const result = await searchFiles(rootId, currentPath, trimmedQuery, storagePoolId);
   return {
     entries: result.files,
     git: result.git

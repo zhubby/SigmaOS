@@ -66,12 +66,16 @@ interface GitPathIndex {
 export async function getDirectoryGitView(
   rootPath: string,
   requestedPath: string,
-  entries: FileEntry[]
+  entries: FileEntry[],
+  scopeRootPath?: string
 ): Promise<DirectoryGitView> {
   try {
     const safe = await resolveSafeExistingPath(rootPath, requestedPath);
     const repository = await resolveGitRepository(safe);
     if (!repository) {
+      return { entries, git: null };
+    }
+    if (scopeRootPath && !isPathInside(scopeRootPath, repository.repositoryRealPath)) {
       return { entries, git: null };
     }
 

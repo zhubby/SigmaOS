@@ -45,6 +45,26 @@
   color: var(--danger-text);
 }
 
+.app-notification[data-tone="success"] {
+  border-color: var(--line-soft);
+  box-shadow: var(--shadow), inset 3px 0 0 var(--green);
+}
+
+.app-notification[data-tone="success"] > svg,
+.app-notification[data-tone="success"] strong {
+  color: var(--success-text);
+}
+
+.app-notification[data-tone="warning"] {
+  border-color: var(--line-soft);
+  box-shadow: var(--shadow), inset 3px 0 0 var(--warning-text);
+}
+
+.app-notification[data-tone="warning"] > svg,
+.app-notification[data-tone="warning"] strong {
+  color: var(--warning-text);
+}
+
 .app-notification strong,
 .app-notification span {
   display: block;

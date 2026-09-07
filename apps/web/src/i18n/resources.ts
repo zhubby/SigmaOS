@@ -41,7 +41,9 @@ export const en = {
     }
   },
   notifications: {
-    errorTitle: "Error"
+    errorTitle: "Error",
+    successTitle: "Success",
+    warningTitle: "Attention"
   },
   status: {
     starting: "Starting",
@@ -141,6 +143,13 @@ export const en = {
   workspace: {
     label: "Workspace",
     rootLabel: "Root",
+    storagePoolLabel: "Storage pool",
+    storagePoolPlaceholder: "Select a storage pool",
+    selectStoragePoolTitle: "Select a storage pool",
+    selectStoragePoolBody: "Choose a mounted pool to browse its files.",
+    openStorageManagement: "Open storage management",
+    storagePoolUnavailable: "The selected storage pool is no longer available.",
+    pathOutsideStoragePool: "That path is outside the selected storage pool.",
     breadcrumbs: "Breadcrumbs",
     searchPlaceholder: "Search filenames",
     searchAria: "Search filenames",
@@ -222,7 +231,7 @@ export const en = {
       destinationFolder: "Destination folder",
       chooseFolder: "Choose a destination folder",
       transferPreview: "Transfer preview",
-      transferHint: "Use a path relative to the NAS root. The original name will be kept.",
+      transferHint: "Use a path relative to the selected storage pool. The original name will be kept.",
       requestMove: "Request move",
       requestCopy: "Request copy",
       extract: "Extract",
@@ -572,6 +581,8 @@ export const en = {
         createTitle: "Create a RAID pool",
         poolCreated: "Storage pool created successfully.",
         createPool: "Create pool",
+        creatingTitle: "Creating storage pool",
+        creatingDescription: "Creating the RAID array, formatting it, and mounting the pool. This may take a few minutes.",
         directApplyConfirmation: "I understand this permanently erases the selected disks and creates the pool immediately.",
         diskSelectionDescription: "Only unused whole disks can be selected. The system disk and formatted disks are blocked.",
         eraseWarning: "Creating this pool permanently erases every selected disk, formats it as {{filesystem}}, and mounts it below /srv/nas.",
@@ -1136,7 +1147,9 @@ export const zhCN = {
     }
   },
   notifications: {
-    errorTitle: "错误"
+    errorTitle: "错误",
+    successTitle: "操作成功",
+    warningTitle: "注意"
   },
   status: {
     starting: "启动中",
@@ -1236,6 +1249,13 @@ export const zhCN = {
   workspace: {
     label: "工作区",
     rootLabel: "根目录",
+    storagePoolLabel: "存储池",
+    storagePoolPlaceholder: "选择存储池",
+    selectStoragePoolTitle: "选择存储池",
+    selectStoragePoolBody: "请选择已挂载的存储池以浏览其中的文件。",
+    openStorageManagement: "打开存储管理",
+    storagePoolUnavailable: "所选存储池已不可用。",
+    pathOutsideStoragePool: "该路径不在当前存储池内。",
     breadcrumbs: "面包屑",
     searchPlaceholder: "搜索文件名",
     searchAria: "搜索文件名",
@@ -1317,7 +1337,7 @@ export const zhCN = {
       destinationFolder: "目标文件夹",
       chooseFolder: "选择目标文件夹",
       transferPreview: "传输预览",
-      transferHint: "请输入相对于 NAS 根目录的路径，文件名将保持不变。",
+      transferHint: "请输入相对于当前存储池的路径，文件名将保持不变。",
       requestMove: "请求移动",
       requestCopy: "请求拷贝",
       extract: "解压",
@@ -1667,6 +1687,8 @@ export const zhCN = {
         createTitle: "创建 RAID 存储池",
         poolCreated: "存储池已创建。",
         createPool: "创建存储池",
+        creatingTitle: "正在创建存储池",
+        creatingDescription: "正在创建 RAID、格式化并挂载存储池，此过程可能需要几分钟。",
         directApplyConfirmation: "我确认这会永久擦除选中的磁盘，并立即创建存储池。",
         diskSelectionDescription: "只能选择未使用的整块磁盘；系统盘和已格式化磁盘会被阻止。",
         eraseWarning: "创建存储池会永久擦除所有选中磁盘，格式化为 {{filesystem}}，并挂载到 /srv/nas 下。",

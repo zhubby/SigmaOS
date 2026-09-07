@@ -288,7 +288,10 @@ export function WorkspaceManagementPanel({
   pendingApprovals,
   dockerOperations,
   locale,
-  onWorkQueuesChanged
+  onWorkQueuesChanged,
+  onNotifyError,
+  onNotifySuccess,
+  onNotifyWarning
 }: {
   panel: ManagementPanelId;
   roots: NasRoot[];
@@ -297,6 +300,9 @@ export function WorkspaceManagementPanel({
   dockerOperations: DockerOperation[];
   locale: SupportedLocale;
   onWorkQueuesChanged: () => void | Promise<void>;
+  onNotifyError: (message: string | null) => void;
+  onNotifySuccess: (message: string | null) => void;
+  onNotifyWarning: (message: string | null) => void;
 }) {
   if (panel === "docker") {
     return (
@@ -306,6 +312,8 @@ export function WorkspaceManagementPanel({
         dockerOperations={dockerOperations}
         locale={locale}
         onWorkQueuesChanged={onWorkQueuesChanged}
+        onNotifyError={onNotifyError}
+        onNotifySuccess={onNotifySuccess}
       />
     );
   }
@@ -317,11 +325,14 @@ export function WorkspaceManagementPanel({
         pendingApprovals={pendingApprovals}
         locale={locale}
         onWorkQueuesChanged={onWorkQueuesChanged}
+        onNotifyError={onNotifyError}
+        onNotifySuccess={onNotifySuccess}
+        onNotifyWarning={onNotifyWarning}
       />
     );
   }
   if (panel === "network") {
-    return <SystemNetworkManagementPanel locale={locale} />;
+    return <SystemNetworkManagementPanel locale={locale} onNotifyError={onNotifyError} />;
   }
   if (panel === "storage") {
     return (
@@ -329,6 +340,8 @@ export function WorkspaceManagementPanel({
         locale={locale}
         sessionId={sessionId}
         onWorkQueuesChanged={onWorkQueuesChanged}
+        onNotifyError={onNotifyError}
+        onNotifySuccess={onNotifySuccess}
       />
     );
   }
@@ -466,19 +479,22 @@ function DockerManagementPanel({
   pendingApprovals,
   dockerOperations,
   locale,
-  onWorkQueuesChanged
+  onWorkQueuesChanged,
+  onNotifyError,
+  onNotifySuccess
 }: {
   sessionId: string | null;
   pendingApprovals: PendingApproval[];
   dockerOperations: DockerOperation[];
   locale: SupportedLocale;
   onWorkQueuesChanged: () => void | Promise<void>;
+  onNotifyError: (message: string | null) => void;
+  onNotifySuccess: (message: string | null) => void;
 }) {
   const { t } = useTranslation();
   const [summary, setSummary] = useState<DockerSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [logsState, setLogsState] = useState<{
     container: DockerContainer;
@@ -509,11 +525,15 @@ function DockerManagementPanel({
           return;
         }
         setSummary(nextSummary);
+        if (nextSummary.engine.error) {
+          onNotifyError(nextSummary.engine.error);
+        }
       } catch (nextError) {
         if (!active) {
           return;
         }
         setError(errorMessage(nextError));
+        onNotifyError(errorMessage(nextError));
       } finally {
         if (active) {
           setLoading(false);
@@ -526,9 +546,15 @@ function DockerManagementPanel({
     setLoading(true);
     setError(null);
     try {
-      setSummary(await getDockerSummary());
+      const nextSummary = await getDockerSummary();
+      setSummary(nextSummary);
+      if (nextSummary.engine.error) {
+        onNotifyError(nextSummary.engine.error);
+      }
     } catch (nextError) {
-      setError(errorMessage(nextError));
+      const message = errorMessage(nextError);
+      setError(message);
+      onNotifyError(message);
     } finally {
       setLoading(false);
     }
@@ -561,7 +587,9 @@ function DockerManagementPanel({
         setConsoleSession(await createDockerConsoleSession(approvedOperation.id));
         await onWorkQueuesChanged();
       } catch (nextError) {
-        setError(errorMessage(nextError));
+        const message = errorMessage(nextError);
+        setError(message);
+        onNotifyError(message);
       } finally {
         setPendingAction(null);
       }
@@ -592,22 +620,25 @@ function DockerManagementPanel({
     input: Omit<Parameters<typeof proposeDockerOperation>[0], "sessionId">
   ): Promise<Awaited<ReturnType<typeof proposeDockerOperation>> | null> {
     if (!sessionId) {
-      setError(t("workspace.management.docker.errors.noSession"));
+      const message = t("workspace.management.docker.errors.noSession");
+      setError(message);
+      onNotifyError(message);
       return null;
     }
     setPendingAction(actionId);
     setError(null);
-    setNotice(null);
     try {
       const result = await proposeDockerOperation({
         ...input,
         sessionId
       });
-      setNotice(t("workspace.management.docker.proposalCreated"));
+      onNotifySuccess(t("workspace.management.docker.proposalCreated"));
       await onWorkQueuesChanged();
       return result;
     } catch (nextError) {
-      setError(errorMessage(nextError));
+      const message = errorMessage(nextError);
+      setError(message);
+      onNotifyError(message);
       return null;
     } finally {
       setPendingAction(null);
@@ -666,13 +697,6 @@ function DockerManagementPanel({
             </dl>
           </div>
         </section>
-
-        {notice || error ? (
-          <div className={error ? "management-inline-message is-error" : "management-inline-message"} role="status">
-            {error ? <CircleAlert aria-hidden="true" size={15} /> : <CircleCheck aria-hidden="true" size={15} />}
-            <span>{error ?? notice}</span>
-          </div>
-        ) : null}
 
         <div className="management-metric-grid">
           {dockerMetrics(summary, locale, t).map((metric) => {
@@ -1167,12 +1191,14 @@ function dockerStatusDetail(
     return String(t("workspace.management.docker.loading"));
   }
   if (error) {
-    return error;
+    return String(t("common.states.unavailable"));
   }
   if (!summary?.enabled) {
     return String(t("workspace.management.docker.disabledDetail"));
   }
-  return summary.engine.error ?? String(t("workspace.management.docker.engineDetail"));
+  return summary.engine.error
+    ? String(t("common.states.unavailable"))
+    : String(t("workspace.management.docker.engineDetail"));
 }
 
 function dockerEmptyState(enabled: boolean, loading: boolean, t: Translate): string {

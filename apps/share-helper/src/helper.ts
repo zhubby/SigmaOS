@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { access, chmod, chown, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -499,7 +498,7 @@ export function validateStorageHelperRequest(value: unknown): StorageHelperReque
 
   if (value.command === "mdadm") {
     const validScan = args.length === 2 && args[0] === "--detail" && args[1] === "--scan";
-    const validDetail = args.length === 2 && args[0] === "--detail" && isDevicePath(args[1]!);
+    const validDetail = args.length === 2 && args[0] === "--detail" && isMdadmDevicePath(args[1]!);
     if (!validScan && !validDetail) {
       throw new Error("Unsupported mdadm request");
     }
@@ -599,20 +598,24 @@ async function applyStoragePoolOperationNow(
   options: StoragePoolOperationOptions
 ): Promise<StoragePoolOperationResult> {
   const proposal = validateStorageOperationRequest(request);
-  await assertStorageDevicesAvailable(proposal, runner);
+  if (await cleanupOrphanMdDevices(runner, options.mdSysBlockPath)) {
+    await runner.run("udevadm", ["settle"]);
+  }
+  const staleRaidDevices = await assertStorageDevicesAvailable(proposal, runner, options.mdSysBlockPath);
   await mkdir(options.mdadmRuntimePath ?? "/run/mdadm", { recursive: true });
   const mountpoint = options.mountRoot ? path.posix.join(options.mountRoot, proposal.name) : proposal.mountpoint;
   const mountpointExisted = await assertMountpointAvailable(mountpoint, options.mountRoot ?? "/srv/nas");
 
   const mdDevice = options.mdDeviceRoot ? path.posix.join(options.mdDeviceRoot, proposal.name) : `/dev/md/${proposal.name}`;
-  if (await cleanupOrphanMdDevices(runner, options.mdSysBlockPath)) {
-    await runner.run("udevadm", ["settle"]);
-  }
   await assertPathMissing(mdDevice);
   await mkdir(path.posix.dirname(mdDevice), { recursive: true });
   let created = false;
   let mounted = false;
   try {
+    if (staleRaidDevices.length) {
+      await runner.run("mdadm", ["--zero-superblock", "--force", ...staleRaidDevices]);
+      await runner.run("udevadm", ["settle"]);
+    }
     await runner.run("mdadm", [
       "--create",
       mdDevice,
@@ -654,6 +657,7 @@ async function applyStoragePoolOperationNow(
     }
     if (created) {
       await bestEffort(runner, "mdadm", ["--stop", mdDevice]);
+      await bestEffort(runner, "mdadm", ["--zero-superblock", "--force", ...proposal.devices]);
     } else {
       await bestEffortOrphanMdCleanup(runner, options.mdSysBlockPath);
     }
@@ -723,8 +727,9 @@ async function bestEffortOrphanMdCleanup(runner: HelperCommandRunner, sysBlockPa
 
 async function assertStorageDevicesAvailable(
   proposal: StorageOperationProposal,
-  runner: HelperCommandRunner
-): Promise<void> {
+  runner: HelperCommandRunner,
+  sysBlockPath = "/sys/block"
+): Promise<string[]> {
   const output = await runner.run("lsblk", [
     "--json",
     "--bytes",
@@ -746,12 +751,28 @@ async function assertStorageDevicesAvailable(
       .map((row) => [stringField(row, "path"), row] as const)
       .filter((entry): entry is readonly [string, Record<string, unknown>] => Boolean(entry[0]))
   );
+  const staleRaidDevices: string[] = [];
   for (const device of proposal.devices) {
     const row = byPath.get(device);
     if (!row || stringField(row, "type") !== "disk") {
       throw new Error(`Block device is not an available whole disk: ${device}`);
     }
-    assertStorageNodeUnused(row, device);
+    const filesystem = stringField(row, "fstype");
+    assertStorageNodeUnused(row, device, true);
+    if (filesystem === "linux_raid_member") {
+      const holdersPath = path.join(sysBlockPath, path.basename(device), "holders");
+      try {
+        const holders = await readdir(holdersPath);
+        if (holders.length) {
+          throw new Error(`Block device belongs to an active RAID array and cannot be reused: ${device}`);
+        }
+      } catch (error) {
+        if (!(isNodeError(error) && error.code === "ENOENT")) {
+          throw error;
+        }
+      }
+      staleRaidDevices.push(device);
+    }
     const children = Array.isArray(row.children) ? row.children : [];
     for (const child of children) {
       if (isRecord(child)) {
@@ -759,12 +780,18 @@ async function assertStorageDevicesAvailable(
       }
     }
   }
+  return staleRaidDevices;
 }
 
-function assertStorageNodeUnused(row: Record<string, unknown>, device: string): void {
+function assertStorageNodeUnused(
+  row: Record<string, unknown>,
+  device: string,
+  allowStaleRaidMember = false
+): void {
   const filesystem = stringField(row, "fstype");
   const mountpoints = row.mountpoints;
-  if (filesystem || (Array.isArray(mountpoints) && mountpoints.some((mountpoint) => typeof mountpoint === "string" && mountpoint))) {
+  const isStaleRaidMember = allowStaleRaidMember && filesystem === "linux_raid_member";
+  if ((filesystem && !isStaleRaidMember) || (Array.isArray(mountpoints) && mountpoints.some((mountpoint) => typeof mountpoint === "string" && mountpoint))) {
     throw new Error(`Block device contains a filesystem or mount and cannot be used: ${device}`);
   }
 }
@@ -824,12 +851,17 @@ async function appendFstabEntry(
   }
   const entry = `UUID=${uuid} ${mountpoint} ${filesystem} defaults,nofail,x-systemd.device-timeout=30s 0 2`;
   const next = `${current.trimEnd()}\n${entry}\n`;
-  const tempPath = `${fstabPath}.${process.pid}-${randomUUID()}.sigmaos.tmp`;
-  await writeFile(tempPath, next, { encoding: "utf8", mode: 0o644 });
   try {
-    await rename(tempPath, fstabPath);
+    // The helper unit grants write access to the fstab file, but keeps its parent
+    // directory read-only. Write the existing file in place so systemd's
+    // filesystem sandbox does not reject creation of a sibling temp file.
+    await writeFile(fstabPath, next, { encoding: "utf8" });
   } catch (error) {
-    await rm(tempPath, { force: true });
+    try {
+      await writeFile(fstabPath, current, { encoding: "utf8" });
+    } catch {
+      // Preserve the original write error if recovery is also blocked.
+    }
     throw error;
   }
 }
@@ -872,4 +904,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isDevicePath(value: string): boolean {
   return /^\/dev\/[A-Za-z0-9._-]+$/u.test(value);
+}
+
+function isMdadmDevicePath(value: string): boolean {
+  return /^\/dev\/(?:[A-Za-z0-9._-]+|md\/[A-Za-z0-9._-]+)$/u.test(value);
 }

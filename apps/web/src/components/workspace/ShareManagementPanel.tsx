@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { ShareProtocol } from "@sigmaos/shared";
 import {
   CircleAlert,
-  CircleCheck,
   Database,
   Folder,
   HardDrive,
@@ -59,13 +58,19 @@ export function ShareManagementPanel({
   sessionId,
   pendingApprovals,
   locale,
-  onWorkQueuesChanged
+  onWorkQueuesChanged,
+  onNotifyError,
+  onNotifySuccess,
+  onNotifyWarning
 }: {
   roots: NasRoot[];
   sessionId: string | null;
   pendingApprovals: PendingApproval[];
   locale: SupportedLocale;
   onWorkQueuesChanged: () => void | Promise<void>;
+  onNotifyError: (message: string | null) => void;
+  onNotifySuccess: (message: string | null) => void;
+  onNotifyWarning: (message: string | null) => void;
 }) {
   const { t } = useTranslation();
   const [form, setForm] = useState<ShareSettingsFormState>(() => shareSettingsToForm(null, roots));
@@ -73,12 +78,12 @@ export function ShareManagementPanel({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const reportedIssueSignature = useRef<string | null>(null);
+  const reportedPendingApprovalId = useRef<string | null>(null);
   const pendingShareApproval = pendingApprovals.find((approval) => approval.kind === "share_operation") ?? null;
   const validationIssues = useMemo(() => validateShareForm(form, roots), [form, roots]);
-  const visibleValidationIssues = pendingShareApproval ? [] : validationIssues.slice(0, 4);
-  const submitDisabled = loading || submitting || Boolean(pendingShareApproval) || validationIssues.length > 0 || !sessionId;
+  const submitDisabled = loading || submitting || Boolean(pendingShareApproval) || !sessionId;
   const statusTone = shareStatusTone(summary, loading, error);
   const metrics = summary?.metrics ?? {
     shares: form.shares.length,
@@ -108,13 +113,28 @@ export function ShareManagementPanel({
         }
         setForm(shareSettingsToForm(settings, roots));
         setSummary(nextSummary);
+        notifySummaryIssues(nextSummary.issues, onNotifyError, reportedIssueSignature);
       } catch (nextError) {
         if (active) {
-          setError(errorMessage(nextError));
+          const message = errorMessage(nextError);
+          setError(message);
+          onNotifyError(message);
         }
       }
     }
   }, [roots]);
+
+  useEffect(() => {
+    if (!pendingShareApproval) {
+      reportedPendingApprovalId.current = null;
+      return;
+    }
+    if (reportedPendingApprovalId.current === pendingShareApproval.id) {
+      return;
+    }
+    reportedPendingApprovalId.current = pendingShareApproval.id;
+    onNotifyWarning(t("workspace.management.shares.pendingApproval"));
+  }, [onNotifyWarning, pendingShareApproval, t]);
 
   async function refreshShareData() {
     setRefreshing(true);
@@ -123,8 +143,11 @@ export function ShareManagementPanel({
       const [settings, nextSummary] = await Promise.all([getShareSettings(), getShareSummary()]);
       setForm(shareSettingsToForm(settings, roots));
       setSummary(nextSummary);
+      notifySummaryIssues(nextSummary.issues, onNotifyError, reportedIssueSignature);
     } catch (nextError) {
-      setError(errorMessage(nextError));
+      const message = errorMessage(nextError);
+      setError(message);
+      onNotifyError(message);
     } finally {
       setRefreshing(false);
     }
@@ -133,23 +156,26 @@ export function ShareManagementPanel({
   async function submitProposal(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!sessionId) {
-      setError(t("workspace.management.shares.errors.noSession"));
+      const message = t("workspace.management.shares.errors.noSession");
+      setError(message);
+      onNotifyError(message);
       return;
     }
     if (validationIssues.length > 0) {
-      setError(validationIssueText(validationIssues[0]!, t));
+      const message = validationIssueText(validationIssues[0]!, t);
+      setError(message);
+      onNotifyError(message);
       return;
     }
 
     setSubmitting(true);
     setError(null);
-    setNotice(null);
     try {
       await proposeShareSettings({
         sessionId,
         settings: shareFormToInput(form)
       });
-      setNotice(t("workspace.management.shares.proposalCreated"));
+      onNotifySuccess(t("workspace.management.shares.proposalCreated"));
       setForm((current) => ({
         ...current,
         account: {
@@ -160,14 +186,15 @@ export function ShareManagementPanel({
       }));
       await onWorkQueuesChanged();
     } catch (nextError) {
-      setError(errorMessage(nextError));
+      const message = errorMessage(nextError);
+      setError(message);
+      onNotifyError(message);
     } finally {
       setSubmitting(false);
     }
   }
 
   function updateAccount(patch: Partial<ShareSettingsFormState["account"]>) {
-    setNotice(null);
     setForm((current) => ({
       ...current,
       account: {
@@ -178,7 +205,6 @@ export function ShareManagementPanel({
   }
 
   function updateShare(index: number, patch: Partial<ShareDefinitionFormState>) {
-    setNotice(null);
     setForm((current) => ({
       ...current,
       shares: current.shares.map((share, shareIndex) =>
@@ -197,7 +223,6 @@ export function ShareManagementPanel({
     protocol: Protocol,
     patch: Partial<ShareProtocolFormState[Protocol]>
   ) {
-    setNotice(null);
     setForm((current) => ({
       ...current,
       shares: current.shares.map((share, shareIndex) => {
@@ -219,7 +244,6 @@ export function ShareManagementPanel({
   }
 
   function addShare() {
-    setNotice(null);
     setForm((current) => ({
       ...current,
       shares: [...current.shares, createShareFormState(roots, current.shares)]
@@ -227,7 +251,6 @@ export function ShareManagementPanel({
   }
 
   function removeShare(index: number) {
-    setNotice(null);
     setForm((current) => ({
       ...current,
       shares: current.shares.filter((_, shareIndex) => shareIndex !== index)
@@ -340,25 +363,6 @@ export function ShareManagementPanel({
           />
         </div>
 
-        {pendingShareApproval ? (
-          <div className="management-inline-message" role="status">
-            <CircleAlert aria-hidden="true" size={15} />
-            <span>{t("workspace.management.shares.pendingApproval")}</span>
-          </div>
-        ) : null}
-
-        {visibleValidationIssues.length > 0 ? (
-          <div className="management-inline-message is-error" role="alert">
-            <CircleAlert aria-hidden="true" size={15} />
-            <span>{visibleValidationIssues.map((issue) => validationIssueText(issue, t)).join(" ")}</span>
-          </div>
-        ) : notice || error ? (
-          <div className={error ? "management-inline-message is-error" : "management-inline-message"} role={error ? "alert" : "status"}>
-            {error ? <CircleAlert aria-hidden="true" size={15} /> : <CircleCheck aria-hidden="true" size={15} />}
-            <span>{error ?? notice}</span>
-          </div>
-        ) : null}
-
         <section className="management-section share-account-section">
           <SectionHeader title={t("workspace.management.shares.accountTitle")} description={t("workspace.management.shares.accountDescription")} />
           <fieldset className="share-field-grid">
@@ -369,7 +373,6 @@ export function ShareManagementPanel({
                   type="checkbox"
                   checked={form.enabled}
                   onChange={(event) => {
-                    setNotice(null);
                     setForm((current) => ({ ...current, enabled: event.target.checked }));
                   }}
                 />
@@ -402,7 +405,6 @@ export function ShareManagementPanel({
               <input
                 value={form.helperSocketPath}
                 onChange={(event) => {
-                  setNotice(null);
                   setForm((current) => ({ ...current, helperSocketPath: event.target.value }));
                 }}
                 placeholder="/run/sigmaos/share-helper.sock"
@@ -805,7 +807,7 @@ function shareStatusDetail(summary: ShareSummary | null, loading: boolean, error
     return t("workspace.management.shares.loading");
   }
   if (error) {
-    return error;
+    return t("workspace.management.shares.disabledDetail");
   }
   if (!summary?.enabled) {
     return t("workspace.management.shares.disabledDetail");
@@ -862,4 +864,27 @@ function validationIssueText(issue: ShareFormValidationIssue, t: Translate): str
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function notifySummaryIssues(
+  issues: Array<{ source: string; message: string }>,
+  onNotifyError: (message: string | null) => void,
+  reportedIssueSignature: { current: string | null }
+): void {
+  const signature = issues.map((issue) => `${issue.source}:${issue.message}`).join("\u0000");
+  if (!signature) {
+    reportedIssueSignature.current = null;
+    onNotifyError(null);
+    return;
+  }
+  if (reportedIssueSignature.current === signature) {
+    return;
+  }
+  reportedIssueSignature.current = signature;
+  onNotifyError(
+    issues
+      .slice(0, 3)
+      .map((issue) => `${issue.source}: ${issue.message}`)
+      .join(" · ")
+  );
 }

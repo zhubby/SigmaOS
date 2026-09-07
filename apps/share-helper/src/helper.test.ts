@@ -106,6 +106,10 @@ describe("share helper", () => {
       command: "mdadm",
       args: ["--detail", "--scan"]
     });
+    expect(validateStorageHelperRequest({ command: "mdadm", args: ["--detail", "/dev/md/pool1"] })).toEqual({
+      command: "mdadm",
+      args: ["--detail", "/dev/md/pool1"]
+    });
     expect(validateStorageHelperRequest({ command: "smartctl", args: ["--all", "--json", "-d", "sat", "/dev/sda"] })).toEqual({
       command: "smartctl",
       args: ["--all", "--json", "-d", "sat", "/dev/sda"]
@@ -114,6 +118,9 @@ describe("share helper", () => {
       "Invalid storage helper request"
     );
     expect(() => validateStorageHelperRequest({ command: "mdadm", args: ["--create", "/dev/md0"] })).toThrow(
+      "Unsupported mdadm request"
+    );
+    expect(() => validateStorageHelperRequest({ command: "mdadm", args: ["--detail", "/dev/md/pool1/child"] })).toThrow(
       "Unsupported mdadm request"
     );
   });
@@ -194,7 +201,42 @@ describe("share helper", () => {
     await expect(readFile(fstabPath, "utf8")).resolves.toContain(
       `UUID=11111111-2222-3333-4444-555555555555 ${path.join(mountRoot, "archive")} ext4 defaults,nofail,x-systemd.device-timeout=30s 0 2`
     );
+    await expect(readdir(path.dirname(fstabPath))).resolves.toEqual(["fstab"]);
     await expect(readdir(mdadmRuntimePath)).resolves.toEqual([]);
+  });
+
+  it("clears stale RAID metadata before recreating a selected pool", async () => {
+    const fstabPath = path.join(tempDir, "etc/fstab");
+    const mountRoot = path.join(tempDir, "nas-pools");
+    const mdDeviceRoot = path.join(tempDir, "dev/md");
+    const mdadmRuntimePath = path.join(tempDir, "run/mdadm");
+    await mkdir(path.dirname(fstabPath), { recursive: true });
+    await writeFile(fstabPath, "# managed by test\n", "utf8");
+    const runner = new StorageCommandRunner("", true);
+
+    await applyStoragePoolOperation(storagePoolProposal(), runner, {
+      fstabPath,
+      mountRoot,
+      mdDeviceRoot,
+      mdadmRuntimePath,
+      mdSysBlockPath: path.join(tempDir, "missing-sys-block")
+    });
+
+    expect(runner.calls).toContain(
+      `mdadm --zero-superblock --force /dev/sda /dev/sdb`
+    );
+  });
+
+  it("refuses RAID metadata that is still held by an active array", async () => {
+    const sysBlockPath = path.join(tempDir, "sys/block");
+    await mkdir(path.join(sysBlockPath, "sda/holders/md0"), { recursive: true });
+    const runner = new StorageCommandRunner("", true);
+
+    await expect(
+      applyStoragePoolOperation(storagePoolProposal(), runner, {
+        mdSysBlockPath: sysBlockPath
+      })
+    ).rejects.toThrow("active RAID array");
   });
 
   it("stops the array and removes a new mount directory when execution fails", async () => {
@@ -215,8 +257,9 @@ describe("share helper", () => {
         mdSysBlockPath: path.join(tempDir, "missing-sys-block")
       })
     ).rejects.toThrow("findmnt failed");
-    expect(runner.calls.at(-2)).toBe(`umount ${path.join(mountRoot, "archive")}`);
-    expect(runner.calls.at(-1)).toBe(`mdadm --stop ${path.join(mdDeviceRoot, "archive")}`);
+    expect(runner.calls.at(-3)).toBe(`umount ${path.join(mountRoot, "archive")}`);
+    expect(runner.calls.at(-2)).toBe(`mdadm --stop ${path.join(mdDeviceRoot, "archive")}`);
+    expect(runner.calls.at(-1)).toBe(`mdadm --zero-superblock --force /dev/sda /dev/sdb`);
     await expect(readFile(fstabPath, "utf8")).resolves.toBe("# managed by test\n");
   });
 
@@ -284,7 +327,10 @@ class FakeHelperCommandRunner implements HelperCommandRunner {
 class StorageCommandRunner implements HelperCommandRunner {
   calls: string[] = [];
 
-  constructor(private readonly failCommand: string | null = null) {}
+  constructor(
+    private readonly failCommand: string | null = null,
+    private readonly staleRaidMember = false
+  ) {}
 
   async run(command: string, args: string[]): Promise<string> {
     this.calls.push([command, ...args].join(" "));
@@ -294,8 +340,8 @@ class StorageCommandRunner implements HelperCommandRunner {
     if (command === "lsblk") {
       return JSON.stringify({
         blockdevices: [
-          { path: "/dev/sda", type: "disk", fstype: null, mountpoints: [], children: [] },
-          { path: "/dev/sdb", type: "disk", fstype: null, mountpoints: [], children: [] }
+          { path: "/dev/sda", type: "disk", fstype: this.staleRaidMember ? "linux_raid_member" : null, mountpoints: [], children: [] },
+          { path: "/dev/sdb", type: "disk", fstype: this.staleRaidMember ? "linux_raid_member" : null, mountpoints: [], children: [] }
         ]
       });
     }

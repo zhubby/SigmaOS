@@ -20,6 +20,7 @@ export interface UploadItemState {
 export interface UploadBatchState {
   id: string;
   rootId: string;
+  storagePoolId: string;
   targetPath: string;
   createdAt: string;
   status: UploadStatus;
@@ -120,6 +121,7 @@ export async function collectUploadSourcesFromDataTransfer(dataTransfer: DataTra
 export function createUploadBatch(input: {
   id: string;
   rootId: string;
+  storagePoolId: string;
   currentPath: string;
   sources: UploadSource[];
 }): UploadBatchState {
@@ -131,6 +133,7 @@ export function createUploadBatch(input: {
   return {
     id: input.id,
     rootId: input.rootId,
+    storagePoolId: input.storagePoolId,
     targetPath,
     createdAt: new Date().toISOString(),
     status: "queued",

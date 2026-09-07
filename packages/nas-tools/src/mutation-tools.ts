@@ -111,6 +111,9 @@ export async function restoreTrashPath(
 ): Promise<AppliedMutation> {
   const trash = await resolveSafeExistingPath(path.dirname(input.trashPath), path.basename(input.trashPath));
   const target = await resolveSafeTargetPath(root.path, input.originalPath);
+  // The target may not exist yet, so lexical containment alone cannot detect a
+  // parent symlink that would redirect the restore outside the NAS root.
+  await assertNoSymlinkPathSegments(target.rootRealPath, path.dirname(target.absolutePath));
   await assertTargetDoesNotExist(target.absolutePath);
   await mkdir(path.dirname(target.absolutePath), { recursive: true });
   await rename(trash.realPath, target.absolutePath);
@@ -215,6 +218,7 @@ async function applyMkdir(root: NasRootRecord, proposal: FileOperationProposal):
   }
 
   const target = await resolveSafeTargetPath(root.path, proposal.targetPath);
+  await assertNoSymlinkPathSegments(target.rootRealPath, path.dirname(target.absolutePath));
   await mkdir(target.absolutePath, { recursive: false });
   return {
     proposal,
@@ -609,6 +613,7 @@ async function rollbackMove(
 
   const current = await resolveSafeExistingPath(root.path, operation.targetPath);
   const original = await resolveSafeTargetPath(root.path, operation.sourcePath);
+  await assertNoSymlinkPathSegments(original.rootRealPath, path.dirname(original.absolutePath));
   await assertTargetDoesNotExist(original.absolutePath);
   await mkdir(path.dirname(original.absolutePath), { recursive: true });
   await rename(current.realPath, original.absolutePath);

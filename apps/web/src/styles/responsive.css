@@ -263,7 +263,9 @@
   }
 
   .files-navigation-bar,
-  .files-navigation-bar.has-root-switcher {
+  .files-navigation-bar.has-root-switcher,
+  .files-navigation-bar.has-storage-pool-switcher,
+  .files-navigation-bar.has-root-switcher.has-storage-pool-switcher.has-multiple-switchers {
     grid-template-columns: 1fr;
   }
 

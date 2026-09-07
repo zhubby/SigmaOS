@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Activity,
@@ -63,12 +63,19 @@ interface Gauge {
   tone: GaugeTone;
 }
 
-export function SystemNetworkManagementPanel({ locale }: { locale: SupportedLocale }) {
+export function SystemNetworkManagementPanel({
+  locale,
+  onNotifyError
+}: {
+  locale: SupportedLocale;
+  onNotifyError: (message: string | null) => void;
+}) {
   const { t } = useTranslation();
   const translate = t as Translate;
   const [summary, setSummary] = useState<NetworkSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const reportedIssueSignature = useRef<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -84,10 +91,13 @@ export function SystemNetworkManagementPanel({ locale }: { locale: SupportedLoca
         const nextSummary = await getSystemNetwork();
         if (active) {
           setSummary(nextSummary);
+          notifySummaryIssues(nextSummary.issues, onNotifyError, reportedIssueSignature);
         }
       } catch (nextError) {
         if (active) {
-          setError(errorMessage(nextError));
+          const message = errorMessage(nextError);
+          setError(message);
+          onNotifyError(message);
         }
       } finally {
         if (active) {
@@ -101,9 +111,13 @@ export function SystemNetworkManagementPanel({ locale }: { locale: SupportedLoca
     setLoading(true);
     setError(null);
     try {
-      setSummary(await getSystemNetwork());
+      const nextSummary = await getSystemNetwork();
+      setSummary(nextSummary);
+      notifySummaryIssues(nextSummary.issues, onNotifyError, reportedIssueSignature);
     } catch (nextError) {
-      setError(errorMessage(nextError));
+      const message = errorMessage(nextError);
+      setError(message);
+      onNotifyError(message);
     } finally {
       setLoading(false);
     }
@@ -163,8 +177,6 @@ export function SystemNetworkManagementPanel({ locale }: { locale: SupportedLoca
             </dl>
           </div>
         </section>
-
-        <SystemIssues error={error} issues={summary?.issues ?? []} />
 
         <div className="management-metric-grid">
           {networkMetrics(summary, locale, translate).map((metric) => (
@@ -256,18 +268,21 @@ export function SystemNetworkManagementPanel({ locale }: { locale: SupportedLoca
 export function SystemStorageManagementPanel({
   locale,
   sessionId,
-  onWorkQueuesChanged
+  onWorkQueuesChanged,
+  onNotifyError,
+  onNotifySuccess
 }: {
   locale: SupportedLocale;
   sessionId: string | null;
   onWorkQueuesChanged: () => void | Promise<void>;
+  onNotifyError: (message: string | null) => void;
+  onNotifySuccess: (message: string | null) => void;
 }) {
   const { t } = useTranslation();
   const translate = t as Translate;
   const [summary, setSummary] = useState<StorageSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
@@ -277,6 +292,7 @@ export function SystemStorageManagementPanel({
     filesystem: "ext4",
     devices: []
   });
+  const reportedIssueSignature = useRef<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -292,10 +308,13 @@ export function SystemStorageManagementPanel({
         const nextSummary = await getSystemStorage();
         if (active) {
           setSummary(nextSummary);
+          notifySummaryIssues(nextSummary.issues, onNotifyError, reportedIssueSignature);
         }
       } catch (nextError) {
         if (active) {
-          setError(errorMessage(nextError));
+          const message = errorMessage(nextError);
+          setError(message);
+          onNotifyError(message);
         }
       } finally {
         if (active) {
@@ -309,9 +328,13 @@ export function SystemStorageManagementPanel({
     setLoading(true);
     setError(null);
     try {
-      setSummary(await getSystemStorage());
+      const nextSummary = await getSystemStorage();
+      setSummary(nextSummary);
+      notifySummaryIssues(nextSummary.issues, onNotifyError, reportedIssueSignature);
     } catch (nextError) {
-      setError(errorMessage(nextError));
+      const message = errorMessage(nextError);
+      setError(message);
+      onNotifyError(message);
     } finally {
       setLoading(false);
     }
@@ -322,8 +345,9 @@ export function SystemStorageManagementPanel({
   const canCreatePool = Boolean(summary?.capabilities.canCreatePool && sessionId);
 
   function openCreateModal() {
-    setNotice(null);
     setError(null);
+    onNotifyError(null);
+    onNotifySuccess(null);
     setConfirmed(false);
     setCreateOpen(true);
   }
@@ -335,7 +359,6 @@ export function SystemStorageManagementPanel({
   }
 
   function toggleDevice(device: string, checked: boolean) {
-    setNotice(null);
     setForm((current) => ({
       ...current,
       devices: checked ? [...new Set([...current.devices, device])] : current.devices.filter((path) => path !== device)
@@ -344,18 +367,19 @@ export function SystemStorageManagementPanel({
 
   async function submitStorageProposal(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    onNotifyError(null);
     if (!sessionId) {
-      setError(t("workspace.management.storage.errors.noSession"));
+      const message = t("workspace.management.storage.errors.noSession");
+      onNotifyError(message);
       return;
     }
     if (validationIssues.length > 0) {
-      setError(storageValidationIssueText(validationIssues[0]!, t));
+      onNotifyError(storageValidationIssueText(validationIssues[0]!, t));
       return;
     }
 
     setSubmitting(true);
     setError(null);
-    setNotice(null);
     try {
       await createStoragePool({
         sessionId,
@@ -365,14 +389,15 @@ export function SystemStorageManagementPanel({
         filesystem: form.filesystem,
         confirm: true
       });
-      setNotice(t("workspace.management.storage.poolCreated"));
+      onNotifySuccess(t("workspace.management.storage.poolCreated"));
       setCreateOpen(false);
       setForm({ name: "", raidLevel: "1", filesystem: "ext4", devices: [] });
       setConfirmed(false);
       await onWorkQueuesChanged();
     } catch (nextError) {
       setCreateOpen(false);
-      setError(errorMessage(nextError));
+      const message = errorMessage(nextError);
+      onNotifyError(message);
     } finally {
       setSubmitting(false);
     }
@@ -441,15 +466,6 @@ export function SystemStorageManagementPanel({
             </dl>
           </div>
         </section>
-
-        <SystemIssues error={error} issues={summary?.issues ?? []} />
-
-        {notice ? (
-          <div className="management-inline-message" role="status">
-            <CircleCheck aria-hidden="true" size={15} />
-            <span>{notice}</span>
-          </div>
-        ) : null}
 
         <div className="management-metric-grid">
           {storageMetrics(summary, locale, translate).map((metric) => (
@@ -577,8 +593,8 @@ export function SystemStorageManagementPanel({
                   <span>{t("workspace.management.storage.fields.name")}</span>
                   <input
                     value={form.name}
+                    disabled={submitting}
                     onChange={(event) => {
-                      setNotice(null);
                       setForm((current) => ({ ...current, name: event.target.value }));
                     }}
                     placeholder="media"
@@ -591,8 +607,8 @@ export function SystemStorageManagementPanel({
                   <span>{t("workspace.management.storage.fields.raid")}</span>
                   <select
                     value={form.raidLevel}
+                    disabled={submitting}
                     onChange={(event) => {
-                      setNotice(null);
                       setForm((current) => ({ ...current, raidLevel: event.target.value as StorageRaidLevel }));
                     }}
                   >
@@ -607,8 +623,8 @@ export function SystemStorageManagementPanel({
                   <span>{t("workspace.management.storage.fields.filesystem")}</span>
                   <select
                     value={form.filesystem}
+                    disabled={submitting}
                     onChange={(event) => {
-                      setNotice(null);
                       setForm((current) => ({ ...current, filesystem: event.target.value as StorageFilesystem }));
                     }}
                   >
@@ -659,14 +675,14 @@ export function SystemStorageManagementPanel({
                 </div>
               </section>
 
-              <div className="management-inline-message is-warning" role="alert">
+              <p className="storage-pool-risk-note">
                 <CircleAlert aria-hidden="true" size={15} />
                 <span>
                   {t("workspace.management.storage.eraseWarning", {
                     filesystem: t(`workspace.management.storage.filesystems.${form.filesystem}`)
                   })}
                 </span>
-              </div>
+              </p>
 
               <label className="storage-pool-confirmation">
                 <input
@@ -678,10 +694,25 @@ export function SystemStorageManagementPanel({
                 <span>{t("workspace.management.storage.directApplyConfirmation")}</span>
               </label>
 
-              {validationIssues.length ? (
-                <div className="management-inline-message is-error" role="alert">
-                  <CircleAlert aria-hidden="true" size={15} />
-                  <span>{storageValidationIssueText(validationIssues[0]!, t)}</span>
+              {submitting ? (
+                <div className="storage-pool-progress" aria-live="polite">
+                  <div className="storage-pool-progress-summary">
+                    <LoaderCircle className="storage-pool-spinner" aria-hidden="true" size={17} />
+                    <div>
+                      <strong id="storage-pool-progress-title">{t("workspace.management.storage.creatingTitle")}</strong>
+                      <span id="storage-pool-progress-description">
+                        {t("workspace.management.storage.creatingDescription")}
+                      </span>
+                    </div>
+                  </div>
+                  <div
+                    className="storage-pool-progress-track"
+                    role="progressbar"
+                    aria-labelledby="storage-pool-progress-title"
+                    aria-describedby="storage-pool-progress-description"
+                  >
+                    <span />
+                  </div>
                 </div>
               ) : null}
 
@@ -689,8 +720,12 @@ export function SystemStorageManagementPanel({
                 <button type="button" onClick={closeCreateModal} disabled={submitting}>
                   {t("common.actions.cancel")}
                 </button>
-                <button type="submit" className="is-primary" disabled={submitting || validationIssues.length > 0 || !sessionId || !confirmed}>
-                  {submitting ? <LoaderCircle aria-hidden="true" size={15} /> : <Plus aria-hidden="true" size={15} />}
+                <button type="submit" className="is-primary" disabled={submitting || !sessionId || !confirmed}>
+                  {submitting ? (
+                    <LoaderCircle className="storage-pool-spinner" aria-hidden="true" size={15} />
+                  ) : (
+                    <Plus aria-hidden="true" size={15} />
+                  )}
                   <span>{submitting ? t("common.states.loading") : t("workspace.management.storage.createPool")}</span>
                 </button>
               </footer>
@@ -719,30 +754,6 @@ function SectionHeader({ title, description }: { title: string; description: str
         <p>{description}</p>
       </div>
     </header>
-  );
-}
-
-function SystemIssues({
-  error,
-  issues
-}: {
-  error: string | null;
-  issues: Array<{ source: string; message: string }>;
-}) {
-  if (!error && issues.length === 0) {
-    return null;
-  }
-  return (
-    <div className="management-inline-message is-error system-issue-list" role="status">
-      <CircleAlert aria-hidden="true" size={15} />
-      <span>
-        {error ??
-          issues
-            .slice(0, 3)
-            .map((issue) => `${issue.source}: ${issue.message}`)
-            .join(" · ")}
-      </span>
-    </div>
   );
 }
 
@@ -982,7 +993,7 @@ function networkStatusDetail(
     return t("workspace.management.network.loading");
   }
   if (error) {
-    return error;
+    return t("workspace.management.network.unavailableDetail");
   }
   if (summary?.status === "partial") {
     return t("workspace.management.network.partialDetail");
@@ -1003,7 +1014,7 @@ function storageStatusDetail(
     return t("workspace.management.storage.loading");
   }
   if (error) {
-    return error;
+    return t("workspace.management.storage.unavailableDetail");
   }
   if (summary?.status === "partial") {
     return t("workspace.management.storage.partialDetail");
@@ -1226,4 +1237,27 @@ function statusIcon(state: StatusTone) {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function notifySummaryIssues(
+  issues: Array<{ source: string; message: string }>,
+  onNotifyError: (message: string | null) => void,
+  reportedIssueSignature: { current: string | null }
+): void {
+  const signature = issues.map((issue) => `${issue.source}:${issue.message}`).join("\u0000");
+  if (!signature) {
+    reportedIssueSignature.current = null;
+    onNotifyError(null);
+    return;
+  }
+  if (reportedIssueSignature.current === signature) {
+    return;
+  }
+  reportedIssueSignature.current = signature;
+  onNotifyError(
+    issues
+      .slice(0, 3)
+      .map((issue) => `${issue.source}: ${issue.message}`)
+      .join(" · ")
+  );
 }

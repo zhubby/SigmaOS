@@ -48,13 +48,66 @@ import type {
 import type { DockerComposeRuntime } from "./lib/docker-compose.js";
 import type { DockerEngineRuntime, DockerExecStream } from "./lib/docker-client.js";
 import type { SystemCommandRunner } from "./lib/system-management.js";
-import { buildServer } from "./server.js";
+import { buildServer as buildApiServer, type ServerDependencies } from "./server.js";
 
 const execFileAsync = promisify(execFile);
+const TEST_STORAGE_POOL_ID = "/dev/md/test-pool";
 
 let tempDir: string;
 let rootDir: string;
 let db: SigmaDatabase;
+
+async function buildServer(dependencies: ServerDependencies) {
+  return await buildApiServer({
+    ...dependencies,
+    system: dependencies.system ?? { commandRunner: testStorageCommandRunner() }
+  });
+}
+
+function testStorageCommandRunner(): SystemCommandRunner {
+  return testStorageCommandRunnerFor(rootDir, TEST_STORAGE_POOL_ID);
+}
+
+function testStorageCommandRunnerFor(target: string, poolId = TEST_STORAGE_POOL_ID): SystemCommandRunner {
+  return {
+    async run(command, args) {
+      if (command === "lsblk") {
+        return JSON.stringify({ blockdevices: [] });
+      }
+      if (command === "findmnt") {
+        return JSON.stringify({
+          filesystems: [
+            {
+              source: poolId,
+              target,
+              fstype: "ext4",
+              size: 1024,
+              used: 128,
+              avail: 896,
+              "use%": "12.5%"
+            }
+          ]
+        });
+      }
+      if (command === "mdadm" && args[0] === "--detail" && args[1] === "--scan") {
+        return `ARRAY ${poolId} name=test-pool UUID=test-pool`;
+      }
+      if (command === "mdadm" && args[0] === "--detail") {
+        return [
+          "Name : test-pool",
+          "Raid Level : raid1",
+          "State : clean",
+          "UUID : test-pool",
+          "Array Size : 1024 KiB"
+        ].join("\n");
+      }
+      if (command === "smartctl") {
+        return JSON.stringify({ devices: [] });
+      }
+      return JSON.stringify({});
+    }
+  };
+}
 
 beforeEach(async () => {
   tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-api-"));
@@ -238,7 +291,7 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({
       method: "GET",
-      url: "/api/files?rootId=local&path=."
+      url: `/api/files?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=.`
     });
 
     expect(response.statusCode).toBe(200);
@@ -256,6 +309,205 @@ describe("API server", () => {
     await server.close();
   });
 
+  it("requires a mounted storage pool and matching NAS root for file access", async () => {
+    const server = await buildServer({ config: testConfig(tempDir), db });
+
+    const missingPool = await server.inject({
+      method: "GET",
+      url: "/api/files?rootId=local&path=."
+    });
+    const unknownPool = await server.inject({
+      method: "GET",
+      url: "/api/files?rootId=local&storagePoolId=missing&path=."
+    });
+
+    const baseRunner = testStorageCommandRunner();
+    const unmountedServer = await buildServer({
+      config: testConfig(tempDir),
+      db,
+      system: {
+        commandRunner: {
+          async run(command, args) {
+            if (command === "findmnt") {
+              return JSON.stringify({ filesystems: [] });
+            }
+            return await baseRunner.run(command, args);
+          }
+        }
+      }
+    });
+    const unmountedPool = await unmountedServer.inject({
+      method: "GET",
+      url: `/api/files?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=.`
+    });
+    await unmountedServer.close();
+
+    const otherRoot = path.join(tempDir, "other-root");
+    await mkdir(otherRoot);
+    ensureNasRoots(db, [{ id: "other", name: "Other", path: otherRoot }]);
+    const mismatchedRoot = await server.inject({
+      method: "GET",
+      url: `/api/files?rootId=other&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=.`
+    });
+
+    expect(missingPool.statusCode).toBe(400);
+    expect(unknownPool.statusCode).toBe(404);
+    expect(unmountedPool.statusCode).toBe(404);
+    expect(mismatchedRoot.statusCode).toBe(403);
+    await server.close();
+  });
+
+  it("isolates listings and mutations to the selected storage pool", async () => {
+    const poolDir = path.join(rootDir, "pool");
+    await mkdir(poolDir);
+    await writeFile(path.join(poolDir, "inside.txt"), "inside");
+    await writeFile(path.join(rootDir, "outside.txt"), "outside");
+    await symlink(path.join(rootDir, "outside.txt"), path.join(poolDir, "escape.txt"));
+    await writeFile(path.join(rootDir, "outside-index.txt"), "match outside");
+    upsertIndexedFile(db, {
+      rootId: "local",
+      path: "pool/../outside-index.txt",
+      name: "outside-index.txt",
+      mimeType: "text/plain",
+      sizeBytes: 14,
+      mtimeMs: Date.now(),
+      hash: "outside-index",
+      body: "match outside"
+    });
+    const server = await buildServer({
+      config: testConfig(tempDir),
+      db,
+      system: { commandRunner: testStorageCommandRunnerFor(poolDir) }
+    });
+
+    const listing = await server.inject({
+      method: "GET",
+      url: `/api/files?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=pool`
+    });
+    const traversal = await server.inject({
+      method: "GET",
+      url: `/api/files?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=pool/../outside.txt`
+    });
+    const absolute = await server.inject({
+      method: "GET",
+      url: `/api/files?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=${encodeURIComponent(path.join(rootDir, "outside.txt"))}`
+    });
+    const symlinkEscape = await server.inject({
+      method: "GET",
+      url: `/api/files/meta?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=pool/escape.txt`
+    });
+    const session = createSession(db, { rootId: "local" });
+    const crossPoolProposal = await server.inject({
+      method: "POST",
+      url: "/api/files/proposals",
+      payload: {
+        sessionId: session.id,
+        rootId: "local",
+        storagePoolId: TEST_STORAGE_POOL_ID,
+        operation: "copy",
+        sourcePath: "pool/inside.txt",
+        targetPath: "outside.txt"
+      }
+    });
+    const scopedSearch = await server.inject({
+      method: "GET",
+      url: `/api/search?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=pool&q=match`
+    });
+
+    expect(listing.statusCode).toBe(200);
+    expect(listing.json().entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "inside.txt", path: "pool/inside.txt", isSafe: true }),
+        expect.objectContaining({ name: "escape.txt", path: "pool/escape.txt", isSafe: false })
+      ])
+    );
+    expect(traversal.statusCode).toBe(400);
+    expect(absolute.statusCode).toBe(400);
+    expect(symlinkEscape.statusCode).toBe(403);
+    expect(crossPoolProposal.statusCode).toBe(403);
+    expect(scopedSearch.statusCode).toBe(200);
+    expect(scopedSearch.json().files).toEqual([]);
+    await server.close();
+  });
+
+  it("rechecks storage pool boundaries during rollback and trash restore", async () => {
+    const poolDir = path.join(rootDir, "pool");
+    const alternateMount = path.join(rootDir, "alternate");
+    await mkdir(poolDir);
+    await mkdir(alternateMount);
+    await writeFile(path.join(poolDir, "rollback.txt"), "rollback");
+    let mountpoint = poolDir;
+    const commandRunner: SystemCommandRunner = {
+      ...testStorageCommandRunnerFor(poolDir),
+      async run(command, args) {
+        if (command === "findmnt") {
+          return JSON.stringify({
+            filesystems: [
+              {
+                source: TEST_STORAGE_POOL_ID,
+                target: mountpoint,
+                fstype: "ext4",
+                size: 1024,
+                used: 128,
+                avail: 896,
+                "use%": "12.5%"
+              }
+            ]
+          });
+        }
+        return await testStorageCommandRunnerFor(poolDir).run(command, args);
+      }
+    };
+    const server = await buildServer({ config: testConfig(tempDir), db, system: { commandRunner } });
+
+    const upload = await server.inject({
+      method: "PUT",
+      url: `/api/files/upload?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=pool/rollback-upload.txt`,
+      headers: { "content-type": "application/octet-stream" },
+      payload: "uploaded"
+    });
+    expect(upload.statusCode).toBe(201);
+
+    mountpoint = alternateMount;
+    const rollback = await server.inject({
+      method: "POST",
+      url: `/api/operations/${upload.json().operation.id}/rollback`
+    });
+    expect(rollback.statusCode).toBe(403);
+    await expect(readFile(path.join(poolDir, "rollback-upload.txt"), "utf8")).resolves.toBe("uploaded");
+
+    mountpoint = poolDir;
+    const session = createSession(db, { rootId: "local" });
+    const proposal = await server.inject({
+      method: "POST",
+      url: "/api/files/proposals",
+      payload: {
+        sessionId: session.id,
+        rootId: "local",
+        storagePoolId: TEST_STORAGE_POOL_ID,
+        operation: "trash",
+        sourcePath: "pool/rollback.txt"
+      }
+    });
+    expect(proposal.statusCode).toBe(202);
+    const approvalId = proposal.json().approval.id as string;
+    const applied = await server.inject({
+      method: "POST",
+      url: `/api/approvals/${approvalId}/approve`
+    });
+    expect(applied.statusCode).toBe(202);
+    const trashEntryId = applied.json().operations[0].metadata.trashEntryId as string;
+    expect(getTrashEntry(db, trashEntryId)?.metadata.storagePoolId).toBe(TEST_STORAGE_POOL_ID);
+
+    mountpoint = alternateMount;
+    const restore = await server.inject({
+      method: "POST",
+      url: `/api/trash/${trashEntryId}/restore`
+    });
+    expect(restore.statusCode).toBe(403);
+    await server.close();
+  });
+
   it("lists Git status for files inside a repository", async () => {
     await git(["init", "-b", "main"]);
     await writeFile(path.join(rootDir, "clean.txt"), "clean");
@@ -268,7 +520,7 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({
       method: "GET",
-      url: "/api/files?rootId=local&path=."
+      url: `/api/files?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=.`
     });
 
     expect(response.statusCode).toBe(200);
@@ -313,7 +565,7 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({
       method: "GET",
-      url: "/api/search?rootId=local&path=.&q=match"
+      url: `/api/search?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=.&q=match`
     });
 
     expect(response.statusCode).toBe(200);
@@ -344,7 +596,7 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({
       method: "GET",
-      url: "/api/files?rootId=local&path=broken"
+      url: `/api/files?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=broken`
     });
 
     expect(response.statusCode).toBe(200);
@@ -378,7 +630,7 @@ describe("API server", () => {
       process.env.PATH = fakeBinPath;
       const response = await server.inject({
         method: "GET",
-        url: "/api/files?rootId=local&path=."
+        url: `/api/files?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=.`
       });
 
       expect(response.statusCode).toBe(200);
@@ -400,7 +652,7 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({
       method: "GET",
-      url: "/api/files?rootId=local&path=missing"
+      url: `/api/files?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=missing`
     });
 
     expect(response.statusCode).toBe(404);
@@ -1639,7 +1891,7 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({
       method: "GET",
-      url: "/api/files?rootId=local&path=.."
+      url: `/api/files?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=..`
     });
 
     expect(response.statusCode).toBe(400);
@@ -1871,7 +2123,7 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({
       method: "GET",
-      url: "/api/files/meta?rootId=local&path=hello.txt"
+      url: `/api/files/meta?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=hello.txt`
     });
 
     expect(response.statusCode).toBe(200);
@@ -1892,7 +2144,7 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({
       method: "GET",
-      url: "/api/files/text?rootId=local&path=long.txt&maxBytes=3"
+      url: `/api/files/text?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=long.txt&maxBytes=3`
     });
 
     expect(response.statusCode).toBe(200);
@@ -1910,11 +2162,11 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const metaResponse = await server.inject({
       method: "GET",
-      url: "/api/files/meta?rootId=local&path=payload.bin"
+      url: `/api/files/meta?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=payload.bin`
     });
     const textResponse = await server.inject({
       method: "GET",
-      url: "/api/files/text?rootId=local&path=payload.bin&maxBytes=64"
+      url: `/api/files/text?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=payload.bin&maxBytes=64`
     });
 
     expect(metaResponse.statusCode).toBe(200);
@@ -1938,13 +2190,14 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const editable = await server.inject({
       method: "GET",
-      url: "/api/files/edit-text?rootId=local&path=hello.txt"
+      url: `/api/files/edit-text?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=hello.txt`
     });
     const save = await server.inject({
       method: "PUT",
       url: "/api/files/edit-text",
       payload: {
         rootId: "local",
+        storagePoolId: TEST_STORAGE_POOL_ID,
         path: "hello.txt",
         content: "changed",
         expectedModifiedAt: editable.json().modifiedAt
@@ -1977,7 +2230,7 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({
       method: "PUT",
-      url: "/api/files/upload?rootId=local&path=docs/uploads/notes.txt",
+      url: `/api/files/upload?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=docs/uploads/notes.txt`,
       headers: {
         "content-type": "application/octet-stream"
       },
@@ -2009,7 +2262,7 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({
       method: "PUT",
-      url: "/api/files/upload?rootId=local&path=existing.txt",
+      url: `/api/files/upload?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=existing.txt`,
       headers: {
         "content-type": "application/octet-stream"
       },
@@ -2031,6 +2284,7 @@ describe("API server", () => {
       payload: {
         sessionId: session.id,
         rootId: "local",
+        storagePoolId: TEST_STORAGE_POOL_ID,
         operation: "mkdir",
         targetPath: "projects"
       }
@@ -2050,6 +2304,7 @@ describe("API server", () => {
           {
             operation: "mkdir",
             rootId: "local",
+            storagePoolId: TEST_STORAGE_POOL_ID,
             targetPath: "projects",
             risk: "low",
             reversible: true
@@ -2074,6 +2329,7 @@ describe("API server", () => {
       payload: {
         sessionId: session.id,
         rootId: "local",
+        storagePoolId: TEST_STORAGE_POOL_ID,
         operation: "rename",
         sourcePath: "hello.txt",
         targetName: "renamed.txt"
@@ -2118,6 +2374,7 @@ describe("API server", () => {
       payload: {
         sessionId: session.id,
         rootId: "local",
+        storagePoolId: TEST_STORAGE_POOL_ID,
         operation: "trash",
         sourcePath: "hello.txt"
       }
@@ -2153,6 +2410,7 @@ describe("API server", () => {
         payload: {
           sessionId: session.id,
           rootId: "local",
+          storagePoolId: TEST_STORAGE_POOL_ID,
           operation,
           sourcePath: "hello.txt",
           targetPath: `archive/${operation}.txt`
@@ -2191,6 +2449,7 @@ describe("API server", () => {
       url: "/api/files/extract",
       payload: {
         rootId: "local",
+        storagePoolId: TEST_STORAGE_POOL_ID,
         path: "bundle.zip"
       }
     });
@@ -2220,6 +2479,7 @@ describe("API server", () => {
       payload: {
         sessionId: session.id,
         rootId: "local",
+        storagePoolId: TEST_STORAGE_POOL_ID,
         operation: "extract",
         sourcePath: "bundle.zip"
       }
@@ -2242,6 +2502,7 @@ describe("API server", () => {
       payload: {
         sessionId: session.id,
         rootId: "local",
+        storagePoolId: TEST_STORAGE_POOL_ID,
         operation: "copy",
         sourcePath: "folder",
         targetPath: "folder/child/folder"
@@ -2263,13 +2524,14 @@ describe("API server", () => {
       payload: {
         sessionId: session.id,
         rootId: "local",
+        storagePoolId: TEST_STORAGE_POOL_ID,
         operation: "trash",
         sourcePath: "."
       }
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: "Cannot mutate the NAS root" });
+    expect(response.json()).toEqual({ error: "Cannot mutate the storage pool root" });
     await server.close();
   });
 
@@ -2277,7 +2539,7 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const editable = await server.inject({
       method: "GET",
-      url: "/api/files/edit-text?rootId=local&path=hello.txt"
+      url: `/api/files/edit-text?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=hello.txt`
     });
     await writeFile(path.join(rootDir, "hello.txt"), "external");
 
@@ -2286,6 +2548,7 @@ describe("API server", () => {
       url: "/api/files/edit-text",
       payload: {
         rootId: "local",
+        storagePoolId: TEST_STORAGE_POOL_ID,
         path: "hello.txt",
         content: "changed",
         expectedModifiedAt: editable.json().modifiedAt
@@ -2302,7 +2565,7 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({
       method: "GET",
-      url: "/api/files/edit-text?rootId=local&path=hello-link.txt"
+      url: `/api/files/edit-text?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=hello-link.txt`
     });
 
     expect(response.statusCode).toBe(400);
@@ -2314,7 +2577,7 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({
       method: "GET",
-      url: "/api/files/blob?rootId=local&path=hello.txt"
+      url: `/api/files/blob?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=hello.txt`
     });
 
     expect(response.statusCode).toBe(200);
@@ -2327,7 +2590,7 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({
       method: "GET",
-      url: "/api/files/blob?rootId=local&path=hello.txt",
+      url: `/api/files/blob?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=hello.txt`,
       headers: {
         range: "bytes=1-3"
       }
@@ -2343,7 +2606,7 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({
       method: "GET",
-      url: "/api/files/blob?rootId=local&path=hello.txt",
+      url: `/api/files/blob?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=hello.txt`,
       headers: {
         range: "bytes=99-120"
       }
@@ -2359,7 +2622,7 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({
       method: "GET",
-      url: "/api/files/video?rootId=local&path=clip.mp4",
+      url: `/api/files/video?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=clip.mp4`,
       headers: {
         range: "bytes=1-5"
       }
@@ -2381,8 +2644,8 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db, videoTranscoder: { transcode } });
 
     const [first, second] = await Promise.all([
-      server.inject({ method: "GET", url: "/api/files/video?rootId=local&path=clip.mkv" }),
-      server.inject({ method: "GET", url: "/api/files/video?rootId=local&path=clip.mkv" })
+      server.inject({ method: "GET", url: `/api/files/video?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=clip.mkv` }),
+      server.inject({ method: "GET", url: `/api/files/video?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=clip.mkv` })
     ]);
 
     expect(first.statusCode).toBe(200);
@@ -2392,7 +2655,7 @@ describe("API server", () => {
     expect(transcode).toHaveBeenCalledTimes(1);
 
     await writeFile(path.join(rootDir, "clip.mkv"), "changed-source-video");
-    const changed = await server.inject({ method: "GET", url: "/api/files/video?rootId=local&path=clip.mkv" });
+    const changed = await server.inject({ method: "GET", url: `/api/files/video?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=clip.mkv` });
     expect(changed.statusCode).toBe(200);
     expect(transcode).toHaveBeenCalledTimes(2);
     await server.close();
@@ -2407,7 +2670,7 @@ describe("API server", () => {
 
     const response = await server.inject({
       method: "GET",
-      url: "/api/files/video?rootId=local&path=broken.avi"
+      url: `/api/files/video?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=broken.avi`
     });
 
     expect(response.statusCode).toBe(503);
@@ -2420,11 +2683,11 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const nonVideo = await server.inject({
       method: "GET",
-      url: "/api/files/video?rootId=local&path=hello.txt"
+      url: `/api/files/video?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=hello.txt`
     });
     const traversal = await server.inject({
       method: "GET",
-      url: "/api/files/video?rootId=local&path=.."
+      url: `/api/files/video?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=..`
     });
 
     expect(nonVideo.statusCode).toBe(415);
@@ -2436,7 +2699,7 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({
       method: "GET",
-      url: "/api/files/blob?rootId=local&path=.."
+      url: `/api/files/blob?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=..`
     });
 
     expect(response.statusCode).toBe(400);
@@ -2451,7 +2714,7 @@ describe("API server", () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({
       method: "GET",
-      url: "/api/search?rootId=local&q=alpha"
+      url: `/api/search?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&q=alpha`
     });
 
     expect(response.statusCode).toBe(200);
@@ -2479,7 +2742,7 @@ describe("API server", () => {
 
     const scoped = await server.inject({
       method: "GET",
-      url: "/api/search?rootId=local&path=docs&q=alpha"
+      url: `/api/search?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=docs&q=alpha`
     });
     expect(scoped.statusCode).toBe(200);
     expect(scoped.json()).toMatchObject({
@@ -2489,13 +2752,13 @@ describe("API server", () => {
 
     const traversal = await server.inject({
       method: "GET",
-      url: "/api/search?rootId=local&path=..&q=alpha"
+      url: `/api/search?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=..&q=alpha`
     });
     expect(traversal.statusCode).toBe(400);
 
     const filePath = await server.inject({
       method: "GET",
-      url: "/api/search?rootId=local&path=hello.txt&q=alpha"
+      url: `/api/search?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=hello.txt&q=alpha`
     });
     expect(filePath.statusCode).toBe(400);
     await server.close();
@@ -2530,7 +2793,7 @@ describe("API server", () => {
 
     const response = await server.inject({
       method: "GET",
-      url: "/api/search?rootId=local&path=docs&q=alpha"
+      url: `/api/search?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=docs&q=alpha`
     });
 
     expect(response.statusCode).toBe(200);

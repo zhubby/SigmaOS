@@ -247,19 +247,6 @@
   cursor: pointer;
 }
 
-.settings-error {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 12px 18px 0;
-  padding: 10px 12px;
-  border: 1px solid rgb(218 55 60 / 36%);
-  border-radius: 5px;
-  color: #ffb3b6;
-  background: rgb(218 55 60 / 13%);
-  font-size: 12.5px;
-}
-
 .settings-content-body {
   min-height: 0;
   overflow: auto;
@@ -690,24 +677,6 @@
   font-size: 12.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.settings-inline-error {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  padding: 9px 10px;
-  border: 1px solid rgb(218 55 60 / 28%);
-  border-radius: 5px;
-  color: #ffb3b6;
-  background: rgb(218 55 60 / 10%);
-  font-size: 11.5px;
-  line-height: 1.4;
-}
-
-.settings-inline-error svg {
-  flex: 0 0 auto;
 }
 
 .settings-system-grid {

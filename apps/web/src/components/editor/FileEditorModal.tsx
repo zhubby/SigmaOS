@@ -17,16 +17,20 @@ type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 export function FileEditorModal({
   rootId,
+  storagePoolId,
   meta,
   locale,
   onClose,
-  onSaved
+  onSaved,
+  onNotifyError
 }: {
   rootId: string;
+  storagePoolId: string;
   meta: FileMeta;
   locale: SupportedLocale;
   onClose: () => void;
   onSaved: (result: SaveEditableTextResult) => void;
+  onNotifyError: (message: string | null) => void;
 }) {
   const { t } = useTranslation();
   const translate = t as Translate;
@@ -64,19 +68,21 @@ export function FileEditorModal({
     setLastSavedAt(null);
 
     try {
-      const editable = await getEditableText(rootId, meta.path);
+      const editable = await getEditableText(rootId, meta.path, storagePoolId);
       setContent(editable.content);
       setSavedContent(editable.content);
       setModifiedAt(editable.modifiedAt);
       setLastSavedAt(editable.modifiedAt);
       setSaveStatus("saved");
     } catch (nextError) {
-      setError(toErrorMessage(nextError));
+      const message = toErrorMessage(nextError);
+      setError(message);
+      onNotifyError(message);
       setSaveStatus("error");
     } finally {
       setLoading(false);
     }
-  }, [meta.path, rootId]);
+  }, [meta.path, onNotifyError, rootId, storagePoolId]);
 
   useEffect(() => {
     void loadEditor();
@@ -93,6 +99,7 @@ export function FileEditorModal({
       try {
         const result = await saveEditableText({
           rootId,
+          storagePoolId,
           currentPath: meta.path,
           content: nextContent,
           expectedModifiedAt: modifiedAt
@@ -106,11 +113,12 @@ export function FileEditorModal({
       } catch (nextError) {
         const message = toErrorMessage(nextError);
         setError(message);
+        onNotifyError(message);
         setSaveStatus(message.includes("changed since") ? "conflict" : "error");
         return false;
       }
     },
-    [loading, meta.path, modifiedAt, rootId]
+    [loading, meta.path, modifiedAt, onNotifyError, rootId, storagePoolId]
   );
 
   useEffect(() => {
@@ -186,19 +194,6 @@ export function FileEditorModal({
           </button>
         </header>
 
-        {error ? (
-          <div className="editor-alert" role="alert">
-            <AlertTriangle aria-hidden="true" size={17} />
-            <span>{error}</span>
-            {saveStatus === "conflict" ? (
-              <button type="button" onClick={() => void loadEditor()}>
-                <RotateCcw aria-hidden="true" size={14} />
-                {t("editor.reload")}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-
         <div className={`editor-code-surface${loading ? " is-loading" : ""}`}>
           <pre ref={highlightRef} className={`editor-highlight language-${highlighted.language}`} aria-hidden="true">
             <code dangerouslySetInnerHTML={{ __html: highlighted.html }} />
@@ -220,6 +215,12 @@ export function FileEditorModal({
           <span>{descriptor.languageLabel}</span>
           <span>{formatBytes(contentBytes, locale)}</span>
           <span>{lastSavedAt ? t("editor.savedAt", { time: formatTime(lastSavedAt, locale) }) : t("editor.notSaved")}</span>
+          {blocked ? (
+            <button type="button" className="editor-footer-action" onClick={() => void loadEditor()}>
+              <RotateCcw aria-hidden="true" size={14} />
+              {t("editor.reload")}
+            </button>
+          ) : null}
         </footer>
       </section>
     </div>

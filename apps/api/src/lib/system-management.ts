@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import http from "node:http";
 import { promisify } from "node:util";
@@ -659,7 +660,7 @@ function mapMount(row: Record<string, unknown>): SystemStorageMount {
 }
 
 function mapStoragePool(array: SystemRaidArray, mounts: SystemStorageMount[]): SystemStoragePool {
-  const mount = mounts.find((candidate) => candidate.source === array.path) ?? null;
+  const mount = mounts.find((candidate) => storageDevicePathsEqual(candidate.source, array.path)) ?? null;
   return {
     id: array.path,
     name: array.name,
@@ -674,6 +675,19 @@ function mapStoragePool(array: SystemRaidArray, mounts: SystemStorageMount[]): S
     usedPercent: mount?.usedPercent ?? null,
     memberDevices: array.memberDevices
   };
+}
+
+function storageDevicePathsEqual(left: string, right: string): boolean {
+  if (left === right) {
+    return true;
+  }
+
+  try {
+    return realpathSync(left) === realpathSync(right);
+  } catch {
+    // Test doubles and offline arrays may not have device nodes to resolve.
+    return false;
+  }
 }
 
 function storagePoolStatus(array: SystemRaidArray): SystemStoragePool["status"] {

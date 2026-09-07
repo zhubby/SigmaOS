@@ -8,6 +8,8 @@ import {
   type SigmaDatabase
 } from "@sigmaos/db";
 import { rollbackFileMutation, restoreTrashPath } from "@sigmaos/nas-tools";
+import type { SystemManagementDependencies } from "./system-management.js";
+import { resolveScopedTargetPath, resolveStoragePoolScope, validateStoragePoolProposal } from "./storage-scope.js";
 
 type FileOperationRecord = NonNullable<ReturnType<typeof getFileOperation>>;
 
@@ -21,13 +23,18 @@ export class TrashRestoreError extends Error {
   }
 }
 
-export async function rollbackTrashOperation(db: SigmaDatabase, operation: FileOperationRecord) {
+export async function rollbackTrashOperation(
+  db: SigmaDatabase,
+  operation: FileOperationRecord,
+  system?: SystemManagementDependencies
+) {
   const trashEntryId = getStringMetadata(operation.metadata, "trashEntryId");
   if (!trashEntryId) {
     throw new Error("Trash operation is missing trash entry metadata");
   }
 
-  const { entry, root, restored } = await restoreTrashEntry(db, trashEntryId);
+  const { entry, root, restored } = await restoreTrashEntry(db, trashEntryId, system);
+  const storagePoolId = getStringMetadata(operation.metadata, "storagePoolId");
   return {
     operation: "restore" as const,
     sourcePath: entry.trashPath,
@@ -36,12 +43,17 @@ export async function rollbackTrashOperation(db: SigmaDatabase, operation: FileO
       ...restored.metadata,
       rootId: root.id,
       rollbackOf: operation.id,
-      trashEntryId: entry.id
+      trashEntryId: entry.id,
+      ...(storagePoolId ? { storagePoolId } : {})
     }
   };
 }
 
-export async function restoreTrashEntry(db: SigmaDatabase, trashEntryId: string) {
+export async function restoreTrashEntry(
+  db: SigmaDatabase,
+  trashEntryId: string,
+  system?: SystemManagementDependencies
+) {
   const entry = getTrashEntry(db, trashEntryId);
   if (!entry) {
     throw new TrashRestoreError("Trash entry not found", 404);
@@ -53,6 +65,12 @@ export async function restoreTrashEntry(db: SigmaDatabase, trashEntryId: string)
   const root = getNasRoot(db, entry.rootId);
   if (!root) {
     throw new TrashRestoreError("NAS root not found", 404);
+  }
+
+  const storagePoolId = getStringMetadata(entry.metadata, "storagePoolId");
+  if (storagePoolId) {
+    const scope = await resolveStoragePoolScope(db, system, root.id, storagePoolId);
+    await resolveScopedTargetPath(scope, entry.originalPath);
   }
 
   const restored = await restoreTrashPath(root, {
@@ -70,7 +88,8 @@ export async function restoreTrashEntry(db: SigmaDatabase, trashEntryId: string)
 export async function rollbackRegularOperation(
   db: SigmaDatabase,
   operation: FileOperationRecord,
-  trashRootPath: string
+  trashRootPath: string,
+  system?: SystemManagementDependencies
 ) {
   const rootId = getOperationRootId(operation);
   if (!rootId) {
@@ -82,6 +101,20 @@ export async function rollbackRegularOperation(
     throw new Error("NAS root not found");
   }
 
+  const storagePoolId = getStringMetadata(operation.metadata, "storagePoolId");
+  if (storagePoolId) {
+    const scope = await resolveStoragePoolScope(db, system, root.id, storagePoolId);
+    await validateStoragePoolProposal(
+      scope,
+      operation.operation === "restore"
+        ? { ...(operation.targetPath ? { targetPath: operation.targetPath } : {}) }
+        : {
+            ...(operation.sourcePath ? { sourcePath: operation.sourcePath } : {}),
+            ...(operation.targetPath ? { targetPath: operation.targetPath } : {})
+          }
+    );
+  }
+
   const rolledBack = await rollbackFileMutation(root, operation, trashRootPath);
   if (rolledBack.operation === "trash" && rolledBack.metadata.trashEntryId && rolledBack.targetPath) {
     createTrashEntry(db, {
@@ -91,7 +124,8 @@ export async function rollbackRegularOperation(
       trashPath: path.join(trashRootPath, rolledBack.targetPath),
       metadata: {
         ...rolledBack.metadata,
-        rootId: root.id
+        rootId: root.id,
+        ...(storagePoolId ? { storagePoolId } : {})
       }
     });
   }
@@ -100,7 +134,8 @@ export async function rollbackRegularOperation(
     ...rolledBack,
     metadata: {
       ...rolledBack.metadata,
-      rootId: root.id
+      rootId: root.id,
+      ...(storagePoolId ? { storagePoolId } : {})
     }
   };
 }

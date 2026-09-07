@@ -28,13 +28,18 @@ import {
   safeQueryIndex
 } from "../lib/files.js";
 import { getDirectoryGitView } from "../lib/git.js";
-import { resolveRoot } from "../lib/roots.js";
+import {
+  resolveScopedExistingPath,
+  resolveScopedTargetPath,
+  resolveStoragePoolScope,
+  type StoragePoolScope
+} from "../lib/storage-scope.js";
 import { VideoCache } from "../lib/video-cache.js";
 
 const MAX_EDIT_TEXT_BYTES = 1024 * 1024;
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024 * 1024;
 
-export function registerFileRoutes(server: FastifyInstance, { config, db, videoTranscoder }: ApiRouteContext): void {
+export function registerFileRoutes(server: FastifyInstance, { config, db, system, videoTranscoder }: ApiRouteContext): void {
   const videoCache = videoTranscoder
     ? new VideoCache({ dataDir: config.dataDir, transcoder: videoTranscoder })
     : new VideoCache({ dataDir: config.dataDir });
@@ -43,34 +48,41 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
   });
 
   server.get<{
-    Querystring: { rootId?: string; path?: string };
+    Querystring: { rootId?: string; storagePoolId?: string; path?: string };
   }>("/api/files", async (request, reply) => {
-    const root = resolveRoot(db, request.query.rootId);
-    if (!root) {
-      reply.status(404).send({ error: "NAS root not found" });
-      return;
-    }
-
-    const entries = await listDir(root, request.query.path ?? ".");
-    const gitView = await getDirectoryGitView(root.path, request.query.path ?? ".", entries);
+    const scope = await resolveStoragePoolScope(db, system, request.query.rootId, request.query.storagePoolId);
+    const root = scope.root;
+    const safe = await resolveScopedExistingPath(scope, request.query.path ?? scope.mountpointPath);
+    const entries = await listDir(root, safe.relativePath);
+    const scopedEntries = await Promise.all(
+      entries.map(async (entry) => {
+        if (!entry.isSafe) {
+          return entry;
+        }
+        try {
+          await resolveScopedExistingPath(scope, entry.path);
+          return entry;
+        } catch {
+          return { ...entry, isSafe: false };
+        }
+      })
+    );
+    const gitView = await getDirectoryGitView(root.path, safe.relativePath, scopedEntries, scope.mountpointRealPath);
     reply.send({
       root,
-      path: request.query.path ?? ".",
+      path: safe.relativePath,
       entries: gitView.entries,
       git: gitView.git
     });
   });
 
   server.get<{
-    Querystring: { rootId?: string; path?: string };
+    Querystring: { rootId?: string; storagePoolId?: string; path?: string };
   }>("/api/files/meta", async (request, reply) => {
-    const root = resolveRoot(db, request.query.rootId);
-    if (!root) {
-      reply.status(404).send({ error: "NAS root not found" });
-      return;
-    }
-
-    const meta = await getFilePreviewMeta(root.path, request.query.path ?? ".");
+    const scope = await resolveStoragePoolScope(db, system, request.query.rootId, request.query.storagePoolId);
+    const root = scope.root;
+    const safe = await resolveScopedExistingPath(scope, request.query.path ?? scope.mountpointPath);
+    const meta = await getFilePreviewMeta(root.path, safe.relativePath);
     reply.send({
       root,
       meta
@@ -78,22 +90,19 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
   });
 
   server.get<{
-    Querystring: { rootId?: string; path?: string; maxBytes?: string };
+    Querystring: { rootId?: string; storagePoolId?: string; path?: string; maxBytes?: string };
   }>("/api/files/text", async (request, reply) => {
-    const root = resolveRoot(db, request.query.rootId);
-    if (!root) {
-      reply.status(404).send({ error: "NAS root not found" });
-      return;
-    }
-
-    const meta = await getFilePreviewMeta(root.path, request.query.path ?? ".");
+    const scope = await resolveStoragePoolScope(db, system, request.query.rootId, request.query.storagePoolId);
+    const root = scope.root;
+    const safe = await resolveScopedExistingPath(scope, request.query.path ?? scope.mountpointPath);
+    const meta = await getFilePreviewMeta(root.path, safe.relativePath);
     if (meta.previewKind !== "text") {
       reply.status(415).send({ error: "File is not text-previewable" });
       return;
     }
 
     const maxBytes = clampPreviewBytes(request.query.maxBytes);
-    const preview = await readText(root, request.query.path ?? ".", maxBytes);
+    const preview = await readText(root, safe.relativePath, maxBytes);
     reply.send({
       ...preview,
       maxBytes
@@ -101,15 +110,11 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
   });
 
   server.get<{
-    Querystring: { rootId?: string; path?: string };
+    Querystring: { rootId?: string; storagePoolId?: string; path?: string };
   }>("/api/files/edit-text", async (request, reply) => {
-    const root = resolveRoot(db, request.query.rootId);
-    if (!root) {
-      reply.status(404).send({ error: "NAS root not found" });
-      return;
-    }
-
-    const target = await getEditableTextTarget(root, request.query.path ?? ".");
+    const scope = await resolveStoragePoolScope(db, system, request.query.rootId, request.query.storagePoolId);
+    const root = scope.root;
+    const target = await getEditableTextTarget(root, scope, request.query.path ?? scope.mountpointPath);
     if ("error" in target) {
       reply.status(target.statusCode).send({ error: target.error });
       return;
@@ -127,16 +132,14 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
   server.put<{
     Body: {
       rootId?: string;
+      storagePoolId?: string;
       path?: string;
       content?: string;
       expectedModifiedAt?: string | null;
     };
   }>("/api/files/edit-text", async (request, reply) => {
-    const root = resolveRoot(db, request.body?.rootId);
-    if (!root) {
-      reply.status(404).send({ error: "NAS root not found" });
-      return;
-    }
+    const scope = await resolveStoragePoolScope(db, system, request.body?.rootId, request.body?.storagePoolId);
+    const root = scope.root;
 
     const content = request.body?.content;
     if (typeof content !== "string") {
@@ -148,7 +151,7 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
       return;
     }
 
-    const target = await getEditableTextTarget(root, request.body?.path ?? ".");
+    const target = await getEditableTextTarget(root, scope, request.body?.path ?? scope.mountpointPath);
     if ("error" in target) {
       reply.status(target.statusCode).send({ error: target.error });
       return;
@@ -173,6 +176,7 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
       status: "applied",
       metadata: {
         rootId: root.id,
+        storagePoolId: scope.pool.id,
         reversible: false,
         realtimeSave: true,
         sizeBytes: meta.sizeBytes
@@ -190,21 +194,17 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
   });
 
   server.put<{
-    Querystring: { rootId?: string; path?: string };
+    Querystring: { rootId?: string; storagePoolId?: string; path?: string };
   }>(
     "/api/files/upload",
     {
       bodyLimit: MAX_UPLOAD_BYTES
     },
     async (request, reply) => {
-      const root = resolveRoot(db, request.query.rootId);
-      if (!root) {
-        reply.status(404).send({ error: "NAS root not found" });
-        return;
-      }
-
-      const requestedPath = request.query.path ?? ".";
-      const target = await prepareUploadTarget(root.path, requestedPath);
+      const scope = await resolveStoragePoolScope(db, system, request.query.rootId, request.query.storagePoolId);
+      const root = scope.root;
+      const requestedPath = request.query.path ?? scope.mountpointPath;
+      const target = await prepareUploadTarget(scope, requestedPath);
       if (target.exists) {
         reply.status(409).send({ error: "Upload target already exists" });
         return;
@@ -247,6 +247,7 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
         status: "applied",
         metadata: {
           rootId: root.id,
+          storagePoolId: scope.pool.id,
           reversible: true,
           sizeBytes: meta.sizeBytes,
           mimeType: meta.mimeType,
@@ -265,6 +266,7 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
     Body: {
       sessionId?: string;
       rootId?: string;
+      storagePoolId?: string;
       operation?: "mkdir" | "rename" | "trash" | "move" | "copy";
       sourcePath?: string;
       targetName?: string;
@@ -277,11 +279,8 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
       return;
     }
 
-    const root = resolveRoot(db, request.body?.rootId);
-    if (!root) {
-      reply.status(404).send({ error: "NAS root not found" });
-      return;
-    }
+    const scope = await resolveStoragePoolScope(db, system, request.body?.rootId, request.body?.storagePoolId);
+    const root = scope.root;
     if (session.rootId !== root.id) {
       reply.status(400).send({ error: "Session root does not match proposal root" });
       return;
@@ -305,9 +304,9 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
         }
       | { statusCode: number; error: string };
     if (operation === "mkdir") {
-      proposal = await buildMkdirProposal(root, request.body?.targetPath);
+      proposal = await buildMkdirProposal(root, scope, request.body?.targetPath);
     } else {
-      const source = await getMutableSource(root, request.body?.sourcePath ?? ".");
+      const source = await getMutableSource(root, scope, request.body?.sourcePath ?? scope.mountpointPath);
       if ("error" in source) {
         reply.status(source.statusCode).send({ error: source.error });
         return;
@@ -315,15 +314,16 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
 
       proposal =
         operation === "rename"
-          ? await buildRenameProposal(root, source.safe.relativePath, request.body?.targetName)
+          ? await buildRenameProposal(root, scope, source.safe.relativePath, request.body?.targetName)
           : operation === "trash"
             ? buildTrashProposal(root, source.safe.relativePath)
-            : await buildTransferProposal(root, source.safe, operation, request.body?.targetPath);
+            : await buildTransferProposal(root, scope, source.safe, operation, request.body?.targetPath);
     }
     if ("error" in proposal) {
       reply.status(proposal.statusCode).send({ error: proposal.error });
       return;
     }
+    proposal.proposal.storagePoolId = scope.pool.id;
 
     const summary = proposal.proposal.summary;
     const { message, job } = createUserMessageAndJob(db, {
@@ -356,17 +356,14 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
   server.post<{
     Body: {
       rootId?: string;
+      storagePoolId?: string;
       path?: string;
     };
   }>("/api/files/extract", async (request, reply) => {
-    const root = resolveRoot(db, request.body?.rootId);
-    if (!root) {
-      reply.status(404).send({ error: "NAS root not found" });
-      return;
-    }
-
-    const source = await resolveSafeExistingPath(root.path, request.body?.path ?? ".");
-    const proposal = await buildExtractProposal(root, source);
+    const scope = await resolveStoragePoolScope(db, system, request.body?.rootId, request.body?.storagePoolId);
+    const root = scope.root;
+    const source = await resolveScopedExistingPath(scope, request.body?.path ?? scope.mountpointPath);
+    const proposal = await buildExtractProposal(root, scope, source);
     if ("error" in proposal) {
       reply.status(proposal.statusCode).send({ error: proposal.error });
       return;
@@ -383,6 +380,7 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
         metadata: {
           ...result.metadata,
           rootId: root.id,
+          storagePoolId: scope.pool.id,
           reversible: proposal.proposal.reversible
         }
       });
@@ -398,15 +396,10 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
   });
 
   server.get<{
-    Querystring: { rootId?: string; path?: string };
+    Querystring: { rootId?: string; storagePoolId?: string; path?: string };
   }>("/api/files/blob", async (request, reply) => {
-    const root = resolveRoot(db, request.query.rootId);
-    if (!root) {
-      reply.status(404).send({ error: "NAS root not found" });
-      return;
-    }
-
-    const safe = await resolveSafeExistingPath(root.path, request.query.path ?? ".");
+    const scope = await resolveStoragePoolScope(db, system, request.query.rootId, request.query.storagePoolId);
+    const safe = await resolveScopedExistingPath(scope, request.query.path ?? scope.mountpointPath);
     const safeStat = await stat(safe.realPath);
     if (!safeStat.isFile()) {
       reply.status(400).send({ error: "Path is not a file" });
@@ -417,15 +410,11 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
   });
 
   server.get<{
-    Querystring: { rootId?: string; path?: string };
+    Querystring: { rootId?: string; storagePoolId?: string; path?: string };
   }>("/api/files/video", async (request, reply) => {
-    const root = resolveRoot(db, request.query.rootId);
-    if (!root) {
-      reply.status(404).send({ error: "NAS root not found" });
-      return;
-    }
-
-    const safe = await resolveSafeExistingPath(root.path, request.query.path ?? ".");
+    const scope = await resolveStoragePoolScope(db, system, request.query.rootId, request.query.storagePoolId);
+    const root = scope.root;
+    const safe = await resolveScopedExistingPath(scope, request.query.path ?? scope.mountpointPath);
     const sourceStat = await stat(safe.realPath);
     if (!sourceStat.isFile()) {
       reply.status(400).send({ error: "Path is not a file" });
@@ -469,13 +458,10 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
   });
 
   server.get<{
-    Querystring: { q?: string; rootId?: string; path?: string };
+    Querystring: { q?: string; rootId?: string; storagePoolId?: string; path?: string };
   }>("/api/search", async (request, reply) => {
-    const root = resolveRoot(db, request.query.rootId);
-    if (!root) {
-      reply.status(404).send({ error: "NAS root not found" });
-      return;
-    }
+    const scope = await resolveStoragePoolScope(db, system, request.query.rootId, request.query.storagePoolId);
+    const root = scope.root;
 
     const query = request.query.q?.trim();
     if (!query) {
@@ -483,8 +469,8 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
       return;
     }
 
-    const searchPath = request.query.path ?? ".";
-    const safeSearchPath = await resolveSafeExistingPath(root.path, searchPath);
+    const searchPath = request.query.path ?? scope.mountpointPath;
+    const safeSearchPath = await resolveScopedExistingPath(scope, searchPath);
     const searchStat = await stat(safeSearchPath.realPath);
     if (!searchStat.isDirectory()) {
       reply.status(400).send({ error: "Search path must be a directory" });
@@ -492,27 +478,49 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, videoT
     }
 
     const indexed = safeQueryIndex(db, root.id, query, safeSearchPath.relativePath);
-    const files = indexed.length
-      ? indexed.map(indexMatchToFileEntry)
+    const scopedIndexed = [];
+    for (const match of indexed) {
+      try {
+        await resolveScopedTargetPath(scope, match.path);
+        try {
+          await resolveScopedExistingPath(scope, match.path);
+        } catch (error) {
+          if (!isMissingPathError(error)) {
+            throw error;
+          }
+        }
+        scopedIndexed.push(match);
+      } catch {
+        // Stale or malicious index rows must not widen the selected pool scope.
+      }
+    }
+    const files = scopedIndexed.length
+      ? scopedIndexed.map(indexMatchToFileEntry)
       : await searchFiles(root, {
           query,
           path: safeSearchPath.relativePath,
           limit: 50
         });
-    const gitView = await getDirectoryGitView(root.path, safeSearchPath.relativePath, files);
+    const gitView = await getDirectoryGitView(root.path, safeSearchPath.relativePath, files, scope.mountpointRealPath);
 
     reply.send({
       root,
       query,
-      indexed,
+      indexed: scopedIndexed,
       files: gitView.entries,
       git: gitView.git
     });
   });
 }
 
+function isMissingPathError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
 async function buildExtractProposal(
   root: NasRootRecord,
+  scope: StoragePoolScope,
   source: Awaited<ReturnType<typeof resolveSafeExistingPath>>
 ): Promise<
   | { proposal: FileOperationProposal }
@@ -535,14 +543,14 @@ async function buildExtractProposal(
   if (!targetPath) {
     return { statusCode: 400, error: "Unable to determine extraction target" };
   }
-  const target = await resolveSafeTargetPath(root.path, targetPath);
+  const target = await resolveScopedTargetPath(scope, targetPath);
   if (target.relativePath === ".") {
-    return { statusCode: 400, error: "Extraction target must be inside the NAS root" };
+    return { statusCode: 400, error: "Extraction target must be inside the selected storage pool" };
   }
   if (await pathExistsNoSymlink(target.absolutePath)) {
     return { statusCode: 409, error: "Extraction target already exists" };
   }
-  const destination = await resolveSafeExistingPath(root.path, path.dirname(target.relativePath));
+  const destination = await resolveScopedExistingPath(scope, path.dirname(target.relativePath));
   const destinationLinkStat = await lstat(destination.absolutePath);
   if (destinationLinkStat.isSymbolicLink()) {
     return { statusCode: 400, error: "Refusing to extract into a symlinked folder" };
@@ -581,6 +589,7 @@ function createUploadLimitStream(maxBytes: number): Transform {
 
 async function getEditableTextTarget(
   root: NasRootRecord,
+  scope: StoragePoolScope,
   requestedPath: string
 ): Promise<
   | {
@@ -589,7 +598,7 @@ async function getEditableTextTarget(
     }
   | { statusCode: number; error: string }
 > {
-  const safe = await resolveSafeExistingPath(root.path, requestedPath);
+  const safe = await resolveScopedExistingPath(scope, requestedPath);
   const linkStat = await lstat(safe.absolutePath);
   if (linkStat.isSymbolicLink()) {
     return { statusCode: 400, error: "Refusing to edit through a symlink" };
@@ -611,6 +620,7 @@ async function getEditableTextTarget(
 
 async function getMutableSource(
   root: NasRootRecord,
+  scope: StoragePoolScope,
   requestedPath: string
 ): Promise<
   | {
@@ -618,9 +628,9 @@ async function getMutableSource(
     }
   | { statusCode: number; error: string }
 > {
-  const safe = await resolveSafeExistingPath(root.path, requestedPath);
-  if (safe.relativePath === ".") {
-    return { statusCode: 400, error: "Cannot mutate the NAS root" };
+  const safe = await resolveScopedExistingPath(scope, requestedPath);
+  if (safe.relativePath === "." || safe.relativePath === scope.mountpointPath) {
+    return { statusCode: 400, error: "Cannot mutate the storage pool root" };
   }
   const linkStat = await lstat(safe.absolutePath);
   if (linkStat.isSymbolicLink()) {
@@ -632,6 +642,7 @@ async function getMutableSource(
 
 async function buildMkdirProposal(
   root: NasRootRecord,
+  scope: StoragePoolScope,
   rawTargetPath: string | undefined
 ): Promise<
   | {
@@ -644,15 +655,15 @@ async function buildMkdirProposal(
     return normalizedTarget;
   }
 
-  const target = await resolveSafeTargetPath(root.path, normalizedTarget.path);
-  if (target.relativePath === ".") {
-    return { statusCode: 400, error: "New folder must be inside the NAS root" };
+  const target = await resolveScopedTargetPath(scope, normalizedTarget.path);
+  if (target.relativePath === "." || target.relativePath === scope.mountpointPath) {
+    return { statusCode: 400, error: "New folder must be inside the selected storage pool" };
   }
   if (await pathExistsNoSymlink(target.absolutePath)) {
     return { statusCode: 409, error: "Mutation target already exists" };
   }
 
-  const destination = await resolveSafeExistingPath(root.path, path.dirname(target.relativePath));
+  const destination = await resolveScopedExistingPath(scope, path.dirname(target.relativePath));
   const destinationLinkStat = await lstat(destination.absolutePath);
   if (destinationLinkStat.isSymbolicLink()) {
     return { statusCode: 400, error: "Refusing to create a folder inside a symlinked folder" };
@@ -676,6 +687,7 @@ async function buildMkdirProposal(
 
 async function buildRenameProposal(
   root: NasRootRecord,
+  scope: StoragePoolScope,
   sourcePath: string,
   rawTargetName: string | undefined
 ): Promise<
@@ -696,7 +708,7 @@ async function buildRenameProposal(
 
   const parentPath = path.dirname(sourcePath);
   const targetPath = parentPath === "." ? targetName.name : path.join(parentPath, targetName.name);
-  const target = await resolveSafeTargetPath(root.path, targetPath);
+  const target = await resolveScopedTargetPath(scope, targetPath);
   const targetExists = await pathExists(target.absolutePath);
   if (targetExists) {
     return { statusCode: 409, error: "Mutation target already exists" };
@@ -717,6 +729,7 @@ async function buildRenameProposal(
 
 async function buildTransferProposal(
   root: NasRootRecord,
+  scope: StoragePoolScope,
   source: Awaited<ReturnType<typeof resolveSafeExistingPath>>,
   operation: "move" | "copy",
   rawTargetPath: string | undefined
@@ -731,7 +744,7 @@ async function buildTransferProposal(
     return normalizedTarget;
   }
 
-  const target = await resolveSafeTargetPath(root.path, normalizedTarget.path);
+  const target = await resolveScopedTargetPath(scope, normalizedTarget.path);
   if (target.relativePath === source.relativePath) {
     return { statusCode: 400, error: "Transfer target must be different from the source" };
   }
@@ -739,7 +752,7 @@ async function buildTransferProposal(
     return { statusCode: 409, error: "Mutation target already exists" };
   }
 
-  const destination = await resolveSafeExistingPath(root.path, path.dirname(target.relativePath));
+  const destination = await resolveScopedExistingPath(scope, path.dirname(target.relativePath));
   const destinationLinkStat = await lstat(destination.absolutePath);
   if (destinationLinkStat.isSymbolicLink()) {
     return { statusCode: 400, error: "Refusing to transfer into a symlinked folder" };
@@ -861,11 +874,11 @@ async function sendFileStream(
   return reply.send(stream);
 }
 
-async function prepareUploadTarget(rootPath: string, requestedPath: string): Promise<{
+async function prepareUploadTarget(scope: StoragePoolScope, requestedPath: string): Promise<{
   safe: Awaited<ReturnType<typeof resolveSafeTargetPath>>;
   exists: boolean;
 }> {
-  const safe = await resolveSafeTargetPath(rootPath, requestedPath);
+  const safe = await resolveScopedTargetPath(scope, requestedPath);
   const exists = await pathExistsNoSymlink(safe.absolutePath);
   return { safe, exists };
 }
