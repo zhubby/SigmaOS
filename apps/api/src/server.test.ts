@@ -430,6 +430,78 @@ describe("API server", () => {
     await server.close();
   });
 
+  it("does not cross into a nested mounted storage pool", async () => {
+    const parentDir = path.join(rootDir, "parent");
+    const childDir = path.join(parentDir, "child");
+    await mkdir(childDir, { recursive: true });
+    await writeFile(path.join(parentDir, "parent.txt"), "parent");
+    await writeFile(path.join(childDir, "child.txt"), "child");
+
+    const parentPoolId = "/dev/md/parent-pool";
+    const childPoolId = "/dev/md/child-pool";
+    const nestedRunner: SystemCommandRunner = {
+      async run(command, args) {
+        if (command === "lsblk") {
+          return JSON.stringify({ blockdevices: [] });
+        }
+        if (command === "findmnt") {
+          return JSON.stringify({
+            filesystems: [
+              { source: parentPoolId, target: parentDir, fstype: "ext4", size: 1024, used: 1, avail: 1023, "use%": "0.1%" },
+              { source: childPoolId, target: childDir, fstype: "btrfs", size: 512, used: 1, avail: 511, "use%": "0.2%" }
+            ]
+          });
+        }
+        if (command === "mdadm" && args[0] === "--detail" && args[1] === "--scan") {
+          return `ARRAY ${parentPoolId} name=parent-pool UUID=parent\nARRAY ${childPoolId} name=child-pool UUID=child`;
+        }
+        if (command === "mdadm" && args[0] === "--detail") {
+          const isChild = args[1] === childPoolId;
+          return [
+            `Name : ${isChild ? "child-pool" : "parent-pool"}`,
+            "Raid Level : raid1",
+            "State : clean",
+            `UUID : ${isChild ? "child" : "parent"}`,
+            "Array Size : 1024 KiB"
+          ].join("\n");
+        }
+        if (command === "smartctl") {
+          return JSON.stringify({ devices: [] });
+        }
+        return JSON.stringify({});
+      }
+    };
+    const server = await buildServer({ config: testConfig(tempDir), db, system: { commandRunner: nestedRunner } });
+
+    const parentListing = await server.inject({
+      method: "GET",
+      url: `/api/files?rootId=local&storagePoolId=${encodeURIComponent(parentPoolId)}&path=parent`
+    });
+    const parentSearch = await server.inject({
+      method: "GET",
+      url: `/api/search?rootId=local&storagePoolId=${encodeURIComponent(parentPoolId)}&path=parent&q=child`
+    });
+    const childListing = await server.inject({
+      method: "GET",
+      url: `/api/files?rootId=local&storagePoolId=${encodeURIComponent(childPoolId)}&path=parent/child`
+    });
+
+    expect(parentListing.statusCode).toBe(200);
+    expect(parentListing.json().entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "parent.txt", isSafe: true }),
+        expect.objectContaining({ name: "child", isSafe: false })
+      ])
+    );
+    expect(parentSearch.statusCode).toBe(200);
+    expect(parentSearch.json().files).toEqual([]);
+    expect(childListing.statusCode).toBe(200);
+    expect(childListing.json().entries).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "child.txt", isSafe: true })])
+    );
+    await server.close();
+  });
+
   it("rechecks storage pool boundaries during rollback and trash restore", async () => {
     const poolDir = path.join(rootDir, "pool");
     const alternateMount = path.join(rootDir, "alternate");

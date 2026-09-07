@@ -15,7 +15,8 @@ import {
   readText,
   resolveSafeExistingPath,
   resolveSafeTargetPath,
-  searchFiles
+  searchFiles,
+  type FileEntry
 } from "@sigmaos/nas-tools";
 import { appendEvent, createPendingApproval, createUserMessageAndJob, getSession, recordAppliedOperation } from "@sigmaos/db";
 import type { FileOperationProposal, NasRootRecord } from "@sigmaos/shared";
@@ -496,11 +497,14 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, system
     }
     const files = scopedIndexed.length
       ? scopedIndexed.map(indexMatchToFileEntry)
-      : await searchFiles(root, {
-          query,
-          path: safeSearchPath.relativePath,
-          limit: 50
-        });
+      : await filterScopedSearchResults(
+          scope,
+          await searchFiles(root, {
+            query,
+            path: safeSearchPath.relativePath,
+            limit: 50
+          })
+        );
     const gitView = await getDirectoryGitView(root.path, safeSearchPath.relativePath, files, scope.mountpointRealPath);
 
     reply.send({
@@ -511,6 +515,23 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, system
       git: gitView.git
     });
   });
+}
+
+async function filterScopedSearchResults(scope: StoragePoolScope, matches: FileEntry[]): Promise<FileEntry[]> {
+  const scoped: FileEntry[] = [];
+  for (const match of matches) {
+    if (!match.isSafe) {
+      scoped.push(match);
+      continue;
+    }
+    try {
+      await resolveScopedExistingPath(scope, match.path);
+      scoped.push(match);
+    } catch {
+      // Do not expose results that cross a nested pool or other scope boundary.
+    }
+  }
+  return scoped;
 }
 
 function isMissingPathError(error: unknown): boolean {

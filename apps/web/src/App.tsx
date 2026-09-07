@@ -599,11 +599,16 @@ export function App() {
     };
   }, []);
 
-  async function reloadSessions() {
-    if (!selectedRootId) {
-      return;
+  async function reloadSessions(expectedRootId = selectedRootIdRef.current): Promise<boolean> {
+    if (!expectedRootId || selectedRootIdRef.current !== expectedRootId) {
+      return false;
     }
-    setSessions(await getSessions(selectedRootId));
+    const nextSessions = await getSessions(expectedRootId);
+    if (selectedRootIdRef.current !== expectedRootId) {
+      return false;
+    }
+    setSessions(nextSessions);
+    return true;
   }
 
   async function refreshStorageSummary() {
@@ -760,10 +765,10 @@ export function App() {
       getSessions(selectedRootId),
       getTranscript(nextSession.id)
     ]);
-    setSessions(nextSessions);
     if (!isCurrentSessionViewRequest(sessionRequestId)) {
       return;
     }
+    setSessions(nextSessions);
     seenEvents.current.clear();
     setSession(nextSession);
     setActiveSessionId(nextSession.id);
@@ -892,10 +897,7 @@ export function App() {
     setPreviewCollapsed(false);
     const fileRequestId = beginFileListingRequest();
     try {
-      const [nextListing, updatedSession] = await Promise.all([
-        getFiles(selectedRootId, pathname, selectedStoragePool.id),
-        session && session.rootId === selectedRootId ? updateSessionPath(session.id, pathname) : Promise.resolve(null)
-      ]);
+      const nextListing = await getFiles(selectedRootId, pathname, selectedStoragePool.id);
       if (
         !isCurrentFileListingRequest(fileRequestId) ||
         selectedRootIdRef.current !== requestRootId ||
@@ -905,6 +907,15 @@ export function App() {
       }
       commitFileListing(fileRequestId, nextListing);
       setCurrentPath(pathname);
+      const updatedSession =
+        session && session.rootId === requestRootId ? await updateSessionPath(session.id, pathname) : null;
+      if (
+        !isCurrentFileListingRequest(fileRequestId) ||
+        selectedRootIdRef.current !== requestRootId ||
+        selectedStoragePoolIdRef.current !== requestStoragePoolId
+      ) {
+        return;
+      }
       if (updatedSession) {
         setSession((current) => (current?.id === updatedSession.id ? updatedSession : current));
       }
@@ -1391,6 +1402,12 @@ export function App() {
       await refreshCurrentFileListing();
       setStatus("ready");
     } catch (nextError) {
+      if (
+        selectedRootIdRef.current !== requestRootId ||
+        selectedStoragePoolIdRef.current !== requestStoragePoolId
+      ) {
+        return;
+      }
       setStatus("error");
       setError(toErrorMessage(nextError));
       throw nextError;

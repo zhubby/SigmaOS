@@ -32,6 +32,7 @@ export interface StoragePoolScope {
   rootRealPath: string;
   mountpointRealPath: string;
   mountpointPath: string;
+  nestedMountpointRealPaths: string[];
 }
 
 export async function resolveStoragePoolScope(
@@ -80,12 +81,28 @@ export async function resolveStoragePoolScope(
     throw new StorageScopeError("Storage pool is not mounted", 404);
   }
 
+  const nestedMountpointRealPaths: string[] = [];
+  for (const candidate of summary.pools) {
+    if (candidate.id === pool.id || !candidate.mountpoint) {
+      continue;
+    }
+    try {
+      const candidateRealPath = await realpath(candidate.mountpoint);
+      if (isPathInside(mountpointRealPath, candidateRealPath) && candidateRealPath !== mountpointRealPath) {
+        nestedMountpointRealPaths.push(candidateRealPath);
+      }
+    } catch {
+      // An unavailable nested pool is not an accessible boundary.
+    }
+  }
+
   return {
     root,
     pool,
     rootRealPath,
     mountpointRealPath,
-    mountpointPath: path.relative(rootRealPath, mountpointRealPath) || "."
+    mountpointPath: path.relative(rootRealPath, mountpointRealPath) || ".",
+    nestedMountpointRealPaths
   };
 }
 
@@ -115,6 +132,7 @@ export async function resolveScopedExistingPath(
   if (!isPathInside(scope.mountpointRealPath, safe.realPath)) {
     throw new StorageScopeError("Path is outside the selected storage pool", 403);
   }
+  assertNotNestedStoragePool(scope, safe.realPath);
   return safe;
 }
 
@@ -127,6 +145,7 @@ export async function resolveScopedTargetPath(
   if (!isPathInside(scope.mountpointRealPath, safe.absolutePath)) {
     throw new StorageScopeError("Path is outside the selected storage pool", 403);
   }
+  assertNotNestedStoragePool(scope, safe.absolutePath);
   await assertNoSymlinkPathSegments(scope.rootRealPath, safe.absolutePath);
   return safe;
 }
@@ -134,6 +153,13 @@ export async function resolveScopedTargetPath(
 export function assertPathInsideStoragePool(scope: StoragePoolScope, absolutePath: string): void {
   if (!isPathInside(scope.mountpointRealPath, absolutePath)) {
     throw new StorageScopeError("Path is outside the selected storage pool", 403);
+  }
+  assertNotNestedStoragePool(scope, absolutePath);
+}
+
+function assertNotNestedStoragePool(scope: StoragePoolScope, absolutePath: string): void {
+  if (scope.nestedMountpointRealPaths.some((nestedPath) => isPathInside(nestedPath, absolutePath))) {
+    throw new StorageScopeError("Path belongs to another mounted storage pool", 403);
   }
 }
 
