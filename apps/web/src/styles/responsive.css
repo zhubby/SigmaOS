@@ -326,6 +326,10 @@
     grid-template-columns: 1fr;
   }
 
+  .storage-pool-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .management-emblem {
     width: 48px;
     height: 48px;
@@ -530,6 +534,34 @@
   .management-fact-list,
   .management-metric-grid {
     grid-template-columns: 1fr;
+  }
+
+  .management-modal.storage-pool-modal {
+    width: 100%;
+    max-height: calc(100dvh - 20px);
+  }
+
+  .storage-pool-form {
+    gap: 13px;
+    padding: 13px;
+  }
+
+  .storage-pool-form-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .storage-pool-form-actions button {
+    width: 100%;
+  }
+
+  .storage-disk-option {
+    grid-template-columns: 17px minmax(0, 1fr);
+  }
+
+  .storage-disk-option em {
+    grid-column: 2;
+    justify-self: start;
   }
 
   .management-workload {

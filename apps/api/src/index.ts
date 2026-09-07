@@ -3,13 +3,20 @@ import path from "node:path";
 import fastifyStatic from "@fastify/static";
 import { ensureNasRoots, openSigmaDb } from "@sigmaos/db";
 import { loadConfig } from "@sigmaos/shared";
+import { createSystemCommandRunner } from "./lib/system-management.js";
 import { buildServer } from "./server.js";
 
 const config = loadConfig();
 const db = openSigmaDb(config.databasePath);
 ensureNasRoots(db, config.nasRoots);
 
-const server = await buildServer({ config, db });
+const server = await buildServer({
+  config,
+  db,
+  system: {
+    commandRunner: createSystemCommandRunner(config.shares.helperSocketPath)
+  }
+});
 const webDist = resolveWebDist();
 
 if (existsSync(webDist)) {

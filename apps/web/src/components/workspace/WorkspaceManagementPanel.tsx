@@ -324,7 +324,13 @@ export function WorkspaceManagementPanel({
     return <SystemNetworkManagementPanel locale={locale} />;
   }
   if (panel === "storage") {
-    return <SystemStorageManagementPanel locale={locale} />;
+    return (
+      <SystemStorageManagementPanel
+        locale={locale}
+        sessionId={sessionId}
+        onWorkQueuesChanged={onWorkQueuesChanged}
+      />
+    );
   }
 
   const { t } = useTranslation();

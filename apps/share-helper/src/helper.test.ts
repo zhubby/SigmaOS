@@ -1,15 +1,19 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ShareApplyRequest } from "@sigmaos/shared";
 import {
+  applyStoragePoolOperation,
   applyHostShareSettings,
+  cleanupOrphanMdDevices,
   renderDlnaConfig,
   renderNfsExports,
   renderSambaConfig,
   renderWebDavConfig,
+  validateStorageOperationRequest,
   servicesForSettings,
+  validateStorageHelperRequest,
   type HelperCommandRunner,
   type ShareHelperPaths
 } from "./helper.js";
@@ -96,7 +100,135 @@ describe("share helper", () => {
       "minidlna.service"
     ]);
   });
+
+  it("allows only read-only storage inspection commands", () => {
+    expect(validateStorageHelperRequest({ command: "mdadm", args: ["--detail", "--scan"] })).toEqual({
+      command: "mdadm",
+      args: ["--detail", "--scan"]
+    });
+    expect(validateStorageHelperRequest({ command: "smartctl", args: ["--all", "--json", "-d", "sat", "/dev/sda"] })).toEqual({
+      command: "smartctl",
+      args: ["--all", "--json", "-d", "sat", "/dev/sda"]
+    });
+    expect(() => validateStorageHelperRequest({ command: "sh", args: ["-c", "id"] })).toThrow(
+      "Invalid storage helper request"
+    );
+    expect(() => validateStorageHelperRequest({ command: "mdadm", args: ["--create", "/dev/md0"] })).toThrow(
+      "Unsupported mdadm request"
+    );
+  });
+
+  it("validates storage pool operations and rejects unsafe requests", () => {
+    const proposal = validateStorageOperationRequest({
+      action: "create_pool",
+      name: "archive",
+      raidLevel: "1",
+      devices: ["/dev/sda", "/dev/sdb"],
+      filesystem: "ext4",
+      mountpoint: "/srv/nas/archive",
+      risk: "high",
+      summary: "Create archive"
+    });
+    expect(proposal).toMatchObject({ action: "create_pool", mountpoint: "/srv/nas/archive" });
+    expect(() => validateStorageOperationRequest({ ...proposal, mountpoint: "/etc/archive" })).toThrow(
+      "Invalid storage operation request"
+    );
+    expect(() => validateStorageOperationRequest({ ...proposal, devices: ["/dev/sda", "/dev/sda"] })).toThrow(
+      "Invalid storage operation request"
+    );
+    expect(() => validateStorageOperationRequest({ ...proposal, raidLevel: "5" })).toThrow(
+      "Invalid disk count for RAID 5"
+    );
+  });
+
+  it("stops only clear md devices without holders", async () => {
+    const sysBlockPath = path.join(tempDir, "sys/block");
+    await mkdir(path.join(sysBlockPath, "md127/md", "holders"), { recursive: true });
+    await writeFile(path.join(sysBlockPath, "md127/md/array_state"), "clear\n", "utf8");
+    await mkdir(path.join(sysBlockPath, "md0/md", "holders"), { recursive: true });
+    await writeFile(path.join(sysBlockPath, "md0/md/array_state"), "active\n", "utf8");
+    await mkdir(path.join(sysBlockPath, "md1/md", "holders", "sda"), { recursive: true });
+    await writeFile(path.join(sysBlockPath, "md1/md/array_state"), "clear\n", "utf8");
+    const runner = new StorageCommandRunner();
+
+    await expect(cleanupOrphanMdDevices(runner, sysBlockPath)).resolves.toBe(true);
+    expect(runner.calls).toEqual(["mdadm --stop /dev/md127"]);
+  });
+
+  it("creates a pool, verifies the mount, and persists an fstab entry", async () => {
+    const fstabPath = path.join(tempDir, "etc/fstab");
+    const mountRoot = path.join(tempDir, "nas-pools");
+    const mdDeviceRoot = path.join(tempDir, "dev/md");
+    const mdadmRuntimePath = path.join(tempDir, "run/mdadm");
+    await mkdir(path.dirname(fstabPath), { recursive: true });
+    await writeFile(fstabPath, "# managed by test\n", "utf8");
+    const runner = new StorageCommandRunner();
+
+    const result = await applyStoragePoolOperation(storagePoolProposal(), runner, {
+      fstabPath,
+      mountRoot,
+      mdDeviceRoot,
+      mdadmRuntimePath,
+      mdSysBlockPath: path.join(tempDir, "missing-sys-block")
+    });
+
+    expect(result).toMatchObject({
+      name: "archive",
+      mountpoint: "/srv/nas/archive",
+      mdDevice: path.join(mdDeviceRoot, "archive"),
+      uuid: "11111111-2222-3333-4444-555555555555"
+    });
+    expect(runner.calls).toEqual([
+      "lsblk --json --bytes --tree --output PATH,TYPE,FSTYPE,MOUNTPOINTS,PKNAME /dev/sda /dev/sdb",
+      `mdadm --create ${path.join(mdDeviceRoot, "archive")} --run --force --metadata=1.2 --level=1 --raid-devices=2 /dev/sda /dev/sdb`,
+      "udevadm settle",
+      `mkfs.ext4 -F -L archive ${path.join(mdDeviceRoot, "archive")}`,
+      `mount ${path.join(mdDeviceRoot, "archive")} ${path.join(mountRoot, "archive")}`,
+      `findmnt --target ${path.join(mountRoot, "archive")} --output SOURCE,FSTYPE --noheadings`,
+      `blkid -s UUID -o value ${path.join(mdDeviceRoot, "archive")}`
+    ]);
+    await expect(readFile(fstabPath, "utf8")).resolves.toContain(
+      `UUID=11111111-2222-3333-4444-555555555555 ${path.join(mountRoot, "archive")} ext4 defaults,nofail,x-systemd.device-timeout=30s 0 2`
+    );
+    await expect(readdir(mdadmRuntimePath)).resolves.toEqual([]);
+  });
+
+  it("stops the array and removes a new mount directory when execution fails", async () => {
+    const fstabPath = path.join(tempDir, "etc/fstab");
+    const mountRoot = path.join(tempDir, "nas-pools");
+    const mdDeviceRoot = path.join(tempDir, "dev/md");
+    const mdadmRuntimePath = path.join(tempDir, "run/mdadm");
+    await mkdir(path.dirname(fstabPath), { recursive: true });
+    await writeFile(fstabPath, "# managed by test\n", "utf8");
+    const runner = new StorageCommandRunner("findmnt");
+
+    await expect(
+      applyStoragePoolOperation(storagePoolProposal(), runner, {
+        fstabPath,
+        mountRoot,
+        mdDeviceRoot,
+        mdadmRuntimePath,
+        mdSysBlockPath: path.join(tempDir, "missing-sys-block")
+      })
+    ).rejects.toThrow("findmnt failed");
+    expect(runner.calls.at(-2)).toBe(`umount ${path.join(mountRoot, "archive")}`);
+    expect(runner.calls.at(-1)).toBe(`mdadm --stop ${path.join(mdDeviceRoot, "archive")}`);
+    await expect(readFile(fstabPath, "utf8")).resolves.toBe("# managed by test\n");
+  });
 });
+
+function storagePoolProposal() {
+  return {
+    action: "create_pool" as const,
+    name: "archive",
+    raidLevel: "1" as const,
+    devices: ["/dev/sda", "/dev/sdb"],
+    filesystem: "ext4" as const,
+    mountpoint: "/srv/nas/archive",
+    risk: "high" as const,
+    summary: "Create archive"
+  };
+}
 
 class FakeHelperCommandRunner implements HelperCommandRunner {
   calls: string[] = [];
@@ -112,6 +244,31 @@ class FakeHelperCommandRunner implements HelperCommandRunner {
     }
     if (command === "id") {
       return "1000\n";
+    }
+    return "";
+  }
+}
+
+class StorageCommandRunner implements HelperCommandRunner {
+  calls: string[] = [];
+
+  constructor(private readonly failCommand: string | null = null) {}
+
+  async run(command: string, args: string[]): Promise<string> {
+    this.calls.push([command, ...args].join(" "));
+    if (command === this.failCommand) {
+      throw new Error(`${command} failed`);
+    }
+    if (command === "lsblk") {
+      return JSON.stringify({
+        blockdevices: [
+          { path: "/dev/sda", type: "disk", fstype: null, mountpoints: [], children: [] },
+          { path: "/dev/sdb", type: "disk", fstype: null, mountpoints: [], children: [] }
+        ]
+      });
+    }
+    if (command === "blkid") {
+      return "11111111-2222-3333-4444-555555555555\n";
     }
     return "";
   }

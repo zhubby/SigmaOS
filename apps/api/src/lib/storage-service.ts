@@ -1,0 +1,153 @@
+import http from "node:http";
+import path from "node:path";
+import type {
+  StorageOperationProposal,
+  StorageRaidLevel,
+  SystemStorageSummary
+} from "@sigmaos/shared";
+
+const STORAGE_HELPER_TIMEOUT_MS = 120_000;
+const STORAGE_MOUNT_ROOT = "/srv/nas";
+const POOL_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/u;
+const RAID_MINIMUMS: Record<StorageRaidLevel, number> = {
+  "0": 2,
+  "1": 2,
+  "5": 3,
+  "6": 4,
+  "10": 4
+};
+
+export interface StoragePoolProposalInput {
+  name?: string;
+  raidLevel?: string;
+  devices?: string[];
+}
+
+export function buildStoragePoolProposal(
+  input: StoragePoolProposalInput,
+  summary: SystemStorageSummary,
+  mountRoot = STORAGE_MOUNT_ROOT
+): StorageOperationProposal {
+  const name = input.name?.trim() ?? "";
+  if (!POOL_NAME_PATTERN.test(name)) {
+    throw new Error("Pool name must start with a lowercase letter and contain only a-z, 0-9, _ or -");
+  }
+
+  const raidLevel = parseRaidLevel(input.raidLevel);
+  const devices = [...new Set(input.devices ?? [])];
+  const minimum = RAID_MINIMUMS[raidLevel];
+  if (devices.length < minimum) {
+    throw new Error(`RAID ${raidLevel} requires at least ${minimum} disks`);
+  }
+  if (raidLevel === "10" && devices.length % 2 !== 0) {
+    throw new Error("RAID 10 requires an even number of disks");
+  }
+
+  const normalizedMountRoot = normalizeMountRoot(mountRoot);
+  const mountpoint = path.posix.join(normalizedMountRoot, name);
+  const disksByPath = new Map(summary.disks.map((disk) => [disk.path, disk]));
+  const arrayMembers = new Set(summary.arrays.flatMap((array) => array.memberDevices));
+  for (const device of devices) {
+    if (!/^\/dev\/[A-Za-z0-9._-]+$/u.test(device)) {
+      throw new Error(`Invalid block device path: ${device}`);
+    }
+    const disk = disksByPath.get(device);
+    if (!disk) {
+      throw new Error(`Block device is not present in the latest inventory: ${device}`);
+    }
+    if (disk.mountpoints.length || disk.partitions.some((partition) => partition.mountpoints.length)) {
+      throw new Error(`Block device is mounted and cannot be used: ${device}`);
+    }
+    if (arrayMembers.has(device) || disk.partitions.some((partition) => arrayMembers.has(partition.path))) {
+      throw new Error(`Block device already belongs to an mdadm array: ${device}`);
+    }
+    if (disk.partitions.some((partition) => partition.filesystem !== null)) {
+      throw new Error(`Block device contains formatted partitions and cannot be used: ${device}`);
+    }
+  }
+
+  if (summary.issues.some((issue) => issue.source === "block devices" || issue.source === "mdadm scan")) {
+    throw new Error("Storage inventory is incomplete; refresh the panel before creating a pool");
+  }
+
+  return {
+    action: "create_pool",
+    name,
+    raidLevel,
+    devices,
+    filesystem: "ext4",
+    mountpoint,
+    risk: "high",
+    summary: `Create RAID ${raidLevel} pool ${name} at ${mountpoint} using ${devices.join(", ")}. All selected disks will be erased.`
+  };
+}
+
+export async function applyStoragePoolOperation(
+  helperSocketPath: string,
+  proposal: StorageOperationProposal
+): Promise<Record<string, unknown>> {
+  const body = JSON.stringify(proposal);
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      {
+        socketPath: helperSocketPath,
+        path: "/storage-operation",
+        method: "POST",
+        timeout: STORAGE_HELPER_TIMEOUT_MS,
+        headers: {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(body)
+        }
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () => {
+          const raw = Buffer.concat(chunks).toString("utf8");
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(raw) as unknown;
+          } catch {
+            reject(new Error("Invalid response from storage helper"));
+            return;
+          }
+          if ((response.statusCode ?? 500) >= 400) {
+            reject(new Error(storageHelperError(parsed) ?? "Storage helper request failed"));
+            return;
+          }
+          if (!isRecord(parsed)) {
+            reject(new Error("Invalid response from storage helper"));
+            return;
+          }
+          resolve(parsed);
+        });
+      }
+    );
+    request.on("timeout", () => request.destroy(new Error("Storage helper timed out")));
+    request.on("error", reject);
+    request.end(body);
+  });
+}
+
+function parseRaidLevel(value: string | undefined): StorageRaidLevel {
+  if (value === "0" || value === "1" || value === "5" || value === "6" || value === "10") {
+    return value;
+  }
+  throw new Error("Unsupported RAID level");
+}
+
+function normalizeMountRoot(value: string): string {
+  const normalized = path.posix.resolve(value);
+  if (normalized !== STORAGE_MOUNT_ROOT) {
+    throw new Error(`Storage pools must be mounted below ${STORAGE_MOUNT_ROOT}`);
+  }
+  return normalized;
+}
+
+function storageHelperError(value: unknown): string | null {
+  return isRecord(value) && typeof value.error === "string" ? value.error : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

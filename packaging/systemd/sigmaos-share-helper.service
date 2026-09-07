@@ -1,7 +1,7 @@
 [Unit]
 Description=SigmaOS privileged share configuration helper
 Documentation=/usr/share/doc/sigmaos/README.md
-After=network-online.target
+After=network-online.target systemd-tmpfiles-setup.service
 Wants=network-online.target
 
 [Service]
@@ -11,17 +11,16 @@ Group=root
 Environment=SIGMAOS_SHARE_HELPER_SOCKET_PATH=/run/sigmaos/share-helper.sock
 WorkingDirectory=/var/lib/sigmaos
 StateDirectory=sigmaos
-RuntimeDirectory=sigmaos
 LogsDirectory=sigmaos
 ExecStart=/usr/bin/node /usr/lib/sigmaos/apps/share-helper/dist/index.js
 Restart=on-failure
 RestartSec=3
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/etc/sigmaos /etc/samba/smb.conf.d /etc/apache2/sites-available /etc/vsftpd.d /etc/exports.d /etc/minidlna.d /etc/pam.d /run/sigmaos /var/lib/sigmaos /var/log/sigmaos
+ReadWritePaths=/etc/sigmaos /etc/fstab -/etc/mdadm -/etc/samba/smb.conf.d -/etc/apache2/sites-available -/etc/vsftpd.d -/etc/exports.d -/etc/minidlna.d -/etc/pam.d /run/sigmaos /run/mdadm /srv/nas /var/lib/sigmaos /var/log/sigmaos
 NoNewPrivileges=yes
 PrivateTmp=yes
-CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SYS_ADMIN CAP_SYS_RAWIO
 MemoryMax=192M
 CPUQuota=50%
 TasksMax=128

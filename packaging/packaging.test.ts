@@ -25,6 +25,7 @@ describe("native packaging artifacts", () => {
       expect(unit).toContain("NoNewPrivileges=yes");
       expect(unit).toContain("CapabilityBoundingSet=");
       expect(unit).toContain("ReadWritePaths=/var/lib/sigmaos");
+      expect(unit).not.toContain("RuntimeDirectory=sigmaos");
     }
 
     await expect(readPackagingFile("systemd", "sigmaos-maintenance.timer")).resolves.toContain(
@@ -37,6 +38,7 @@ describe("native packaging artifacts", () => {
   it("declares Debian install paths required by the spec", async () => {
     const install = await readPackagingFile("debian", "install");
     const control = await readPackagingFile("debian", "control");
+    const tmpfiles = await readPackagingFile("tmpfiles.d", "sigmaos.conf");
 
     expect(install).toContain("usr/lib/sigmaos/apps/api/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/share-helper/dist/");
@@ -46,6 +48,9 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("usr/lib/sigmaos/apps/scheduler/dist/");
     expect(install).toContain("etc/sigmaos/");
     expect(install).toContain("lib/systemd/system/");
+    expect(install).toContain("tmpfiles.d/sigmaos.conf");
+    expect(tmpfiles).toContain("/run/sigmaos");
+    expect(tmpfiles).toContain("/run/mdadm");
     expect(control).toContain("git");
     expect(control).toContain("ffmpeg");
     expect(control).toContain("samba");
@@ -54,6 +59,8 @@ describe("native packaging artifacts", () => {
     expect(control).toContain("unzip");
     expect(control).toContain("unrar-free");
     expect(control).toContain("restic");
+    expect(control).toContain("mdadm");
+    expect(control).toContain("smartmontools");
   });
 
   it("ships first-boot and appliance image scaffolding", async () => {
@@ -73,6 +80,8 @@ describe("native packaging artifacts", () => {
     expect(buildImage).toMatch(/--include=.*(^|,)git(,|\\|\s)/s);
     expect(buildImage).toMatch(/--include=.*(^|,)samba(,|\\|\s)/s);
     expect(manifest).toContain("tesseract-ocr");
+    expect(manifest).toContain("mdadm");
+    expect(manifest).toContain("smartmontools");
     expect(manifest).toContain("unzip");
     expect(manifest).toContain("unrar-free");
     expect(manifest).toContain("sigmaos-maintenance.timer");
@@ -90,11 +99,15 @@ describe("native packaging artifacts", () => {
     const unit = await readPackagingFile("systemd", "sigmaos-share-helper.service");
 
     expect(unit).toContain("User=root");
-    expect(unit).toContain("RuntimeDirectory=sigmaos");
+    expect(unit).not.toContain("RuntimeDirectory=sigmaos");
+    expect(unit).toContain("systemd-tmpfiles-setup.service");
     expect(unit).toContain("share-helper.sock");
+    expect(unit).toContain("/run/mdadm");
     expect(unit).toContain("ProtectSystem=strict");
     expect(unit).toContain("ReadWritePaths=/etc/sigmaos");
     expect(unit).toContain("CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER");
+    expect(unit).toContain("CAP_SYS_ADMIN");
+    expect(unit).toContain("CAP_SYS_RAWIO");
   });
 });
 

@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Activity,
@@ -13,14 +13,25 @@ import {
   Route,
   Settings,
   Trash2,
+  X,
   type LucideIcon
 } from "lucide-react";
 import {
   getSystemNetwork,
   getSystemStorage,
+  createStoragePool,
   type NetworkSummary,
-  type StorageSummary
+  type StorageSummary,
+  type StorageRaidLevel
 } from "../../api.js";
+import {
+  isStorageDiskSelectable,
+  raidMinimum,
+  storageDiskAvailability,
+  validateStoragePoolForm,
+  type StoragePoolFormState,
+  type StoragePoolValidationIssue
+} from "../../config/storage-pool.js";
 import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
 
@@ -239,12 +250,29 @@ export function SystemNetworkManagementPanel({ locale }: { locale: SupportedLoca
   );
 }
 
-export function SystemStorageManagementPanel({ locale }: { locale: SupportedLocale }) {
+export function SystemStorageManagementPanel({
+  locale,
+  sessionId,
+  onWorkQueuesChanged
+}: {
+  locale: SupportedLocale;
+  sessionId: string | null;
+  onWorkQueuesChanged: () => void | Promise<void>;
+}) {
   const { t } = useTranslation();
   const translate = t as Translate;
   const [summary, setSummary] = useState<StorageSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
+  const [form, setForm] = useState<StoragePoolFormState>({
+    name: "",
+    raidLevel: "1",
+    devices: []
+  });
 
   useEffect(() => {
     let active = true;
@@ -285,6 +313,66 @@ export function SystemStorageManagementPanel({ locale }: { locale: SupportedLoca
     }
   }
 
+  const validationIssues = validateStoragePoolForm(form, summary);
+  const availableDisks = summary?.disks ?? [];
+  const canCreatePool = Boolean(summary?.capabilities.canCreatePool && sessionId);
+
+  function openCreateModal() {
+    setNotice(null);
+    setError(null);
+    setConfirmed(false);
+    setCreateOpen(true);
+  }
+
+  function closeCreateModal() {
+    if (!submitting) {
+      setCreateOpen(false);
+    }
+  }
+
+  function toggleDevice(device: string, checked: boolean) {
+    setNotice(null);
+    setForm((current) => ({
+      ...current,
+      devices: checked ? [...new Set([...current.devices, device])] : current.devices.filter((path) => path !== device)
+    }));
+  }
+
+  async function submitStorageProposal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!sessionId) {
+      setError(t("workspace.management.storage.errors.noSession"));
+      return;
+    }
+    if (validationIssues.length > 0) {
+      setError(storageValidationIssueText(validationIssues[0]!, t));
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await createStoragePool({
+        sessionId,
+        name: form.name.trim(),
+        raidLevel: form.raidLevel,
+        devices: form.devices,
+        confirm: true
+      });
+      setNotice(t("workspace.management.storage.poolCreated"));
+      setCreateOpen(false);
+      setForm({ name: "", raidLevel: "1", devices: [] });
+      setConfirmed(false);
+      await onWorkQueuesChanged();
+    } catch (nextError) {
+      setCreateOpen(false);
+      setError(errorMessage(nextError));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   const status = summary?.status ?? "unavailable";
   const pools = summary?.pools ?? [];
   const disks = summary?.disks ?? [];
@@ -301,7 +389,12 @@ export function SystemStorageManagementPanel({ locale }: { locale: SupportedLoca
           <span className="management-status-pill" data-state={systemStatusTone(status, loading, error)}>
             {systemStatusLabel(status, loading, error, translate)}
           </span>
-          <button type="button" disabled title={translate("workspace.management.actions.systemIntegrationRequired")}>
+          <button
+            type="button"
+            onClick={openCreateModal}
+            disabled={loading || !canCreatePool}
+            title={translate("workspace.management.actions.createPool")}
+          >
             <Plus aria-hidden="true" size={15} />
             <span>{translate("workspace.management.actions.createPool")}</span>
           </button>
@@ -331,7 +424,7 @@ export function SystemStorageManagementPanel({ locale }: { locale: SupportedLoca
             </div>
             <dl className="management-fact-list">
               <Fact label={t("workspace.management.storage.facts.backend")} value="mdadm" />
-              <Fact label={translate("workspace.management.storage.facts.mode")} value={translate("workspace.management.values.readOnly")} />
+              <Fact label={translate("workspace.management.storage.facts.mode")} value={translate("workspace.management.storage.values.directApply")} />
               <Fact
                 label={t("workspace.management.storage.facts.pools")}
                 value={formatLocaleNumber(summary?.metrics.pools ?? 0, locale)}
@@ -345,6 +438,13 @@ export function SystemStorageManagementPanel({ locale }: { locale: SupportedLoca
         </section>
 
         <SystemIssues error={error} issues={summary?.issues ?? []} />
+
+        {notice ? (
+          <div className="management-inline-message" role="status">
+            <CircleCheck aria-hidden="true" size={15} />
+            <span>{notice}</span>
+          </div>
+        ) : null}
 
         <div className="management-metric-grid">
           {storageMetrics(summary, locale, translate).map((metric) => (
@@ -437,6 +537,142 @@ export function SystemStorageManagementPanel({ locale }: { locale: SupportedLoca
           </section>
         </div>
       </div>
+
+      {createOpen ? (
+        <div
+          className="management-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => event.currentTarget === event.target && closeCreateModal()}
+        >
+          <section
+            className="management-modal storage-pool-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="storage-pool-title"
+          >
+            <header>
+              <div>
+                <span className="eyebrow">{t("workspace.management.storage.createEyebrow")}</span>
+                <h2 id="storage-pool-title">{t("workspace.management.storage.createTitle")}</h2>
+              </div>
+              <button
+                type="button"
+                className="management-icon-action"
+                onClick={closeCreateModal}
+                disabled={submitting}
+                title={t("common.actions.cancel")}
+                aria-label={t("common.actions.cancel")}
+              >
+                <X aria-hidden="true" size={15} />
+              </button>
+            </header>
+            <form className="storage-pool-form" onSubmit={submitStorageProposal}>
+              <div className="storage-pool-fields">
+                <label>
+                  <span>{t("workspace.management.storage.fields.name")}</span>
+                  <input
+                    value={form.name}
+                    onChange={(event) => {
+                      setNotice(null);
+                      setForm((current) => ({ ...current, name: event.target.value }));
+                    }}
+                    placeholder="media"
+                    autoFocus
+                    autoComplete="off"
+                    maxLength={32}
+                  />
+                </label>
+                <label>
+                  <span>{t("workspace.management.storage.fields.raid")}</span>
+                  <select
+                    value={form.raidLevel}
+                    onChange={(event) => {
+                      setNotice(null);
+                      setForm((current) => ({ ...current, raidLevel: event.target.value as StorageRaidLevel }));
+                    }}
+                  >
+                    {(["1", "5", "6", "10", "0"] as StorageRaidLevel[]).map((level) => (
+                      <option key={level} value={level}>
+                        RAID {level} ({t("workspace.management.storage.raidMinimum", { count: raidMinimum(level) })})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <section
+                className="storage-disk-selection"
+                role="group"
+                aria-labelledby="storage-disk-selection-title"
+              >
+                <h3 id="storage-disk-selection-title">{t("workspace.management.storage.fields.devices")}</h3>
+                <p>{t("workspace.management.storage.diskSelectionDescription")}</p>
+                <div className="storage-disk-options">
+                  {availableDisks.length ? (
+                    availableDisks.map((disk) => {
+                      const diskSummary: Pick<StorageSummary, "arrays"> = summary ?? { arrays: [] };
+                      const availability = storageDiskAvailability(disk, diskSummary);
+                      const selectable = isStorageDiskSelectable(disk, diskSummary);
+                      const details = [disk.model, disk.transport, disk.sizeBytes !== null ? formatBytes(disk.sizeBytes, locale) : null]
+                        .filter(Boolean)
+                        .join(" · ");
+                      return (
+                        <label key={disk.id} className="storage-disk-option" data-state={availability}>
+                          <input
+                            type="checkbox"
+                            checked={form.devices.includes(disk.path)}
+                            disabled={!selectable || submitting}
+                            onChange={(event) => toggleDevice(disk.path, event.target.checked)}
+                          />
+                          <span>
+                            <strong>{disk.path}</strong>
+                            <small>{details || t("common.dash")}</small>
+                          </span>
+                          <em>{storageDiskAvailabilityLabel(availability, t)}</em>
+                        </label>
+                      );
+                    })
+                  ) : (
+                    <p className="management-empty">{t("workspace.management.storage.noDisks")}</p>
+                  )}
+                </div>
+              </section>
+
+              <div className="management-inline-message is-warning" role="alert">
+                <CircleAlert aria-hidden="true" size={15} />
+                <span>{t("workspace.management.storage.eraseWarning")}</span>
+              </div>
+
+              <label className="storage-pool-confirmation">
+                <input
+                  type="checkbox"
+                  checked={confirmed}
+                  disabled={submitting}
+                  onChange={(event) => setConfirmed(event.target.checked)}
+                />
+                <span>{t("workspace.management.storage.directApplyConfirmation")}</span>
+              </label>
+
+              {validationIssues.length ? (
+                <div className="management-inline-message is-error" role="alert">
+                  <CircleAlert aria-hidden="true" size={15} />
+                  <span>{storageValidationIssueText(validationIssues[0]!, t)}</span>
+                </div>
+              ) : null}
+
+              <footer className="storage-pool-form-actions">
+                <button type="button" onClick={closeCreateModal} disabled={submitting}>
+                  {t("common.actions.cancel")}
+                </button>
+                <button type="submit" className="is-primary" disabled={submitting || validationIssues.length > 0 || !sessionId || !confirmed}>
+                  {submitting ? <LoaderCircle aria-hidden="true" size={15} /> : <Plus aria-hidden="true" size={15} />}
+                  <span>{submitting ? t("common.states.loading") : t("workspace.management.storage.createPool")}</span>
+                </button>
+              </footer>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -922,6 +1158,35 @@ function usageGaugeTone(value: number | null): GaugeTone {
 
 function ratioGauge(value: number, total: number): number {
   return total > 0 ? Math.round((value / total) * 100) : 0;
+}
+
+function storageValidationIssueText(issue: StoragePoolValidationIssue, t: Translate): string {
+  if (issue.code === "missingName") {
+    return t("workspace.management.storage.validation.missingName");
+  }
+  if (issue.code === "invalidName") {
+    return t("workspace.management.storage.validation.invalidName");
+  }
+  if (issue.code === "noDevices") {
+    return t("workspace.management.storage.validation.noDevices");
+  }
+  if (issue.code === "tooFewDevices") {
+    return t("workspace.management.storage.validation.tooFewDevices", { count: issue.minimum ?? 0 });
+  }
+  if (issue.code === "oddRaid10") {
+    return t("workspace.management.storage.validation.oddRaid10");
+  }
+  if (issue.code === "unavailableDevice") {
+    return t("workspace.management.storage.validation.unavailableDevice");
+  }
+  return t("workspace.management.storage.validation.inventoryIncomplete");
+}
+
+function storageDiskAvailabilityLabel(
+  availability: ReturnType<typeof storageDiskAvailability>,
+  t: Translate
+): string {
+  return t(`workspace.management.storage.diskStates.${availability}`);
 }
 
 function statusIcon(state: StatusTone) {

@@ -104,6 +104,13 @@ export const en = {
       shareOperation: "Share operation",
       shareTitle: "Share settings",
       shareApproval: "Review the requested share configuration.",
+      storageOperation: "Storage operation",
+      storageTitle: "Create storage pool",
+      storageApproval: "Review the disks that will be erased and formatted.",
+      poolName: "Pool name",
+      raidLevel: "RAID level",
+      devices: "Disks",
+      mountpoint: "Mountpoint",
       root: "Root",
       paths: "Paths",
       targetType: "Target type",
@@ -553,13 +560,47 @@ export const en = {
       storage: {
         eyebrow: "Storage",
         title: "Storage",
-        description: "Read-only mdadm storage pool view with RAID arrays, disk inventory, mounts, and SMART health.",
+        description: "Manage mdadm storage pools with direct disk creation and live health data.",
         loading: "Loading storage devices.",
         readyDetail: "Live block device, mdadm, mount, and SMART data from the host.",
         partialDetail: "Some storage commands failed; available disks and pools are still shown.",
         unavailableDetail: "Storage command data is unavailable on this host.",
         noPools: "No mdadm storage pools are visible.",
         noDisks: "No disks are visible.",
+        createEyebrow: "Storage pool",
+        createTitle: "Create a RAID pool",
+        poolCreated: "Storage pool created successfully.",
+        createPool: "Create pool",
+        directApplyConfirmation: "I understand this permanently erases the selected disks and creates the pool immediately.",
+        diskSelectionDescription: "Only unused whole disks can be selected. The system disk and formatted disks are blocked.",
+        eraseWarning: "Creating this pool permanently erases every selected disk, formats it as ext4, and mounts it below /srv/nas.",
+        raidMinimum: "{{count}} disks minimum",
+        fields: {
+          name: "Pool name",
+          raid: "RAID level",
+          devices: "Disks to use"
+        },
+        values: {
+          directApply: "Direct apply"
+        },
+        errors: {
+          noSession: "Open an agent session before creating a storage pool."
+        },
+        validation: {
+          missingName: "Enter a pool name.",
+          invalidName: "Use a lowercase name starting with a letter; only a-z, 0-9, _ and - are allowed.",
+          noDevices: "Select at least one unused disk.",
+          tooFewDevices: "This RAID level requires at least {{count}} disks.",
+          oddRaid10: "RAID 10 requires an even number of disks.",
+          unavailableDevice: "One or more selected disks are no longer available. Refresh the inventory.",
+          inventoryIncomplete: "Storage inventory is incomplete. Refresh and try again."
+        },
+        diskStates: {
+          ready: "Available",
+          mounted: "Mounted",
+          formatted: "Formatted",
+          array: "In RAID array"
+        },
         poolsTitle: "Storage pools",
         poolsDescription: "Each pool maps to one mdadm RAID array.",
         disksTitle: "Disks and SMART",
@@ -1152,6 +1193,13 @@ export const zhCN = {
       shareOperation: "共享操作",
       shareTitle: "共享设置",
       shareApproval: "请确认请求的共享配置。",
+      storageOperation: "存储操作",
+      storageTitle: "创建存储池",
+      storageApproval: "请确认将被擦除并格式化的磁盘。",
+      poolName: "池名称",
+      raidLevel: "RAID 级别",
+      devices: "磁盘",
+      mountpoint: "挂载点",
       root: "根目录",
       paths: "路径",
       targetType: "目标类型",
@@ -1601,13 +1649,47 @@ export const zhCN = {
       storage: {
         eyebrow: "存储",
         title: "存储",
-        description: "只读查看 mdadm 存储池、RAID 阵列、磁盘、挂载和 SMART 健康。",
+        description: "管理 mdadm 存储池；创建操作会直接执行，并实时展示健康状态。",
         loading: "正在加载存储设备。",
         readyDetail: "来自宿主的块设备、mdadm、挂载和 SMART 实时数据。",
         partialDetail: "部分存储命令失败；仍会展示可用磁盘和存储池。",
         unavailableDetail: "当前主机无法读取存储命令数据。",
         noPools: "当前没有可见 mdadm 存储池。",
         noDisks: "当前没有可见磁盘。",
+        createEyebrow: "存储池",
+        createTitle: "创建 RAID 存储池",
+        poolCreated: "存储池已创建。",
+        createPool: "创建存储池",
+        directApplyConfirmation: "我确认这会永久擦除选中的磁盘，并立即创建存储池。",
+        diskSelectionDescription: "只能选择未使用的整块磁盘；系统盘和已格式化磁盘会被阻止。",
+        eraseWarning: "创建存储池会永久擦除所有选中磁盘，格式化为 ext4，并挂载到 /srv/nas 下。",
+        raidMinimum: "至少 {{count}} 块磁盘",
+        fields: {
+          name: "池名称",
+          raid: "RAID 级别",
+          devices: "使用的磁盘"
+        },
+        values: {
+          directApply: "直接执行"
+        },
+        errors: {
+          noSession: "请先打开 agent 会话，再创建存储池。"
+        },
+        validation: {
+          missingName: "请输入存储池名称。",
+          invalidName: "名称必须以小写字母开头，只能包含 a-z、0-9、_ 和 -。",
+          noDevices: "请选择至少一块未使用的磁盘。",
+          tooFewDevices: "此 RAID 级别至少需要 {{count}} 块磁盘。",
+          oddRaid10: "RAID 10 必须选择偶数块磁盘。",
+          unavailableDevice: "一个或多个已选磁盘已不可用，请刷新存储清单。",
+          inventoryIncomplete: "存储清单不完整，请刷新后重试。"
+        },
+        diskStates: {
+          ready: "可用",
+          mounted: "已挂载",
+          formatted: "已格式化",
+          array: "已在 RAID 阵列中"
+        },
         poolsTitle: "存储池",
         poolsDescription: "每个存储池映射一个 mdadm RAID 阵列。",
         disksTitle: "磁盘与 SMART",

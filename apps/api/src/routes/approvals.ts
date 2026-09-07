@@ -7,17 +7,25 @@ import {
   getApproval,
   getDockerOperationByApproval,
   getShareOperationByApproval,
+  getStorageOperationByApproval,
   getNasRoot,
   listPendingApprovals,
   recordAppliedOperation,
   saveShareSettings,
   updateDockerOperationStatus,
   updateShareOperationStatus,
+  updateStorageOperationStatus,
   updateApprovalStatus,
   updateJobStatus
 } from "@sigmaos/db";
 import { applyFileMutation } from "@sigmaos/nas-tools";
-import type { DockerOperationProposal, FileOperationProposal, PendingApprovalRecord, ShareOperationProposal } from "@sigmaos/shared";
+import type {
+  DockerOperationProposal,
+  FileOperationProposal,
+  PendingApprovalRecord,
+  ShareOperationProposal,
+  StorageOperationProposal
+} from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
 import { effectiveDockerConfig } from "../lib/settings.js";
 import { applyDockerOperation, safeDockerMessage } from "../lib/docker-service.js";
@@ -27,6 +35,7 @@ import {
   shareSettingsFromOperation,
   toPublicShareOperation
 } from "../lib/share-service.js";
+import { applyStoragePoolOperation } from "../lib/storage-service.js";
 
 export function registerApprovalRoutes(server: FastifyInstance, context: ApiRouteContext): void {
   const { config, db } = context;
@@ -166,6 +175,61 @@ export function registerApprovalRoutes(server: FastifyInstance, context: ApiRout
       } catch (error) {
         const message = safeShareMessage(error);
         updateShareOperationStatus(db, operation.id, "failed", {
+          error: message,
+          failedAt: new Date().toISOString()
+        });
+        updateApprovalStatus(db, approval.id, "failed", ["approved"]);
+        updateJobStatus(db, approval.jobId, "failed", message, ["waiting_approval"]);
+        appendEvent(db, {
+          sessionId: approval.sessionId,
+          jobId: approval.jobId,
+          type: "job.failed",
+          payload: { error: message }
+        });
+        reply.status(400).send({ error: message });
+        return;
+      }
+    }
+
+    if (approval.kind === "storage_operation") {
+      const operation = getStorageOperationByApproval(db, approval.id);
+      const proposal = storageOperationProposal(approval);
+      if (!operation || !proposal) {
+        reply.status(400).send({ error: "Storage approval is missing operation metadata" });
+        return;
+      }
+      if (!updateApprovalStatus(db, approval.id, "approved", ["pending"])) {
+        reply.status(409).send({ error: `Approval is already ${approval.status}` });
+        return;
+      }
+
+      try {
+        const metadata = await applyStoragePoolOperation(config.shares.helperSocketPath, proposal);
+        const applied = updateStorageOperationStatus(db, operation.id, "applied", {
+          ...metadata,
+          appliedAt: new Date().toISOString()
+        });
+        updateApprovalStatus(db, approval.id, "applied", ["approved"]);
+        updateJobStatus(db, approval.jobId, "completed", null, ["waiting_approval"]);
+        appendEvent(db, {
+          sessionId: approval.sessionId,
+          jobId: approval.jobId,
+          type: "job.completed",
+          payload: {
+            jobId: approval.jobId,
+            approvalId: approval.id,
+            storageOperation: applied
+          }
+        });
+        reply.status(202).send({
+          approvalId: approval.id,
+          status: "applied",
+          operation: applied
+        });
+        return;
+      } catch (error) {
+        const message = safeStorageMessage(error);
+        updateStorageOperationStatus(db, operation.id, "failed", {
           error: message,
           failedAt: new Date().toISOString()
         });
@@ -335,6 +399,36 @@ export function registerApprovalRoutes(server: FastifyInstance, context: ApiRout
       return;
     }
 
+    if (approval.kind === "storage_operation") {
+      if (!updateApprovalStatus(db, approval.id, "rejected", ["pending"])) {
+        reply.status(409).send({ error: `Approval is already ${approval.status}` });
+        return;
+      }
+      const operation = getStorageOperationByApproval(db, approval.id);
+      if (operation) {
+        updateStorageOperationStatus(db, operation.id, "failed", {
+          rejected: true,
+          rejectedAt: new Date().toISOString()
+        });
+      }
+      updateJobStatus(db, approval.jobId, "completed", null, ["waiting_approval"]);
+      appendEvent(db, {
+        sessionId: approval.sessionId,
+        jobId: approval.jobId,
+        type: "job.completed",
+        payload: {
+          jobId: approval.jobId,
+          approvalId: approval.id,
+          rejected: true
+        }
+      });
+      reply.status(202).send({
+        approvalId: approval.id,
+        status: "rejected"
+      });
+      return;
+    }
+
     if (!updateApprovalStatus(db, approval.id, "rejected", ["pending"])) {
       reply.status(409).send({ error: `Approval is already ${approval.status}` });
       return;
@@ -388,6 +482,27 @@ function shareOperationProposal(approval: PendingApprovalRecord): ShareOperation
     return proposal as ShareOperationProposal;
   }
   return null;
+}
+
+function storageOperationProposal(approval: PendingApprovalRecord): StorageOperationProposal | null {
+  if (approval.kind !== "storage_operation") {
+    return null;
+  }
+  const proposal = approval.proposal[0];
+  if (
+    typeof proposal === "object" &&
+    proposal !== null &&
+    "action" in proposal &&
+    (proposal as { action?: unknown }).action === "create_pool"
+  ) {
+    return proposal as StorageOperationProposal;
+  }
+  return null;
+}
+
+function safeStorageMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/password["']?\s*[:=]\s*["'][^"']+["']/giu, "password: [redacted]");
 }
 
 function fileOperationProposals(approval: PendingApprovalRecord): FileOperationProposal[] {

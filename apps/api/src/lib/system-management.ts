@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import http from "node:http";
 import { promisify } from "node:util";
 import type {
   SystemCollectionIssue,
@@ -23,6 +24,7 @@ import type {
 const execFileAsync = promisify(execFile);
 const COMMAND_TIMEOUT_MS = 5_000;
 const COMMAND_MAX_BUFFER = 4 * 1024 * 1024;
+const STORAGE_HELPER_TIMEOUT_MS = 5_000;
 
 export interface SystemCommandRunner {
   run(command: string, args: string[]): Promise<string>;
@@ -48,6 +50,93 @@ class NodeSystemCommandRunner implements SystemCommandRunner {
       throw error;
     }
   }
+}
+
+export function createSystemCommandRunner(helperSocketPath?: string): SystemCommandRunner {
+  const fallback = new NodeSystemCommandRunner();
+  if (!helperSocketPath) {
+    return fallback;
+  }
+  return new HybridSystemCommandRunner(helperSocketPath, fallback);
+}
+
+class HybridSystemCommandRunner implements SystemCommandRunner {
+  constructor(
+    private readonly helperSocketPath: string,
+    private readonly fallback: SystemCommandRunner
+  ) {}
+
+  async run(command: string, args: string[]): Promise<string> {
+    if (command !== "mdadm" && command !== "smartctl") {
+      return this.fallback.run(command, args);
+    }
+    try {
+      return await requestStorageHelper(this.helperSocketPath, command, args);
+    } catch (error) {
+      if (isMissingStorageHelper(error)) {
+        return this.fallback.run(command, args);
+      }
+      throw error;
+    }
+  }
+}
+
+function requestStorageHelper(
+  socketPath: string,
+  command: "mdadm" | "smartctl",
+  args: string[]
+): Promise<string> {
+  const body = JSON.stringify({ command, args });
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      {
+        socketPath,
+        path: "/storage-command",
+        method: "POST",
+        timeout: STORAGE_HELPER_TIMEOUT_MS,
+        headers: {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(body)
+        }
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () => {
+          const raw = Buffer.concat(chunks).toString("utf8");
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(raw) as unknown;
+          } catch {
+            reject(new Error("Invalid response from storage helper"));
+            return;
+          }
+          if ((response.statusCode ?? 500) >= 400) {
+            reject(new Error(storageHelperError(parsed) ?? "Storage helper request failed"));
+            return;
+          }
+          if (!isRecord(parsed) || typeof parsed.stdout !== "string") {
+            reject(new Error("Invalid response from storage helper"));
+            return;
+          }
+          resolve(parsed.stdout);
+        });
+      }
+    );
+
+    request.on("timeout", () => request.destroy(new Error("Storage helper timed out")));
+    request.on("error", reject);
+    request.end(body);
+  });
+}
+
+function isMissingStorageHelper(error: unknown): boolean {
+  const code = isRecord(error) && typeof error.code === "string" ? error.code : null;
+  return code === "ENOENT" || code === "ECONNREFUSED" || code === "ENXIO";
+}
+
+function storageHelperError(value: unknown): string | null {
+  return isRecord(value) && typeof value.error === "string" ? value.error : null;
 }
 
 interface CommandResult<T> {
@@ -165,7 +254,7 @@ export async function collectSystemStorage(
     status,
     capabilities: {
       backend: "mdadm",
-      canCreatePool: false,
+      canCreatePool: true,
       canDeletePool: false,
       canApplyConfiguration: false
     },
