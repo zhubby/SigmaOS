@@ -106,6 +106,7 @@ describe("native packaging artifacts", () => {
     expect(unit).toContain("ProtectSystem=strict");
     expect(unit).toContain("ReadWritePaths=/etc/sigmaos");
     expect(unit).toContain("CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER");
+    expect(unit).toContain("CAP_MKNOD");
     expect(unit).toContain("CAP_SYS_ADMIN");
     expect(unit).toContain("CAP_SYS_RAWIO");
   });
