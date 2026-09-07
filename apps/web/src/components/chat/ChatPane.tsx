@@ -794,6 +794,7 @@ function approvalCard(approval: PendingApproval, t: Translate): ApprovalCard {
       items: [
         { label: t("chat.approvalCards.poolName"), value: storageOperation.name },
         { label: t("chat.approvalCards.raidLevel"), value: `RAID ${storageOperation.raidLevel}` },
+        { label: t("chat.approvalCards.filesystem"), value: storageOperation.filesystem },
         { label: t("chat.approvalCards.devices"), value: storageOperation.devices.join(", ") },
         { label: t("chat.approvalCards.mountpoint"), value: storageOperation.mountpoint }
       ]

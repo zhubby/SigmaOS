@@ -19,6 +19,21 @@ describe("storage service", () => {
     });
   });
 
+  it("accepts btrfs while keeping ext4 as the default", () => {
+    const proposal = buildStoragePoolProposal(
+      { name: "archive", raidLevel: "1", filesystem: "btrfs", devices: ["/dev/sda", "/dev/sdb"] },
+      summary()
+    );
+
+    expect(proposal).toMatchObject({
+      filesystem: "btrfs",
+      summary: expect.stringContaining("formatted as btrfs")
+    });
+    expect(() => buildStoragePoolProposal({ name: "archive", raidLevel: "1", filesystem: "xfs", devices: ["/dev/sda", "/dev/sdb"] }, summary())).toThrow(
+      "Unsupported storage filesystem"
+    );
+  });
+
   it("rejects mounted, formatted, and existing array members", () => {
     expect(() => buildStoragePoolProposal({ name: "bad", raidLevel: "1", devices: ["/dev/sda", "/dev/sdc"] }, summary())).toThrow(
       "Block device is mounted"

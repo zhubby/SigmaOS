@@ -1,6 +1,7 @@
-import type { StorageRaidLevel, StorageSummary } from "../api.js";
+import type { StorageFilesystem, StorageRaidLevel, StorageSummary } from "../api.js";
 
 export const STORAGE_RAID_LEVELS = ["1", "5", "6", "10", "0"] as const satisfies readonly StorageRaidLevel[];
+export const STORAGE_FILESYSTEMS = ["ext4", "btrfs"] as const satisfies readonly StorageFilesystem[];
 
 const RAID_MINIMUMS: Record<StorageRaidLevel, number> = {
   "0": 2,
@@ -15,6 +16,7 @@ const POOL_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/u;
 export interface StoragePoolFormState {
   name: string;
   raidLevel: StorageRaidLevel;
+  filesystem: StorageFilesystem;
   devices: string[];
 }
 

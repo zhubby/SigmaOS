@@ -139,6 +139,10 @@ describe("share helper", () => {
     expect(() => validateStorageOperationRequest({ ...proposal, raidLevel: "5" })).toThrow(
       "Invalid disk count for RAID 5"
     );
+    expect(validateStorageOperationRequest({ ...proposal, filesystem: "btrfs" })).toMatchObject({ filesystem: "btrfs" });
+    expect(() => validateStorageOperationRequest({ ...proposal, filesystem: "xfs" })).toThrow(
+      "Invalid storage operation request"
+    );
   });
 
   it("stops only clear md devices without holders", async () => {
@@ -214,6 +218,34 @@ describe("share helper", () => {
     expect(runner.calls.at(-2)).toBe(`umount ${path.join(mountRoot, "archive")}`);
     expect(runner.calls.at(-1)).toBe(`mdadm --stop ${path.join(mdDeviceRoot, "archive")}`);
     await expect(readFile(fstabPath, "utf8")).resolves.toBe("# managed by test\n");
+  });
+
+  it("formats btrfs pools and persists the matching fstab type", async () => {
+    const fstabPath = path.join(tempDir, "etc/fstab");
+    const mountRoot = path.join(tempDir, "nas-pools");
+    const mdDeviceRoot = path.join(tempDir, "dev/md");
+    const mdadmRuntimePath = path.join(tempDir, "run/mdadm");
+    await mkdir(path.dirname(fstabPath), { recursive: true });
+    await writeFile(fstabPath, "# managed by test\n", "utf8");
+    const runner = new StorageCommandRunner();
+
+    const result = await applyStoragePoolOperation(
+      { ...storagePoolProposal(), filesystem: "btrfs" },
+      runner,
+      {
+        fstabPath,
+        mountRoot,
+        mdDeviceRoot,
+        mdadmRuntimePath,
+        mdSysBlockPath: path.join(tempDir, "missing-sys-block")
+      }
+    );
+
+    expect(result.filesystem).toBe("btrfs");
+    expect(runner.calls).toContain(`mkfs.btrfs -f -L archive ${path.join(mdDeviceRoot, "archive")}`);
+    await expect(readFile(fstabPath, "utf8")).resolves.toContain(
+      `UUID=11111111-2222-3333-4444-555555555555 ${path.join(mountRoot, "archive")} btrfs defaults,nofail,x-systemd.device-timeout=30s 0 2`
+    );
   });
 });
 

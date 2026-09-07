@@ -45,6 +45,7 @@ ocr_media_helpers = [
 ]
 nas_health = [
   "mdadm",
+  "btrfs-progs",
   "smartmontools"
 ]
 archive_helpers = [
