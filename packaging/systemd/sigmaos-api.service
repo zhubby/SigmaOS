@@ -8,7 +8,7 @@ Wants=network-online.target
 Type=simple
 User=sigmaos
 Group=sigmaos
-SupplementaryGroups=libvirt
+SupplementaryGroups=libvirt docker
 Environment=SIGMAOS_CONFIG=/etc/sigmaos/config.toml
 Environment=SIGMAOS_WEB_DIST=/usr/lib/sigmaos/apps/web/dist
 WorkingDirectory=/var/lib/sigmaos
