@@ -37,6 +37,7 @@ import {
 } from "../../config/storage-pool.js";
 import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
+import { ManagementSkeletonBody, SkeletonBlock } from "./ManagementSkeleton.js";
 
 type StatusTone = "ready" | "warning" | "offline" | "neutral";
 type GaugeTone = "ready" | "warning" | "danger" | "neutral";
@@ -136,9 +137,13 @@ export function SystemNetworkManagementPanel({
           <p>{t("workspace.management.network.description")}</p>
         </div>
         <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
-          <span className="management-status-pill" data-state={systemStatusTone(status, loading, error)}>
-            {systemStatusLabel(status, loading, error, translate)}
-          </span>
+          {loading ? (
+            <SkeletonBlock className="management-skeleton-status" width="66px" />
+          ) : (
+            <span className="management-status-pill" data-state={systemStatusTone(status, false, error)}>
+              {systemStatusLabel(status, false, error, translate)}
+            </span>
+          )}
           <button type="button" disabled title={translate("workspace.management.actions.systemIntegrationRequired")}>
             <Settings aria-hidden="true" size={15} />
             <span>{translate("workspace.management.actions.configure")}</span>
@@ -151,6 +156,7 @@ export function SystemNetworkManagementPanel({
       </header>
 
       <div className="management-body">
+        {loading ? <ManagementSkeletonBody tableColumns={8} tableRows={4} /> : <>
         <section className="management-command-panel">
           <div className="management-emblem" aria-hidden="true">
             <Network size={31} />
@@ -260,6 +266,7 @@ export function SystemNetworkManagementPanel({
             </div>
           </section>
         </div>
+        </>}
       </div>
     </section>
   );
@@ -416,9 +423,13 @@ export function SystemStorageManagementPanel({
           <p>{t("workspace.management.storage.description")}</p>
         </div>
         <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
-          <span className="management-status-pill" data-state={systemStatusTone(status, loading, error)}>
-            {systemStatusLabel(status, loading, error, translate)}
-          </span>
+          {loading ? (
+            <SkeletonBlock className="management-skeleton-status" width="66px" />
+          ) : (
+            <span className="management-status-pill" data-state={systemStatusTone(status, false, error)}>
+              {systemStatusLabel(status, false, error, translate)}
+            </span>
+          )}
           <button
             type="button"
             onClick={openCreateModal}
@@ -440,6 +451,7 @@ export function SystemStorageManagementPanel({
       </header>
 
       <div className="management-body">
+        {loading ? <ManagementSkeletonBody tableColumns={7} tableRows={4} /> : <>
         <section className="management-command-panel">
           <div className="management-emblem" aria-hidden="true">
             <Database size={31} />
@@ -557,6 +569,7 @@ export function SystemStorageManagementPanel({
             </div>
           </section>
         </div>
+        </>}
       </div>
 
       {createOpen ? (

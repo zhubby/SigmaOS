@@ -8,6 +8,7 @@ import type { NasRoot } from "../../api.js";
 import type { CodeFontSettings } from "../../lib/editor-settings.js";
 import type { ResolvedTheme } from "../../lib/theme-settings.js";
 import { applyTerminalOptions, terminalOptions } from "../../lib/terminal-theme.js";
+import { SkeletonBlock } from "./ManagementSkeleton.js";
 
 type TerminalStatus = "connecting" | "connected" | "disconnected" | "error" | "exited";
 
@@ -197,7 +198,9 @@ export function LocalTerminalPanel({
           </button>
         </div>
       </header>
-      <div ref={terminalHostRef} className="workspace-terminal" />
+      <div ref={terminalHostRef} className={`workspace-terminal${status === "connecting" ? " is-connecting" : ""}`} aria-busy={status === "connecting"}>
+        {status === "connecting" ? <div className="workspace-terminal-skeleton" aria-hidden="true"><SkeletonBlock width="38%" /><SkeletonBlock width="64%" /><SkeletonBlock width="52%" /></div> : null}
+      </div>
     </section>
   );
 }

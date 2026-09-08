@@ -46,6 +46,7 @@ import {
 } from "../../lib/uploads.js";
 import { WorkspaceManagementPanel, type ManagementPanelId } from "./WorkspaceManagementPanel.js";
 import { LocalTerminalPanel } from "./LocalTerminalPanel.js";
+import { FileListSkeleton, SkeletonBlock } from "./ManagementSkeleton.js";
 import type { CodeFontSettings } from "../../lib/editor-settings.js";
 import type { ResolvedTheme } from "../../lib/theme-settings.js";
 
@@ -144,6 +145,7 @@ export function WorkspacePane({
   displayPath,
   breadcrumbs,
   entries,
+  fileListingLoading,
   gitStatus,
   selectedFilePath,
   previewMeta,
@@ -201,6 +203,7 @@ export function WorkspacePane({
   displayPath: string;
   breadcrumbs: string[];
   entries: FileEntry[];
+  fileListingLoading: boolean;
   gitStatus: FileListing["git"];
   selectedFilePath: string | null;
   previewMeta: FileMeta | null;
@@ -664,8 +667,8 @@ export function WorkspacePane({
               >
                 <div className="management-title-block files-title-block">
                   <span className="eyebrow">{t("workspace.filesEyebrow")}</span>
-                  <h2>{displayTitle}</h2>
-                  <p>{t("workspace.filesManagementDescription")}</p>
+                  <h2>{fileListingLoading ? <SkeletonBlock width="42%" /> : displayTitle}</h2>
+                  <p>{fileListingLoading ? <SkeletonBlock width="68%" /> : t("workspace.filesManagementDescription")}</p>
                 </div>
 
                 <div className="management-actions files-header-actions" aria-label={t("workspace.management.actions.label")}>
@@ -734,31 +737,41 @@ export function WorkspacePane({
                 >
                   <div className="root-control storage-pool-control">
                     <label htmlFor="storage-pool-select">{t("workspace.storagePoolLabel")}</label>
-                    <CustomSelect
-                      id="storage-pool-select"
-                      value={selectedStoragePoolId}
-                      options={storagePoolOptions}
-                      ariaLabel={`${t("workspace.storagePoolLabel")}: ${selectedStoragePoolLabel}`}
-                      onChange={onSelectStoragePool}
-                      placeholder={t("workspace.storagePoolPlaceholder")}
-                    />
+                    {fileListingLoading ? (
+                      <SkeletonBlock className="files-skeleton-select" />
+                    ) : (
+                      <CustomSelect
+                        id="storage-pool-select"
+                        value={selectedStoragePoolId}
+                        options={storagePoolOptions}
+                        ariaLabel={`${t("workspace.storagePoolLabel")}: ${selectedStoragePoolLabel}`}
+                        onChange={onSelectStoragePool}
+                        placeholder={t("workspace.storagePoolPlaceholder")}
+                      />
+                    )}
                   </div>
 
-                  <nav className="breadcrumbs" aria-label={t("workspace.breadcrumbs")}>
-                    <button type="button" onClick={onGoToStoragePool} disabled={!selectedStoragePool}>
-                      <HardDrive aria-hidden="true" size={14} />
-                      <span>{selectedStoragePool?.name ?? t("workspace.storagePoolPlaceholder")}</span>
-                    </button>
-                    {visibleBreadcrumbs.map((crumb, index) => (
-                      <button
-                        key={`${crumb}-${index}`}
-                        type="button"
-                        onClick={() => onGoToBreadcrumb(selectedStoragePool ? storagePoolPathDepth + index : index)}
-                      >
-                        <span>{crumb}</span>
+                  {fileListingLoading ? (
+                    <div className="breadcrumbs files-skeleton-breadcrumbs" aria-hidden="true">
+                      <SkeletonBlock width="72%" />
+                    </div>
+                  ) : (
+                    <nav className="breadcrumbs" aria-label={t("workspace.breadcrumbs")}>
+                      <button type="button" onClick={onGoToStoragePool} disabled={!selectedStoragePool}>
+                        <HardDrive aria-hidden="true" size={14} />
+                        <span>{selectedStoragePool?.name ?? t("workspace.storagePoolPlaceholder")}</span>
                       </button>
-                    ))}
-                  </nav>
+                      {visibleBreadcrumbs.map((crumb, index) => (
+                        <button
+                          key={`${crumb}-${index}`}
+                          type="button"
+                          onClick={() => onGoToBreadcrumb(selectedStoragePool ? storagePoolPathDepth + index : index)}
+                        >
+                          <span>{crumb}</span>
+                        </button>
+                      ))}
+                    </nav>
+                  )}
 
                   <form className="search" onSubmit={onSubmitSearch}>
                     <Search aria-hidden="true" size={17} />
@@ -794,7 +807,7 @@ export function WorkspacePane({
                     <div className="files-list-title-block">
                       <h3>{t("workspace.filesListTitle")}</h3>
                       <p className="files-list-summary">
-                        {t("workspace.filesListDescription", {
+                        {fileListingLoading ? <SkeletonBlock width="58%" /> : t("workspace.filesListDescription", {
                           total: entryCount,
                           root: selectedStoragePool?.name ?? t("workspace.storagePoolPlaceholder")
                         })}
@@ -808,7 +821,11 @@ export function WorkspacePane({
                     ) : null}
                   </header>
 
-                  {hasStoragePool ? (
+                  {fileListingLoading ? (
+                    <div className="file-list" role="table" aria-label={t("workspace.table.files")}>
+                      <FileListSkeleton />
+                    </div>
+                  ) : hasStoragePool ? (
                     <div className="file-list" role="table" aria-label={t("workspace.table.files")}>
                     <div className="file-row file-row-head" role="row">
                       <span role="columnheader" aria-sort={fileSortAria(fileSort, "name")}>
@@ -840,7 +857,7 @@ export function WorkspacePane({
                         </button>
                       </span>
                     </div>
-                    {sortedEntries.map((entry) => {
+                    {fileListingLoading ? <FileListSkeleton /> : sortedEntries.map((entry) => {
                       const fileVisual = describeFileVisual(entry);
                       const isHidden = isHiddenName(entry.name);
                       const displaySize =

@@ -56,6 +56,7 @@ import type { en } from "../../i18n/resources.js";
 import { SystemNetworkManagementPanel, SystemStorageManagementPanel } from "./SystemManagementPanel.js";
 import { ShareManagementPanel } from "./ShareManagementPanel.js";
 import { applyTerminalOptions, terminalOptions } from "../../lib/terminal-theme.js";
+import { ManagementSkeletonBody, SkeletonBlock } from "./ManagementSkeleton.js";
 
 export type ManagementPanelId = "docker" | "virtualMachines" | "network" | "storage" | "shares";
 
@@ -589,12 +590,17 @@ function VirtualMachineManagementPanel({
           <p>{t("workspace.management.virtualMachines.description")}</p>
         </div>
         <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
-          <span className="management-status-pill" data-state={statusTone}>{vmHostStatusLabel(host?.status, loading, t)}</span>
+          {loading ? (
+            <SkeletonBlock className="management-skeleton-status" width="66px" />
+          ) : (
+            <span className="management-status-pill" data-state={statusTone}>{vmHostStatusLabel(host?.status, false, t)}</span>
+          )}
           <button type="button" onClick={() => void refresh()} disabled={loading}><RefreshCw aria-hidden="true" size={15} /><span>{t("common.actions.refresh")}</span></button>
           <button type="button" onClick={() => setCreateOpen(true)} disabled={!canMutate}><Play aria-hidden="true" size={15} /><span>{t("workspace.management.virtualMachines.create")}</span></button>
         </div>
       </header>
       <div className="management-body">
+        {loading ? <ManagementSkeletonBody tableColumns={7} tableRows={4} /> : <>
         <section className="management-command-panel">
           <div className="management-emblem" aria-hidden="true"><MonitorCog size={31} /></div>
           <div className="management-command-copy">
@@ -668,6 +674,7 @@ function VirtualMachineManagementPanel({
           )}
         </section>
         <div className="management-lower-grid"><section className="management-section"><SectionHeader title={t("workspace.management.virtualMachines.poolsTitle")} description={t("workspace.management.virtualMachines.poolsDescription")} /><div className="management-workload-list">{summary?.storagePools.map((pool) => <article key={pool.name} className="management-workload"><HardDrive size={16} /><div><strong>{pool.name}</strong><span>{pool.path}</span></div><em data-state={pool.state === "running" || pool.state === "active" ? "ready" : "warning"}>{pool.state}</em><small>{formatBytes(pool.availableBytes ?? 0, "en")} free</small></article>) ?? null}{summary?.networks.map((network) => <article key={network.name} className="management-workload"><Network size={16} /><div><strong>{network.name}</strong><span>{network.mode}</span></div><em data-state={network.state === "active" ? "ready" : "offline"}>{network.state}</em><small>{network.mode}</small></article>) ?? null}</div></section></div>
+        </>}
       </div>
       {createOpen ? <div className="management-dialog-backdrop"><form className="management-dialog" onSubmit={(event) => void createVm(event)}><header><h3>{t("workspace.management.virtualMachines.create")}</h3><button type="button" className="management-icon-action" onClick={() => setCreateOpen(false)} aria-label={String(t("editor.close"))}><X size={15} /></button></header><label>{t("workspace.management.virtualMachines.name")}<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,62}" /></label><label>vCPU<input type="number" min="1" max="128" value={form.vcpu} onChange={(event) => setForm({ ...form, vcpu: event.target.value })} /></label><label>{t("workspace.management.virtualMachines.memory")} (GiB)<input type="number" min="1" max="1024" value={form.memoryGiB} onChange={(event) => setForm({ ...form, memoryGiB: event.target.value })} /></label><label>{t("workspace.management.virtualMachines.disk")} (GiB)<input type="number" min="1" max="65536" value={form.diskGiB} onChange={(event) => setForm({ ...form, diskGiB: event.target.value })} /></label><label>ISO path<input value={form.isoPath} onChange={(event) => setForm({ ...form, isoPath: event.target.value })} placeholder="/srv/iso/installer.iso" required /></label><label>{t("workspace.management.virtualMachines.network")}<input value={form.network} onChange={(event) => setForm({ ...form, network: event.target.value })} /></label><footer><button type="button" onClick={() => setCreateOpen(false)}>{t("common.actions.cancel")}</button><button type="submit" disabled={pendingAction !== null}>{t("workspace.management.virtualMachines.create")}</button></footer></form></div> : null}
       {consoleSession ? <DockerConsoleDialog session={{ id: consoleSession.id, operationId: consoleSession.operationId, containerId: consoleSession.domainName, shell: "", expiresAt: consoleSession.expiresAt, websocketUrl: consoleSession.websocketUrl }} onClose={() => setConsoleSession(null)} /> : null}
@@ -901,9 +908,13 @@ function DockerManagementPanel({
           <p>{t("workspace.management.docker.description")}</p>
         </div>
         <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
-          <span className="management-status-pill" data-state={dockerStatusTone(dockerState)}>
-            {dockerStatusLabel(summary, loading, error, t)}
-          </span>
+          {loading ? (
+            <SkeletonBlock className="management-skeleton-status" width="66px" />
+          ) : (
+            <span className="management-status-pill" data-state={dockerStatusTone(dockerState)}>
+              {dockerStatusLabel(summary, false, error, t)}
+            </span>
+          )}
           <button type="button" onClick={refreshSummary} disabled={loading}>
             {loading ? <LoaderCircle aria-hidden="true" size={15} /> : <RefreshCw aria-hidden="true" size={15} />}
             <span>{t("common.actions.refresh")}</span>
@@ -912,6 +923,7 @@ function DockerManagementPanel({
       </header>
 
       <div className="management-body">
+        {loading ? <ManagementSkeletonBody tableColumns={7} tableRows={4} /> : <>
         <section className="management-command-panel">
           <div className="management-emblem" aria-hidden="true">
             <Container size={31} />
@@ -1044,6 +1056,7 @@ function DockerManagementPanel({
             </div>
           </section>
         </div>
+        </>}
       </div>
 
       {logsState ? <DockerLogsDialog state={logsState} onClose={() => setLogsState(null)} /> : null}

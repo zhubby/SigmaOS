@@ -41,6 +41,7 @@ import {
 } from "../../config/share-settings.js";
 import { formatDate, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
+import { ManagementSkeletonBody, SkeletonBlock } from "./ManagementSkeleton.js";
 
 type StatusTone = "ready" | "warning" | "offline" | "neutral";
 type Translate = (key: string, options?: Record<string, unknown>) => string;
@@ -266,9 +267,13 @@ export function ShareManagementPanel({
           <p>{t("workspace.management.shares.description")}</p>
         </div>
         <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
-          <span className="management-status-pill" data-state={statusTone}>
-            {shareStatusLabel(summary, loading, error, t)}
-          </span>
+          {loading ? (
+            <SkeletonBlock className="management-skeleton-status" width="66px" />
+          ) : (
+            <span className="management-status-pill" data-state={statusTone}>
+              {shareStatusLabel(summary, false, error, t)}
+            </span>
+          )}
           <button
             type="button"
             onClick={refreshShareData}
@@ -295,6 +300,7 @@ export function ShareManagementPanel({
       </header>
 
       <form id="share-management-form" className="management-body share-management-body" onSubmit={submitProposal}>
+        {loading ? <ManagementSkeletonBody tableColumns={5} tableRows={3} /> : <>
         <section className="management-command-panel">
           <div className="management-emblem" aria-hidden="true">
             <Share2 size={31} />
@@ -678,6 +684,7 @@ export function ShareManagementPanel({
             )}
           </div>
         </section>
+        </>}
       </form>
     </section>
   );

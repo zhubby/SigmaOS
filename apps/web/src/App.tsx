@@ -121,6 +121,7 @@ export function App() {
   const [selectedRootId, setSelectedRootId] = useState("");
   const [selectedStoragePoolId, setSelectedStoragePoolId] = useState("");
   const [storageSummary, setStorageSummary] = useState<StorageSummary | null>(null);
+  const [storageSummaryLoading, setStorageSummaryLoading] = useState(true);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [activeSessionId, setActiveSessionId] = useState("");
   const [session, setSession] = useState<Session | null>(null);
@@ -278,6 +279,7 @@ export function App() {
       } else {
         setError(toErrorMessage(storageResult.reason));
       }
+      setStorageSummaryLoading(false);
     });
     return () => {
       active = false;
@@ -1789,6 +1791,9 @@ export function App() {
         displayPath={displayPath}
         breadcrumbs={breadcrumbs}
         entries={entries}
+        fileListingLoading={
+          storageSummaryLoading || status === "starting" || status === "loading" || status === "searching"
+        }
         gitStatus={gitStatus}
         selectedFilePath={selectedFilePath}
         previewMeta={previewMeta}
