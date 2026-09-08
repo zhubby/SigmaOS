@@ -611,6 +611,7 @@ async function applyStoragePoolOperationNow(
   await mkdir(path.posix.dirname(mdDevice), { recursive: true });
   let created = false;
   let mounted = false;
+  let previousFstab: string | null = null;
   try {
     if (staleRaidDevices.length) {
       await runner.run("mdadm", ["--zero-superblock", "--force", ...staleRaidDevices]);
@@ -637,7 +638,11 @@ async function applyStoragePoolOperationNow(
     if (!uuid || !/^[A-Fa-f0-9-]+$/u.test(uuid)) {
       throw new Error("Unable to read the new pool UUID");
     }
-    await appendFstabEntry(uuid, mountpoint, proposal.filesystem, options.fstabPath ?? "/etc/fstab");
+    const fstabPath = options.fstabPath ?? "/etc/fstab";
+    previousFstab = await appendFstabEntry(uuid, mountpoint, proposal.filesystem, fstabPath);
+    await runner.run("systemctl", ["daemon-reload"]);
+    await runner.run("systemctl", ["start", mountUnitName(proposal.mountpoint)]);
+    await runner.run("findmnt", ["--target", proposal.mountpoint, "--output", "SOURCE,FSTYPE", "--noheadings"]);
     return {
       action: proposal.action,
       name: proposal.name,
@@ -649,6 +654,10 @@ async function applyStoragePoolOperationNow(
       uuid
     };
   } catch (error) {
+    if (previousFstab !== null) {
+      await bestEffortFstabRestore(options.fstabPath ?? "/etc/fstab", previousFstab);
+      await bestEffort(runner, "systemctl", ["daemon-reload"]);
+    }
     if (mounted) {
       await bestEffort(runner, "umount", [mountpoint]);
     }
@@ -843,7 +852,7 @@ async function appendFstabEntry(
   mountpoint: string,
   filesystem: StorageFilesystem,
   fstabPath: string
-): Promise<void> {
+): Promise<string> {
   const current = await readFile(fstabPath, "utf8");
   const lines = current.split("\n");
   if (lines.some((line) => line.trim() && !line.trimStart().startsWith("#") && line.split(/\s+/u)[1] === mountpoint)) {
@@ -863,6 +872,24 @@ async function appendFstabEntry(
       // Preserve the original write error if recovery is also blocked.
     }
     throw error;
+  }
+  return current;
+}
+
+function mountUnitName(mountpoint: string): string {
+  const segments = path.posix
+    .resolve(mountpoint)
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => segment.replace(/-/gu, "\\x2d"));
+  return `${segments.join("-") || "-"}.mount`;
+}
+
+async function bestEffortFstabRestore(fstabPath: string, contents: string): Promise<void> {
+  try {
+    await writeFile(fstabPath, contents, { encoding: "utf8" });
+  } catch {
+    // Preserve the original storage operation error if rollback is also blocked.
   }
 }
 

@@ -1,7 +1,7 @@
 [Unit]
 Description=SigmaOS privileged share configuration helper
 Documentation=/usr/share/doc/sigmaos/README.md
-After=network-online.target systemd-tmpfiles-setup.service
+After=network-online.target local-fs.target systemd-tmpfiles-setup.service
 Wants=network-online.target
 
 [Service]

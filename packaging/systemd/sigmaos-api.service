@@ -1,7 +1,7 @@
 [Unit]
 Description=SigmaOS API and web UI
 Documentation=/usr/share/doc/sigmaos/README.md
-After=network-online.target
+After=network-online.target local-fs.target
 Wants=network-online.target
 
 [Service]

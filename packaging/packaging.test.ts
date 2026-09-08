@@ -28,6 +28,13 @@ describe("native packaging artifacts", () => {
       expect(unit).not.toContain("RuntimeDirectory=sigmaos");
     }
 
+    await expect(readPackagingFile("systemd", "sigmaos-api.service")).resolves.toContain(
+      "After=network-online.target local-fs.target"
+    );
+    await expect(readPackagingFile("systemd", "sigmaos-share-helper.service")).resolves.toContain(
+      "After=network-online.target local-fs.target systemd-tmpfiles-setup.service"
+    );
+
     await expect(readPackagingFile("systemd", "sigmaos-maintenance.timer")).resolves.toContain(
       "OnCalendar=daily"
     );

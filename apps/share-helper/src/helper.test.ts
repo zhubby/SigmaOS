@@ -196,7 +196,10 @@ describe("share helper", () => {
       `mkfs.ext4 -F -L archive ${path.join(mdDeviceRoot, "archive")}`,
       `mount ${path.join(mdDeviceRoot, "archive")} ${path.join(mountRoot, "archive")}`,
       `findmnt --target ${path.join(mountRoot, "archive")} --output SOURCE,FSTYPE --noheadings`,
-      `blkid -s UUID -o value ${path.join(mdDeviceRoot, "archive")}`
+      `blkid -s UUID -o value ${path.join(mdDeviceRoot, "archive")}`,
+      "systemctl daemon-reload",
+      "systemctl start srv-nas-archive.mount",
+      "findmnt --target /srv/nas/archive --output SOURCE,FSTYPE --noheadings"
     ]);
     await expect(readFile(fstabPath, "utf8")).resolves.toContain(
       `UUID=11111111-2222-3333-4444-555555555555 ${path.join(mountRoot, "archive")} ext4 defaults,nofail,x-systemd.device-timeout=30s 0 2`
@@ -289,6 +292,29 @@ describe("share helper", () => {
     await expect(readFile(fstabPath, "utf8")).resolves.toContain(
       `UUID=11111111-2222-3333-4444-555555555555 ${path.join(mountRoot, "archive")} btrfs defaults,nofail,x-systemd.device-timeout=30s 0 2`
     );
+  });
+
+  it("rolls back fstab when systemd cannot activate the new mount", async () => {
+    const fstabPath = path.join(tempDir, "etc/fstab");
+    const mountRoot = path.join(tempDir, "nas-pools");
+    const mdDeviceRoot = path.join(tempDir, "dev/md");
+    const mdadmRuntimePath = path.join(tempDir, "run/mdadm");
+    await mkdir(path.dirname(fstabPath), { recursive: true });
+    await writeFile(fstabPath, "# managed by test\n", "utf8");
+    const runner = new StorageCommandRunner("systemctl");
+
+    await expect(
+      applyStoragePoolOperation(storagePoolProposal(), runner, {
+        fstabPath,
+        mountRoot,
+        mdDeviceRoot,
+        mdadmRuntimePath,
+        mdSysBlockPath: path.join(tempDir, "missing-sys-block")
+      })
+    ).rejects.toThrow("systemctl failed");
+    await expect(readFile(fstabPath, "utf8")).resolves.toBe("# managed by test\n");
+    expect(runner.calls).toContain(`umount ${path.join(mountRoot, "archive")}`);
+    expect(runner.calls).toContain("systemctl daemon-reload");
   });
 });
 
