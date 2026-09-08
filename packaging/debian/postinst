@@ -9,8 +9,8 @@ if [ "$1" = "configure" ]; then
     adduser --system --ingroup sigmaos --home /var/lib/sigmaos --no-create-home sigmaos
   fi
 
-  install -d -o sigmaos -g sigmaos -m 0750 /var/lib/sigmaos /var/lib/sigmaos/trash /var/lib/sigmaos/reports /var/lib/sigmaos/pi-sessions
-  install -d -o sigmaos -g sigmaos -m 0755 /srv/nas
+  install -d -o sigmaos -g sigmaos -m 0750 /var/lib/sigmaos /var/lib/sigmaos/trash /var/lib/sigmaos/reports /var/lib/sigmaos/pi-sessions /var/lib/sigmaos/vmstore
+  install -d -o sigmaos -g sigmaos -m 0755 /srv/nas /srv/iso
   chown -R sigmaos:sigmaos /var/lib/sigmaos
 
   if command -v systemctl >/dev/null 2>&1; then

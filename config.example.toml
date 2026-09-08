@@ -32,6 +32,15 @@ console_shells = ["/bin/sh", "/bin/bash"]
 # name = "Apps"
 # path = "/srv/compose"
 
+[vm]
+enabled = true
+libvirt_uri = "qemu:///system"
+storage_path = "/var/lib/sigmaos/vmstore"
+network_name = "default"
+iso_roots = ["/srv/iso"]
+operation_timeout_ms = 120000
+console_mode = "serial"
+
 [[nas_roots]]
 id = "primary"
 name = "Primary NAS"

@@ -27,7 +27,7 @@ import {
   Upload,
   type LucideIcon
 } from "lucide-react";
-import type { DockerOperation, FileEntry, FileListing, FileMeta, FileOperation, NasRoot, PendingApproval, TextPreview } from "../../api.js";
+import type { DockerOperation, FileEntry, FileListing, FileMeta, FileOperation, NasRoot, PendingApproval, TextPreview, VmOperation } from "../../api.js";
 import { describeFileVisual, isHiddenName } from "../../file-type-utils.js";
 import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
@@ -158,6 +158,7 @@ export function WorkspacePane({
   operations,
   uploadBatches,
   dockerOperations,
+  vmOperations,
   operationsReady,
   sessionId,
   pendingApprovals,
@@ -214,6 +215,7 @@ export function WorkspacePane({
   operations: FileOperation[];
   uploadBatches: UploadBatchState[];
   dockerOperations: DockerOperation[];
+  vmOperations: VmOperation[];
   operationsReady: boolean;
   sessionId: string | null;
   pendingApprovals: PendingApproval[];
@@ -1045,6 +1047,7 @@ export function WorkspacePane({
               sessionId={sessionId}
               pendingApprovals={pendingApprovals}
               dockerOperations={dockerOperations}
+              vmOperations={vmOperations}
               locale={locale}
               onWorkQueuesChanged={onWorkQueuesChanged}
               onNotifyError={onNotifyError}

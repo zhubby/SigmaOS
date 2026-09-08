@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Activity,
@@ -31,6 +31,12 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import {
   createDockerConsoleSession,
+  createVmConsoleSession,
+  type VmConsoleSession,
+  getVmSummary,
+  type VmOperation,
+  type VmOperationProposal,
+  proposeVmOperation,
   getDockerContainerLogs,
   getDockerSummary,
   proposeDockerOperation,
@@ -42,6 +48,7 @@ import {
   type DockerSummary,
   type NasRoot,
   type PendingApproval
+  , type VmSummary
 } from "../../api.js";
 import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
@@ -287,6 +294,7 @@ export function WorkspaceManagementPanel({
   sessionId,
   pendingApprovals,
   dockerOperations,
+  vmOperations,
   locale,
   onWorkQueuesChanged,
   onNotifyError,
@@ -298,6 +306,7 @@ export function WorkspaceManagementPanel({
   sessionId: string | null;
   pendingApprovals: PendingApproval[];
   dockerOperations: DockerOperation[];
+  vmOperations: VmOperation[];
   locale: SupportedLocale;
   onWorkQueuesChanged: () => void | Promise<void>;
   onNotifyError: (message: string | null) => void;
@@ -345,9 +354,21 @@ export function WorkspaceManagementPanel({
       />
     );
   }
+  if (panel === "virtualMachines") {
+    return (
+      <VirtualMachineManagementPanel
+        sessionId={sessionId}
+        pendingApprovals={pendingApprovals}
+        vmOperations={vmOperations}
+        onWorkQueuesChanged={onWorkQueuesChanged}
+        onNotifyError={onNotifyError}
+        onNotifySuccess={onNotifySuccess}
+      />
+    );
+  }
 
   const { t } = useTranslation();
-  const config = MANAGEMENT_PANELS[panel];
+  const config = MANAGEMENT_PANELS["virtualMachines"];
   const HeaderIcon = config.Icon;
 
   return (
@@ -471,6 +492,232 @@ export function WorkspaceManagementPanel({
         </div>
       </div>
     </section>
+  );
+}
+
+function VirtualMachineManagementPanel({
+  sessionId,
+  pendingApprovals,
+  vmOperations,
+  onWorkQueuesChanged,
+  onNotifyError,
+  onNotifySuccess
+}: {
+  sessionId: string | null;
+  pendingApprovals: PendingApproval[];
+  vmOperations: VmOperation[];
+  onWorkQueuesChanged: () => void | Promise<void>;
+  onNotifyError: (message: string | null) => void;
+  onNotifySuccess: (message: string | null) => void;
+}) {
+  const { t } = useTranslation();
+  const [summary, setSummary] = useState<VmSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [consoleSession, setConsoleSession] = useState<VmConsoleSession | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [form, setForm] = useState({ name: "", vcpu: "2", memoryGiB: "2", diskGiB: "20", isoPath: "", network: "default" });
+
+  async function refresh() {
+    setLoading(true); setError(null);
+    try { setSummary(await getVmSummary()); }
+    catch (nextError) { const message = errorMessage(nextError); setError(message); onNotifyError(message); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => { void refresh(); }, []);
+  useEffect(() => {
+    if (vmOperations.length > 0) {
+      void refresh();
+    }
+  }, [vmOperations[0]?.updatedAt]);
+
+  async function request(action: Parameters<typeof proposeVmOperation>[0]["action"], domainName: string, extra: Partial<Parameters<typeof proposeVmOperation>[0]> = {}): Promise<boolean> {
+    if (!sessionId) { onNotifyError(t("workspace.management.virtualMachines.noSession")); return false; }
+    setPendingAction(`${action}:${domainName}`);
+    try {
+      await proposeVmOperation({ sessionId, action, domainName, ...extra });
+      onNotifySuccess(t("workspace.management.virtualMachines.proposalCreated"));
+      await onWorkQueuesChanged();
+      return true;
+    } catch (nextError) { onNotifyError(errorMessage(nextError)); return false; }
+    finally { setPendingAction(null); }
+  }
+
+  async function requestConsole(domainName: string) {
+    const approvedOperation = approvedVmConsoleOperation(domainName, vmOperations);
+    if (approvedOperation) {
+      setPendingAction(`console-open:${domainName}`);
+      try {
+        setConsoleSession(await createVmConsoleSession(approvedOperation.id));
+        await onWorkQueuesChanged();
+      } catch (nextError) {
+        onNotifyError(errorMessage(nextError));
+      } finally {
+        setPendingAction(null);
+      }
+      return;
+    }
+    if (!canConsole) {
+      onNotifyError(host?.issues?.[0] ?? t("workspace.management.virtualMachines.unavailableDetail"));
+      return;
+    }
+    await request("console", domainName);
+  }
+
+  async function createVm(event: FormEvent) {
+    event.preventDefault();
+    if (!form.name.trim()) return;
+    const proposed = await request("create", form.name.trim(), {
+      vcpu: Number(form.vcpu), memoryBytes: Number(form.memoryGiB) * 1024 ** 3,
+      diskSizeBytes: Number(form.diskGiB) * 1024 ** 3,
+      ...(form.isoPath.trim() ? { isoPath: form.isoPath.trim() } : {}), networkName: form.network
+    });
+    if (proposed) setCreateOpen(false);
+  }
+
+  const host = summary?.host;
+  const canMutate = host?.status === "ready" && !loading;
+  const canConsole = (host?.status === "ready" || host?.status === "degraded") && !loading;
+  const statusTone = host?.status === "ready" ? "ready" : host?.status === "degraded" ? "warning" : "offline";
+  return (
+    <section className="workspace-management" aria-label={t("workspace.management.virtualMachines.title")}>
+      <header className="management-header">
+        <div className="management-title-block">
+          <span className="eyebrow">{t("workspace.management.virtualMachines.eyebrow")}</span>
+          <h2>{t("workspace.management.virtualMachines.title")}</h2>
+          <p>{t("workspace.management.virtualMachines.description")}</p>
+        </div>
+        <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
+          <span className="management-status-pill" data-state={statusTone}>{vmHostStatusLabel(host?.status, loading, t)}</span>
+          <button type="button" onClick={() => void refresh()} disabled={loading}><RefreshCw aria-hidden="true" size={15} /><span>{t("common.actions.refresh")}</span></button>
+          <button type="button" onClick={() => setCreateOpen(true)} disabled={!canMutate}><Play aria-hidden="true" size={15} /><span>{t("workspace.management.virtualMachines.create")}</span></button>
+        </div>
+      </header>
+      <div className="management-body">
+        <section className="management-command-panel">
+          <div className="management-emblem" aria-hidden="true"><MonitorCog size={31} /></div>
+          <div className="management-command-copy">
+            <div><span className="management-status-pill" data-state={statusTone}>{host?.kvmAvailable ? "KVM" : t("workspace.management.virtualMachines.kvmMissing")}</span><h3>{host?.libvirtVersion ? `libvirt ${host.libvirtVersion}` : t("workspace.management.virtualMachines.hypervisor")}</h3><p>{host?.error ?? host?.issues?.[0] ?? t("workspace.management.virtualMachines.readyDetail")}</p></div>
+            <dl className="management-fact-list">
+              <div><dt>{t("workspace.management.virtualMachines.facts.storage")}</dt><dd>{host?.storagePath ?? "-"}</dd></div>
+              <div><dt>{t("workspace.management.virtualMachines.facts.network")}</dt><dd>{host?.networkName ?? "-"}</dd></div>
+              <div><dt>{t("workspace.management.virtualMachines.facts.qemu")}</dt><dd>{host?.qemuVersion ?? "-"}</dd></div>
+              <div><dt>{t("workspace.management.virtualMachines.facts.cpu")}</dt><dd>{host?.cpuCount ?? "-"}</dd></div>
+            </dl>
+          </div>
+        </section>
+        <div className="management-metric-grid">
+          <article className="management-metric" data-state="ready"><Server size={18} /><span>{t("workspace.management.virtualMachines.metrics.instances")}</span><strong>{summary?.metrics.total ?? 0}</strong><small>{summary?.metrics.running ?? 0} running</small></article>
+          <article className="management-metric" data-state="neutral"><Cpu size={18} /><span>{t("workspace.management.virtualMachines.metrics.vcpu")}</span><strong>{summary?.metrics.vcpu ?? 0}</strong><small>{t("workspace.management.virtualMachines.metrics.vcpuDetail")}</small></article>
+          <article className="management-metric" data-state="neutral"><Activity size={18} /><span>{t("workspace.management.virtualMachines.metrics.memory")}</span><strong>{formatBytes(summary?.metrics.memoryBytes ?? 0, "en")}</strong><small>{t("workspace.management.virtualMachines.metrics.memoryDetail")}</small></article>
+          <article className="management-metric" data-state={host?.status === "ready" ? "ready" : "warning"}><Network size={18} /><span>{t("workspace.management.virtualMachines.facts.network")}</span><strong>{summary?.networks.length ?? 0}</strong><small>{host?.networkName ?? "-"}</small></article>
+        </div>
+        <section className="management-section management-table-section">
+          <SectionHeader title={t("workspace.management.virtualMachines.instancesTitle")} description={t("workspace.management.virtualMachines.instancesDescription")} />
+          {error ? (
+            <p className="management-empty management-table-empty-state">{error}</p>
+          ) : summary?.instances.length ? (
+            <div className="management-table-wrap">
+              <table className="management-table management-table-virtualMachines">
+                <thead>
+                  <tr>
+                    <th>{t("workspace.management.columns.name")}</th>
+                    <th>{t("workspace.management.columns.status")}</th>
+                    <th>{t("workspace.management.columns.cpu")}</th>
+                    <th>{t("workspace.management.columns.memory")}</th>
+                    <th>{t("workspace.management.virtualMachines.columns.disk")}</th>
+                    <th>{t("workspace.management.columns.network")}</th>
+                    <th>{t("workspace.management.columns.actions")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.instances.map((vm) => (
+                    <tr key={vm.id}>
+                      <td>{vm.name}</td>
+                      <td>
+                        <span className="management-row-status" data-state={vm.state === "running" ? "ready" : vm.state === "paused" ? "warning" : "offline"}>
+                          {vmStateLabel(vm.state, t)}
+                        </span>
+                      </td>
+                      <td>{vm.vcpu ?? "-"}</td>
+                      <td>{vm.memoryBytes ? formatBytes(vm.memoryBytes, "en") : "-"}</td>
+                      <td>{formatBytes(vm.disks.reduce((sum, disk) => sum + (disk.capacityBytes ?? 0), 0), "en")}</td>
+                      <td>{vm.networks.map((network) => network.name || network.source || "-").join(", ") || "-"}</td>
+                      <td>
+                        <VmInstanceActions
+                          vm={vm}
+                          pendingApproval={pendingVmApprovalForTarget(pendingApprovals, vm.name)}
+                          approvedConsole={approvedVmConsoleOperation(vm.name, vmOperations)}
+                          canMutate={canMutate}
+                          canConsole={canConsole}
+                          pendingAction={pendingAction}
+                          onRequest={request}
+                          onRequestConsole={requestConsole}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="management-empty management-table-empty-state">
+              {host?.status === "unavailable" ? t("workspace.management.virtualMachines.unavailableDetail") : t("workspace.management.virtualMachines.noInstances")}
+            </p>
+          )}
+        </section>
+        <div className="management-lower-grid"><section className="management-section"><SectionHeader title={t("workspace.management.virtualMachines.poolsTitle")} description={t("workspace.management.virtualMachines.poolsDescription")} /><div className="management-workload-list">{summary?.storagePools.map((pool) => <article key={pool.name} className="management-workload"><HardDrive size={16} /><div><strong>{pool.name}</strong><span>{pool.path}</span></div><em data-state={pool.state === "running" || pool.state === "active" ? "ready" : "warning"}>{pool.state}</em><small>{formatBytes(pool.availableBytes ?? 0, "en")} free</small></article>) ?? null}{summary?.networks.map((network) => <article key={network.name} className="management-workload"><Network size={16} /><div><strong>{network.name}</strong><span>{network.mode}</span></div><em data-state={network.state === "active" ? "ready" : "offline"}>{network.state}</em><small>{network.mode}</small></article>) ?? null}</div></section></div>
+      </div>
+      {createOpen ? <div className="management-dialog-backdrop"><form className="management-dialog" onSubmit={(event) => void createVm(event)}><header><h3>{t("workspace.management.virtualMachines.create")}</h3><button type="button" className="management-icon-action" onClick={() => setCreateOpen(false)} aria-label={String(t("editor.close"))}><X size={15} /></button></header><label>{t("workspace.management.virtualMachines.name")}<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,62}" /></label><label>vCPU<input type="number" min="1" max="128" value={form.vcpu} onChange={(event) => setForm({ ...form, vcpu: event.target.value })} /></label><label>{t("workspace.management.virtualMachines.memory")} (GiB)<input type="number" min="1" max="1024" value={form.memoryGiB} onChange={(event) => setForm({ ...form, memoryGiB: event.target.value })} /></label><label>{t("workspace.management.virtualMachines.disk")} (GiB)<input type="number" min="1" max="65536" value={form.diskGiB} onChange={(event) => setForm({ ...form, diskGiB: event.target.value })} /></label><label>ISO path<input value={form.isoPath} onChange={(event) => setForm({ ...form, isoPath: event.target.value })} placeholder="/srv/iso/installer.iso" required /></label><label>{t("workspace.management.virtualMachines.network")}<input value={form.network} onChange={(event) => setForm({ ...form, network: event.target.value })} /></label><footer><button type="button" onClick={() => setCreateOpen(false)}>{t("common.actions.cancel")}</button><button type="submit" disabled={pendingAction !== null}>{t("workspace.management.virtualMachines.create")}</button></footer></form></div> : null}
+      {consoleSession ? <DockerConsoleDialog session={{ id: consoleSession.id, operationId: consoleSession.operationId, containerId: consoleSession.domainName, shell: "", expiresAt: consoleSession.expiresAt, websocketUrl: consoleSession.websocketUrl }} onClose={() => setConsoleSession(null)} /> : null}
+    </section>
+  );
+}
+
+function VmInstanceActions({
+  vm,
+  pendingApproval,
+  approvedConsole,
+  canMutate,
+  canConsole,
+  pendingAction,
+  onRequest,
+  onRequestConsole
+}: {
+  vm: VmSummary["instances"][number];
+  pendingApproval: PendingApproval | null;
+  approvedConsole: VmOperation | null;
+  canMutate: boolean;
+  canConsole: boolean;
+  pendingAction: string | null;
+  onRequest: (
+    action: Parameters<typeof proposeVmOperation>[0]["action"],
+    domainName: string,
+    extra?: Partial<Parameters<typeof proposeVmOperation>[0]>
+  ) => void | Promise<unknown>;
+  onRequestConsole: (domainName: string) => void | Promise<unknown>;
+}) {
+  const { t } = useTranslation();
+  const actionDisabled = !canMutate || pendingAction !== null || Boolean(pendingApproval);
+  const consoleDisabled = !canConsole || pendingAction !== null || Boolean(pendingApproval);
+  const pendingLabel = t("workspace.management.actions.pendingApproval");
+  const domainName = vm.name;
+  return (
+    <div className="management-row-actions">
+      {vm.state === "running" ? (
+        <>
+          <ActionIconButton label={pendingApproval ? pendingLabel : t("workspace.management.actions.stop")} disabled={actionDisabled} pending={Boolean(pendingApproval) || pendingAction === `shutdown:${domainName}`} Icon={Power} onClick={() => onRequest("shutdown", domainName)} />
+          <ActionIconButton label={pendingApproval ? pendingLabel : t("workspace.management.actions.pause")} disabled={actionDisabled} pending={Boolean(pendingApproval) || pendingAction === `pause:${domainName}`} Icon={Pause} onClick={() => onRequest("pause", domainName)} />
+        </>
+      ) : (
+        <ActionIconButton label={pendingApproval ? pendingLabel : t("workspace.management.actions.start")} disabled={actionDisabled} pending={Boolean(pendingApproval) || pendingAction === `start:${domainName}`} Icon={Play} onClick={() => onRequest("start", domainName)} />
+      )}
+      <ActionIconButton label={pendingApproval ? pendingLabel : t("workspace.management.actions.restart")} disabled={actionDisabled} pending={Boolean(pendingApproval) || pendingAction === `restart:${domainName}`} Icon={RotateCw} onClick={() => onRequest("restart", domainName)} />
+      <ActionIconButton label={pendingApproval ? pendingLabel : t("workspace.management.actions.snapshot")} disabled={actionDisabled} pending={Boolean(pendingApproval) || pendingAction === `snapshot:${domainName}`} Icon={Database} onClick={() => onRequest("snapshot", domainName, { snapshotName: `${domainName}-${new Date().toISOString().slice(0, 10)}` })} />
+      <ActionIconButton label={pendingApproval ? pendingLabel : approvedConsole ? t("workspace.management.actions.openConsole") : t("workspace.management.actions.console")} disabled={consoleDisabled} pending={Boolean(pendingApproval) || pendingAction === `console:${domainName}` || pendingAction === `console-open:${domainName}`} Icon={TerminalSquare} onClick={() => onRequestConsole(domainName)} />
+      <ActionIconButton label={pendingApproval ? pendingLabel : t("workspace.management.actions.remove")} disabled={actionDisabled} pending={Boolean(pendingApproval) || pendingAction === `delete:${domainName}`} Icon={Trash2} danger onClick={() => onRequest("delete", domainName)} />
+    </div>
   );
 }
 
@@ -891,7 +1138,7 @@ function ActionIconButton({
   pending?: boolean;
   Icon: LucideIcon;
   danger?: boolean;
-  onClick: () => void | Promise<void>;
+  onClick: () => void | Promise<unknown>;
 }) {
   const ButtonIcon = pending ? LoaderCircle : Icon;
   return (
@@ -1160,6 +1407,30 @@ function dockerStatusTone(status: DockerSummary["engine"]["status"]): StatusTone
   return "offline";
 }
 
+function vmHostStatusLabel(status: VmSummary["host"]["status"] | undefined, loading: boolean, t: Translate): string {
+  if (loading) {
+    return String(t("common.states.loading"));
+  }
+  if (status === "ready") {
+    return String(t("workspace.management.states.ready"));
+  }
+  if (status === "degraded") {
+    return String(t("workspace.management.states.degraded"));
+  }
+  if (status === "disabled") {
+    return String(t("workspace.management.virtualMachines.unavailable"));
+  }
+  return String(t("common.states.unavailable"));
+}
+
+function vmStateLabel(state: VmSummary["instances"][number]["state"], t: Translate): string {
+  if (state === "running") return String(t("workspace.management.states.running"));
+  if (state === "paused") return String(t("workspace.management.states.paused"));
+  if (state === "shutoff") return String(t("workspace.management.states.stopped"));
+  if (state === "crashed") return String(t("workspace.management.states.attention"));
+  return String(t("workspace.management.states.offline"));
+}
+
 function dockerStatusLabel(
   summary: DockerSummary | null,
   loading: boolean,
@@ -1250,6 +1521,27 @@ function approvedConsoleOperation(container: DockerContainer, operations: Docker
         operation.targetId === container.id
     ) ?? null
   );
+}
+
+function pendingVmApprovalForTarget(approvals: PendingApproval[], domainName: string): PendingApproval | null {
+  return (
+    approvals.find((approval) => {
+      if (approval.kind !== "vm_operation") {
+        return false;
+      }
+      return approval.proposal.some(
+        (proposal) => isVmOperationProposal(proposal) && proposal.domainName === domainName
+      );
+    }) ?? null
+  );
+}
+
+function isVmOperationProposal(proposal: PendingApproval["proposal"][number]): proposal is VmOperationProposal {
+  return "action" in proposal && "risk" in proposal && "summary" in proposal && (proposal as { action?: unknown }).action !== undefined;
+}
+
+function approvedVmConsoleOperation(domainName: string, operations: VmOperation[]): VmOperation | null {
+  return operations.find((operation) => operation.action === "console" && operation.status === "approved" && operation.targetId === domainName) ?? null;
 }
 
 function containerTone(container: DockerContainer): StatusTone {

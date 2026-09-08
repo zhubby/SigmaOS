@@ -6,6 +6,7 @@ import type { ShareManagementDependencies } from "./lib/share-service.js";
 import type { SystemManagementDependencies } from "./lib/system-management.js";
 import type { TerminalRuntime } from "./lib/terminal.js";
 import type { VideoTranscoder } from "./lib/video-cache.js";
+import type { VmRuntimeDependencies } from "./lib/vm-service.js";
 
 export interface ApiRouteContext {
   config: SigmaConfig;
@@ -14,6 +15,7 @@ export interface ApiRouteContext {
     engine?: DockerEngineRuntime;
     compose?: DockerComposeRuntime;
   };
+  vm?: VmRuntimeDependencies;
   shares?: ShareManagementDependencies;
   system?: SystemManagementDependencies;
   terminal?: TerminalRuntime;

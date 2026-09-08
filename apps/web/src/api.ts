@@ -24,6 +24,10 @@ import type {
   RootReadiness,
   IndexerAlert,
   SystemHealthSummary
+  , VmSummary as PublicVmSummary
+  , VmOperationRecord
+  , VmOperationAction
+  , VmOperationProposal as SharedVmOperationProposal
 } from "@sigmaos/shared";
 
 export interface NasRoot {
@@ -69,6 +73,11 @@ export interface BackupStatus {
 
 export interface ReadinessResponse { roots: RootReadiness[]; }
 export type SystemHealth = SystemHealthSummary;
+export type VmSummary = PublicVmSummary;
+export type VmOperation = VmOperationRecord;
+export type VmAction = VmOperationAction;
+export interface VmProposalResult { message: AgentMessage; job: Job; approval: PendingApproval; operation: VmOperation; }
+export interface VmConsoleSession { id: string; operationId: string; approvalId: string; domainName: string; status: string; createdAt: string; expiresAt: string; usedAt: string | null; websocketUrl: string; }
 
 export interface Session {
   id: string;
@@ -144,6 +153,8 @@ export interface DockerOperationProposal {
   summary: string;
 }
 
+export type VmOperationProposal = SharedVmOperationProposal;
+
 export type ShareOperationProposal = SharedShareOperationProposal;
 export type StorageOperationProposal = SharedStorageOperationProposal;
 
@@ -151,6 +162,7 @@ export type PendingApprovalProposal =
   | FileOperationProposal
   | PiToolCallApproval
   | DockerOperationProposal
+  | VmOperationProposal
   | ShareOperationProposal
   | StorageOperationProposal;
 
@@ -158,7 +170,7 @@ export interface PendingApproval {
   id: string;
   jobId: string;
   sessionId: string;
-  kind: "file_operation" | "pi_tool_call" | "docker_operation" | "share_operation" | "storage_operation";
+  kind: "file_operation" | "pi_tool_call" | "docker_operation" | "vm_operation" | "share_operation" | "storage_operation";
   status: string;
   proposal: PendingApprovalProposal[];
   createdAt: string;
@@ -343,6 +355,42 @@ export async function getDockerSummary(): Promise<DockerSummary> {
   await ensureOk(response);
   const body = (await response.json()) as { summary: DockerSummary };
   return body.summary;
+}
+
+export async function getVmSummary(): Promise<VmSummary> {
+  const response = await fetch("/api/vms/summary");
+  await ensureOk(response);
+  return ((await response.json()) as { summary: VmSummary }).summary;
+}
+
+export async function getVmOperations(sessionId?: string | null): Promise<VmOperation[]> {
+  const query = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
+  const response = await fetch(`/api/vms/operations${query}`);
+  await ensureOk(response);
+  return ((await response.json()) as { operations: VmOperation[] }).operations;
+}
+
+export async function proposeVmOperation(input: {
+  sessionId: string;
+  action: VmAction;
+  domainName?: string;
+  snapshotName?: string;
+  vcpu?: number;
+  memoryBytes?: number;
+  diskSizeBytes?: number;
+  isoPath?: string;
+  diskPath?: string;
+  networkName?: string;
+}): Promise<VmProposalResult> {
+  const response = await fetch("/api/vms/proposals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
+  await ensureOk(response);
+  return (await response.json()) as VmProposalResult;
+}
+
+export async function createVmConsoleSession(operationId: string): Promise<VmConsoleSession> {
+  const response = await fetch("/api/vms/console-sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operationId }) });
+  await ensureOk(response);
+  return ((await response.json()) as { consoleSession: VmConsoleSession }).consoleSession;
 }
 
 export async function getDockerSettings(): Promise<DockerSettings> {

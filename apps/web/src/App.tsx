@@ -9,6 +9,7 @@ import {
   extractFile,
   getApprovals,
   getDockerOperations,
+  getVmOperations,
   getDockerSettings,
   getFileBlobUrl,
   getFileVideoUrl,
@@ -38,6 +39,7 @@ import {
   type FileMeta,
   type FileOperation,
   type DockerOperation,
+  type VmOperation,
   type DockerSettings,
   type SaveEditableTextResult,
   type FileListing,
@@ -126,6 +128,7 @@ export function App() {
   const [approvals, setApprovals] = useState<PendingApproval[]>([]);
   const [operations, setOperations] = useState<FileOperation[]>([]);
   const [dockerOperations, setDockerOperations] = useState<DockerOperation[]>([]);
+  const [vmOperations, setVmOperations] = useState<VmOperation[]>([]);
   const [operationsReady, setOperationsReady] = useState(false);
   const [uploadBatches, setUploadBatches] = useState<UploadBatchState[]>([]);
   const [currentPath, setCurrentPath] = useState(".");
@@ -1189,10 +1192,11 @@ export function App() {
     const queueSessionId = session?.id ?? null;
     const queueStoragePoolId = selectedStoragePoolIdRef.current;
     try {
-      const [nextApprovals, nextOperations, nextDockerOperations] = await Promise.all([
+      const [nextApprovals, nextOperations, nextDockerOperations, nextVmOperations] = await Promise.all([
         getApprovals(),
         getOperations(),
-        getDockerOperations(queueSessionId)
+        getDockerOperations(queueSessionId),
+        getVmOperations(queueSessionId)
       ]);
       if (queueSessionId !== (session?.id ?? null) || queueStoragePoolId !== selectedStoragePoolIdRef.current) {
         return;
@@ -1204,6 +1208,7 @@ export function App() {
           : []
       );
       setDockerOperations(nextDockerOperations);
+      setVmOperations(nextVmOperations);
       setOperationsReady(true);
     } catch (nextError) {
       if (queueSessionId !== (session?.id ?? null) || queueStoragePoolId !== selectedStoragePoolIdRef.current) {
@@ -1798,6 +1803,7 @@ export function App() {
         operations={operations}
         uploadBatches={visibleUploadBatches}
         dockerOperations={dockerOperations}
+        vmOperations={vmOperations}
         operationsReady={operationsReady}
         sessionId={session?.id ?? null}
         pendingApprovals={activeApprovals}

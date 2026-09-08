@@ -56,6 +56,7 @@ export type PendingApprovalKind =
   | "file_operation"
   | "pi_tool_call"
   | "docker_operation"
+  | "vm_operation"
   | "share_operation"
   | "storage_operation";
 
@@ -321,6 +322,7 @@ export interface SigmaConfig {
     localEndpoint: string | null;
   };
   docker: DockerConfig;
+  vm?: VmConfig;
   shares: ShareConfig;
   nasRoots: NasRootConfig[];
   backup?: BackupConfig;
@@ -331,6 +333,16 @@ export interface SigmaConfig {
     consecutiveFailureThreshold: number;
     backupStaleMs: number;
   };
+}
+
+export interface VmConfig {
+  enabled: boolean;
+  libvirtUri: string;
+  storagePath: string;
+  networkName: string;
+  isoRoots: string[];
+  operationTimeoutMs: number;
+  consoleMode: "serial";
 }
 
 export const MODEL_PROVIDER_NAMES = ["openai", "anthropic"] as const;
@@ -889,6 +901,113 @@ export interface DockerOperationRecord {
   updatedAt: string;
 }
 
+export type VmHostStatus = "disabled" | "ready" | "degraded" | "unavailable";
+export type VmState = "running" | "paused" | "shutoff" | "crashed" | "unknown";
+export type VmOperationAction =
+  | "create"
+  | "start"
+  | "shutdown"
+  | "stop"
+  | "restart"
+  | "pause"
+  | "resume"
+  | "reset"
+  | "snapshot"
+  | "delete"
+  | "console";
+export type VmOperationStatus = "proposed" | "approved" | "applied" | "failed";
+
+export interface VmHostSummary {
+  status: VmHostStatus;
+  libvirtUri: string;
+  libvirtVersion: string | null;
+  qemuVersion: string | null;
+  kvmAvailable: boolean;
+  cpuCount: number | null;
+  memoryTotalBytes: number | null;
+  memoryFreeBytes: number | null;
+  storagePath: string;
+  storageTotalBytes: number | null;
+  storageFreeBytes: number | null;
+  networkName: string;
+  error: string | null;
+  issues: string[];
+}
+
+export interface VmInstanceSummary {
+  id: string;
+  name: string;
+  state: VmState;
+  uuid: string | null;
+  vcpu: number | null;
+  memoryBytes: number | null;
+  maxMemoryBytes: number | null;
+  os: string | null;
+  disks: Array<{ source: string; capacityBytes: number | null }>;
+  networks: Array<{ name: string; mac: string | null; source: string | null }>;
+}
+
+export interface VmStoragePoolSummary {
+  name: string;
+  path: string;
+  state: string;
+  capacityBytes: number | null;
+  allocationBytes: number | null;
+  availableBytes: number | null;
+}
+
+export interface VmNetworkSummary {
+  name: string;
+  state: string;
+  mode: "nat" | "bridge" | "isolated" | "unknown";
+}
+
+export interface VmSummary {
+  collectedAt: string;
+  enabled: boolean;
+  host: VmHostSummary;
+  metrics: { total: number; running: number; paused: number; vcpu: number; memoryBytes: number; diskBytes: number };
+  instances: VmInstanceSummary[];
+  storagePools: VmStoragePoolSummary[];
+  networks: VmNetworkSummary[];
+}
+
+export interface VmOperationProposal {
+  action: VmOperationAction;
+  domainName?: string;
+  snapshotName?: string;
+  vcpu?: number;
+  memoryBytes?: number;
+  diskSizeBytes?: number;
+  isoPath?: string;
+  diskPath?: string;
+  networkName?: string;
+  risk: "medium" | "high";
+  summary: string;
+}
+
+export interface VmOperationRecord {
+  id: string;
+  approvalId: string | null;
+  action: VmOperationAction;
+  targetId: string;
+  status: VmOperationStatus;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VmConsoleAuthorizationRecord {
+  id: string;
+  operationId: string;
+  approvalId: string;
+  domainName: string;
+  status: "active" | "used" | "expired" | "failed";
+  createdAt: string;
+  expiresAt: string;
+  usedAt: string | null;
+}
+
 export interface ShareProtocolService {
   name: string;
   status: ShareProtocolServiceStatus;
@@ -994,6 +1113,7 @@ export type PendingApprovalProposal =
   | FileOperationProposal
   | PiToolCallApproval
   | DockerOperationProposal
+  | VmOperationProposal
   | ShareOperationProposal
   | StorageOperationProposal;
 

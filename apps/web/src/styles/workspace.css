@@ -2520,6 +2520,51 @@
   background: var(--code-bg);
 }
 
+.management-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(0 0 0 / 58%);
+}
+
+.management-dialog {
+  width: min(460px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  box-shadow: 0 20px 60px rgb(0 0 0 / 36%);
+}
+
+.management-dialog header,
+.management-dialog footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.management-dialog label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted-text);
+  font-size: 12px;
+}
+
+.management-dialog input {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  background: var(--input-bg);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .workspace-grid,
   .workspace-panel-tab,

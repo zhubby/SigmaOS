@@ -9,6 +9,8 @@ import type {
   PendingApprovalRecord,
   ShareOperationRecord,
   StorageOperationRecord,
+  VmConsoleAuthorizationRecord,
+  VmOperationRecord,
   TrashEntryRecord
 } from "@sigmaos/shared";
 import { normalizeModelProviderName } from "./settings-mappers.js";
@@ -21,6 +23,8 @@ import type {
   DbProviderSessionRow,
   DbShareOperationRow,
   DbStorageOperationRow,
+  DbVmConsoleAuthorizationRow,
+  DbVmOperationRow,
   DbTrashEntryRow
 } from "./repository-rows.js";
 
@@ -102,6 +106,32 @@ export function mapStorageOperation(row: DbStorageOperationRow): StorageOperatio
     metadata: JSON.parse(row.metadata_json) as Record<string, unknown>,
     createdAt: row.created_at,
     updatedAt: row.updated_at
+  };
+}
+
+export function mapVmOperation(row: DbVmOperationRow): VmOperationRecord {
+  return {
+    id: row.id,
+    approvalId: row.approval_id,
+    action: row.action,
+    targetId: row.target_id,
+    status: row.status,
+    metadata: JSON.parse(row.metadata_json) as Record<string, unknown>,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+export function mapVmConsoleAuthorization(row: DbVmConsoleAuthorizationRow): VmConsoleAuthorizationRecord {
+  return {
+    id: row.id,
+    operationId: row.operation_id,
+    approvalId: row.approval_id,
+    domainName: row.domain_name,
+    status: row.status,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    usedAt: row.used_at
   };
 }
 

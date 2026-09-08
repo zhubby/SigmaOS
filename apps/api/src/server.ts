@@ -7,7 +7,7 @@ import { registerApiRoutes } from "./routes/index.js";
 
 export type { ServerDependencies } from "./context.js";
 
-export async function buildServer({ config, db, docker, shares, system, terminal, videoTranscoder }: ServerDependencies): Promise<FastifyInstance> {
+export async function buildServer({ config, db, docker, vm, shares, system, terminal, videoTranscoder }: ServerDependencies): Promise<FastifyInstance> {
   if (!isLoopbackHost(config.api.host)) {
     throw new Error("SigmaOS API must bind to a loopback host");
   }
@@ -29,6 +29,7 @@ export async function buildServer({ config, db, docker, shares, system, terminal
     config,
     db,
     ...(docker ? { docker } : {}),
+    ...(vm ? { vm } : {}),
     ...(shares ? { shares } : {}),
     ...(system ? { system } : {}),
     ...(terminal ? { terminal } : {}),

@@ -17,6 +17,7 @@ import { registerShareRoutes } from "./shares.js";
 import { registerSystemRoutes } from "./system.js";
 import { registerStorageRoutes } from "./storage.js";
 import { registerTerminalRoutes } from "./terminal.js";
+import { registerVmRoutes } from "./vms.js";
 
 export function registerApiRoutes(server: FastifyInstance, context: ApiRouteContext): void {
   registerHealthRoutes(server, context);
@@ -36,4 +37,5 @@ export function registerApiRoutes(server: FastifyInstance, context: ApiRouteCont
   registerDockerRoutes(server, context);
   registerShareRoutes(server, context);
   registerTerminalRoutes(server, context);
+  registerVmRoutes(server, context);
 }

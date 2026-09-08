@@ -8,6 +8,7 @@ Wants=network-online.target
 Type=simple
 User=sigmaos
 Group=sigmaos
+SupplementaryGroups=libvirt
 Environment=SIGMAOS_CONFIG=/etc/sigmaos/config.toml
 Environment=SIGMAOS_WEB_DIST=/usr/lib/sigmaos/apps/web/dist
 WorkingDirectory=/var/lib/sigmaos
@@ -18,7 +19,8 @@ Restart=on-failure
 RestartSec=3
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/var/lib/sigmaos /var/log/sigmaos /srv/nas
+ReadWritePaths=/var/lib/sigmaos /var/log/sigmaos /srv/nas /var/lib/sigmaos/vmstore /srv/iso
+BindReadOnlyPaths=/run/libvirt/libvirt-sock
 NoNewPrivileges=yes
 PrivateTmp=yes
 CapabilityBoundingSet=

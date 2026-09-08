@@ -30,6 +30,7 @@ describe("SQLite schema migrations", () => {
       "005_docker_management",
       "006_share_management",
       "006a_storage_management",
+      "006b_vm_management",
       "007_indexer_status",
       "008_index_failure_root_guard",
       "009_p0_operations",

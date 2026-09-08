@@ -8,7 +8,8 @@ import type {
   ShareConfig,
   ShareDefinitionConfig,
   ShareProtocolConfig,
-  SigmaConfig
+  SigmaConfig,
+  VmConfig
 } from "./types.js";
 
 interface TomlConfig {
@@ -42,6 +43,15 @@ interface TomlConfig {
       name?: string;
       path?: string;
     }>;
+  };
+  vm?: {
+    enabled?: boolean;
+    libvirt_uri?: string;
+    storage_path?: string;
+    network_name?: string;
+    iso_roots?: string[];
+    operation_timeout_ms?: number;
+    console_mode?: "serial";
   };
   shares?: {
     enabled?: boolean;
@@ -170,10 +180,30 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
       consoleShells: loadDockerConsoleShells(env, fileConfig),
       composeRoots: loadDockerComposeRoots(env, fileConfig, workspaceRoot)
     },
+    vm: loadVmConfig(env, fileConfig, workspaceRoot),
     shares: loadShareConfig(env, fileConfig),
     nasRoots,
     backup,
     health
+  };
+}
+
+function loadVmConfig(env: NodeJS.ProcessEnv, fileConfig: TomlConfig, cwd: string): VmConfig {
+  const vm = fileConfig.vm;
+  const isoRoots = env.SIGMAOS_VM_ISO_ROOTS
+    ? env.SIGMAOS_VM_ISO_ROOTS.split(",").map((value) => path.resolve(cwd, value.trim())).filter(Boolean)
+    : (vm?.iso_roots ?? []).map((value) => path.resolve(cwd, value));
+  return {
+    enabled: toBoolean(env.SIGMAOS_VM_ENABLED, vm?.enabled ?? true),
+    libvirtUri: env.SIGMAOS_VM_LIBVIRT_URI ?? vm?.libvirt_uri ?? "qemu:///system",
+    storagePath: path.resolve(cwd, env.SIGMAOS_VM_STORAGE_PATH ?? vm?.storage_path ?? ".sigmaos/vmstore"),
+    networkName: env.SIGMAOS_VM_NETWORK_NAME ?? vm?.network_name ?? "default",
+    isoRoots,
+    operationTimeoutMs: toPositiveInteger(
+      env.SIGMAOS_VM_OPERATION_TIMEOUT_MS,
+      vm?.operation_timeout_ms ?? 120_000
+    ),
+    consoleMode: "serial"
   };
 }
 

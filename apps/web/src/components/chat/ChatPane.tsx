@@ -11,6 +11,7 @@ import {
   LoaderCircle,
   MessageSquare,
   MessageSquarePlus,
+  MonitorCog,
   Plus,
   Send,
   Settings,
@@ -28,6 +29,7 @@ import type {
   SessionSummary,
   ShareOperationProposal,
   StorageOperationProposal,
+  VmOperationProposal,
   TranscriptMessage
 } from "../../api.js";
 import type { AppStatus } from "../../config/status.js";
@@ -44,7 +46,7 @@ import {
 import { sessionTitle } from "../../lib/session.js";
 
 type ApprovalRisk = PendingApproval["proposal"][number]["risk"];
-type ApprovalCardKind = "file" | "tool" | "docker" | "share" | "storage";
+type ApprovalCardKind = "file" | "tool" | "docker" | "vm" | "share" | "storage";
 type ComposerKeyDownEvent = Pick<KeyboardEvent<HTMLTextAreaElement>, "key" | "shiftKey" | "nativeEvent">;
 type ComposerFeedbackState = "sending" | "queued" | "running" | "reconnecting";
 
@@ -258,11 +260,13 @@ export function ChatPane({
         ? TerminalSquare
         : card.kind === "docker"
           ? Container
-          : card.kind === "share"
-            ? Share2
-            : card.kind === "storage"
-              ? HardDrive
-              : FileCog;
+          : card.kind === "vm"
+            ? MonitorCog
+            : card.kind === "share"
+              ? Share2
+              : card.kind === "storage"
+                ? HardDrive
+                : FileCog;
 
     return (
       <article className="approval-card" aria-label={t("chat.pendingApprovals")}>
@@ -775,6 +779,48 @@ function approvalCard(approval: PendingApproval, t: Translate): ApprovalCard {
     };
   }
 
+  if (approval.kind === "vm_operation") {
+    const vmOperation = approval.proposal.find(isVmOperationProposal);
+    if (!vmOperation) {
+      return {
+        kind: "vm",
+        title: t("chat.approvalCards.vmTitle"),
+        detail: t("chat.approvalCards.vmApproval"),
+        meta: t("chat.approvalCards.vmOperation"),
+        items: []
+      };
+    }
+    return {
+      kind: "vm",
+      title: vmOperationActionLabel(vmOperation.action, t),
+      detail: vmOperation.summary,
+      meta: t("chat.approvalCards.vmOperation"),
+      items: [
+        ...(vmOperation.domainName
+          ? [{ label: t("chat.approvalCards.target"), value: vmOperation.domainName }]
+          : []),
+        ...(vmOperation.snapshotName
+          ? [{ label: t("chat.approvalCards.snapshot"), value: vmOperation.snapshotName }]
+          : []),
+        ...(vmOperation.vcpu
+          ? [{ label: t("chat.approvalCards.vcpu"), value: String(vmOperation.vcpu) }]
+          : []),
+        ...(vmOperation.memoryBytes
+          ? [{ label: t("chat.approvalCards.memory"), value: `${Math.round(vmOperation.memoryBytes / 1024 ** 3)} GiB` }]
+          : []),
+        ...(vmOperation.diskSizeBytes
+          ? [{ label: t("chat.approvalCards.disk"), value: `${Math.round(vmOperation.diskSizeBytes / 1024 ** 3)} GiB` }]
+          : []),
+        ...(vmOperation.isoPath
+          ? [{ label: t("chat.approvalCards.iso"), value: vmOperation.isoPath }]
+          : []),
+        ...(vmOperation.networkName
+          ? [{ label: t("chat.approvalCards.network"), value: vmOperation.networkName }]
+          : [])
+      ]
+    };
+  }
+
   if (approval.kind === "storage_operation") {
     const storageOperation = approval.proposal.find(isStorageOperationProposal);
     if (!storageOperation) {
@@ -830,6 +876,14 @@ function approvalCard(approval: PendingApproval, t: Translate): ApprovalCard {
 
 function isDockerOperationProposal(proposal: PendingApproval["proposal"][number]): proposal is DockerOperationProposal {
   return "targetType" in proposal;
+}
+
+function isVmOperationProposal(proposal: PendingApproval["proposal"][number]): proposal is VmOperationProposal {
+  return "action" in proposal && "risk" in proposal && "summary" in proposal && !("targetType" in proposal);
+}
+
+function vmOperationActionLabel(action: VmOperationProposal["action"], t: Translate): string {
+  return t(`chat.approvalCards.vmActions.${action}`);
 }
 
 function isShareOperationProposal(proposal: PendingApproval["proposal"][number]): proposal is ShareOperationProposal {

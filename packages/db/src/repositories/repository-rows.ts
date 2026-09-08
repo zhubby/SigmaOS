@@ -19,6 +19,8 @@ import type {
   ShareOperationAction,
   ShareOperationStatus,
   StorageOperationStatus
+  , VmOperationAction
+  , VmOperationStatus
 } from "@sigmaos/shared";
 
 export type DbSessionRow = {
@@ -219,6 +221,28 @@ export type DbStorageOperationRow = {
   metadata_json: string;
   created_at: string;
   updated_at: string;
+};
+
+export type DbVmOperationRow = {
+  id: string;
+  approval_id: string | null;
+  action: VmOperationAction;
+  target_id: string;
+  status: VmOperationStatus;
+  metadata_json: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DbVmConsoleAuthorizationRow = {
+  id: string;
+  operation_id: string;
+  approval_id: string;
+  domain_name: string;
+  status: "active" | "used" | "expired" | "failed";
+  created_at: string;
+  expires_at: string;
+  used_at: string | null;
 };
 
 export type DbDockerConsoleAuthorizationRow = {

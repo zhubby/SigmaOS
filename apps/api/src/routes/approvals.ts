@@ -8,6 +8,7 @@ import {
   getDockerOperationByApproval,
   getShareOperationByApproval,
   getStorageOperationByApproval,
+  getVmOperationByApproval,
   getNasRoot,
   listPendingApprovals,
   recordAppliedOperation,
@@ -15,6 +16,7 @@ import {
   updateDockerOperationStatus,
   updateShareOperationStatus,
   updateStorageOperationStatus,
+  updateVmOperationStatus,
   updateApprovalStatus,
   updateJobStatus
 } from "@sigmaos/db";
@@ -25,6 +27,7 @@ import type {
   PendingApprovalRecord,
   ShareOperationProposal,
   StorageOperationProposal
+  , VmOperationProposal
 } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
 import { effectiveDockerConfig } from "../lib/settings.js";
@@ -37,6 +40,7 @@ import {
 } from "../lib/share-service.js";
 import { applyStoragePoolOperation } from "../lib/storage-service.js";
 import { StorageScopeError, resolveStoragePoolScope, validateStoragePoolProposal } from "../lib/storage-scope.js";
+import { applyVmOperation, safeVmMessage } from "../lib/vm-service.js";
 
 export function registerApprovalRoutes(server: FastifyInstance, context: ApiRouteContext): void {
   const { config, db, system } = context;
@@ -247,6 +251,40 @@ export function registerApprovalRoutes(server: FastifyInstance, context: ApiRout
       }
     }
 
+    if (approval.kind === "vm_operation") {
+      const operation = getVmOperationByApproval(db, approval.id);
+      const proposal = vmOperationProposal(approval);
+      if (!operation || !proposal) {
+        reply.status(400).send({ error: "VM approval is missing operation metadata" });
+        return;
+      }
+      if (!updateApprovalStatus(db, approval.id, "approved", ["pending"])) {
+        reply.status(409).send({ error: `Approval is already ${approval.status}` });
+        return;
+      }
+      if (proposal.action === "console") {
+        const approved = updateVmOperationStatus(db, operation.id, "approved", { approvedAt: new Date().toISOString() });
+        reply.status(202).send({ approvalId: approval.id, status: "approved", operation: approved });
+        return;
+      }
+      try {
+        const metadata = await applyVmOperation(config, operation, proposal, context.vm);
+        const applied = updateVmOperationStatus(db, operation.id, "applied", { ...metadata, appliedAt: new Date().toISOString() });
+        updateApprovalStatus(db, approval.id, "applied", ["approved"]);
+        updateJobStatus(db, approval.jobId, "completed", null, ["waiting_approval"]);
+        appendEvent(db, { sessionId: approval.sessionId, jobId: approval.jobId, type: "job.completed", payload: { jobId: approval.jobId, approvalId: approval.id, vmOperation: applied } });
+        reply.status(202).send({ approvalId: approval.id, status: "applied", operation: applied });
+      } catch (error) {
+        const message = safeVmMessage(error);
+        updateVmOperationStatus(db, operation.id, "failed", { error: message, failedAt: new Date().toISOString() });
+        updateApprovalStatus(db, approval.id, "failed", ["approved"]);
+        updateJobStatus(db, approval.jobId, "failed", message, ["waiting_approval"]);
+        appendEvent(db, { sessionId: approval.sessionId, jobId: approval.jobId, type: "job.failed", payload: { jobId: approval.jobId, approvalId: approval.id, error: message } });
+        reply.status(400).send({ error: message });
+      }
+      return;
+    }
+
     if (!updateApprovalStatus(db, approval.id, "approved", ["pending"])) {
       reply.status(409).send({ error: `Approval is already ${approval.status}` });
       return;
@@ -443,6 +481,19 @@ export function registerApprovalRoutes(server: FastifyInstance, context: ApiRout
       return;
     }
 
+    if (approval.kind === "vm_operation") {
+      if (!updateApprovalStatus(db, approval.id, "rejected", ["pending"])) {
+        reply.status(409).send({ error: `Approval is already ${approval.status}` });
+        return;
+      }
+      const operation = getVmOperationByApproval(db, approval.id);
+      if (operation) updateVmOperationStatus(db, operation.id, "failed", { rejected: true, rejectedAt: new Date().toISOString() });
+      updateJobStatus(db, approval.jobId, "completed", null, ["waiting_approval"]);
+      appendEvent(db, { sessionId: approval.sessionId, jobId: approval.jobId, type: "job.completed", payload: { jobId: approval.jobId, approvalId: approval.id, rejected: true } });
+      reply.status(202).send({ approvalId: approval.id, status: "rejected" });
+      return;
+    }
+
     if (!updateApprovalStatus(db, approval.id, "rejected", ["pending"])) {
       reply.status(409).send({ error: `Approval is already ${approval.status}` });
       return;
@@ -517,6 +568,15 @@ function storageOperationProposal(approval: PendingApprovalRecord): StorageOpera
     (proposal as { action?: unknown }).action === "create_pool"
   ) {
     return proposal as StorageOperationProposal;
+  }
+  return null;
+}
+
+function vmOperationProposal(approval: PendingApprovalRecord): VmOperationProposal | null {
+  if (approval.kind !== "vm_operation") return null;
+  const proposal = approval.proposal[0];
+  if (typeof proposal === "object" && proposal !== null && "action" in proposal && typeof (proposal as { action?: unknown }).action === "string") {
+    return proposal as VmOperationProposal;
   }
   return null;
 }
