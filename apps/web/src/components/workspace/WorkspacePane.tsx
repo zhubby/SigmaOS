@@ -364,11 +364,11 @@ export function WorkspacePane({
     !transferTargetDirectory.trim() ||
     rawTransferDirectory.startsWith("/") ||
     normalizedTransferDirectory.split("/").some((segment) => segment === ".." || segment === "");
-  const transferTargetRootPath = transferDirectoryInvalid
-    ? ""
-    : selectedStoragePool
+  const transferTargetRootPath = transferState && !transferDirectoryInvalid
+    ? selectedStoragePool
       ? joinNasPath(selectedStoragePool.path, transferTargetPath)
-      : transferTargetPath;
+      : transferTargetPath
+    : "";
   const transferTargetInvalid =
     transferDirectoryInvalid ||
     transferTargetRootPath === transferState?.entry.path;
