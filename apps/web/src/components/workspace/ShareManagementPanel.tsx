@@ -14,6 +14,7 @@ import {
   Server,
   Share2,
   Trash2,
+  X,
   type LucideIcon
 } from "lucide-react";
 import {
@@ -80,6 +81,8 @@ export function ShareManagementPanel({
   const [refreshing, setRefreshing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [newShare, setNewShare] = useState<ShareDefinitionFormState | null>(null);
+  const [newShareError, setNewShareError] = useState<string | null>(null);
   const reportedIssueSignature = useRef<string | null>(null);
   const reportedPendingApprovalId = useRef<string | null>(null);
   const pendingShareApproval = pendingApprovals.find((approval) => approval.kind === "share_operation") ?? null;
@@ -92,6 +95,8 @@ export function ShareManagementPanel({
     authenticatedProtocols: authenticatedProtocolCount(form)
   };
   const serviceIssueCount = summary?.issues.length ?? 0;
+  const addShareOpen = newShare !== null;
+  const displayedShares = newShare ? [...form.shares, newShare] : form.shares;
 
   useEffect(() => {
     let active = true;
@@ -137,6 +142,20 @@ export function ShareManagementPanel({
     onNotifyWarning(t("workspace.management.shares.pendingApproval"));
   }, [onNotifyWarning, pendingShareApproval, t]);
 
+  useEffect(() => {
+    if (!addShareOpen) {
+      return;
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setNewShare(null);
+        setNewShareError(null);
+      }
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [addShareOpen]);
+
   async function refreshShareData() {
     setRefreshing(true);
     setError(null);
@@ -156,6 +175,10 @@ export function ShareManagementPanel({
 
   async function submitProposal(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (newShare) {
+      confirmAddShare();
+      return;
+    }
     if (!sessionId) {
       const message = t("workspace.management.shares.errors.noSession");
       setError(message);
@@ -206,6 +229,10 @@ export function ShareManagementPanel({
   }
 
   function updateShare(index: number, patch: Partial<ShareDefinitionFormState>) {
+    if (newShare && index === form.shares.length) {
+      updateNewShare(patch);
+      return;
+    }
     setForm((current) => ({
       ...current,
       shares: current.shares.map((share, shareIndex) =>
@@ -224,6 +251,10 @@ export function ShareManagementPanel({
     protocol: Protocol,
     patch: Partial<ShareProtocolFormState[Protocol]>
   ) {
+    if (newShare && index === form.shares.length) {
+      updateNewShareProtocol(protocol, patch);
+      return;
+    }
     setForm((current) => ({
       ...current,
       shares: current.shares.map((share, shareIndex) => {
@@ -244,14 +275,63 @@ export function ShareManagementPanel({
     }));
   }
 
-  function addShare() {
+  function openAddShare() {
+    setNewShare(createShareFormState(roots, form.shares));
+    setNewShareError(null);
+  }
+
+  function closeAddShare() {
+    setNewShare(null);
+    setNewShareError(null);
+  }
+
+  function confirmAddShare() {
+    if (!newShare) {
+      return;
+    }
+    const issue = newShareValidationIssue(form, newShare, roots);
+    if (issue) {
+      setNewShareError(validationIssueText(issue, t));
+      return;
+    }
     setForm((current) => ({
       ...current,
-      shares: [...current.shares, createShareFormState(roots, current.shares)]
+      shares: [...current.shares, newShare]
     }));
+    closeAddShare();
+  }
+
+  function updateNewShare(patch: Partial<ShareDefinitionFormState>) {
+    setNewShare((current) => (current ? { ...current, ...patch } : current));
+    setNewShareError(null);
+  }
+
+  function updateNewShareProtocol<Protocol extends ShareProtocol>(
+    protocol: Protocol,
+    patch: Partial<ShareProtocolFormState[Protocol]>
+  ) {
+    setNewShare((current) =>
+      current
+        ? {
+            ...current,
+            protocols: {
+              ...current.protocols,
+              [protocol]: {
+                ...current.protocols[protocol],
+                ...patch
+              }
+            } as ShareProtocolFormState
+          }
+        : current
+    );
+    setNewShareError(null);
   }
 
   function removeShare(index: number) {
+    if (newShare && index === form.shares.length) {
+      closeAddShare();
+      return;
+    }
     setForm((current) => ({
       ...current,
       shares: current.shares.filter((_, shareIndex) => shareIndex !== index)
@@ -372,19 +452,17 @@ export function ShareManagementPanel({
         <section className="management-section share-account-section">
           <SectionHeader title={t("workspace.management.shares.accountTitle")} description={t("workspace.management.shares.accountDescription")} />
           <fieldset className="share-field-grid">
-            <label>
-              <span>{t("workspace.management.shares.fields.enabled")}</span>
-              <span className="share-switch-row">
-                <input
-                  type="checkbox"
-                  checked={form.enabled}
-                  onChange={(event) => {
-                    setForm((current) => ({ ...current, enabled: event.target.checked }));
-                  }}
-                />
-                <em>{form.enabled ? t("workspace.management.shares.states.enabled") : t("workspace.management.shares.states.disabled")}</em>
-              </span>
-            </label>
+            <div className="share-form-field">
+              <span className="share-field-label">{t("workspace.management.shares.fields.enabled")}</span>
+              <SwitchControl
+                checked={form.enabled}
+                label={form.enabled ? t("workspace.management.shares.states.enabled") : t("workspace.management.shares.states.disabled")}
+                accessibilityLabel={t("workspace.management.shares.fields.enabled")}
+                onChange={(enabled) => {
+                  setForm((current) => ({ ...current, enabled }));
+                }}
+              />
+            </div>
             <label>
               <span>{t("workspace.management.shares.fields.username")}</span>
               <input
@@ -416,15 +494,14 @@ export function ShareManagementPanel({
                 placeholder="/run/sigmaos/share-helper.sock"
               />
             </label>
-            <label className="share-check share-field-wide">
-              <input
-                type="checkbox"
-                checked={form.account.clearPassword}
-                disabled={!form.account.passwordConfigured || form.account.password.length > 0}
-                onChange={(event) => updateAccount({ clearPassword: event.target.checked })}
-              />
-              <span>{t("workspace.management.shares.fields.clearPassword")}</span>
-            </label>
+            <SwitchControl
+              className="share-field-wide"
+              checked={form.account.clearPassword}
+              disabled={!form.account.passwordConfigured || form.account.password.length > 0}
+              label={t("workspace.management.shares.fields.clearPassword")}
+              accessibilityLabel={t("workspace.management.shares.fields.clearPassword")}
+              onChange={(clearPassword) => updateAccount({ clearPassword })}
+            />
           </fieldset>
         </section>
 
@@ -455,7 +532,7 @@ export function ShareManagementPanel({
             <button
               type="button"
               className="management-row-action"
-              onClick={addShare}
+              onClick={openAddShare}
               disabled={roots.length === 0 || loading || submitting}
               title={t("workspace.management.shares.addShare")}
               aria-label={t("workspace.management.shares.addShare")}
@@ -466,9 +543,11 @@ export function ShareManagementPanel({
           </header>
 
           <div className="share-directory-list">
-            {form.shares.length ? (
-              form.shares.map((share, index) => (
-                <article key={`${share.id}-${index}`} className="share-directory-card">
+            {displayedShares.length ? (
+              displayedShares.map((share, index) => {
+                const isNewShare = Boolean(newShare && index === form.shares.length);
+                const shareCard = (
+                <article key={`share-${index}`} className="share-directory-card">
                   <header className="share-directory-card-header">
                     <div>
                       <Folder aria-hidden="true" size={17} />
@@ -493,7 +572,11 @@ export function ShareManagementPanel({
                   <div className="share-directory-fields">
                     <label>
                       <span>{t("workspace.management.shares.fields.shareName")}</span>
-                      <input value={share.name} onChange={(event) => updateShare(index, { name: event.target.value })} />
+                      <input
+                        value={share.name}
+                        autoFocus={isNewShare}
+                        onChange={(event) => updateShare(index, { name: event.target.value })}
+                      />
                     </label>
                     <label>
                       <span>{t("workspace.management.shares.fields.shareId")}</span>
@@ -527,17 +610,17 @@ export function ShareManagementPanel({
                       t={t}
                       onEnabledChange={(enabled) => updateShareProtocol(index, "smb", { enabled })}
                     >
-                      <CheckField
+                      <SwitchField
                         label={t("workspace.management.shares.fields.readOnly")}
                         checked={share.protocols.smb.readOnly}
                         onChange={(readOnly) => updateShareProtocol(index, "smb", { readOnly })}
                       />
-                      <CheckField
+                      <SwitchField
                         label={t("workspace.management.shares.fields.browseable")}
                         checked={share.protocols.smb.browseable}
                         onChange={(browseable) => updateShareProtocol(index, "smb", { browseable })}
                       />
-                      <CheckField
+                      <SwitchField
                         label={t("workspace.management.shares.fields.allowGuest")}
                         checked={share.protocols.smb.allowGuest}
                         onChange={(allowGuest) => updateShareProtocol(index, "smb", { allowGuest })}
@@ -561,12 +644,12 @@ export function ShareManagementPanel({
                         value={share.protocols.webdav.pathPrefix}
                         onChange={(pathPrefix) => updateShareProtocol(index, "webdav", { pathPrefix })}
                       />
-                      <CheckField
+                      <SwitchField
                         label={t("workspace.management.shares.fields.readOnly")}
                         checked={share.protocols.webdav.readOnly}
                         onChange={(readOnly) => updateShareProtocol(index, "webdav", { readOnly })}
                       />
-                      <CheckField
+                      <SwitchField
                         label={t("workspace.management.shares.fields.allowGuest")}
                         checked={share.protocols.webdav.allowGuest}
                         onChange={(allowGuest) => updateShareProtocol(index, "webdav", { allowGuest })}
@@ -597,12 +680,12 @@ export function ShareManagementPanel({
                         inputMode="numeric"
                         onChange={(passivePortEnd) => updateShareProtocol(index, "ftp", { passivePortEnd })}
                       />
-                      <CheckField
+                      <SwitchField
                         label={t("workspace.management.shares.fields.readOnly")}
                         checked={share.protocols.ftp.readOnly}
                         onChange={(readOnly) => updateShareProtocol(index, "ftp", { readOnly })}
                       />
-                      <CheckField
+                      <SwitchField
                         label={t("workspace.management.shares.fields.allowGuest")}
                         checked={share.protocols.ftp.allowGuest}
                         onChange={(allowGuest) => updateShareProtocol(index, "ftp", { allowGuest })}
@@ -623,12 +706,12 @@ export function ShareManagementPanel({
                           placeholder="192.168.1.0/24"
                         />
                       </label>
-                      <CheckField
+                      <SwitchField
                         label={t("workspace.management.shares.fields.readOnly")}
                         checked={share.protocols.nfs.readOnly}
                         onChange={(readOnly) => updateShareProtocol(index, "nfs", { readOnly })}
                       />
-                      <CheckField
+                      <SwitchField
                         label={t("workspace.management.shares.fields.rootSquash")}
                         checked={share.protocols.nfs.rootSquash}
                         onChange={(rootSquash) => updateShareProtocol(index, "nfs", { rootSquash })}
@@ -678,7 +761,62 @@ export function ShareManagementPanel({
                     </ProtocolCard>
                   </div>
                 </article>
-              ))
+                );
+                if (!isNewShare) {
+                  return shareCard;
+                }
+                return (
+                  <div
+                    key="add-share-modal"
+                    className="management-modal-backdrop share-add-modal-backdrop"
+                    role="presentation"
+                    onMouseDown={(event) => event.currentTarget === event.target && closeAddShare()}
+                  >
+                    <section
+                      className="management-modal share-add-modal"
+                      role="dialog"
+                      aria-modal="true"
+                      aria-labelledby="share-add-title"
+                    >
+                      <header>
+                        <div>
+                          <span className="eyebrow">{t("workspace.management.shares.eyebrow")}</span>
+                          <h2 id="share-add-title">{t("workspace.management.shares.addShare")}</h2>
+                        </div>
+                        <button
+                          type="button"
+                          className="management-icon-action"
+                          onClick={closeAddShare}
+                          title={t("common.actions.cancel")}
+                          aria-label={t("common.actions.cancel")}
+                        >
+                          <X aria-hidden="true" size={15} />
+                        </button>
+                      </header>
+                      <div className="share-add-form">
+                        <div className="share-add-form-body">
+                          {shareCard}
+                          {newShareError ? (
+                            <p className="share-add-form-error" role="alert">
+                              <CircleAlert aria-hidden="true" size={15} />
+                              <span>{newShareError}</span>
+                            </p>
+                          ) : null}
+                        </div>
+                        <footer className="share-add-form-actions">
+                          <button type="button" onClick={closeAddShare}>
+                            {t("common.actions.cancel")}
+                          </button>
+                          <button type="button" className="is-primary" onClick={confirmAddShare}>
+                            <Plus aria-hidden="true" size={15} />
+                            <span>{t("workspace.management.shares.addShare")}</span>
+                          </button>
+                        </footer>
+                      </div>
+                    </section>
+                  </div>
+                );
+              })
             ) : (
               <p className="management-empty">{t("workspace.management.shares.noShares")}</p>
             )}
@@ -729,11 +867,18 @@ function ProtocolCard({
   return (
     <section className="share-protocol-card" data-enabled={enabled}>
       <header>
-        <label className="share-protocol-toggle">
-          <input type="checkbox" checked={enabled} onChange={(event) => onEnabledChange(event.target.checked)} />
-          {protocolIcon(protocol, 15)}
-          <span>{t(`workspace.management.shares.protocolLabels.${protocol}`)}</span>
-        </label>
+        <SwitchControl
+          className="share-protocol-toggle"
+          checked={enabled}
+          label={
+            <>
+              {protocolIcon(protocol, 15)}
+              <span>{t(`workspace.management.shares.protocolLabels.${protocol}`)}</span>
+            </>
+          }
+          accessibilityLabel={t(`workspace.management.shares.protocolLabels.${protocol}`)}
+          onChange={onEnabledChange}
+        />
         <span className="management-row-status" data-state={enabled ? "ready" : "neutral"}>
           {enabled ? t("workspace.management.shares.states.enabled") : t("workspace.management.shares.states.disabled")}
         </span>
@@ -769,6 +914,42 @@ function CheckField({ label, checked, onChange }: { label: string; checked: bool
     <label className="share-check">
       <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
       <span>{label}</span>
+    </label>
+  );
+}
+
+function SwitchField({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return <SwitchControl checked={checked} label={label} accessibilityLabel={label} onChange={onChange} />;
+}
+
+function SwitchControl({
+  checked,
+  disabled = false,
+  label,
+  accessibilityLabel,
+  className,
+  onChange
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  label: ReactNode;
+  accessibilityLabel: string;
+  className?: string;
+  onChange: (checked: boolean) => void;
+}) {
+  const classes = ["share-switch", disabled ? "is-disabled" : "", className ?? ""].filter(Boolean).join(" ");
+  return (
+    <label className={classes}>
+      <input
+        type="checkbox"
+        role="switch"
+        aria-label={accessibilityLabel}
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span className="share-switch-track" aria-hidden="true" />
+      <span className="share-switch-copy">{label}</span>
     </label>
   );
 }
@@ -860,6 +1041,40 @@ function settingsUpdatedAtLabel(updatedAt: string, locale: SupportedLocale, t: T
 
 function rootDisplayName(rootId: string, roots: NasRoot[]): string {
   return roots.find((root) => root.id === rootId)?.name ?? (rootId || "-");
+}
+
+function newShareValidationIssue(
+  form: ShareSettingsFormState,
+  share: ShareDefinitionFormState,
+  roots: NasRoot[]
+): ShareFormValidationIssue | null {
+  const [shareIssue] = validateShareForm(
+    {
+      ...form,
+      enabled: false,
+      account: {
+        ...form.account,
+        username: "sigma-share"
+      },
+      shares: [share]
+    },
+    roots
+  );
+  if (shareIssue) {
+    return shareIssue;
+  }
+  const id = share.id.trim();
+  if (form.shares.some((existingShare) => existingShare.id.trim() === id)) {
+    return {
+      code: "duplicateId",
+      shareName: share.name.trim() || id || "share",
+      value: id
+    };
+  }
+  if (share.protocols.ftp.enabled && form.shares.some((existingShare) => existingShare.protocols.ftp.enabled)) {
+    return { code: "multipleFtp" };
+  }
+  return null;
 }
 
 function validationIssueText(issue: ShareFormValidationIssue, t: Translate): string {
