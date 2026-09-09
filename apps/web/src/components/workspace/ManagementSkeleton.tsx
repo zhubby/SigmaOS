@@ -10,12 +10,14 @@ export function ManagementSkeletonBody({
   tableColumns = 6,
   tableRows = 4,
   listRows = 3,
-  gaugeRows = 4
+  gaugeRows = 4,
+  variant = "default"
 }: {
   tableColumns?: number;
   tableRows?: number;
   listRows?: number;
   gaugeRows?: number;
+  variant?: "default" | "docker";
 }) {
   const { t } = useTranslation();
 
@@ -62,6 +64,55 @@ export function ManagementSkeletonBody({
         </div>
       </section>
 
+      {variant === "docker" ? (
+        <>
+          <div className="docker-runtime-layout management-skeleton-docker-layout">
+            <section className="management-section">
+              <SkeletonSectionHeader />
+              <div className="docker-pressure-body">
+                <div className="docker-pressure-stat-grid">
+                  {Array.from({ length: 2 }, (_, index) => (
+                    <div key={index} className="docker-pressure-stat management-skeleton-pressure-stat">
+                      <SkeletonBlock width="52%" />
+                      <SkeletonBlock width="42%" />
+                      <SkeletonBlock width="64%" />
+                    </div>
+                  ))}
+                </div>
+                <SkeletonBlock className="management-skeleton-pressure-chart" />
+                <SkeletonBlock width="56%" />
+              </div>
+            </section>
+            {Array.from({ length: 2 }, (_, section) => (
+              <section key={section} className="management-section">
+                <SkeletonSectionHeader />
+                <div className="docker-inventory-list management-skeleton-inventory-list">
+                  {Array.from({ length: 3 }, (_, index) => (
+                    <div key={index} className="docker-inventory-row">
+                      <SkeletonBlock className="management-skeleton-icon" />
+                      <div><SkeletonBlock width={index % 2 ? "62%" : "76%"} /><SkeletonBlock width="48%" /></div>
+                      <SkeletonBlock width="34px" />
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+          <section className="management-section docker-compose-section">
+            <SkeletonSectionHeader />
+            <div className="management-workload-list management-skeleton-list">
+              {Array.from({ length: listRows }, (_, index) => (
+                <div key={index} className="management-workload management-skeleton-workload">
+                  <SkeletonBlock className="management-skeleton-icon" />
+                  <div><SkeletonBlock width="58%" /><SkeletonBlock width="84%" /></div>
+                  <SkeletonBlock className="management-skeleton-status" width="52px" />
+                  <SkeletonBlock width="42px" />
+                </div>
+              ))}
+            </div>
+          </section>
+        </>
+      ) : (
       <div className="management-lower-grid">
         <section className="management-section">
           <SkeletonSectionHeader />
@@ -93,6 +144,7 @@ export function ManagementSkeletonBody({
           </div>
         </section>
       </div>
+      )}
     </div>
   );
 }

@@ -31,6 +31,7 @@ import {
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   createDockerConsoleSession,
   createVmConsoleSession,
@@ -122,6 +123,12 @@ interface ManagementGauge {
   value: number;
   display: string;
   tone: GaugeTone;
+}
+
+interface DockerPressurePoint {
+  timestamp: number;
+  cpu: number | null;
+  memory: number | null;
 }
 
 interface ManagementPanelConfig {
@@ -752,6 +759,7 @@ function DockerManagementPanel({
 }) {
   const { t } = useTranslation();
   const [summary, setSummary] = useState<DockerSummary | null>(null);
+  const [pressureHistory, setPressureHistory] = useState<DockerPressurePoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -790,6 +798,7 @@ function DockerManagementPanel({
           return;
         }
         setSummary(nextSummary);
+        recordPressureSample(nextSummary);
         if (nextSummary.engine.error) {
           onNotifyError(nextSummary.engine.error);
         }
@@ -807,12 +816,35 @@ function DockerManagementPanel({
     }
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    const interval = window.setInterval(() => {
+      void getDockerSummary()
+        .then((nextSummary) => {
+          if (!active) {
+            return;
+          }
+          setSummary(nextSummary);
+          recordPressureSample(nextSummary);
+          setError(null);
+        })
+        .catch(() => {
+          // Keep the last good sample visible when a background refresh is interrupted.
+        });
+    }, 8000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, []);
+
   async function refreshSummary() {
     setLoading(true);
     setError(null);
     try {
       const nextSummary = await getDockerSummary();
       setSummary(nextSummary);
+      recordPressureSample(nextSummary);
       if (nextSummary.engine.error) {
         onNotifyError(nextSummary.engine.error);
       }
@@ -823,6 +855,20 @@ function DockerManagementPanel({
     } finally {
       setLoading(false);
     }
+  }
+
+  function recordPressureSample(nextSummary: DockerSummary) {
+    const sample = dockerPressurePoint(nextSummary);
+    if (!sample) {
+      return;
+    }
+    setPressureHistory((previous) => {
+      const last = previous[previous.length - 1];
+      if (last && Math.abs(last.timestamp - sample.timestamp) < 1000) {
+        return [...previous.slice(0, -1), sample];
+      }
+      return [...previous, sample].slice(-36);
+    });
   }
 
   async function openLogs(container: DockerContainer) {
@@ -955,7 +1001,7 @@ function DockerManagementPanel({
       </header>
 
       <div className="management-body">
-        {loading ? <ManagementSkeletonBody tableColumns={7} tableRows={4} /> : <>
+        {loading ? <ManagementSkeletonBody tableColumns={6} tableRows={4} variant="docker" /> : <>
         <section className="management-command-panel">
           <div className="management-emblem" aria-hidden="true">
             <Container size={31} />
@@ -1019,7 +1065,6 @@ function DockerManagementPanel({
                     <th>{t("workspace.management.columns.cpu")}</th>
                     <th>{t("workspace.management.columns.memory")}</th>
                     <th>{t("workspace.management.docker.columns.ports")}</th>
-                    <th>{t("workspace.management.columns.actions")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1044,14 +1089,6 @@ function DockerManagementPanel({
                       <td>{formatPercent(container.cpuPercent, locale)}</td>
                       <td>{formatContainerMemory(container, locale)}</td>
                       <td title={container.ports.join(", ")}>{container.ports.join(", ") || t("common.dash")}</td>
-                      <td>
-                        <ActionIconButton
-                          label={t("workspace.management.docker.details")}
-                          disabled={!canUseDocker}
-                          Icon={Info}
-                          onClick={() => void openContainerDetails(container)}
-                        />
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1062,48 +1099,40 @@ function DockerManagementPanel({
           )}
         </section>
 
-        <div className="management-lower-grid">
-          <section className="management-section">
-            <SectionHeader
-              title={t("workspace.management.docker.composeTitle")}
-              description={t("workspace.management.docker.composeDescription")}
-            />
-            <div className="management-workload-list">
-              {composeProjects.length ? (
-                composeProjects.map((project) => (
-                  <article key={project.id} className="management-workload management-workload-docker">
-                    {statusIcon(composeTone(project))}
-                    <div>
-                      <strong>{project.name}</strong>
-                      <span>{project.services.join(", ") || project.filePath}</span>
-                    </div>
-                    <em data-state={composeTone(project)}>{composeStatusLabel(project, t)}</em>
-                    <div className="management-action-cluster">
-                      {renderComposeButton(project, "compose_up", Play, t("workspace.management.actions.deploy"))}
-                      {renderComposeButton(project, "compose_pull", RefreshCw, t("workspace.management.actions.pull"))}
-                      {renderComposeButton(project, "compose_restart", RotateCw, t("workspace.management.actions.restart"))}
-                      {renderComposeButton(project, "compose_down", Power, t("workspace.management.actions.stop"))}
-                    </div>
-                  </article>
-                ))
-              ) : (
-                <p className="management-empty">{dockerComposeEmptyState(dockerEnabled, loading, t)}</p>
-              )}
-            </div>
-          </section>
-
-          <section className="management-section">
-            <SectionHeader
-              title={t("workspace.management.docker.resourcesTitle")}
-              description={t("workspace.management.docker.resourcesDescription")}
-            />
-            <div className="management-resource-list">
-              {dockerGauges(summary, locale, t).map((gauge) => (
-                <ResourceGauge key={gauge.id} gauge={gauge} />
-              ))}
-            </div>
-          </section>
+        <div className="docker-runtime-layout">
+          <DockerRuntimePressure summary={summary} history={pressureHistory} locale={locale} t={t} />
+          <DockerNetworkInventory summary={summary} locale={locale} t={t} />
+          <DockerStorageInventory summary={summary} t={t} />
         </div>
+
+        <section className="management-section docker-compose-section">
+          <SectionHeader
+            title={t("workspace.management.docker.composeTitle")}
+            description={t("workspace.management.docker.composeDescription")}
+          />
+          <div className="management-workload-list">
+            {composeProjects.length ? (
+              composeProjects.map((project) => (
+                <article key={project.id} className="management-workload management-workload-docker">
+                  {statusIcon(composeTone(project))}
+                  <div>
+                    <strong>{project.name}</strong>
+                    <span>{project.services.join(", ") || project.filePath}</span>
+                  </div>
+                  <em data-state={composeTone(project)}>{composeStatusLabel(project, t)}</em>
+                  <div className="management-action-cluster">
+                    {renderComposeButton(project, "compose_up", Play, t("workspace.management.actions.deploy"))}
+                    {renderComposeButton(project, "compose_pull", RefreshCw, t("workspace.management.actions.pull"))}
+                    {renderComposeButton(project, "compose_restart", RotateCw, t("workspace.management.actions.restart"))}
+                    {renderComposeButton(project, "compose_down", Power, t("workspace.management.actions.stop"))}
+                  </div>
+                </article>
+              ))
+            ) : (
+              <p className="management-empty">{dockerComposeEmptyState(dockerEnabled, loading, t)}</p>
+            )}
+          </div>
+        </section>
         </>}
       </div>
 
@@ -1599,43 +1628,148 @@ function dockerMetrics(summary: DockerSummary | null, locale: SupportedLocale, t
   ];
 }
 
-function dockerGauges(summary: DockerSummary | null, locale: SupportedLocale, t: Translate): ManagementGauge[] {
+function DockerRuntimePressure({
+  summary,
+  history,
+  locale,
+  t
+}: {
+  summary: DockerSummary | null;
+  history: DockerPressurePoint[];
+  locale: SupportedLocale;
+  t: Translate;
+}) {
   const metrics = summary?.metrics;
-  return [
-    {
-      id: "cpu",
-      labelKey: "workspace.management.gauges.cpu",
-      value: clampGauge(metrics?.cpuPercent ?? 0),
-      display: metrics?.cpuPercent === null || metrics?.cpuPercent === undefined ? String(t("common.dash")) : formatPercent(metrics.cpuPercent, locale),
-      tone: gaugeTone(metrics?.cpuPercent ?? 0)
-    },
-    {
-      id: "memory",
-      labelKey: "workspace.management.gauges.memory",
-      value: clampGauge(metrics?.memoryPercent ?? 0),
-      display:
-        metrics?.memoryUsageBytes === null || metrics?.memoryUsageBytes === undefined
-          ? String(t("common.dash"))
-          : `${formatBytes(metrics.memoryUsageBytes, locale)}${
-              metrics.memoryLimitBytes ? ` / ${formatBytes(metrics.memoryLimitBytes, locale)}` : ""
-            }`,
-      tone: gaugeTone(metrics?.memoryPercent ?? 0)
-    },
-    {
-      id: "network",
-      labelKey: "workspace.management.gauges.network",
-      value: clampGauge((metrics?.networks ?? 0) * 8),
-      display: metrics ? `${formatLocaleNumber(metrics.networks, locale)} ${String(t("workspace.management.docker.units.networks"))}` : String(t("common.dash")),
-      tone: "neutral"
-    },
-    {
-      id: "storage",
-      labelKey: "workspace.management.gauges.storage",
-      value: clampGauge((metrics?.volumes ?? 0) * 6),
-      display: metrics ? `${formatLocaleNumber(metrics.volumes, locale)} ${String(t("workspace.management.docker.units.volumes"))}` : String(t("common.dash")),
-      tone: metrics?.volumes ? "warning" : "neutral"
-    }
-  ];
+  const current = history[history.length - 1];
+  const cpu = typeof metrics?.cpuPercent === "number" ? metrics.cpuPercent : current?.cpu ?? null;
+  const memory = typeof metrics?.memoryPercent === "number" ? metrics.memoryPercent : current?.memory ?? null;
+  const chartData = history.map((point) => ({
+    ...point,
+    label: new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }).format(point.timestamp)
+  }));
+  const memoryDetail = metrics?.memoryUsageBytes == null
+    ? String(t("common.dash"))
+    : `${formatBytes(metrics.memoryUsageBytes, locale)}${metrics.memoryLimitBytes ? ` / ${formatBytes(metrics.memoryLimitBytes, locale)}` : ""}`;
+
+  return (
+    <section className="management-section docker-pressure-section">
+      <SectionHeader
+        title={String(t("workspace.management.docker.pressureTitle"))}
+        description={String(t("workspace.management.docker.pressureDescription"))}
+      />
+      <div className="docker-pressure-body">
+        <div className="docker-pressure-stat-grid">
+          <div className="docker-pressure-stat" data-state={pressureTone(cpu)}>
+            <div><Cpu aria-hidden="true" size={15} /><span>{String(t("workspace.management.docker.pressureCpu"))}</span></div>
+            <strong>{formatPercent(cpu, locale)}</strong>
+            <small>{String(t("workspace.management.docker.pressureLive"))}</small>
+          </div>
+          <div className="docker-pressure-stat" data-state={pressureTone(memory)}>
+            <div><Activity aria-hidden="true" size={15} /><span>{String(t("workspace.management.docker.pressureMemory"))}</span></div>
+            <strong>{formatPercent(memory, locale)}</strong>
+            <small>{memoryDetail}</small>
+          </div>
+        </div>
+        <div className="docker-pressure-chart" aria-label={String(t("workspace.management.docker.pressureChartLabel"))}>
+          {chartData.length ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartData} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="dockerPressureCpu" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="var(--accent-soft-text)" stopOpacity={0.42} />
+                    <stop offset="100%" stopColor="var(--accent-soft-text)" stopOpacity={0.02} />
+                  </linearGradient>
+                  <linearGradient id="dockerPressureMemory" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="var(--warning-text)" stopOpacity={0.34} />
+                    <stop offset="100%" stopColor="var(--warning-text)" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="var(--line-soft)" strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="label" tick={{ fill: "var(--muted-2)", fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={24} />
+                <YAxis domain={[0, 100]} tickFormatter={(value) => `${value}%`} tick={{ fill: "var(--muted-2)", fontSize: 10 }} tickLine={false} axisLine={false} width={38} />
+                <Tooltip
+                  contentStyle={{ background: "var(--modal-bg)", border: "1px solid var(--line)", borderRadius: 5, color: "var(--text)", fontSize: 11 }}
+                  labelStyle={{ color: "var(--muted)", marginBottom: 4 }}
+                  formatter={(value, name) => [
+                    `${formatLocaleNumber(Number(value), locale, { maximumFractionDigits: 1 })}%`,
+                    name === "cpu" ? String(t("workspace.management.docker.pressureCpu")) : String(t("workspace.management.docker.pressureMemory"))
+                  ]}
+                />
+                <Area type="monotone" dataKey="cpu" name="cpu" connectNulls stroke="var(--accent-soft-text)" strokeWidth={2} fill="url(#dockerPressureCpu)" isAnimationActive={false} />
+                <Area type="monotone" dataKey="memory" name="memory" connectNulls stroke="var(--warning-text)" strokeWidth={2} fill="url(#dockerPressureMemory)" isAnimationActive={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="docker-pressure-empty">
+              <Activity aria-hidden="true" size={18} />
+              <span>{String(t("workspace.management.docker.pressureWaiting"))}</span>
+            </div>
+          )}
+        </div>
+        <div className="docker-pressure-legend" aria-hidden="true">
+          <span><i data-tone="cpu" />{String(t("workspace.management.docker.pressureCpu"))}</span>
+          <span><i data-tone="memory" />{String(t("workspace.management.docker.pressureMemory"))}</span>
+          <small>{String(t("workspace.management.docker.pressureWindow", { count: history.length }))}</small>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function DockerNetworkInventory({ summary, locale, t }: { summary: DockerSummary | null; locale: SupportedLocale; t: Translate }) {
+  const networks = summary?.networks ?? [];
+  const count = summary?.metrics.networks ?? 0;
+  return (
+    <section className="management-section docker-inventory-section">
+      <SectionHeader
+        title={String(t("workspace.management.docker.networksTitle"))}
+        description={String(t("workspace.management.docker.networksDescription"))}
+      />
+      <div className="docker-inventory-list">
+        {networks.length ? networks.map((network) => (
+          <article className="docker-inventory-row" key={network.id}>
+            <Network aria-hidden="true" size={16} />
+            <div>
+              <strong title={network.name}>{network.name}</strong>
+              <span>{network.driver} · {network.scope}</span>
+            </div>
+            <dl>
+              <div><dt>{String(t("workspace.management.docker.inventoryContainers"))}</dt><dd>{formatLocaleNumber(network.containerCount, locale)}</dd></div>
+            </dl>
+          </article>
+        )) : (
+          <p className="management-empty">{String(t(count ? "workspace.management.docker.inventoryUnavailable" : "workspace.management.docker.noNetworks"))}</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function DockerStorageInventory({ summary, t }: { summary: DockerSummary | null; t: Translate }) {
+  const volumes = summary?.volumes ?? [];
+  const count = summary?.metrics.volumes ?? 0;
+  return (
+    <section className="management-section docker-inventory-section">
+      <SectionHeader
+        title={String(t("workspace.management.docker.storageTitle"))}
+        description={String(t("workspace.management.docker.storageDescription"))}
+      />
+      <div className="docker-inventory-list">
+        {volumes.length ? volumes.map((volume) => (
+          <article className="docker-inventory-row docker-storage-row" key={volume.name}>
+            <HardDrive aria-hidden="true" size={16} />
+            <div>
+              <strong title={volume.name}>{volume.name}</strong>
+              <span>{volume.driver} · {volume.scope}</span>
+            </div>
+            <small title={volume.mountpoint}>{volume.mountpoint || String(t("common.dash"))}</small>
+          </article>
+        )) : (
+          <p className="management-empty">{String(t(count ? "workspace.management.docker.inventoryUnavailable" : "workspace.management.docker.noVolumes"))}</p>
+        )}
+      </div>
+    </section>
+  );
 }
 
 function dockerStatusTone(status: DockerSummary["engine"]["status"]): StatusTone {
@@ -1838,13 +1972,30 @@ function formatPercent(value: number | null, locale: SupportedLocale): string {
   return `${formatLocaleNumber(value, locale, { maximumFractionDigits: 1 })}%`;
 }
 
-function clampGauge(value: number): number {
-  return Math.max(0, Math.min(Math.round(value), 100));
+function dockerPressurePoint(summary: DockerSummary): DockerPressurePoint | null {
+  const cpu = typeof summary.metrics.cpuPercent === "number" && Number.isFinite(summary.metrics.cpuPercent)
+    ? clampPressure(summary.metrics.cpuPercent)
+    : null;
+  const memory = typeof summary.metrics.memoryPercent === "number" && Number.isFinite(summary.metrics.memoryPercent)
+    ? clampPressure(summary.metrics.memoryPercent)
+    : null;
+  if (cpu === null && memory === null) {
+    return null;
+  }
+  const timestamp = Date.parse(summary.collectedAt);
+  return { timestamp: Number.isFinite(timestamp) ? timestamp : Date.now(), cpu, memory };
 }
 
-function gaugeTone(value: number): GaugeTone {
+function clampPressure(value: number): number {
+  return Math.max(0, Math.min(value, 100));
+}
+
+function pressureTone(value: number | null): StatusTone {
+  if (value === null) {
+    return "neutral";
+  }
   if (value >= 85) {
-    return "danger";
+    return "offline";
   }
   if (value >= 65) {
     return "warning";

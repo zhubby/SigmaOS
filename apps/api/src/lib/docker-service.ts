@@ -65,6 +65,8 @@ export async function collectDockerSummary(
         volumes: counts.volumes,
         ...aggregateContainerStats(containers)
       },
+      networks: counts.networkDetails ?? [],
+      volumes: counts.volumeDetails ?? [],
       containers,
       composeProjects
     };
@@ -158,6 +160,8 @@ export function dockerUnavailableSummary(
       memoryLimitBytes: null,
       memoryPercent: null
     },
+    networks: [],
+    volumes: [],
     containers: [],
     composeProjects: []
   };

@@ -855,6 +855,21 @@ export interface DockerContainerDetails extends DockerContainerSummary {
   labels: Record<string, string>;
 }
 
+export interface DockerNetworkSummary {
+  id: string;
+  name: string;
+  driver: string;
+  scope: string;
+  containerCount: number;
+}
+
+export interface DockerVolumeSummary {
+  name: string;
+  driver: string;
+  scope: string;
+  mountpoint: string;
+}
+
 export interface DockerComposeProjectSummary {
   id: string;
   name: string;
@@ -887,6 +902,8 @@ export interface DockerSummary {
     memoryLimitBytes: number | null;
     memoryPercent: number | null;
   };
+  networks: DockerNetworkSummary[];
+  volumes: DockerVolumeSummary[];
   containers: DockerContainerSummary[];
   composeProjects: DockerComposeProjectSummary[];
 }

@@ -19,6 +19,7 @@
     "react-dom": "^19.1.1",
     "react-i18next": "^17.0.12",
     "react-markdown": "^10.1.0",
+    "recharts": "^3.10.1",
     "remark-gfm": "^4.0.1",
     "vite": "^7.1.3"
   },

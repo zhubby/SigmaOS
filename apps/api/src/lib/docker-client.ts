@@ -1,7 +1,13 @@
 import http from "node:http";
 import net from "node:net";
 import { URLSearchParams } from "node:url";
-import type { DockerContainerDetails, DockerContainerState, DockerContainerSummary } from "@sigmaos/shared";
+import type {
+  DockerContainerDetails,
+  DockerContainerState,
+  DockerContainerSummary,
+  DockerNetworkSummary,
+  DockerVolumeSummary
+} from "@sigmaos/shared";
 
 export interface DockerEngineInfo {
   version: string | null;
@@ -15,6 +21,8 @@ export interface DockerEngineCounts {
   images: number;
   networks: number;
   volumes: number;
+  networkDetails?: DockerNetworkSummary[];
+  volumeDetails?: DockerVolumeSummary[];
 }
 
 export interface DockerContainerStats {
@@ -60,6 +68,21 @@ type DockerInfoResponse = {
   OperatingSystem?: string;
   Architecture?: string;
   DockerRootDir?: string;
+};
+
+type DockerNetworkRow = {
+  Id?: string;
+  Name?: string;
+  Driver?: string;
+  Scope?: string;
+  Containers?: Record<string, unknown> | null;
+};
+
+type DockerVolumeRow = {
+  Name?: string;
+  Driver?: string;
+  Scope?: string;
+  Mountpoint?: string;
 };
 
 type DockerContainerRow = {
@@ -169,13 +192,17 @@ export class DockerSocketClient implements DockerEngineRuntime {
   async getCounts(): Promise<DockerEngineCounts> {
     const [images, networks, volumes] = await Promise.all([
       this.requestJson<unknown[]>("GET", "/images/json"),
-      this.requestJson<unknown[]>("GET", "/networks"),
-      this.requestJson<{ Volumes?: unknown[] | null }>("GET", "/volumes")
+      this.requestJson<DockerNetworkRow[]>("GET", "/networks"),
+      this.requestJson<{ Volumes?: DockerVolumeRow[] | null }>("GET", "/volumes")
     ]);
+    const networkDetails = Array.isArray(networks) ? networks.map(mapNetwork).filter((network): network is DockerNetworkSummary => network !== null) : [];
+    const volumeDetails = Array.isArray(volumes.Volumes) ? volumes.Volumes.map(mapVolume).filter((volume): volume is DockerVolumeSummary => volume !== null) : [];
     return {
       images: Array.isArray(images) ? images.length : 0,
       networks: Array.isArray(networks) ? networks.length : 0,
-      volumes: Array.isArray(volumes.Volumes) ? volumes.Volumes.length : 0
+      volumes: Array.isArray(volumes.Volumes) ? volumes.Volumes.length : 0,
+      networkDetails,
+      volumeDetails
     };
   }
 
@@ -467,6 +494,34 @@ function mapContainer(row: DockerContainerRow): DockerContainerSummary {
     memoryLimitBytes: null,
     memoryPercent: null,
     createdAt: dockerCreatedAt(row.Created)
+  };
+}
+
+function mapNetwork(row: DockerNetworkRow): DockerNetworkSummary | null {
+  const id = row.Id?.trim();
+  const name = row.Name?.trim();
+  if (!id || !name) {
+    return null;
+  }
+  return {
+    id,
+    name,
+    driver: row.Driver?.trim() || "unknown",
+    scope: row.Scope?.trim() || "local",
+    containerCount: Object.keys(row.Containers ?? {}).length
+  };
+}
+
+function mapVolume(row: DockerVolumeRow): DockerVolumeSummary | null {
+  const name = row.Name?.trim();
+  if (!name) {
+    return null;
+  }
+  return {
+    name,
+    driver: row.Driver?.trim() || "unknown",
+    scope: row.Scope?.trim() || "local",
+    mountpoint: row.Mountpoint?.trim() || ""
   };
 }
 

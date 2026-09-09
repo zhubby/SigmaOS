@@ -93,11 +93,15 @@ beforeEach(async () => {
       return;
     }
     if (url === "/v1.55/networks") {
-      sendJson(response, [{ Id: "network-1" }]);
+      sendJson(response, [{ Id: "network-1", Name: "bridge", Driver: "bridge", Scope: "local", Containers: { "container-1": {} } }]);
       return;
     }
     if (url === "/v1.55/volumes") {
-      sendJson(response, { Volumes: [{ Name: "volume-1" }, { Name: "volume-2" }, { Name: "volume-3" }] });
+      sendJson(response, { Volumes: [
+        { Name: "volume-1", Driver: "local", Scope: "local", Mountpoint: "/var/lib/docker/volumes/volume-1/_data" },
+        { Name: "volume-2" },
+        { Name: "volume-3" }
+      ] });
       return;
     }
     response.statusCode = 404;
@@ -124,7 +128,13 @@ describe("DockerSocketClient", () => {
     await expect(client.getCounts()).resolves.toEqual({
       images: 2,
       networks: 1,
-      volumes: 3
+      volumes: 3,
+      networkDetails: [{ id: "network-1", name: "bridge", driver: "bridge", scope: "local", containerCount: 1 }],
+      volumeDetails: [
+        { name: "volume-1", driver: "local", scope: "local", mountpoint: "/var/lib/docker/volumes/volume-1/_data" },
+        { name: "volume-2", driver: "unknown", scope: "local", mountpoint: "" },
+        { name: "volume-3", driver: "unknown", scope: "local", mountpoint: "" }
+      ]
     });
     await expect(client.listContainers()).resolves.toMatchObject([
       {
