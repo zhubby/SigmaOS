@@ -55,6 +55,79 @@ export function registerDockerRoutes(server: FastifyInstance, context: ApiRouteC
 
   server.get<{
     Params: { id: string };
+  }>("/api/docker/containers/:id", async (request, reply) => {
+    const nextConfig = currentConfig();
+    if (!nextConfig.docker.enabled) {
+      reply.status(503).send({ error: "Docker management is disabled" });
+      return;
+    }
+    try {
+      const summary = await collectDockerSummary(nextConfig, docker);
+      const container = findContainer(summary.containers, request.params.id);
+      if (!container) {
+        reply.status(404).send({ error: "Docker container not found" });
+        return;
+      }
+      const engine = dockerEngine(nextConfig.docker, docker);
+      const details = engine.getContainerDetails
+        ? await engine.getContainerDetails(container.id, container)
+        : {
+            ...container,
+            command: null,
+            entrypoint: [],
+            environment: [],
+            mounts: [],
+            networks: [],
+            restartPolicy: null,
+            hostname: null,
+            workingDir: null,
+            labels: {}
+          };
+      reply.send({ container: details });
+    } catch (error) {
+      reply.status(502).send({ error: safeDockerMessage(error) });
+    }
+  });
+
+  server.post<{
+    Params: { id: string };
+    Body: { action?: DockerOperationAction };
+  }>("/api/docker/containers/:id/actions", async (request, reply) => {
+    const nextConfig = currentConfig();
+    if (!nextConfig.docker.enabled) {
+      reply.status(503).send({ error: "Docker management is disabled" });
+      return;
+    }
+    const action = request.body?.action;
+    if (!action || !isContainerAction(action)) {
+      reply.status(400).send({ error: "Unsupported Docker container action" });
+      return;
+    }
+    try {
+      const summary = await collectDockerSummary(nextConfig, docker);
+      const container = findContainer(summary.containers, request.params.id);
+      if (!container) {
+        reply.status(404).send({ error: "Docker container not found" });
+        return;
+      }
+      const engine = dockerEngine(nextConfig.docker, docker);
+      if (action === "start") {
+        await engine.startContainer(container.id);
+      } else if (action === "stop") {
+        await engine.stopContainer(container.id);
+      } else if (action === "restart") {
+        await engine.restartContainer(container.id);
+      } else {
+        await engine.removeContainer(container.id);
+      }
+      reply.send({ action, containerId: container.id });
+    } catch (error) {
+      reply.status(502).send({ error: safeDockerMessage(error) });
+    }
+  });
+
+  server.get<{
+    Params: { id: string };
     Querystring: { tail?: string };
   }>("/api/docker/containers/:id/logs", async (request, reply) => {
     const nextConfig = currentConfig();

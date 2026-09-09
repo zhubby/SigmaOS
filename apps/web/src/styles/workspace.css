@@ -2219,6 +2219,42 @@
   color: var(--danger-text);
 }
 
+.docker-container-name-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+  font-weight: 800;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docker-container-name-trigger span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.docker-container-name-trigger svg {
+  flex: 0 0 auto;
+  color: var(--accent-soft-text);
+  opacity: 0;
+  transform: translate(-2px, 2px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.docker-container-name-trigger:hover svg,
+.docker-container-name-trigger:focus-visible svg {
+  opacity: 1;
+  transform: translate(0, 0);
+}
+
 .management-row-action {
   min-height: 28px;
   padding: 0 8px;
@@ -2393,11 +2429,12 @@
 .workspace-share-management textarea {
   width: 100%;
   min-width: 0;
-  border: 1px solid var(--line-soft);
+  border: 1px solid var(--line);
   border-radius: 5px;
   color: var(--text);
-  background: var(--surface);
+  background: var(--channel-bg);
   font: inherit;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
 }
 
 .workspace-share-management input:not([type="checkbox"]),
@@ -2415,6 +2452,20 @@
 .workspace-share-management input::placeholder,
 .workspace-share-management textarea::placeholder {
   color: var(--muted-2);
+}
+
+.workspace-share-management input:not([type="checkbox"]):hover,
+.workspace-share-management select:hover,
+.workspace-share-management textarea:hover {
+  border-color: var(--accent-soft-text);
+}
+
+.workspace-share-management input:not([type="checkbox"]):focus,
+.workspace-share-management select:focus,
+.workspace-share-management textarea:focus {
+  border-color: var(--accent);
+  outline: 0;
+  box-shadow: 0 0 0 3px var(--focus-ring-inset);
 }
 
 .share-management-body {
@@ -2441,7 +2492,7 @@
 }
 
 .share-directory-fields {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   padding: 0;
 }
 
@@ -2678,8 +2729,8 @@
 
 .share-protocol-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 9px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
   min-width: 0;
 }
 
@@ -2688,9 +2739,20 @@
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   overflow: hidden;
-  border: 1px solid var(--line-soft);
+  border: 1px solid var(--line);
   border-radius: 5px;
-  background: rgb(0 0 0 / 12%);
+  background: var(--channel-bg);
+  box-shadow: 0 2px 7px rgb(15 23 42 / 5%);
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+
+.share-protocol-card[data-enabled="true"] {
+  border-color: var(--accent-soft-text);
+  box-shadow: 0 3px 12px rgb(67 83 216 / 10%);
+}
+
+.share-protocol-card[data-enabled="false"] {
+  background: var(--subtle-bg);
 }
 
 .share-protocol-card > header {
@@ -2700,7 +2762,13 @@
   gap: 8px;
   min-width: 0;
   padding: 9px;
-  border-bottom: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line);
+  background: var(--subtle-bg);
+}
+
+.share-protocol-card[data-enabled="true"] > header {
+  border-bottom-color: var(--accent-soft-text);
+  background: var(--accent-soft-bg);
 }
 
 .share-protocol-toggle {
@@ -2742,6 +2810,10 @@
   .workspace-share-management .management-metric-grid,
   .share-field-grid,
   .share-directory-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .share-protocol-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -2807,9 +2879,408 @@
   white-space: nowrap;
 }
 
+.docker-container-detail-modal {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(920px, 100%);
+  max-height: min(820px, calc(100dvh - 28px));
+  border-top: 3px solid var(--accent);
+}
+
+.docker-container-detail-header {
+  padding: 15px 18px;
+  background: var(--channel-bg);
+}
+
+.docker-container-detail-heading,
+.docker-container-detail-header-actions,
+.docker-container-detail-action-buttons,
+.docker-container-detail-action-note {
+  display: flex;
+  align-items: center;
+}
+
+.docker-container-detail-heading {
+  min-width: 0;
+  gap: 11px;
+}
+
+.docker-container-detail-heading > div:last-child {
+  min-width: 0;
+}
+
+.docker-container-detail-heading h2 {
+  margin-top: 3px;
+  font-size: 18px;
+}
+
+.docker-container-detail-heading p {
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--code-font-family);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docker-container-detail-icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid var(--approval-border-hover);
+  border-radius: 7px;
+  color: var(--accent-soft-text);
+  background: var(--accent-soft-bg);
+}
+
+.docker-container-detail-header-actions {
+  flex: 0 0 auto;
+  gap: 9px;
+}
+
+.docker-container-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 18px 20px;
+  background: var(--footer-bg);
+}
+
+.docker-container-detail-section {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--channel-bg);
+}
+
+.docker-container-detail-overview {
+  border-color: var(--approval-border-hover);
+  background: linear-gradient(135deg, var(--accent-soft-bg), var(--channel-bg) 55%);
+}
+
+.docker-container-detail-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.docker-container-detail-section-heading h3 {
+  margin-top: 3px;
+  font-size: 13px;
+}
+
+.docker-container-detail-stat-grid,
+.docker-container-detail-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.docker-container-detail-stat-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.docker-container-detail-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.docker-container-detail-stat {
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: rgb(255 255 255 / 5%);
+}
+
+.docker-container-detail-stat span,
+.docker-container-detail-stat small,
+.docker-container-detail-ports > span {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.docker-container-detail-stat strong {
+  display: block;
+  margin-top: 6px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docker-container-detail-stat small {
+  margin-top: 3px;
+  overflow: hidden;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.docker-container-detail-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.docker-container-detail-list > div {
+  display: grid;
+  grid-template-columns: minmax(104px, 0.7fr) minmax(0, 1.3fr);
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.docker-container-detail-list > div:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.docker-container-detail-list dt {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.docker-container-detail-list dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docker-container-detail-list dd.is-mono,
+.docker-container-detail-mounts span {
+  font-family: var(--code-font-family);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+.docker-container-detail-ports {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.docker-container-detail-ports > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.docker-container-detail-ports code {
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--text);
+  background: var(--subtle-bg);
+  font-family: var(--code-font-family);
+  font-size: 10px;
+}
+
+.docker-container-detail-mounts {
+  display: grid;
+  gap: 7px;
+}
+
+.docker-container-detail-mounts > div {
+  display: grid;
+  grid-template-columns: minmax(110px, .65fr) minmax(0, 1.35fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.docker-container-detail-mounts > div:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.docker-container-detail-mounts strong,
+.docker-container-detail-mounts span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docker-container-detail-mounts em {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  text-transform: uppercase;
+}
+
+.docker-container-detail-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--danger-border);
+  border-radius: 5px;
+  color: var(--danger-text);
+  background: var(--danger-bg-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.docker-container-detail-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 11px 18px;
+  border-top: 1px solid var(--line-soft);
+  background: var(--channel-bg);
+}
+
+.docker-container-detail-action-note {
+  min-width: 0;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.docker-container-detail-action-note svg {
+  flex: 0 0 auto;
+  color: var(--accent-soft-text);
+}
+
+.docker-container-detail-action-buttons {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.docker-detail-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 31px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.docker-detail-action:hover:not(:disabled) {
+  border-color: var(--approval-border-hover);
+  background: var(--surface-hover);
+}
+
+.docker-detail-action.is-danger {
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+
+.docker-detail-action.is-danger:hover:not(:disabled) {
+  background: var(--danger-bg-soft);
+}
+
+.docker-detail-action:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+@media (max-width: 720px) {
+  .docker-container-detail-modal {
+    max-height: calc(100dvh - 16px);
+  }
+
+  .docker-container-detail-header,
+  .docker-container-detail-body,
+  .docker-container-detail-actions {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .docker-container-detail-grid,
+  .docker-container-detail-stat-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .docker-container-detail-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .docker-container-detail-action-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .docker-detail-action {
+    width: 100%;
+  }
+}
+
+@media (max-width: 430px) {
+  .docker-container-detail-heading h2 {
+    max-width: 180px;
+  }
+
+  .docker-container-detail-header-actions .management-row-status {
+    display: none;
+  }
+
+  .docker-container-detail-list > div,
+  .docker-container-detail-mounts > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+  }
+
+  .docker-container-detail-mounts em {
+    justify-self: start;
+  }
+}
+
 .management-modal.share-add-modal {
   width: min(1040px, 100%);
   max-height: min(820px, calc(100dvh - 36px));
+  border-top: 3px solid var(--accent);
+  background: var(--footer-bg);
+}
+
+.share-add-modal > header {
+  padding: 15px 18px;
+  background: var(--channel-bg);
+}
+
+.share-add-modal > header h2 {
+  margin-top: 3px;
+  font-size: 18px;
+}
+
+.share-add-modal > header .eyebrow {
+  color: var(--accent-soft-text);
 }
 
 .share-add-form {
@@ -2820,23 +3291,43 @@
 }
 
 .share-add-form-body {
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   min-height: 0;
   overflow: auto;
-  padding: 14px;
+  padding: 18px;
+  background: var(--footer-bg);
 }
 
 .share-add-modal .share-directory-card {
+  flex: 0 0 auto;
   padding: 0;
-  border: 0;
-  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--channel-bg);
+  box-shadow: 0 2px 8px rgb(15 23 42 / 5%);
+  overflow: visible;
 }
 
 .share-add-modal .share-directory-card > .share-directory-card-header {
-  padding: 0 0 12px;
-  border-bottom: 1px solid var(--line-soft);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--subtle-bg);
+}
+
+.share-add-modal .share-directory-fields {
+  grid-template-columns: minmax(0, 1fr);
+  padding: 16px 16px 4px;
+}
+
+.share-add-modal .share-protocol-grid {
+  grid-template-columns: minmax(0, 1fr);
+  padding: 12px 16px 16px;
+}
+
+.share-add-modal .share-protocol-fields {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .share-add-modal .share-directory-card-header > button {
@@ -2868,9 +3359,9 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
-  padding: 12px 14px;
+  padding: 13px 18px;
   border-top: 1px solid var(--line-soft);
-  background: var(--modal-bg);
+  background: var(--channel-bg);
 }
 
 .share-add-form-actions button {
@@ -2893,6 +3384,17 @@
   border-color: var(--accent-soft-text);
   color: white;
   background: var(--accent);
+}
+
+.share-add-form-actions button:hover:not(:disabled) {
+  border-color: var(--accent-soft-text);
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.share-add-form-actions button.is-primary:hover:not(:disabled) {
+  color: white;
+  background: var(--accent-hover);
 }
 
 @media (max-width: 600px) {

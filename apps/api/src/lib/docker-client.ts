@@ -1,7 +1,7 @@
 import http from "node:http";
 import net from "node:net";
 import { URLSearchParams } from "node:url";
-import type { DockerContainerState, DockerContainerSummary } from "@sigmaos/shared";
+import type { DockerContainerDetails, DockerContainerState, DockerContainerSummary } from "@sigmaos/shared";
 
 export interface DockerEngineInfo {
   version: string | null;
@@ -32,6 +32,7 @@ export interface DockerEngineRuntime {
   getInfo(): Promise<DockerEngineInfo>;
   getCounts(): Promise<DockerEngineCounts>;
   listContainers(): Promise<DockerContainerSummary[]>;
+  getContainerDetails?(containerId: string, baseSummary?: DockerContainerSummary): Promise<DockerContainerDetails>;
   getContainerLogs(containerId: string, tail: number): Promise<string>;
   startContainer(containerId: string): Promise<void>;
   stopContainer(containerId: string): Promise<void>;
@@ -74,7 +75,43 @@ type DockerContainerRow = {
     Type?: string;
   }>;
   Labels?: Record<string, string>;
-  Created?: number;
+  Created?: number | string;
+};
+
+type DockerContainerInspect = {
+  Id?: string;
+  Name?: string;
+  Image?: string;
+  Created?: string;
+  State?: {
+    Status?: string;
+    Running?: boolean;
+    Paused?: boolean;
+    Restarting?: boolean;
+    Dead?: boolean;
+  };
+  Labels?: Record<string, string>;
+  Config?: {
+    Image?: string;
+    Cmd?: string[] | null;
+    Entrypoint?: string[] | null;
+    Env?: string[] | null;
+    Hostname?: string;
+    WorkingDir?: string;
+    Labels?: Record<string, string> | null;
+  };
+  HostConfig?: {
+    RestartPolicy?: { Name?: string };
+  };
+  Mounts?: Array<{
+    Source?: string;
+    Destination?: string;
+    Mode?: string;
+    Type?: string;
+  }>;
+  NetworkSettings?: {
+    Networks?: Record<string, unknown>;
+  };
 };
 
 type DockerStatsResponse = {
@@ -168,6 +205,31 @@ export class DockerSocketClient implements DockerEngineRuntime {
       tail: String(Math.max(1, Math.min(tail, 1000)))
     });
     return decodeDockerOutput(buffer);
+  }
+
+  async getContainerDetails(containerId: string, baseSummary?: DockerContainerSummary): Promise<DockerContainerDetails> {
+    const inspected = await this.requestJson<DockerContainerInspect>(
+      "GET",
+      `/containers/${encodeURIComponent(containerId)}/json`
+    );
+    const summary = baseSummary ?? inspectSummary(inspected, containerId);
+    return {
+      ...summary,
+      command: inspected.Config?.Cmd?.join(" ") ?? null,
+      entrypoint: inspected.Config?.Entrypoint ?? [],
+      environment: (inspected.Config?.Env ?? []).map((entry) => entry.split("=", 1)[0] ?? entry),
+      mounts: (inspected.Mounts ?? []).map((mount) => ({
+        source: mount.Source ?? "",
+        destination: mount.Destination ?? "",
+        mode: mount.Mode ?? "",
+        type: mount.Type ?? ""
+      })),
+      networks: Object.keys(inspected.NetworkSettings?.Networks ?? {}),
+      restartPolicy: inspected.HostConfig?.RestartPolicy?.Name || null,
+      hostname: inspected.Config?.Hostname || null,
+      workingDir: inspected.Config?.WorkingDir || null,
+      labels: inspected.Config?.Labels ?? inspected.Labels ?? {}
+    };
   }
 
   async startContainer(containerId: string): Promise<void> {
@@ -367,6 +429,26 @@ export class DockerSocketClient implements DockerEngineRuntime {
   }
 }
 
+function inspectSummary(inspected: DockerContainerInspect, containerId: string): DockerContainerSummary {
+  const state = inspected.State?.Status;
+  return {
+    id: inspected.Id ?? containerId,
+    shortId: (inspected.Id ?? containerId).slice(0, 12),
+    name: (inspected.Name ?? containerId).replace(/^\//u, ""),
+    image: inspected.Config?.Image ?? inspected.Image ?? "",
+    state: normalizeState(state),
+    status: state ?? "unknown",
+    ports: [],
+    composeProject: inspected.Labels?.["com.docker.compose.project"] ?? null,
+    composeService: inspected.Labels?.["com.docker.compose.service"] ?? null,
+    cpuPercent: null,
+    memoryUsageBytes: null,
+    memoryLimitBytes: null,
+    memoryPercent: null,
+    createdAt: dockerCreatedAt(inspected.Created)
+  };
+}
+
 function mapContainer(row: DockerContainerRow): DockerContainerSummary {
   const id = row.Id ?? "";
   const labels = row.Labels ?? {};
@@ -384,8 +466,25 @@ function mapContainer(row: DockerContainerRow): DockerContainerSummary {
     memoryUsageBytes: null,
     memoryLimitBytes: null,
     memoryPercent: null,
-    createdAt: row.Created ? new Date(row.Created * 1000).toISOString() : null
+    createdAt: dockerCreatedAt(row.Created)
   };
+}
+
+function dockerCreatedAt(value: number | string | undefined): string | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return new Date(value * 1000).toISOString();
+  }
+  if (typeof value === "string" && value.trim()) {
+    const timestamp = Date.parse(value);
+    if (Number.isFinite(timestamp)) {
+      return new Date(timestamp).toISOString();
+    }
+    const seconds = Number(value);
+    if (Number.isFinite(seconds)) {
+      return new Date(seconds * 1000).toISOString();
+    }
+  }
+  return null;
 }
 
 function normalizeState(value: string | undefined): DockerContainerState {

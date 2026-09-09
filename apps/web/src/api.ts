@@ -2,6 +2,7 @@ import type {
   DockerOperationAction,
   DockerOperationRecord,
   DockerOperationTargetType,
+  DockerContainerDetails as SharedDockerContainerDetails,
   DockerSettingsRecord,
   GitDirectoryStatus,
   GitFileStatus,
@@ -241,6 +242,7 @@ export type ShareSettingsInput = Omit<ShareSettings, "account" | "updatedAt"> & 
   };
 };
 export type DockerContainer = DockerSummary["containers"][number];
+export type DockerContainerDetails = SharedDockerContainerDetails;
 export type DockerComposeProject = DockerSummary["composeProjects"][number];
 export type DockerOperation = DockerOperationRecord;
 export type ShareOperation = ShareOperationRecord;
@@ -422,6 +424,26 @@ export async function getDockerContainerLogs(containerId: string, tail = 200): P
   await ensureOk(response);
   const body = (await response.json()) as { logs: string };
   return body.logs;
+}
+
+export async function getDockerContainerDetails(containerId: string): Promise<DockerContainerDetails> {
+  const response = await fetch(`/api/docker/containers/${encodeURIComponent(containerId)}`);
+  await ensureOk(response);
+  const body = (await response.json()) as { container: DockerContainerDetails };
+  return body.container;
+}
+
+export async function executeDockerContainerAction(
+  containerId: string,
+  action: "start" | "stop" | "restart" | "remove"
+): Promise<{ action: string; containerId: string }> {
+  const response = await fetch(`/api/docker/containers/${encodeURIComponent(containerId)}/actions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action })
+  });
+  await ensureOk(response);
+  return (await response.json()) as { action: string; containerId: string };
 }
 
 export async function getDockerOperations(sessionId?: string | null): Promise<DockerOperation[]> {

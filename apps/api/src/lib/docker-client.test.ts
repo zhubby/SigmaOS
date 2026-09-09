@@ -64,6 +64,30 @@ beforeEach(async () => {
       });
       return;
     }
+    if (url === "/v1.55/containers/abcdef1234567890/json") {
+      sendJson(response, {
+        Id: "abcdef1234567890",
+        Names: ["/media"],
+        Image: "jellyfin:latest",
+        State: "running",
+        Status: "Up 2 minutes",
+        Created: 1,
+        Ports: [{ PrivatePort: 8096, PublicPort: 8096, Type: "tcp" }],
+        Labels: { "com.docker.compose.project": "media" },
+        Config: {
+          Cmd: ["/init"],
+          Entrypoint: ["/sbin/tini"],
+          Env: ["TZ=UTC"],
+          Hostname: "media",
+          WorkingDir: "/config",
+          Labels: { "app.role": "media" }
+        },
+        HostConfig: { RestartPolicy: { Name: "unless-stopped" } },
+        Mounts: [{ Source: "/srv/media", Destination: "/media", Mode: "rw", Type: "bind" }],
+        NetworkSettings: { Networks: { bridge: {} } }
+      });
+      return;
+    }
     if (url === "/v1.55/images/json") {
       sendJson(response, [{ Id: "image-1" }, { Id: "image-2" }]);
       return;
@@ -118,6 +142,17 @@ describe("DockerSocketClient", () => {
         memoryPercent: 21.875
       }
     ]);
+    await expect(client.getContainerDetails("abcdef1234567890")).resolves.toMatchObject({
+      command: "/init",
+      entrypoint: ["/sbin/tini"],
+      environment: ["TZ"],
+      mounts: [{ source: "/srv/media", destination: "/media", mode: "rw", type: "bind" }],
+      networks: ["bridge"],
+      restartPolicy: "unless-stopped",
+      hostname: "media",
+      workingDir: "/config",
+      labels: { "app.role": "media" }
+    });
   });
 });
 

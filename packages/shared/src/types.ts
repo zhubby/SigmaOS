@@ -838,6 +838,23 @@ export interface DockerContainerSummary {
   createdAt: string | null;
 }
 
+export interface DockerContainerDetails extends DockerContainerSummary {
+  command: string | null;
+  entrypoint: string[];
+  environment: string[];
+  mounts: Array<{
+    source: string;
+    destination: string;
+    mode: string;
+    type: string;
+  }>;
+  networks: string[];
+  restartPolicy: string | null;
+  hostname: string | null;
+  workingDir: string | null;
+  labels: Record<string, string>;
+}
+
 export interface DockerComposeProjectSummary {
   id: string;
   name: string;

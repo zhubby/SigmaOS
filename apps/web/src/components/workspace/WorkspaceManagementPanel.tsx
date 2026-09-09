@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 
 import { useTranslation } from "react-i18next";
 import {
   Activity,
+  ArrowUpRight,
   Box,
   Boxes,
   CircleAlert,
@@ -10,6 +11,7 @@ import {
   Cpu,
   Database,
   HardDrive,
+  Info,
   Layers,
   LoaderCircle,
   MonitorCog,
@@ -38,12 +40,15 @@ import {
   type VmOperationProposal,
   proposeVmOperation,
   getDockerContainerLogs,
+  getDockerContainerDetails,
   getDockerSummary,
+  executeDockerContainerAction,
   proposeDockerOperation,
   type DockerOperationProposal,
   type DockerConsoleSession,
   type DockerComposeProject,
   type DockerContainer,
+  type DockerContainerDetails,
   type DockerOperation,
   type DockerSummary,
   type NasRoot,
@@ -750,6 +755,12 @@ function DockerManagementPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [detailsState, setDetailsState] = useState<{
+    container: DockerContainer;
+    details: DockerContainerDetails | null;
+    loading: boolean;
+    error: string | null;
+  } | null>(null);
   const [logsState, setLogsState] = useState<{
     container: DockerContainer;
     content: string;
@@ -824,12 +835,33 @@ function DockerManagementPanel({
     }
   }
 
-  async function requestContainerAction(container: DockerContainer, action: "start" | "stop" | "restart" | "remove") {
-    await requestDockerProposal(`${action}:${container.id}`, {
-      action,
-      targetType: "container",
-      containerId: container.id
-    });
+  async function openContainerDetails(container: DockerContainer) {
+    setDetailsState({ container, details: null, loading: true, error: null });
+    try {
+      const details = await getDockerContainerDetails(container.id);
+      setDetailsState({ container, details, loading: false, error: null });
+    } catch (nextError) {
+      setDetailsState({ container, details: null, loading: false, error: errorMessage(nextError) });
+    }
+  }
+
+  async function executeContainerAction(container: DockerContainer, action: "start" | "stop" | "restart" | "remove") {
+    setPendingAction(`${action}:${container.id}`);
+    setError(null);
+    try {
+      await executeDockerContainerAction(container.id, action);
+      onNotifySuccess(t("workspace.management.docker.actionCompleted"));
+      if (action === "remove") {
+        setDetailsState(null);
+      }
+      await refreshSummary();
+    } catch (nextError) {
+      const message = errorMessage(nextError);
+      setError(message);
+      onNotifyError(message);
+    } finally {
+      setPendingAction(null);
+    }
   }
 
   async function requestConsole(container: DockerContainer) {
@@ -993,7 +1025,16 @@ function DockerManagementPanel({
                 <tbody>
                   {containers.map((container) => (
                     <tr key={container.id}>
-                      <td title={container.name}>{container.name}</td>
+                      <td title={container.name}>
+                        <button
+                          type="button"
+                          className="docker-container-name-trigger"
+                          onClick={() => void openContainerDetails(container)}
+                        >
+                          <span>{container.name}</span>
+                          <ArrowUpRight aria-hidden="true" size={13} />
+                        </button>
+                      </td>
                       <td>
                         <span className="management-row-status" data-state={containerTone(container)}>
                           {container.status || container.state}
@@ -1003,7 +1044,14 @@ function DockerManagementPanel({
                       <td>{formatPercent(container.cpuPercent, locale)}</td>
                       <td>{formatContainerMemory(container, locale)}</td>
                       <td title={container.ports.join(", ")}>{container.ports.join(", ") || t("common.dash")}</td>
-                      <td>{renderDockerContainerActions(container)}</td>
+                      <td>
+                        <ActionIconButton
+                          label={t("workspace.management.docker.details")}
+                          disabled={!canUseDocker}
+                          Icon={Info}
+                          onClick={() => void openContainerDetails(container)}
+                        />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1061,62 +1109,21 @@ function DockerManagementPanel({
 
       {logsState ? <DockerLogsDialog state={logsState} onClose={() => setLogsState(null)} /> : null}
       {consoleSession ? <DockerConsoleDialog session={consoleSession} onClose={() => setConsoleSession(null)} /> : null}
+      {detailsState ? (
+        <DockerContainerDetailsDialog
+          state={detailsState}
+          locale={locale}
+          canUseDocker={canUseDocker}
+          pendingAction={pendingAction}
+          consoleApproved={Boolean(approvedConsoleOperation(detailsState.container, dockerOperations))}
+          onClose={() => setDetailsState(null)}
+          onAction={(action) => void executeContainerAction(detailsState.container, action)}
+          onLogs={() => void openLogs(detailsState.container)}
+          onConsole={() => void requestConsole(detailsState.container)}
+        />
+      ) : null}
     </section>
   );
-
-  function renderDockerContainerActions(container: DockerContainer) {
-    const isRunning = container.state === "running";
-    const pendingApproval = pendingDockerApprovalForTarget(pendingApprovals, container.id);
-    const approvedOperation = approvedConsoleOperation(container, dockerOperations);
-    const mutationDisabled = !canUseDocker || Boolean(pendingAction) || Boolean(pendingApproval);
-    const readDisabled = !canUseDocker || Boolean(pendingAction);
-    const pendingLabel = t("workspace.management.actions.pendingApproval");
-    return (
-      <div className="management-action-cluster">
-        <ActionIconButton
-          label={pendingApproval ? pendingLabel : isRunning ? t("workspace.management.actions.stop") : t("workspace.management.actions.start")}
-          disabled={mutationDisabled}
-          pending={pendingAction === `${isRunning ? "stop" : "start"}:${container.id}` || Boolean(pendingApproval)}
-          Icon={isRunning ? Pause : Play}
-          onClick={() => requestContainerAction(container, isRunning ? "stop" : "start")}
-        />
-        <ActionIconButton
-          label={pendingApproval ? pendingLabel : t("workspace.management.actions.restart")}
-          disabled={mutationDisabled}
-          pending={pendingAction === `restart:${container.id}` || Boolean(pendingApproval)}
-          Icon={RotateCw}
-          onClick={() => requestContainerAction(container, "restart")}
-        />
-        <ActionIconButton
-          label={t("workspace.management.actions.logs")}
-          disabled={readDisabled}
-          Icon={ScrollText}
-          onClick={() => void openLogs(container)}
-        />
-        <ActionIconButton
-          label={
-            pendingApproval
-              ? pendingLabel
-              : approvedOperation
-              ? t("workspace.management.actions.openConsole")
-              : t("workspace.management.actions.console")
-          }
-          disabled={mutationDisabled}
-          pending={pendingAction === `console:${container.id}` || pendingAction === `console-open:${container.id}` || Boolean(pendingApproval)}
-          Icon={TerminalSquare}
-          onClick={() => requestConsole(container)}
-        />
-        <ActionIconButton
-          label={pendingApproval ? pendingLabel : t("workspace.management.actions.remove")}
-          disabled={mutationDisabled}
-          pending={pendingAction === `remove:${container.id}` || Boolean(pendingApproval)}
-          Icon={Trash2}
-          danger
-          onClick={() => requestContainerAction(container, "remove")}
-        />
-      </div>
-    );
-  }
 
   function renderComposeButton(
     project: DockerComposeProject,
@@ -1164,6 +1171,227 @@ function ActionIconButton({
       onClick={() => void onClick()}
     >
       <ButtonIcon aria-hidden="true" size={13} />
+    </button>
+  );
+}
+
+function DockerContainerDetailsDialog({
+  state,
+  locale,
+  canUseDocker,
+  pendingAction,
+  consoleApproved,
+  onClose,
+  onAction,
+  onLogs,
+  onConsole
+}: {
+  state: {
+    container: DockerContainer;
+    details: DockerContainerDetails | null;
+    loading: boolean;
+    error: string | null;
+  };
+  locale: SupportedLocale;
+  canUseDocker: boolean;
+  pendingAction: string | null;
+  consoleApproved: boolean;
+  onClose: () => void;
+  onAction: (action: "start" | "stop" | "restart" | "remove") => void;
+  onLogs: () => void;
+  onConsole: () => void;
+}) {
+  const { t } = useTranslation();
+  const container = state.details ?? state.container;
+  const isRunning = container.state === "running";
+  const lifecycleAction = isRunning ? "stop" : "start";
+  const lifecyclePending = pendingAction === `${lifecycleAction}:${container.id}`;
+  const actionBusy = Boolean(pendingAction);
+  const statusTone = containerTone(container);
+  const memory = container.memoryUsageBytes === null
+    ? t("common.dash")
+    : `${formatBytes(container.memoryUsageBytes, locale)} / ${container.memoryLimitBytes ? formatBytes(container.memoryLimitBytes, locale) : t("common.dash")}`;
+
+  function confirmAction(action: "start" | "stop" | "restart" | "remove") {
+    if (action === "remove" && !window.confirm(String(t("workspace.management.docker.removeConfirm", { name: container.name })))) {
+      return;
+    }
+    onAction(action);
+  }
+
+  return (
+    <div className="management-modal-backdrop" role="presentation">
+      <section className="management-modal docker-container-detail-modal" role="dialog" aria-modal="true" aria-labelledby="docker-container-detail-title">
+        <header className="docker-container-detail-header">
+          <div className="docker-container-detail-heading">
+            <div className="docker-container-detail-icon" aria-hidden="true">
+              <Container size={18} />
+            </div>
+            <div>
+              <span className="eyebrow">{t("workspace.management.docker.detailsEyebrow")}</span>
+              <h2 id="docker-container-detail-title">{container.name}</h2>
+              <p>{container.shortId} <span aria-hidden="true">·</span> {container.image}</p>
+            </div>
+          </div>
+          <div className="docker-container-detail-header-actions">
+            <span className="management-row-status" data-state={statusTone}>{container.state}</span>
+            <button type="button" className="management-icon-action" onClick={onClose} title={String(t("common.actions.dismissNotification"))}>
+              <X aria-hidden="true" size={15} />
+            </button>
+          </div>
+        </header>
+
+        <div className="docker-container-detail-body">
+          {state.error ? <p className="docker-container-detail-error"><CircleAlert aria-hidden="true" size={15} />{state.error}</p> : null}
+          <section className="docker-container-detail-section docker-container-detail-overview">
+            <div className="docker-container-detail-section-heading">
+              <div>
+                <span className="eyebrow">{t("workspace.management.docker.overviewEyebrow")}</span>
+                <h3>{t("workspace.management.docker.overviewTitle")}</h3>
+              </div>
+              {state.loading ? <LoaderCircle className="is-spinning" aria-label={String(t("common.states.loading"))} size={16} /> : null}
+            </div>
+            <div className="docker-container-detail-stat-grid">
+              <div className="docker-container-detail-stat">
+                <span>{t("workspace.management.docker.detailStatus")}</span>
+                <strong>{container.status || container.state}</strong>
+                <small>{container.state}</small>
+              </div>
+              <div className="docker-container-detail-stat">
+                <span>{t("workspace.management.docker.detailCpu")}</span>
+                <strong>{formatPercent(container.cpuPercent, locale)}</strong>
+                <small>{t("workspace.management.docker.detailLiveSample")}</small>
+              </div>
+              <div className="docker-container-detail-stat">
+                <span>{t("workspace.management.docker.detailMemory")}</span>
+                <strong>{container.memoryPercent === null ? t("common.dash") : `${formatLocaleNumber(container.memoryPercent, locale, { maximumFractionDigits: 1 })}%`}</strong>
+                <small>{memory}</small>
+              </div>
+            </div>
+          </section>
+
+          <div className="docker-container-detail-grid">
+            <section className="docker-container-detail-section">
+              <div className="docker-container-detail-section-heading">
+                <div>
+                  <span className="eyebrow">{t("workspace.management.docker.configurationEyebrow")}</span>
+                  <h3>{t("workspace.management.docker.configurationTitle")}</h3>
+                </div>
+              </div>
+              <dl className="docker-container-detail-list">
+                <div><dt>{t("workspace.management.docker.fields.image")}</dt><dd title={container.image}>{container.image || t("common.dash")}</dd></div>
+                <div><dt>{t("workspace.management.docker.fields.created")}</dt><dd>{container.createdAt ? new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(container.createdAt)) : t("common.dash")}</dd></div>
+                <div><dt>{t("workspace.management.docker.fields.command")}</dt><dd title={state.details?.command ?? undefined}>{state.details?.command || t("common.dash")}</dd></div>
+                <div><dt>{t("workspace.management.docker.fields.restartPolicy")}</dt><dd>{state.details?.restartPolicy || t("common.dash")}</dd></div>
+                <div><dt>{t("workspace.management.docker.fields.workingDir")}</dt><dd>{state.details?.workingDir || t("common.dash")}</dd></div>
+              </dl>
+            </section>
+
+            <section className="docker-container-detail-section">
+              <div className="docker-container-detail-section-heading">
+                <div>
+                  <span className="eyebrow">{t("workspace.management.docker.networkEyebrow")}</span>
+                  <h3>{t("workspace.management.docker.networkTitle")}</h3>
+                </div>
+              </div>
+              <dl className="docker-container-detail-list">
+                <div><dt>{t("workspace.management.docker.fields.containerId")}</dt><dd className="is-mono" title={container.id}>{container.id}</dd></div>
+                <div><dt>{t("workspace.management.docker.fields.compose")}</dt><dd>{container.composeProject ? `${container.composeProject}${container.composeService ? ` / ${container.composeService}` : ""}` : t("common.dash")}</dd></div>
+                <div><dt>{t("workspace.management.docker.fields.hostname")}</dt><dd>{state.details?.hostname || t("common.dash")}</dd></div>
+                <div><dt>{t("workspace.management.docker.fields.networks")}</dt><dd>{state.details?.networks?.join(", ") || t("common.dash")}</dd></div>
+              </dl>
+              <div className="docker-container-detail-ports">
+                <span>{t("workspace.management.docker.fields.ports")}</span>
+                <div>
+                  {container.ports.length ? container.ports.map((port) => <code key={port}>{port}</code>) : <small>{t("common.dash")}</small>}
+                </div>
+              </div>
+            </section>
+          </div>
+
+          {state.details?.mounts.length ? (
+            <section className="docker-container-detail-section">
+              <div className="docker-container-detail-section-heading">
+                <div>
+                  <span className="eyebrow">{t("workspace.management.docker.storageEyebrow")}</span>
+                  <h3>{t("workspace.management.docker.mountsTitle")}</h3>
+                </div>
+              </div>
+              <div className="docker-container-detail-mounts">
+                {state.details.mounts.map((mount) => (
+                  <div key={`${mount.source}-${mount.destination}`}>
+                    <strong>{mount.destination}</strong>
+                    <span>{mount.source || t("common.dash")}</span>
+                    <em>{mount.mode || mount.type || t("common.dash")}</em>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+        </div>
+
+        <footer className="docker-container-detail-actions">
+          <div className="docker-container-detail-action-note">
+            <Info aria-hidden="true" size={14} />
+            <span>{t("workspace.management.docker.directActionsNote")}</span>
+          </div>
+          <div className="docker-container-detail-action-buttons">
+            <DockerDetailActionButton
+              label={isRunning ? t("workspace.management.actions.stop") : t("workspace.management.actions.start")}
+              Icon={isRunning ? Pause : Play}
+              pending={lifecyclePending}
+              disabled={!canUseDocker || actionBusy}
+              onClick={() => confirmAction(lifecycleAction)}
+            />
+            <DockerDetailActionButton
+              label={t("workspace.management.actions.restart")}
+              Icon={RotateCw}
+              pending={pendingAction === `restart:${container.id}`}
+              disabled={!canUseDocker || actionBusy}
+              onClick={() => confirmAction("restart")}
+            />
+            <DockerDetailActionButton label={t("workspace.management.actions.logs")} Icon={ScrollText} disabled={!canUseDocker || actionBusy} onClick={onLogs} />
+            <DockerDetailActionButton
+              label={consoleApproved ? t("workspace.management.actions.openConsole") : t("workspace.management.actions.console")}
+              Icon={TerminalSquare}
+              disabled={!canUseDocker || actionBusy}
+              onClick={onConsole}
+            />
+            <DockerDetailActionButton
+              label={t("workspace.management.actions.remove")}
+              Icon={Trash2}
+              danger
+              pending={pendingAction === `remove:${container.id}`}
+              disabled={!canUseDocker || actionBusy}
+              onClick={() => confirmAction("remove")}
+            />
+          </div>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function DockerDetailActionButton({
+  label,
+  Icon,
+  disabled,
+  pending,
+  danger,
+  onClick
+}: {
+  label: string;
+  Icon: LucideIcon;
+  disabled?: boolean;
+  pending?: boolean;
+  danger?: boolean;
+  onClick: () => void;
+}) {
+  const ButtonIcon = pending ? LoaderCircle : Icon;
+  return (
+    <button type="button" className={danger ? "docker-detail-action is-danger" : "docker-detail-action"} disabled={disabled} onClick={onClick} title={label}>
+      <ButtonIcon aria-hidden="true" size={14} />
+      <span>{label}</span>
     </button>
   );
 }

@@ -25,6 +25,7 @@ import {
   getShareSettings,
   getTrashEntry,
   listEvents,
+  listDockerOperations,
   listFileOperations,
   listMessages,
   listPendingApprovals,
@@ -1635,6 +1636,30 @@ describe("API server", () => {
       action: "start",
       status: "applied"
     });
+    await server.close();
+  });
+
+  it("executes direct container actions without creating an approval", async () => {
+    const engine = new FakeDockerEngine();
+    const server = await buildServer({
+      config: dockerEnabledConfig(tempDir),
+      db,
+      docker: {
+        engine,
+        compose: new FakeDockerCompose()
+      }
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/docker/containers/container-1/actions",
+      payload: { action: "restart" }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ action: "restart", containerId: "container-1" });
+    expect(engine.calls).toContain("restart:container-1");
+    expect(listDockerOperations(db)).toEqual([]);
     await server.close();
   });
 
