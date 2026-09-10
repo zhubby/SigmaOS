@@ -1,6 +1,6 @@
 import type { SystemStorageSummary } from "@sigmaos/shared";
 import { describe, expect, it } from "vitest";
-import { buildStoragePoolProposal } from "./storage-service.js";
+import { buildStoragePoolDeleteProposal, buildStoragePoolProposal } from "./storage-service.js";
 
 describe("storage service", () => {
   it("builds a destructive proposal only from available whole disks", () => {
@@ -32,6 +32,35 @@ describe("storage service", () => {
     expect(() => buildStoragePoolProposal({ name: "archive", raidLevel: "1", filesystem: "xfs", devices: ["/dev/sda", "/dev/sdb"] }, summary())).toThrow(
       "Unsupported storage filesystem"
     );
+  });
+
+  it("requires the exact pool name when building a delete proposal", () => {
+    const current = summary();
+    current.capabilities.canDeletePool = true;
+    current.pools = [{
+      id: "/dev/md/archive",
+      name: "nas:archive",
+      raidPath: "/dev/md/archive",
+      raidLevel: "raid1",
+      status: "ready",
+      mountpoint: "/srv/nas/archive",
+      filesystem: "ext4",
+      totalBytes: 200,
+      usedBytes: 20,
+      availableBytes: 180,
+      usedPercent: 0.1,
+      memberDevices: ["/dev/sda", "/dev/sdb"]
+    }];
+
+    expect(() => buildStoragePoolDeleteProposal({ poolId: "/dev/md/archive", confirmation: "wrong" }, current)).toThrow(
+      "Type archive to confirm storage pool deletion"
+    );
+    expect(buildStoragePoolDeleteProposal({ poolId: "/dev/md/archive", confirmation: "archive" }, current)).toMatchObject({
+      action: "delete_pool",
+      name: "archive",
+      mdDevice: "/dev/md/archive",
+      mountpoint: "/srv/nas/archive"
+    });
   });
 
   it("rejects mounted, formatted, and existing array members", () => {

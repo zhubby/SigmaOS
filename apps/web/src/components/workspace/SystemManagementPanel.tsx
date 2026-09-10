@@ -17,8 +17,16 @@ import {
   type LucideIcon
 } from "lucide-react";
 import {
+  PolarAngleAxis,
+  RadialBar,
+  RadialBarChart,
+  ResponsiveContainer,
+  Tooltip,
+} from "recharts";
+import {
   getSystemNetwork,
   getSystemStorage,
+  deleteStoragePool,
   createStoragePool,
   type NetworkSummary,
   type StorageFilesystem,
@@ -62,6 +70,15 @@ interface Gauge {
   value: number;
   display: string;
   tone: GaugeTone;
+}
+
+interface StorageHealthSignal {
+  id: "capacity" | "smart" | "pools";
+  label: string;
+  value: number | null;
+  display: string;
+  tone: GaugeTone;
+  color: string;
 }
 
 export function SystemNetworkManagementPanel({
@@ -291,6 +308,10 @@ export function SystemStorageManagementPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [selectedPool, setSelectedPool] = useState<StoragePool | null>(null);
+  const [deleteStep, setDeleteStep] = useState<"idle" | "warning" | "confirm">("idle");
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deleting, setDeleting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [form, setForm] = useState<StoragePoolFormState>({
@@ -362,6 +383,67 @@ export function SystemStorageManagementPanel({
   function closeCreateModal() {
     if (!submitting) {
       setCreateOpen(false);
+    }
+  }
+
+  function openPoolDetails(pool: StoragePool) {
+    setSelectedPool(pool);
+    setDeleteStep("idle");
+    setDeleteConfirmation("");
+    onNotifyError(null);
+    onNotifySuccess(null);
+  }
+
+  function closePoolDetails() {
+    if (!deleting) {
+      setSelectedPool(null);
+      setDeleteStep("idle");
+      setDeleteConfirmation("");
+    }
+  }
+
+  function beginPoolDelete() {
+    if (!selectedPool || !summary?.capabilities.canDeletePool || !sessionId) {
+      return;
+    }
+    setDeleteStep("warning");
+    setDeleteConfirmation("");
+  }
+
+  function continuePoolDelete() {
+    if (selectedPool && deleteStep === "warning") {
+      setDeleteStep("confirm");
+    }
+  }
+
+  async function submitPoolDelete() {
+    if (!selectedPool || !sessionId || deleteStep !== "confirm") {
+      return;
+    }
+    const confirmationName = storagePoolConfirmationName(selectedPool);
+    if (deleteConfirmation.trim() !== confirmationName) {
+      onNotifyError(t("workspace.management.storage.deleteConfirmationMismatch", { name: confirmationName }));
+      return;
+    }
+
+    setDeleting(true);
+    onNotifyError(null);
+    try {
+      await deleteStoragePool({
+        sessionId,
+        poolId: selectedPool.id,
+        confirmation: confirmationName
+      });
+      onNotifySuccess(t("workspace.management.storage.poolDeleted"));
+      setSelectedPool(null);
+      setDeleteStep("idle");
+      setDeleteConfirmation("");
+      await refreshSummary();
+      await onWorkQueuesChanged();
+    } catch (nextError) {
+      onNotifyError(errorMessage(nextError));
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -439,10 +521,6 @@ export function SystemStorageManagementPanel({
             <Plus aria-hidden="true" size={15} />
             <span>{translate("workspace.management.actions.createPool")}</span>
           </button>
-          <button type="button" disabled title={translate("workspace.management.actions.systemIntegrationRequired")}>
-            <Trash2 aria-hidden="true" size={15} />
-            <span>{translate("workspace.management.actions.deletePool")}</span>
-          </button>
           <button type="button" onClick={() => void refreshSummary()} disabled={loading}>
             {loading ? <LoaderCircle aria-hidden="true" size={15} /> : <RefreshCw aria-hidden="true" size={15} />}
             <span>{t("common.actions.refresh")}</span>
@@ -451,7 +529,7 @@ export function SystemStorageManagementPanel({
       </header>
 
       <div className="management-body">
-        {loading ? <ManagementSkeletonBody tableColumns={7} tableRows={4} /> : <>
+        {loading ? <ManagementSkeletonBody tableColumns={7} tableRows={4} variant="storage" /> : <>
         <section className="management-command-panel">
           <div className="management-emblem" aria-hidden="true">
             <Database size={31} />
@@ -501,13 +579,21 @@ export function SystemStorageManagementPanel({
                     <th>{t("workspace.management.storage.columns.usage")}</th>
                     <th>{t("workspace.management.storage.columns.mount")}</th>
                     <th>{t("workspace.management.storage.columns.members")}</th>
-                    <th>{t("workspace.management.columns.actions")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pools.map((pool) => (
                     <tr key={pool.id}>
-                      <td title={pool.name}>{pool.name}</td>
+                      <td title={pool.name}>
+                        <button
+                          type="button"
+                          className="storage-pool-name-button"
+                          onClick={() => openPoolDetails(pool)}
+                          aria-label={t("workspace.management.storage.openPoolDetails", { name: pool.name })}
+                        >
+                          {pool.name}
+                        </button>
+                      </td>
                       <td>
                         <span className="management-row-status" data-state={storagePoolTone(pool)}>
                           {storagePoolStatusLabel(pool, translate)}
@@ -517,17 +603,6 @@ export function SystemStorageManagementPanel({
                       <td>{formatStorageUsage(pool, locale, translate)}</td>
                       <td title={pool.mountpoint ?? t("common.dash")}>{pool.mountpoint ?? t("common.dash")}</td>
                       <td title={pool.memberDevices.join(", ")}>{pool.memberDevices.length}</td>
-                      <td>
-                        <button
-                          type="button"
-                          className="management-icon-action is-danger"
-                          disabled
-                          title={translate("workspace.management.actions.systemIntegrationRequired")}
-                          aria-label={translate("workspace.management.actions.deletePool")}
-                        >
-                          <Trash2 aria-hidden="true" size={13} />
-                        </button>
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -562,15 +637,141 @@ export function SystemStorageManagementPanel({
               title={t("workspace.management.storage.healthTitle")}
               description={t("workspace.management.storage.healthDescription")}
             />
-            <div className="management-resource-list">
-              {storageGauges(summary, locale, translate).map((gauge) => (
-                <ResourceGauge key={gauge.id} gauge={gauge} />
-              ))}
-            </div>
+            <StorageHealthChart summary={summary} locale={locale} t={translate} />
           </section>
         </div>
         </>}
       </div>
+
+      {selectedPool ? (
+        <div
+          className="management-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => event.currentTarget === event.target && closePoolDetails()}
+        >
+          <section
+            className="management-modal storage-pool-details-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="storage-pool-details-title"
+          >
+            <header>
+              <div className="storage-pool-details-heading">
+                <span className="eyebrow">{t("workspace.management.storage.detailsEyebrow")}</span>
+                <h2 id="storage-pool-details-title" title={selectedPool.name}>{selectedPool.name}</h2>
+                <span className="management-row-status" data-state={storagePoolTone(selectedPool)}>
+                  {storagePoolStatusLabel(selectedPool, translate)}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="management-icon-action"
+                onClick={closePoolDetails}
+                disabled={deleting}
+                title={t("common.actions.cancel")}
+                aria-label={t("common.actions.cancel")}
+              >
+                <X aria-hidden="true" size={15} />
+              </button>
+            </header>
+
+            <div className="storage-pool-details-body">
+              <div className="storage-pool-details-overview">
+                <StoragePoolUsageChart pool={selectedPool} locale={locale} t={translate} />
+                <div className="storage-pool-details-summary">
+                  <span className="eyebrow">{t("workspace.management.storage.capacityLabel")}</span>
+                  <strong>{formatStorageUsage(selectedPool, locale, translate)}</strong>
+                  <p>{t("workspace.management.storage.detailsDescription")}</p>
+                </div>
+              </div>
+
+              <div className="storage-pool-details-facts">
+                <StoragePoolDetailFact label={translate("workspace.management.storage.detailFacts.raid")} value={selectedPool.raidLevel ?? translate("common.dash")} />
+                <StoragePoolDetailFact label={translate("workspace.management.storage.detailFacts.filesystem")} value={selectedPool.filesystem ?? translate("common.dash")} />
+                <StoragePoolDetailFact label={translate("workspace.management.storage.detailFacts.mountpoint")} value={selectedPool.mountpoint ?? translate("common.dash")} />
+                <StoragePoolDetailFact label={translate("workspace.management.storage.detailFacts.array")} value={selectedPool.raidPath} />
+              </div>
+
+              <section className="storage-pool-members" aria-labelledby="storage-pool-members-title">
+                <header>
+                  <div>
+                    <span className="eyebrow">{t("workspace.management.storage.membersEyebrow")}</span>
+                    <h3 id="storage-pool-members-title">{t("workspace.management.storage.membersTitle")}</h3>
+                  </div>
+                  <strong>{formatLocaleNumber(selectedPool.memberDevices.length, locale)}</strong>
+                </header>
+                <div className="storage-pool-member-list">
+                  {selectedPool.memberDevices.map((device) => (
+                    <div className="storage-pool-member" key={device}>
+                      <HardDrive aria-hidden="true" size={15} />
+                      <span>{device}</span>
+                      <span>{t("workspace.management.storage.memberDevice")}</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="storage-pool-delete-panel" data-state={deleteStep === "idle" ? "idle" : "danger"}>
+                <div className="storage-pool-delete-copy">
+                  <CircleAlert aria-hidden="true" size={18} />
+                  <div>
+                    <h3>{t("workspace.management.storage.deleteTitle")}</h3>
+                    <p>
+                      {deleteStep === "idle"
+                        ? t("workspace.management.storage.deleteDescription")
+                        : deleteStep === "warning"
+                          ? t("workspace.management.storage.deleteWarning")
+                          : t("workspace.management.storage.deleteFinalDescription", { name: storagePoolConfirmationName(selectedPool) })}
+                    </p>
+                  </div>
+                </div>
+                {!summary?.capabilities.canDeletePool ? (
+                  <p className="storage-pool-delete-disabled">{t("workspace.management.storage.deleteUnavailable")}</p>
+                ) : deleteStep === "idle" ? (
+                  <button type="button" className="danger-button" onClick={beginPoolDelete} disabled={!sessionId || deleting}>
+                    <Trash2 aria-hidden="true" size={15} />
+                    <span>{t("workspace.management.storage.deletePool")}</span>
+                  </button>
+                ) : deleteStep === "warning" ? (
+                  <div className="storage-pool-delete-actions">
+                    <button type="button" onClick={() => setDeleteStep("idle")} disabled={deleting}>{t("common.actions.cancel")}</button>
+                    <button type="button" className="danger-button" onClick={continuePoolDelete} disabled={deleting}>
+                      <CircleAlert aria-hidden="true" size={15} />
+                      <span>{t("workspace.management.storage.deleteContinue")}</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="storage-pool-delete-confirmation">
+                    <label>
+                      <span>{t("workspace.management.storage.deleteConfirmationLabel", { name: storagePoolConfirmationName(selectedPool) })}</span>
+                      <input
+                        value={deleteConfirmation}
+                        onChange={(event) => setDeleteConfirmation(event.target.value)}
+                        autoComplete="off"
+                        autoFocus
+                        disabled={deleting}
+                        placeholder={storagePoolConfirmationName(selectedPool)}
+                      />
+                    </label>
+                    <div className="storage-pool-delete-actions">
+                      <button type="button" onClick={() => setDeleteStep("idle")} disabled={deleting}>{t("common.actions.cancel")}</button>
+                      <button
+                        type="button"
+                        className="danger-button"
+                        onClick={() => void submitPoolDelete()}
+                        disabled={deleting || deleteConfirmation.trim() !== storagePoolConfirmationName(selectedPool)}
+                      >
+                        {deleting ? <LoaderCircle className="storage-pool-spinner" aria-hidden="true" size={15} /> : <Trash2 aria-hidden="true" size={15} />}
+                        <span>{deleting ? t("common.states.loading") : t("workspace.management.storage.deleteConfirm")}</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </section>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {createOpen ? (
         <div
@@ -748,6 +949,70 @@ export function SystemStorageManagementPanel({
       ) : null}
     </section>
   );
+}
+
+function StoragePoolUsageChart({
+  pool,
+  locale,
+  t
+}: {
+  pool: StoragePool;
+  locale: SupportedLocale;
+  t: Translate;
+}) {
+  const ratio = pool.usedPercent ?? (
+    pool.totalBytes !== null && pool.totalBytes > 0 && pool.usedBytes !== null
+      ? clampStorageRatio(pool.usedBytes / pool.totalBytes)
+      : null
+  );
+  const value = ratio === null ? 0 : ratio * 100;
+  const tone = usageGaugeTone(ratio);
+  const chartData = [{ name: t("workspace.management.storage.capacityUsedLabel"), value, fill: storageHealthColor(tone) }];
+
+  return (
+    <div className="storage-pool-usage-chart" aria-label={t("workspace.management.storage.capacityChartLabel")}>
+      <ResponsiveContainer width="100%" height="100%">
+        <RadialBarChart
+          data={chartData}
+          cx="50%"
+          cy="50%"
+          innerRadius="68%"
+          outerRadius="92%"
+          startAngle={90}
+          endAngle={-270}
+        >
+          <PolarAngleAxis type="number" domain={[0, 100]} tick={false} />
+          <RadialBar
+            dataKey="value"
+            background={{ fill: "var(--surface)" }}
+            cornerRadius={6}
+            isAnimationActive={false}
+          />
+          <Tooltip
+            contentStyle={{ background: "var(--modal-bg)", border: "1px solid var(--line)", borderRadius: 5, color: "var(--text)", fontSize: 11 }}
+            formatter={(nextValue) => [`${formatLocaleNumber(Number(nextValue), locale, { maximumFractionDigits: 1 })}%`, t("workspace.management.storage.capacityUsedLabel")]}
+          />
+        </RadialBarChart>
+      </ResponsiveContainer>
+      <div className="storage-pool-usage-center">
+        <strong>{ratio === null ? t("common.dash") : `${formatLocaleNumber(value, locale, { maximumFractionDigits: 1 })}%`}</strong>
+        <span>{t("workspace.management.storage.capacityUsedLabel")}</span>
+      </div>
+    </div>
+  );
+}
+
+function StoragePoolDetailFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <span>{label}</span>
+      <strong title={value}>{value}</strong>
+    </div>
+  );
+}
+
+function storagePoolConfirmationName(pool: StoragePool): string {
+  return pool.mountpoint?.split("/").filter(Boolean).at(-1) ?? pool.name;
 }
 
 function Fact({ label, value }: { label: string; value: string }) {
@@ -959,41 +1224,177 @@ function storageMetrics(
   ];
 }
 
-function storageGauges(
-  summary: StorageSummary | null,
-  locale: SupportedLocale,
-  t: Translate
-): Gauge[] {
-  const total = summary?.metrics.totalBytes ?? null;
-  const used = summary?.metrics.usedBytes ?? null;
-  const disks = summary?.metrics.disks ?? 0;
-  const smartPassed = summary?.metrics.smartPassed ?? 0;
-  const smartFailed = summary?.metrics.smartFailed ?? 0;
+function StorageHealthChart({
+  summary,
+  locale,
+  t
+}: {
+  summary: StorageSummary | null;
+  locale: SupportedLocale;
+  t: Translate;
+}) {
+  const metrics = summary?.metrics;
+  const total = metrics?.totalBytes ?? null;
+  const used = metrics?.usedBytes ?? null;
+  const disks = metrics?.disks ?? 0;
+  const smartPassed = metrics?.smartPassed ?? 0;
+  const smartFailed = metrics?.smartFailed ?? 0;
   const pools = summary?.pools ?? [];
   const readyPools = pools.filter((pool) => pool.status === "ready").length;
-  return [
+  const capacityRatio = total !== null && total > 0 && used !== null ? clampStorageRatio(used / total) : null;
+  const smartRatio = disks > 0 ? clampStorageRatio(smartPassed / disks) : null;
+  const poolRatio = pools.length > 0 ? clampStorageRatio(readyPools / pools.length) : null;
+  const signals: StorageHealthSignal[] = [
     {
       id: "capacity",
       label: t("workspace.management.storage.gauges.capacity"),
-      value: total && used !== null ? Math.round((used / total) * 100) : 0,
-      display: total && used !== null ? `${formatBytes(used, locale)} / ${formatBytes(total, locale)}` : t("common.dash"),
-      tone: usageGaugeTone(total && used !== null ? used / total : null)
+      value: capacityRatio === null ? null : capacityRatio * 100,
+      display: capacityRatio === null || used === null || total === null
+        ? t("common.dash")
+        : `${formatBytes(used, locale)} / ${formatBytes(total, locale)} (${formatRatioPercent(capacityRatio, locale, t)})`,
+      tone: usageGaugeTone(capacityRatio),
+      color: storageHealthColor(usageGaugeTone(capacityRatio), "var(--accent-soft-text)")
     },
     {
       id: "smart",
       label: t("workspace.management.storage.gauges.smart"),
-      value: ratioGauge(smartPassed, disks),
+      value: smartRatio === null ? null : smartRatio * 100,
       display: `${formatLocaleNumber(smartPassed, locale)} / ${formatLocaleNumber(disks, locale)}`,
-      tone: smartFailed ? "danger" : smartPassed ? "ready" : "neutral"
+      tone: smartFailed ? "danger" : smartRatio === null ? "neutral" : "ready",
+      color: storageHealthColor(smartFailed ? "danger" : smartRatio === null ? "neutral" : "ready")
     },
     {
       id: "pools",
       label: t("workspace.management.storage.gauges.pools"),
-      value: ratioGauge(readyPools, pools.length),
+      value: poolRatio === null ? null : poolRatio * 100,
       display: `${formatLocaleNumber(readyPools, locale)} / ${formatLocaleNumber(pools.length, locale)}`,
-      tone: readyPools === pools.length ? "ready" : pools.length ? "warning" : "neutral"
+      tone: poolRatio === null ? "neutral" : readyPools === pools.length ? "ready" : "warning",
+      color: storageHealthColor(
+        poolRatio === null ? "neutral" : readyPools === pools.length ? "ready" : "warning",
+        "var(--teal-text)"
+      )
     }
   ];
+  const availableSignals = signals.filter((signal): signal is StorageHealthSignal & { value: number } => signal.value !== null);
+  const chartData = [...availableSignals].reverse().map((signal) => ({
+    name: signal.id,
+    label: signal.label,
+    value: signal.value,
+    fill: signal.color
+  }));
+  const overallTone = storageHealthTone(summary, capacityRatio, smartFailed, readyPools, pools.length);
+  const overallLabel = overallTone === "danger"
+    ? t("workspace.management.states.attention")
+    : overallTone === "warning"
+      ? t("workspace.management.states.degraded")
+      : overallTone === "ready"
+        ? t("workspace.management.states.healthy")
+        : t("common.dash");
+
+  return (
+    <div className="storage-health-chart">
+      {availableSignals.length ? (
+        <div className="storage-health-chart-layout">
+          <div className="storage-health-radial" aria-label={t("workspace.management.storage.healthChartLabel")}>
+            <ResponsiveContainer width="100%" height="100%">
+              <RadialBarChart
+                data={chartData}
+                cx="50%"
+                cy="50%"
+                innerRadius="43%"
+                outerRadius="92%"
+                startAngle={90}
+                endAngle={-270}
+                barCategoryGap="16%"
+              >
+                <PolarAngleAxis type="number" domain={[0, 100]} tick={false} />
+                <RadialBar
+                  dataKey="value"
+                  name="value"
+                  background={{ fill: "var(--surface)" }}
+                  cornerRadius={5}
+                  isAnimationActive={false}
+                />
+                <Tooltip
+                  contentStyle={{ background: "var(--modal-bg)", border: "1px solid var(--line)", borderRadius: 5, color: "var(--text)", fontSize: 11 }}
+                  formatter={(value, _name, item) => {
+                    const label = typeof item.payload?.label === "string" ? item.payload.label : t("workspace.management.storage.healthTitle");
+                    return [
+                      `${formatLocaleNumber(Number(value), locale, { maximumFractionDigits: 1 })}%`,
+                      label
+                    ];
+                  }}
+                />
+              </RadialBarChart>
+            </ResponsiveContainer>
+            <div className="storage-health-chart-center" data-state={overallTone}>
+              <strong data-state={overallTone}>{overallLabel}</strong>
+            </div>
+          </div>
+          <div className="storage-health-signal-list">
+            {signals.map((signal) => (
+              <div className="storage-health-signal" key={signal.id} data-state={signal.tone}>
+                <i style={{ background: signal.color }} aria-hidden="true" />
+                <div>
+                  <strong>{signal.label}</strong>
+                  <span>{signal.display}</span>
+                </div>
+                <em>{signal.value === null ? t("common.dash") : `${formatLocaleNumber(signal.value, locale, { maximumFractionDigits: 1 })}%`}</em>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="storage-health-empty">
+          <Activity aria-hidden="true" size={20} />
+          <span>{t("workspace.management.storage.healthNoData")}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function clampStorageRatio(value: number): number {
+  return Math.max(0, Math.min(value, 1));
+}
+
+function storageHealthColor(tone: GaugeTone, readyColor = "var(--success-text)"): string {
+  if (tone === "danger") {
+    return "var(--danger-text)";
+  }
+  if (tone === "warning") {
+    return "var(--warning-text)";
+  }
+  if (tone === "ready") {
+    return readyColor;
+  }
+  return "var(--neutral-status-text)";
+}
+
+function storageHealthTone(
+  summary: StorageSummary | null,
+  capacityRatio: number | null,
+  smartFailed: number,
+  readyPools: number,
+  poolCount: number
+): GaugeTone {
+  if (!summary || (capacityRatio === null && !summary.metrics.disks && !poolCount)) {
+    return "neutral";
+  }
+  if (smartFailed > 0 || summary.pools.some((pool) => pool.status === "offline")) {
+    return "danger";
+  }
+  if (capacityRatio !== null && capacityRatio >= 0.85) {
+    return "danger";
+  }
+  if (
+    (capacityRatio !== null && capacityRatio >= 0.65) ||
+    (poolCount > 0 && readyPools < poolCount) ||
+    summary.status === "partial"
+  ) {
+    return "warning";
+  }
+  return "ready";
 }
 
 function networkStatusDetail(

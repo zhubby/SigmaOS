@@ -17,7 +17,7 @@ export function ManagementSkeletonBody({
   tableRows?: number;
   listRows?: number;
   gaugeRows?: number;
-  variant?: "default" | "docker";
+  variant?: "default" | "docker" | "storage";
 }) {
   const { t } = useTranslation();
 
@@ -133,15 +133,19 @@ export function ManagementSkeletonBody({
 
         <section className="management-section">
           <SkeletonSectionHeader />
-          <div className="management-resource-list management-skeleton-resources">
-            {Array.from({ length: gaugeRows }, (_, index) => (
-              <div key={index} className="management-skeleton-resource">
-                <SkeletonBlock width={index % 2 ? "46%" : "58%"} />
-                <SkeletonBlock className="management-skeleton-gauge" />
-                <SkeletonBlock width="34%" />
-              </div>
-            ))}
-          </div>
+          {variant === "storage" ? (
+            <StorageHealthSkeleton />
+          ) : (
+            <div className="management-resource-list management-skeleton-resources">
+              {Array.from({ length: gaugeRows }, (_, index) => (
+                <div key={index} className="management-skeleton-resource">
+                  <SkeletonBlock width={index % 2 ? "46%" : "58%"} />
+                  <SkeletonBlock className="management-skeleton-gauge" />
+                  <SkeletonBlock width="34%" />
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       </div>
       )}
@@ -157,6 +161,25 @@ function SkeletonSectionHeader() {
         <SkeletonBlock width="68%" />
       </div>
     </header>
+  );
+}
+
+function StorageHealthSkeleton() {
+  return (
+    <div className="storage-health-chart management-skeleton-storage-health">
+      <div className="storage-health-chart-layout">
+        <SkeletonBlock className="management-skeleton-storage-radial" />
+        <div className="storage-health-signal-list">
+          {Array.from({ length: 3 }, (_, index) => (
+            <div className="storage-health-signal" key={index}>
+              <SkeletonBlock className="management-skeleton-signal-dot" />
+              <div><SkeletonBlock width={index % 2 ? "66%" : "78%"} /><SkeletonBlock width="92%" /></div>
+              <SkeletonBlock width="34px" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 

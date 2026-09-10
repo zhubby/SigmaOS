@@ -256,7 +256,7 @@ export async function collectSystemStorage(
     capabilities: {
       backend: "mdadm",
       canCreatePool: true,
-      canDeletePool: false,
+      canDeletePool: true,
       canApplyConfiguration: false
     },
     metrics,

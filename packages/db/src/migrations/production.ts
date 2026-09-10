@@ -85,8 +85,7 @@ export const productionMigrations: Migration[] = [
         heartbeat_at TEXT NOT NULL
       );
     `
-  }
-  ,
+  },
   {
     id: "010_index_run_history_archive",
     sql: `
@@ -113,6 +112,37 @@ export const productionMigrations: Migration[] = [
         failures_json TEXT NOT NULL DEFAULT '[]'
       );
       CREATE INDEX IF NOT EXISTS idx_index_run_history_root_started_at ON index_run_history(root_id, started_at DESC);
+    `
+  },
+  {
+    id: "011_storage_pool_delete",
+    disableForeignKeys: true,
+    sql: `
+      PRAGMA legacy_alter_table = ON;
+
+      ALTER TABLE storage_operations RENAME TO storage_operations_old;
+
+      CREATE TABLE storage_operations (
+        id TEXT PRIMARY KEY,
+        approval_id TEXT REFERENCES pending_approvals(id) ON DELETE SET NULL,
+        action TEXT NOT NULL CHECK (action IN ('create_pool', 'delete_pool')),
+        target_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('proposed', 'approved', 'applied', 'failed')),
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      INSERT INTO storage_operations (id, approval_id, action, target_id, status, metadata_json, created_at, updated_at)
+      SELECT id, approval_id, action, target_id, status, metadata_json, created_at, updated_at
+      FROM storage_operations_old;
+
+      DROP TABLE storage_operations_old;
+
+      PRAGMA legacy_alter_table = OFF;
+
+      CREATE INDEX IF NOT EXISTS idx_storage_operations_created_at
+        ON storage_operations(created_at);
     `
   }
 ];

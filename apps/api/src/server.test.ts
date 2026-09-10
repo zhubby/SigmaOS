@@ -965,7 +965,7 @@ describe("API server", () => {
         capabilities: {
           backend: "mdadm",
           canCreatePool: true,
-          canDeletePool: false
+          canDeletePool: true
         },
         metrics: {
           pools: 1,
@@ -1109,7 +1109,7 @@ describe("API server", () => {
     });
     expect(missingConfirmation.statusCode).toBe(400);
     expect(missingConfirmation.json()).toEqual({
-      error: "Storage pool creation requires explicit confirmation"
+      error: "Storage operation requires explicit confirmation"
     });
 
     const proposed = await server.inject({
@@ -1149,6 +1149,110 @@ describe("API server", () => {
     });
     expect(unsafe.statusCode).toBe(400);
     expect(unsafe.json()).toEqual({ error: expect.stringContaining("not present") });
+
+    await server.close();
+    await closeHttpServer(helperServer);
+  });
+
+  it("requires an exact pool confirmation before deleting a storage pool", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const config = testConfig(tempDir);
+    const socketPath = path.join(tempDir, "storage-delete-helper.sock");
+    config.shares.helperSocketPath = socketPath;
+    let helperProposal: StorageOperationProposal | null = null;
+    const helperServer = http.createServer(async (request, response) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      helperProposal = JSON.parse(Buffer.concat(chunks).toString("utf8")) as StorageOperationProposal;
+      const body = JSON.stringify({
+        action: "delete_pool",
+        name: "storage",
+        mountpoint: "/srv/storage",
+        mdDevice: "/dev/md0",
+        devices: ["/dev/sda1", "/dev/sdb1"]
+      });
+      response.writeHead(200, { "content-type": "application/json", "content-length": Buffer.byteLength(body) });
+      response.end(body);
+    });
+    await listenOnUnixSocket(helperServer, socketPath);
+
+    const server = await buildServer({
+      config,
+      db,
+      system: { commandRunner: storageCommandRunner({ mountpoint: "/srv/nas/storage" }) }
+    });
+
+    const missingConfirmation = await server.inject({
+      method: "POST",
+      url: "/api/storage/proposals",
+      payload: {
+        sessionId: session.id,
+        action: "delete_pool",
+        poolId: "/dev/md0",
+        confirmation: "storage"
+      }
+    });
+    expect(missingConfirmation.statusCode).toBe(400);
+    expect(missingConfirmation.json()).toEqual({
+      error: "Storage operation requires explicit confirmation"
+    });
+
+    const missingPool = await server.inject({
+      method: "POST",
+      url: "/api/storage/proposals",
+      payload: {
+        sessionId: session.id,
+        action: "delete_pool",
+        poolId: "/dev/md-missing",
+        confirmation: "storage",
+        confirm: true
+      }
+    });
+    expect(missingPool.statusCode).toBe(400);
+    expect(missingPool.json()).toEqual({ error: "Storage pool is no longer available; refresh the inventory" });
+
+    const wrongConfirmation = await server.inject({
+      method: "POST",
+      url: "/api/storage/proposals",
+      payload: {
+        sessionId: session.id,
+        action: "delete_pool",
+        poolId: "/dev/md0",
+        confirmation: "wrong",
+        confirm: true
+      }
+    });
+    expect(wrongConfirmation.statusCode).toBe(400);
+    expect(wrongConfirmation.json()).toEqual({ error: "Type storage to confirm storage pool deletion" });
+
+    const deleted = await server.inject({
+      method: "POST",
+      url: "/api/storage/proposals",
+      payload: {
+        sessionId: session.id,
+        action: "delete_pool",
+        poolId: "/dev/md0",
+        confirmation: "storage",
+        confirm: true
+      }
+    });
+    expect(deleted.statusCode).toBe(202);
+    expect(deleted.json()).toMatchObject({
+      job: { status: "completed" },
+      operation: {
+        action: "delete_pool",
+        status: "applied",
+        approvalId: null
+      }
+    });
+    expect(helperProposal).toMatchObject({
+      action: "delete_pool",
+      name: "storage",
+      mdDevice: "/dev/md0",
+      mountpoint: "/srv/nas/storage"
+    });
 
     await server.close();
     await closeHttpServer(helperServer);
@@ -3252,10 +3356,12 @@ class FakeSystemCommandRunner implements SystemCommandRunner {
 
 function storageCommandRunner({
   smartSdb,
-  failSmartSdb = false
+  failSmartSdb = false,
+  mountpoint = "/srv/storage"
 }: {
   smartSdb?: string;
   failSmartSdb?: boolean;
+  mountpoint?: string;
 }): FakeSystemCommandRunner {
   return new FakeSystemCommandRunner({
     "lsblk --json --bytes --output NAME,KNAME,PATH,TYPE,SIZE,MODEL,SERIAL,TRAN,ROTA,FSTYPE,LABEL,UUID,MOUNTPOINTS,PKNAME": JSON.stringify({
@@ -3310,7 +3416,7 @@ function storageCommandRunner({
       filesystems: [
         {
           source: "/dev/md0",
-          target: "/srv/storage",
+          target: mountpoint,
           fstype: "ext4",
           size: 2000,
           used: 800,

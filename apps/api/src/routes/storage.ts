@@ -10,7 +10,11 @@ import {
 } from "@sigmaos/db";
 import type { StorageOperationProposal } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
-import { applyStoragePoolOperation, buildStoragePoolProposal } from "../lib/storage-service.js";
+import {
+  applyStoragePoolOperation,
+  buildStoragePoolDeleteProposal,
+  buildStoragePoolProposal
+} from "../lib/storage-service.js";
 import { collectSystemStorage } from "../lib/system-management.js";
 
 export function registerStorageRoutes(server: FastifyInstance, context: ApiRouteContext): void {
@@ -19,10 +23,13 @@ export function registerStorageRoutes(server: FastifyInstance, context: ApiRoute
   server.post<{
     Body: {
       sessionId?: string;
+      action?: "create_pool" | "delete_pool";
       name?: string;
       raidLevel?: string;
       devices?: string[];
       filesystem?: string;
+      poolId?: string;
+      confirmation?: string;
       confirm?: boolean;
     };
   }>("/api/storage/proposals", async (request, reply) => {
@@ -32,13 +39,15 @@ export function registerStorageRoutes(server: FastifyInstance, context: ApiRoute
       return;
     }
     if (request.body?.confirm !== true) {
-      reply.status(400).send({ error: "Storage pool creation requires explicit confirmation" });
+      reply.status(400).send({ error: "Storage operation requires explicit confirmation" });
       return;
     }
 
     try {
       const summary = await collectSystemStorage(context.system);
-      const proposal: StorageOperationProposal = buildStoragePoolProposal(request.body ?? {}, summary);
+      const proposal: StorageOperationProposal = request.body?.action === "delete_pool"
+        ? buildStoragePoolDeleteProposal(request.body, summary)
+        : buildStoragePoolProposal(request.body ?? {}, summary);
       const { message, job } = createUserMessageAndJob(db, {
         sessionId: session.id,
         content: proposal.summary,

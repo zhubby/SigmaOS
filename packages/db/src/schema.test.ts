@@ -34,7 +34,8 @@ describe("SQLite schema migrations", () => {
       "007_indexer_status",
       "008_index_failure_root_guard",
       "009_p0_operations",
-      "010_index_run_history_archive"
+      "010_index_run_history_archive",
+      "011_storage_pool_delete"
     ]);
   });
 

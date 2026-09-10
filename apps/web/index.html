@@ -5,9 +5,329 @@
     <link rel="icon" type="image/svg+xml" href="/sigmaos-icon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SigmaOS</title>
+    <script>
+      (() => {
+        const root = document.documentElement;
+        let theme = "dark";
+        let language = navigator.language?.toLowerCase().startsWith("zh") ? "zh-CN" : "en";
+        try {
+          const storedTheme = localStorage.getItem("sigmaos:theme");
+          const storedLanguage = localStorage.getItem("sigmaos:language");
+          theme = storedTheme === "light" || storedTheme === "dark"
+            ? storedTheme
+            : window.matchMedia?.("(prefers-color-scheme: light)").matches
+              ? "light"
+              : "dark";
+          language = storedLanguage === "zh-CN"
+            ? "zh-CN"
+            : storedLanguage === "en"
+              ? "en"
+              : language;
+        } catch {
+          theme = window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        }
+        root.dataset.theme = theme;
+        root.dataset.themePreference = "system";
+        root.lang = language;
+      })();
+    </script>
+    <style>
+      :root {
+        --boot-bg: #0f1015;
+        --boot-panel: rgb(30 32 41 / 88%);
+        --boot-panel-soft: rgb(255 255 255 / 4%);
+        --boot-line: rgb(255 255 255 / 10%);
+        --boot-text: #f2f3f5;
+        --boot-muted: #b5bac1;
+        --boot-muted-2: #858b98;
+        --boot-accent: #8ea1ff;
+        --boot-accent-strong: #5865f2;
+        --boot-teal: #21d6c2;
+      }
+
+      :root[data-theme="light"] {
+        --boot-bg: #eef2f7;
+        --boot-panel: rgb(255 255 255 / 92%);
+        --boot-panel-soft: rgb(15 23 42 / 4%);
+        --boot-line: rgb(24 34 50 / 12%);
+        --boot-text: #182232;
+        --boot-muted: #526174;
+        --boot-muted-2: #748095;
+        --boot-accent: #4353d8;
+        --boot-accent-strong: #3342b9;
+        --boot-teal: #08766b;
+      }
+
+      html,
+      body {
+        min-width: 320px;
+        min-height: 100%;
+        margin: 0;
+      }
+
+      body {
+        overflow: hidden;
+        background: var(--boot-bg);
+      }
+
+      #sigmaos-boot {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        color: var(--boot-text);
+        background:
+          linear-gradient(90deg, transparent 49.9%, var(--boot-panel-soft) 50%, transparent 50.1%),
+          linear-gradient(0deg, transparent 49.9%, var(--boot-panel-soft) 50%, transparent 50.1%),
+          var(--boot-bg);
+        background-size: 72px 72px;
+        opacity: 1;
+        transition: opacity 380ms cubic-bezier(.2, .72, .2, 1), visibility 380ms linear;
+      }
+
+      #sigmaos-boot::before,
+      #sigmaos-boot::after {
+        position: absolute;
+        left: 50%;
+        width: min(720px, 76vw);
+        height: 1px;
+        background: linear-gradient(90deg, transparent, var(--boot-line), transparent);
+        content: "";
+        transform: translateX(-50%);
+      }
+
+      #sigmaos-boot::before {
+        top: 22%;
+      }
+
+      #sigmaos-boot::after {
+        bottom: 22%;
+      }
+
+      #sigmaos-boot.is-exiting {
+        visibility: hidden;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .sigmaos-boot-shell {
+        position: relative;
+        display: grid;
+        justify-items: center;
+        width: min(400px, calc(100vw - 40px));
+        box-sizing: border-box;
+        padding: 34px 34px 27px;
+        border: 1px solid var(--boot-line);
+        border-radius: 8px;
+        background: var(--boot-panel);
+        box-shadow: 0 24px 80px rgb(0 0 0 / 22%), inset 0 1px 0 var(--boot-panel-soft);
+        text-align: center;
+        animation: sigmaos-boot-arrive 520ms cubic-bezier(.2, .72, .2, 1) both;
+      }
+
+      .sigmaos-boot-brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--boot-text);
+        font: 700 17px/1 "gg sans", "Noto Sans SC", "Noto Sans", sans-serif;
+        letter-spacing: .02em;
+      }
+
+      .sigmaos-boot-brand img {
+        width: 34px;
+        height: 34px;
+        border-radius: 9px;
+        box-shadow: 0 0 0 1px var(--boot-line), 0 0 24px rgb(88 101 242 / 24%);
+      }
+
+      .sigmaos-boot-orbit {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 118px;
+        height: 118px;
+        margin: 28px 0 22px;
+        border: 1px solid var(--boot-line);
+        border-radius: 50%;
+      }
+
+      .sigmaos-boot-orbit::before,
+      .sigmaos-boot-orbit::after {
+        position: absolute;
+        border-radius: 50%;
+        content: "";
+      }
+
+      .sigmaos-boot-orbit::before {
+        inset: 10px;
+        border: 2px solid var(--boot-panel-soft);
+        border-top-color: var(--boot-accent-strong);
+        border-right-color: var(--boot-teal);
+        animation: sigmaos-boot-spin 1.5s linear infinite;
+      }
+
+      .sigmaos-boot-orbit::after {
+        inset: 23px;
+        border: 1px dashed var(--boot-line);
+        animation: sigmaos-boot-spin 4.5s linear infinite reverse;
+      }
+
+      .sigmaos-boot-orbit img {
+        position: relative;
+        z-index: 1;
+        width: 52px;
+        height: 52px;
+        border-radius: 13px;
+      }
+
+      .sigmaos-boot-copy {
+        display: grid;
+        gap: 7px;
+      }
+
+      .sigmaos-boot-copy strong {
+        color: var(--boot-text);
+        font-size: 14px;
+        letter-spacing: .01em;
+      }
+
+      .sigmaos-boot-copy span {
+        color: var(--boot-muted);
+        font-size: 11.5px;
+      }
+
+      .sigmaos-boot-progress {
+        width: 100%;
+        height: 4px;
+        margin-top: 26px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: var(--boot-panel-soft);
+      }
+
+      .sigmaos-boot-progress span {
+        display: block;
+        width: 34%;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--boot-teal), var(--boot-accent-strong));
+        animation: sigmaos-boot-progress 1.7s ease-in-out infinite;
+      }
+
+      .sigmaos-boot-footer {
+        display: flex;
+        justify-content: space-between;
+        width: 100%;
+        margin-top: 18px;
+        color: var(--boot-muted-2);
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: .12em;
+        text-transform: uppercase;
+      }
+
+      .sigmaos-boot-footer span:last-child {
+        color: var(--boot-accent);
+      }
+
+      #sigmaos-boot[data-state="error"] .sigmaos-boot-orbit::before {
+        border-top-color: #da373c;
+        border-right-color: #ffb3b6;
+        animation: none;
+      }
+
+      #sigmaos-boot[data-state="error"] .sigmaos-boot-progress {
+        display: none;
+      }
+
+      .sigmaos-boot-retry {
+        display: none;
+        min-height: 32px;
+        margin-top: 22px;
+        padding: 0 13px;
+        border: 1px solid var(--boot-line);
+        border-radius: 5px;
+        color: var(--boot-text);
+        background: var(--boot-panel-soft);
+        cursor: pointer;
+        font: inherit;
+        font-size: 11px;
+        font-weight: 800;
+      }
+
+      .sigmaos-boot-retry:hover {
+        border-color: var(--boot-accent);
+        background: var(--boot-panel);
+      }
+
+      #sigmaos-boot[data-state="error"] .sigmaos-boot-retry {
+        display: inline-flex;
+        align-items: center;
+      }
+
+      @keyframes sigmaos-boot-arrive {
+        from { opacity: 0; transform: translateY(10px) scale(.985); }
+        to { opacity: 1; transform: translateY(0) scale(1); }
+      }
+
+      @keyframes sigmaos-boot-spin {
+        to { transform: rotate(360deg); }
+      }
+
+      @keyframes sigmaos-boot-progress {
+        0% { transform: translateX(-125%); }
+        55%, 100% { transform: translateX(320%); }
+      }
+
+      @media (max-width: 520px) {
+        #sigmaos-boot::before,
+        #sigmaos-boot::after {
+          width: 88vw;
+        }
+
+        .sigmaos-boot-shell {
+          padding: 29px 24px 23px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #sigmaos-boot,
+        .sigmaos-boot-shell,
+        .sigmaos-boot-orbit::before,
+        .sigmaos-boot-orbit::after,
+        .sigmaos-boot-progress span {
+          animation: none;
+          transition: none;
+        }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <div id="sigmaos-boot" role="status" aria-live="polite" aria-busy="true">
+      <div class="sigmaos-boot-shell">
+        <div class="sigmaos-boot-brand">
+          <img src="/sigmaos-icon.svg" alt="" width="34" height="34" />
+          <span>SigmaOS</span>
+        </div>
+        <div class="sigmaos-boot-orbit" aria-hidden="true">
+          <img src="/sigmaos-icon.svg" alt="" width="52" height="52" />
+        </div>
+        <div class="sigmaos-boot-copy">
+          <strong data-boot-title>Preparing workspace</strong>
+          <span data-boot-detail>Connecting to local services</span>
+        </div>
+        <div class="sigmaos-boot-progress" aria-hidden="true"><span></span></div>
+        <div class="sigmaos-boot-footer">
+          <span data-boot-system>Local system</span>
+          <span>...</span>
+        </div>
+        <button class="sigmaos-boot-retry" type="button" data-boot-retry>Reload</button>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -520,7 +520,7 @@ export function validateStorageHelperRequest(value: unknown): StorageHelperReque
   return { command: value.command, args };
 }
 
-export interface StoragePoolOperationResult {
+export interface StoragePoolCreateOperationResult {
   action: "create_pool";
   name: string;
   raidLevel: StorageRaidLevel;
@@ -530,6 +530,16 @@ export interface StoragePoolOperationResult {
   mdDevice: string;
   uuid: string;
 }
+
+export interface StoragePoolDeleteOperationResult {
+  action: "delete_pool";
+  name: string;
+  mountpoint: string;
+  mdDevice: string;
+  devices: string[];
+}
+
+export type StoragePoolOperationResult = StoragePoolCreateOperationResult | StoragePoolDeleteOperationResult;
 
 export interface StoragePoolOperationOptions {
   fstabPath?: string;
@@ -542,24 +552,51 @@ export interface StoragePoolOperationOptions {
 let storageOperationQueue = Promise.resolve();
 
 export function validateStorageOperationRequest(value: unknown): StorageOperationProposal {
-  if (!isRecord(value) || value.action !== "create_pool") {
+  if (!isRecord(value) || (value.action !== "create_pool" && value.action !== "delete_pool")) {
     throw new Error("Invalid storage operation request");
   }
   const name = value.name;
-  const raidLevel = value.raidLevel;
   const devices = value.devices;
   const mountpoint = value.mountpoint;
   if (
     typeof name !== "string" ||
     !/^[a-z][a-z0-9_-]{0,31}$/u.test(name) ||
-    !isStorageRaidLevel(raidLevel) ||
     !Array.isArray(devices) ||
-    !devices.every((device): device is string => typeof device === "string" && /^\/dev\/[A-Za-z0-9._-]+$/u.test(device)) ||
+    !devices.every((device): device is string => typeof device === "string" && isDevicePath(device)) ||
     new Set(devices).size !== devices.length ||
-    !isStorageFilesystem(value.filesystem) ||
     typeof mountpoint !== "string" ||
-    mountpoint !== path.posix.join("/srv/nas", name) ||
+    !/^\/srv\/nas\/[a-z][a-z0-9_-]{0,31}$/u.test(mountpoint) ||
     value.risk !== "high"
+  ) {
+    throw new Error("Invalid storage operation request");
+  }
+
+  if (value.action === "delete_pool") {
+    const mdDevice = value.mdDevice;
+    if (
+      typeof mdDevice !== "string" ||
+      !isMdadmDevicePath(mdDevice) ||
+      !devices.length ||
+      mountpoint !== path.posix.join("/srv/nas", name)
+    ) {
+      throw new Error("Invalid storage operation request");
+    }
+    return {
+      action: "delete_pool",
+      name,
+      mdDevice,
+      devices,
+      mountpoint,
+      risk: "high",
+      summary: typeof value.summary === "string" ? value.summary : `Delete storage pool ${name}`
+    };
+  }
+
+  const raidLevel = value.raidLevel;
+  if (
+    !isStorageRaidLevel(raidLevel) ||
+    !isStorageFilesystem(value.filesystem) ||
+    mountpoint !== path.posix.join("/srv/nas", name)
   ) {
     throw new Error("Invalid storage operation request");
   }
@@ -598,6 +635,9 @@ async function applyStoragePoolOperationNow(
   options: StoragePoolOperationOptions
 ): Promise<StoragePoolOperationResult> {
   const proposal = validateStorageOperationRequest(request);
+  if (proposal.action === "delete_pool") {
+    return applyStoragePoolDeleteOperationNow(proposal, runner, options);
+  }
   if (await cleanupOrphanMdDevices(runner, options.mdSysBlockPath)) {
     await runner.run("udevadm", ["settle"]);
   }
@@ -669,6 +709,38 @@ async function applyStoragePoolOperationNow(
       await bestEffort(runner, "mdadm", ["--zero-superblock", "--force", ...proposal.devices]);
     } else {
       await bestEffortOrphanMdCleanup(runner, options.mdSysBlockPath);
+    }
+    throw error;
+  }
+}
+
+async function applyStoragePoolDeleteOperationNow(
+  proposal: Extract<StorageOperationProposal, { action: "delete_pool" }>,
+  runner: HelperCommandRunner,
+  options: StoragePoolOperationOptions
+): Promise<StoragePoolDeleteOperationResult> {
+  const fstabPath = options.fstabPath ?? "/etc/fstab";
+  const previousFstab = await removeFstabEntry(proposal.mountpoint, fstabPath);
+  let arrayStopped = false;
+  try {
+    await runner.run("systemctl", ["daemon-reload"]);
+    await runner.run("umount", [proposal.mountpoint]);
+    await runner.run("mdadm", ["--stop", proposal.mdDevice]);
+    arrayStopped = true;
+    await runner.run("udevadm", ["settle"]);
+    await runner.run("mdadm", ["--zero-superblock", "--force", ...proposal.devices]);
+    return {
+      action: proposal.action,
+      name: proposal.name,
+      mountpoint: proposal.mountpoint,
+      mdDevice: proposal.mdDevice,
+      devices: proposal.devices
+    };
+  } catch (error) {
+    if (!arrayStopped) {
+      await bestEffortFstabRestore(fstabPath, previousFstab);
+      await bestEffort(runner, "systemctl", ["daemon-reload"]);
+      await bestEffort(runner, "mount", [proposal.mountpoint]);
     }
     throw error;
   }
@@ -855,7 +927,7 @@ async function appendFstabEntry(
 ): Promise<string> {
   const current = await readFile(fstabPath, "utf8");
   const lines = current.split("\n");
-  if (lines.some((line) => line.trim() && !line.trimStart().startsWith("#") && line.split(/\s+/u)[1] === mountpoint)) {
+  if (lines.some((line) => line.trim() && !line.trimStart().startsWith("#") && line.trim().split(/\s+/u)[1] === mountpoint)) {
     throw new Error(`Mountpoint already exists in ${fstabPath}: ${mountpoint}`);
   }
   const entry = `UUID=${uuid} ${mountpoint} ${filesystem} defaults,nofail,x-systemd.device-timeout=30s 0 2`;
@@ -864,6 +936,31 @@ async function appendFstabEntry(
     // The helper unit grants write access to the fstab file, but keeps its parent
     // directory read-only. Write the existing file in place so systemd's
     // filesystem sandbox does not reject creation of a sibling temp file.
+    await writeFile(fstabPath, next, { encoding: "utf8" });
+  } catch (error) {
+    try {
+      await writeFile(fstabPath, current, { encoding: "utf8" });
+    } catch {
+      // Preserve the original write error if recovery is also blocked.
+    }
+    throw error;
+  }
+  return current;
+}
+
+async function removeFstabEntry(mountpoint: string, fstabPath: string): Promise<string> {
+  const current = await readFile(fstabPath, "utf8");
+  const next = current
+    .split("\n")
+    .filter((line) => {
+      const trimmed = line.trim();
+      return !trimmed || trimmed.startsWith("#") || trimmed.split(/\s+/u)[1] !== mountpoint;
+    })
+    .join("\n");
+  if (next === current) {
+    return current;
+  }
+  try {
     await writeFile(fstabPath, next, { encoding: "utf8" });
   } catch (error) {
     try {

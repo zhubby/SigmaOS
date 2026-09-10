@@ -642,7 +642,7 @@ export interface SystemStorageSummary {
   capabilities: {
     backend: "mdadm";
     canCreatePool: true;
-    canDeletePool: false;
+    canDeletePool: boolean;
     canApplyConfiguration: false;
   };
   metrics: {
@@ -1108,22 +1108,34 @@ export interface ShareOperationRecord {
 export type StorageRaidLevel = "0" | "1" | "5" | "6" | "10";
 export type StorageFilesystem = "ext4" | "btrfs";
 export type StorageOperationStatus = "proposed" | "approved" | "applied" | "failed";
+export type StorageOperationAction = "create_pool" | "delete_pool";
 
-export interface StorageOperationProposal {
-  action: "create_pool";
+interface StorageOperationBase {
   name: string;
-  raidLevel: StorageRaidLevel;
-  devices: string[];
-  filesystem: StorageFilesystem;
   mountpoint: string;
   risk: "high";
   summary: string;
 }
 
+export interface StoragePoolCreateProposal extends StorageOperationBase {
+  action: "create_pool";
+  raidLevel: StorageRaidLevel;
+  devices: string[];
+  filesystem: StorageFilesystem;
+}
+
+export interface StoragePoolDeleteProposal extends StorageOperationBase {
+  action: "delete_pool";
+  mdDevice: string;
+  devices: string[];
+}
+
+export type StorageOperationProposal = StoragePoolCreateProposal | StoragePoolDeleteProposal;
+
 export interface StorageOperationRecord {
   id: string;
   approvalId: string | null;
-  action: "create_pool";
+  action: StorageOperationAction;
   targetId: string;
   status: StorageOperationStatus;
   metadata: Record<string, unknown>;

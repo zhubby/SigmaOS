@@ -890,7 +890,9 @@ function isShareOperationProposal(proposal: PendingApproval["proposal"][number])
   return "action" in proposal && proposal.action === "apply_settings" && "settings" in proposal;
 }
 
-function isStorageOperationProposal(proposal: PendingApproval["proposal"][number]): proposal is StorageOperationProposal {
+function isStorageOperationProposal(
+  proposal: PendingApproval["proposal"][number]
+): proposal is Extract<StorageOperationProposal, { action: "create_pool" }> {
   return "action" in proposal && proposal.action === "create_pool" && "devices" in proposal;
 }
 

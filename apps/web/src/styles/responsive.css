@@ -543,6 +543,27 @@
     max-height: calc(100dvh - 20px);
   }
 
+  .management-modal.storage-pool-details-modal {
+    width: 100%;
+    max-height: calc(100dvh - 20px);
+  }
+
+  .storage-pool-details-body {
+    padding: 12px;
+  }
+
+  .storage-pool-details-overview {
+    grid-template-columns: 108px minmax(0, 1fr);
+    gap: 11px;
+    padding: 10px;
+  }
+
+  .storage-pool-usage-chart {
+    width: 108px;
+    height: 108px;
+    flex-basis: 108px;
+  }
+
   .storage-pool-form {
     gap: 13px;
     padding: 13px;

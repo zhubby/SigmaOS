@@ -25,6 +25,11 @@ export interface StoragePoolProposalInput {
   filesystem?: string;
 }
 
+export interface StoragePoolDeleteProposalInput {
+  poolId?: string;
+  confirmation?: string;
+}
+
 export function buildStoragePoolProposal(
   input: StoragePoolProposalInput,
   summary: SystemStorageSummary,
@@ -82,6 +87,44 @@ export function buildStoragePoolProposal(
     mountpoint,
     risk: "high",
     summary: `Create RAID ${raidLevel} pool ${name} at ${mountpoint} using ${devices.join(", ")}. All selected disks will be erased and formatted as ${filesystem}.`
+  };
+}
+
+export function buildStoragePoolDeleteProposal(
+  input: StoragePoolDeleteProposalInput,
+  summary: SystemStorageSummary
+): StorageOperationProposal {
+  if (!summary.capabilities.canDeletePool) {
+    throw new Error("Storage pool deletion is not supported on this host");
+  }
+
+  const poolId = input.poolId?.trim() ?? "";
+  const pool = summary.pools.find((candidate) => candidate.id === poolId);
+  if (!pool) {
+    throw new Error("Storage pool is no longer available; refresh the inventory");
+  }
+  if (!pool.mountpoint || !/^\/srv\/nas\/[a-z][a-z0-9_-]{0,31}$/u.test(pool.mountpoint)) {
+    throw new Error("Storage pool mountpoint is invalid");
+  }
+  if (!/^\/dev\/md(?:\/[A-Za-z0-9._-]+|\d+)$/u.test(pool.raidPath)) {
+    throw new Error("Storage pool array path is invalid");
+  }
+  const name = path.posix.basename(pool.mountpoint);
+  if (input.confirmation?.trim() !== name) {
+    throw new Error(`Type ${name} to confirm storage pool deletion`);
+  }
+  if (!pool.memberDevices.length || pool.memberDevices.some((device) => !/^\/dev\/[A-Za-z0-9._-]+$/u.test(device))) {
+    throw new Error("Storage pool member devices are unavailable");
+  }
+
+  return {
+    action: "delete_pool",
+    name,
+    mdDevice: pool.raidPath,
+    devices: [...new Set(pool.memberDevices)],
+    mountpoint: pool.mountpoint,
+    risk: "high",
+    summary: `Delete storage pool ${name} at ${pool.mountpoint} and stop ${pool.raidPath}.`
   };
 }
 

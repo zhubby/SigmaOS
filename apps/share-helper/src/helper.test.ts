@@ -150,6 +150,22 @@ describe("share helper", () => {
     expect(() => validateStorageOperationRequest({ ...proposal, filesystem: "xfs" })).toThrow(
       "Invalid storage operation request"
     );
+    const deleteProposal = validateStorageOperationRequest({
+      action: "delete_pool",
+      name: "archive",
+      mdDevice: "/dev/md/archive",
+      devices: ["/dev/sda", "/dev/sdb"],
+      mountpoint: "/srv/nas/archive",
+      risk: "high",
+      summary: "Delete archive"
+    });
+    expect(deleteProposal).toMatchObject({ action: "delete_pool", mdDevice: "/dev/md/archive" });
+    expect(() => validateStorageOperationRequest({ ...deleteProposal, mdDevice: "/dev/sda/child" })).toThrow(
+      "Invalid storage operation request"
+    );
+    expect(() => validateStorageOperationRequest({ ...deleteProposal, mountpoint: "/srv/nas/other" })).toThrow(
+      "Invalid storage operation request"
+    );
   });
 
   it("stops only clear md devices without holders", async () => {
@@ -206,6 +222,60 @@ describe("share helper", () => {
     );
     await expect(readdir(path.dirname(fstabPath))).resolves.toEqual(["fstab"]);
     await expect(readdir(mdadmRuntimePath)).resolves.toEqual([]);
+  });
+
+  it("unmounts and stops a pool after removing its fstab entry", async () => {
+    const fstabPath = path.join(tempDir, "etc/fstab");
+    await mkdir(path.dirname(fstabPath), { recursive: true });
+    await writeFile(fstabPath, `# managed by test\nUUID=test /srv/nas/archive ext4 defaults 0 2\n`, "utf8");
+    const runner = new StorageCommandRunner();
+
+    const result = await applyStoragePoolOperation({
+      action: "delete_pool",
+      name: "archive",
+      mdDevice: "/dev/md/archive",
+      devices: ["/dev/sda", "/dev/sdb"],
+      mountpoint: "/srv/nas/archive",
+      risk: "high",
+      summary: "Delete archive"
+    }, runner, { fstabPath });
+
+    expect(result).toMatchObject({ action: "delete_pool", mdDevice: "/dev/md/archive" });
+    expect(runner.calls).toEqual([
+      "systemctl daemon-reload",
+      "umount /srv/nas/archive",
+      "mdadm --stop /dev/md/archive",
+      "udevadm settle",
+      "mdadm --zero-superblock --force /dev/sda /dev/sdb"
+    ]);
+    await expect(readFile(fstabPath, "utf8")).resolves.toBe("# managed by test\n");
+  });
+
+  it("restores fstab and remounts the pool when stopping its array fails", async () => {
+    const fstabPath = path.join(tempDir, "etc/fstab");
+    const originalFstab = "# managed by test\n  UUID=test  /srv/nas/archive  ext4  defaults  0  2\n";
+    await mkdir(path.dirname(fstabPath), { recursive: true });
+    await writeFile(fstabPath, originalFstab, "utf8");
+    const runner = new StorageCommandRunner("mdadm");
+
+    await expect(applyStoragePoolOperation({
+      action: "delete_pool",
+      name: "archive",
+      mdDevice: "/dev/md/archive",
+      devices: ["/dev/sda", "/dev/sdb"],
+      mountpoint: "/srv/nas/archive",
+      risk: "high",
+      summary: "Delete archive"
+    }, runner, { fstabPath })).rejects.toThrow("mdadm failed");
+
+    await expect(readFile(fstabPath, "utf8")).resolves.toBe(originalFstab);
+    expect(runner.calls).toEqual([
+      "systemctl daemon-reload",
+      "umount /srv/nas/archive",
+      "mdadm --stop /dev/md/archive",
+      "systemctl daemon-reload",
+      "mount /srv/nas/archive"
+    ]);
   });
 
   it("clears stale RAID metadata before recreating a selected pool", async () => {
@@ -287,6 +357,10 @@ describe("share helper", () => {
       }
     );
 
+    expect(result.action).toBe("create_pool");
+    if (result.action !== "create_pool") {
+      throw new Error("Expected a create pool result");
+    }
     expect(result.filesystem).toBe("btrfs");
     expect(runner.calls).toContain(`mkfs.btrfs -f -L archive ${path.join(mdDeviceRoot, "archive")}`);
     await expect(readFile(fstabPath, "utf8")).resolves.toContain(

@@ -542,6 +542,34 @@ export async function createStoragePool(input: {
   };
 }
 
+export async function deleteStoragePool(input: {
+  sessionId: string;
+  poolId: string;
+  confirmation: string;
+}): Promise<{
+  message: AgentMessage;
+  job: Job;
+  operation: StorageOperation;
+}> {
+  const response = await fetch("/api/storage/proposals", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      action: "delete_pool",
+      confirm: true,
+      ...input
+    })
+  });
+  await ensureOk(response);
+  return (await response.json()) as {
+    message: AgentMessage;
+    job: Job;
+    operation: StorageOperation;
+  };
+}
+
 export async function saveDockerSettings(input: Omit<DockerSettings, "updatedAt">): Promise<DockerSettings> {
   const response = await fetch("/api/settings/docker", {
     method: "PATCH",

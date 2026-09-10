@@ -215,7 +215,7 @@ export type DbShareOperationRow = {
 export type DbStorageOperationRow = {
   id: string;
   approval_id: string | null;
-  action: "create_pool";
+  action: "create_pool" | "delete_pool";
   target_id: string;
   status: StorageOperationStatus;
   metadata_json: string;
