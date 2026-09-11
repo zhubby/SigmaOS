@@ -214,7 +214,7 @@ export function App() {
         options.set(pool.id, {
           id: pool.id,
           rootId: root.id,
-          name: pool.name,
+          name: pool.mountpoint?.split("/").filter(Boolean).at(-1) ?? pool.name,
           path: poolPath,
           filesystem: pool.filesystem,
           status: pool.status

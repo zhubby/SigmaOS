@@ -388,12 +388,14 @@ export function WorkspaceManagementPanel({
     <section className="workspace-management" aria-label={t(config.titleKey)}>
       <header className="management-header">
         <div className="management-title-block">
-          <span className="eyebrow">{t(config.eyebrowKey)}</span>
-          <div className="management-title-line">
+          <span className="management-title-icon">
             <HeaderIcon aria-hidden="true" size={20} />
+          </span>
+          <div className="management-title-copy">
+            <span className="eyebrow">{t(config.eyebrowKey)}</span>
             <h2>{t(config.titleKey)}</h2>
+            <p>{t(config.descriptionKey)}</p>
           </div>
-          <p>{t(config.descriptionKey)}</p>
         </div>
         <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
           <span className="management-status-pill" data-state={config.statusState}>
@@ -600,12 +602,14 @@ function VirtualMachineManagementPanel({
     <section className="workspace-management" aria-label={t("workspace.management.virtualMachines.title")}>
       <header className="management-header">
         <div className="management-title-block">
-          <span className="eyebrow">{t("workspace.management.virtualMachines.eyebrow")}</span>
-          <div className="management-title-line">
+          <span className="management-title-icon">
             <MonitorCog aria-hidden="true" size={20} />
+          </span>
+          <div className="management-title-copy">
+            <span className="eyebrow">{t("workspace.management.virtualMachines.eyebrow")}</span>
             <h2>{t("workspace.management.virtualMachines.title")}</h2>
+            <p>{t("workspace.management.virtualMachines.description")}</p>
           </div>
-          <p>{t("workspace.management.virtualMachines.description")}</p>
         </div>
         <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
           {loading ? (
@@ -987,12 +991,14 @@ function DockerManagementPanel({
     <section className="workspace-management" aria-label={t("workspace.management.docker.title")}>
       <header className="management-header">
         <div className="management-title-block">
-          <span className="eyebrow">{t("workspace.management.docker.eyebrow")}</span>
-          <div className="management-title-line">
+          <span className="management-title-icon">
             <Container aria-hidden="true" size={20} />
+          </span>
+          <div className="management-title-copy">
+            <span className="eyebrow">{t("workspace.management.docker.eyebrow")}</span>
             <h2>{t("workspace.management.docker.title")}</h2>
+            <p>{t("workspace.management.docker.description")}</p>
           </div>
-          <p>{t("workspace.management.docker.description")}</p>
         </div>
         <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
           {loading ? (

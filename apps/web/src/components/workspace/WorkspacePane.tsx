@@ -754,12 +754,14 @@ export function WorkspacePane({
                 className={`management-header files-header${storagePools.length > 0 ? " has-storage-pool-switcher" : ""}`}
               >
                 <div className="management-title-block files-title-block">
-                  <span className="eyebrow">{t("workspace.filesEyebrow")}</span>
-                  <div className="management-title-line">
+                  <span className="management-title-icon">
                     <Files aria-hidden="true" size={20} />
+                  </span>
+                  <div className="management-title-copy">
+                    <span className="eyebrow">{t("workspace.filesEyebrow")}</span>
                     <h2>{fileListingLoading ? <SkeletonBlock width="42%" /> : displayTitle}</h2>
+                    <p>{fileListingLoading ? <SkeletonBlock width="68%" /> : t("workspace.filesManagementDescription")}</p>
                   </div>
-                  <p>{fileListingLoading ? <SkeletonBlock width="68%" /> : t("workspace.filesManagementDescription")}</p>
                 </div>
 
                 <div className="management-actions files-header-actions" aria-label={t("workspace.management.actions.label")}>
@@ -839,28 +841,6 @@ export function WorkspacePane({
                     )}
                   </div>
 
-                  {fileListingLoading ? (
-                    <div className="breadcrumbs files-skeleton-breadcrumbs" aria-hidden="true">
-                      <SkeletonBlock width="72%" />
-                    </div>
-                  ) : (
-                    <nav className="breadcrumbs" aria-label={t("workspace.breadcrumbs")}>
-                      <button type="button" onClick={onGoToStoragePool} disabled={!selectedStoragePool}>
-                        <HardDrive aria-hidden="true" size={14} />
-                        <span>{selectedStoragePool?.name ?? t("workspace.storagePoolPlaceholder")}</span>
-                      </button>
-                      {visibleBreadcrumbs.map((crumb, index) => (
-                        <button
-                          key={`${crumb}-${index}`}
-                          type="button"
-                          onClick={() => onGoToBreadcrumb(selectedStoragePool ? storagePoolPathDepth + index : index)}
-                        >
-                          <span>{crumb}</span>
-                        </button>
-                      ))}
-                    </nav>
-                  )}
-
                   <form className="search" onSubmit={onSubmitSearch}>
                     <Search aria-hidden="true" size={17} />
                     <input
@@ -893,7 +873,27 @@ export function WorkspacePane({
                 <section className="file-browser" aria-label={t("workspace.fileBrowser")}>
                   <header className="management-section-header files-list-header">
                     <div className="files-list-title-block">
-                      <h3>{t("workspace.filesListTitle")}</h3>
+                      {fileListingLoading ? (
+                        <div className="breadcrumbs files-skeleton-breadcrumbs" aria-hidden="true">
+                          <SkeletonBlock width="72%" />
+                        </div>
+                      ) : (
+                        <nav className="breadcrumbs files-content-breadcrumbs" aria-label={t("workspace.breadcrumbs")}>
+                          <button type="button" onClick={onGoToStoragePool} disabled={!selectedStoragePool}>
+                            <HardDrive aria-hidden="true" size={14} />
+                            <span>{selectedStoragePool?.name ?? t("workspace.storagePoolPlaceholder")}</span>
+                          </button>
+                          {visibleBreadcrumbs.map((crumb, index) => (
+                            <button
+                              key={`${crumb}-${index}`}
+                              type="button"
+                              onClick={() => onGoToBreadcrumb(selectedStoragePool ? storagePoolPathDepth + index : index)}
+                            >
+                              <span>{crumb}</span>
+                            </button>
+                          ))}
+                        </nav>
+                      )}
                       <p className="files-list-summary">
                         {fileListingLoading ? <SkeletonBlock width="58%" /> : t("workspace.filesListDescription", {
                           total: entryCount,

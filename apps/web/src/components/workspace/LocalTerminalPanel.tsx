@@ -174,13 +174,15 @@ export function LocalTerminalPanel({
   return (
     <section className="workspace-terminal-panel" hidden={!active} aria-hidden={!active} aria-label={t("workspace.terminal.title")}>
       <header className="workspace-terminal-header">
-        <div className="workspace-terminal-title">
-          <span className="eyebrow">{t("workspace.terminal.eyebrow")}</span>
-          <div className="management-title-line">
+        <div className="workspace-terminal-title management-title-block">
+          <span className="management-title-icon">
             <TerminalSquare aria-hidden="true" size={20} />
+          </span>
+          <div className="management-title-copy">
+            <span className="eyebrow">{t("workspace.terminal.eyebrow")}</span>
             <h2>{t("workspace.terminal.title")}</h2>
+            <p>{t("workspace.terminal.description")}</p>
           </div>
-          <p>{t("workspace.terminal.description")}</p>
         </div>
         <div className="workspace-terminal-actions">
           <span className="management-status-pill" data-state={terminalStatusTone(status)} aria-live="polite">
