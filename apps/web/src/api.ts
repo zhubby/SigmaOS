@@ -20,6 +20,7 @@ import type {
   StorageRaidLevel as SharedStorageRaidLevel,
   ShareSummary as PublicShareSummary,
   SystemNetworkSummary,
+  SystemNetworkTrafficSummary,
   SystemStorageSummary
   , BackupRunSummary,
   RootReadiness,
@@ -230,6 +231,7 @@ export interface PiToolPolicySettings {
 export type SystemInfo = PublicSystemInfo;
 export type SystemInfoStorageVolume = PublicSystemInfo["storage"]["volumes"][number];
 export type NetworkSummary = SystemNetworkSummary;
+export type NetworkTrafficSummary = SystemNetworkTrafficSummary;
 export type StorageSummary = SystemStorageSummary;
 export type DockerSummary = PublicDockerSummary;
 export type ShareSettings = PublicShareSettings;
@@ -343,6 +345,13 @@ export async function getSystemNetwork(): Promise<NetworkSummary> {
   await ensureOk(response);
   const body = (await response.json()) as { network: NetworkSummary };
   return body.network;
+}
+
+export async function getSystemNetworkTraffic(): Promise<NetworkTrafficSummary> {
+  const response = await fetch("/api/system/network/traffic");
+  await ensureOk(response);
+  const body = (await response.json()) as { traffic: NetworkTrafficSummary };
+  return body.traffic;
 }
 
 export async function getSystemStorage(): Promise<StorageSummary> {

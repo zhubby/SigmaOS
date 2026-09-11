@@ -943,6 +943,29 @@ describe("API server", () => {
     await server.close();
   });
 
+  it("returns lightweight per-interface network traffic counters", async () => {
+    const commandRunner = new FakeSystemCommandRunner({
+      "cat /proc/net/dev": [
+        "Inter-|   Receive                                                |  Transmit",
+        " face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed",
+        "    lo: 1000 10 0 0 0 0 0 0 2000 20 0 0 0 0 0 0",
+        " enp1s0: 987654 42 0 0 0 0 0 1 456789 31 0 0 0 0 0 0"
+      ].join("\n")
+    });
+    const server = await buildServer({ config: testConfig(tempDir), db, system: { commandRunner } });
+    const response = await server.inject({ method: "GET", url: "/api/system/network/traffic" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().traffic).toMatchObject({
+      interfaces: [
+        { id: "lo", name: "lo", rxBytes: 1000, txBytes: 2000 },
+        { id: "enp1s0", name: "enp1s0", rxBytes: 987654, txBytes: 456789 }
+      ]
+    });
+    expect(response.json().traffic.collectedAt).toEqual(expect.any(String));
+    await server.close();
+  });
+
   it("returns read-only storage management summary from block, RAID, mount, and SMART commands", async () => {
     const commandRunner = storageCommandRunner({
       smartSdb: JSON.stringify({

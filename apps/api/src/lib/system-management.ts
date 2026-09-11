@@ -12,6 +12,7 @@ import type {
   SystemNetworkInterfaceState,
   SystemNetworkRoute,
   SystemNetworkSummary,
+  SystemNetworkTrafficSummary,
   SystemRaidArray,
   SystemSmartAttribute,
   SystemSmartHealth,
@@ -208,6 +209,37 @@ export async function collectSystemNetwork(
     routes,
     issues
   };
+}
+
+export async function collectSystemNetworkTraffic(
+  dependencies: SystemManagementDependencies = {}
+): Promise<SystemNetworkTrafficSummary> {
+  const raw = await systemCommandRunner(dependencies).run("cat", ["/proc/net/dev"]);
+  return {
+    collectedAt: new Date().toISOString(),
+    interfaces: parseSystemNetworkTraffic(raw)
+  };
+}
+
+export function parseSystemNetworkTraffic(raw: string): SystemNetworkTrafficSummary["interfaces"] {
+  const interfaces: SystemNetworkTrafficSummary["interfaces"] = [];
+  for (const line of raw.split(/\r?\n/u)) {
+    const separator = line.indexOf(":");
+    if (separator < 0) {
+      continue;
+    }
+
+    const name = line.slice(0, separator).trim();
+    const fields = line.slice(separator + 1).trim().split(/\s+/u);
+    const rxBytes = Number(fields[0]);
+    const txBytes = Number(fields[8]);
+    if (!name || !Number.isFinite(rxBytes) || !Number.isFinite(txBytes) || rxBytes < 0 || txBytes < 0) {
+      continue;
+    }
+
+    interfaces.push({ id: name, name, rxBytes, txBytes });
+  }
+  return interfaces;
 }
 
 export async function collectSystemStorage(

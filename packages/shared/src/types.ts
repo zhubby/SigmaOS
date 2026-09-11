@@ -559,6 +559,18 @@ export interface SystemNetworkSummary {
   issues: SystemCollectionIssue[];
 }
 
+export interface SystemNetworkTrafficInterface {
+  id: string;
+  name: string;
+  rxBytes: number;
+  txBytes: number;
+}
+
+export interface SystemNetworkTrafficSummary {
+  collectedAt: string;
+  interfaces: SystemNetworkTrafficInterface[];
+}
+
 export type SystemSmartHealth = "passed" | "failed" | "unknown" | "error";
 
 export interface SystemSmartAttribute {

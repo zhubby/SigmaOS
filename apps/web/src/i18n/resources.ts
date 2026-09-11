@@ -585,6 +585,17 @@ export const en = {
         noRoutes: "No routes are visible.",
         interfacesTitle: "Interfaces",
         interfacesDescription: "Physical, virtual, bridge, bond, and VLAN devices reported by the host.",
+        openInterfaceDetails: "Open details for {{name}}",
+        detailsEyebrow: "Network interface",
+        detailsDescription: "{{kind}} interface with {{count}} assigned addresses.",
+        addressesTitle: "Assigned addresses",
+        interfaceRoutesTitle: "Interface routes",
+        routesEyebrow: "Routing",
+        linkEyebrow: "Link",
+        flagsTitle: "Interface flags",
+        noAddresses: "No addresses are assigned to this interface.",
+        noInterfaceRoutes: "No routes use this interface.",
+        noFlags: "No interface flags were reported.",
         routesTitle: "Routes",
         routesDescription: "Default and scoped routes reported by the kernel.",
         readinessTitle: "Configuration readiness",
@@ -613,6 +624,16 @@ export const en = {
           mtu: "MTU",
           defaultRoute: "Default route"
         },
+        detailFacts: {
+          kind: "Kind",
+          index: "Interface index",
+          operState: "Operational state",
+          defaultRoute: "Default route",
+          mac: "MAC address",
+          speed: "Link speed",
+          mtu: "MTU",
+          addresses: "Addresses"
+        },
         states: {
           connected: "Connected",
           up: "Up",
@@ -633,6 +654,19 @@ export const en = {
           connected: "Connected links",
           addressCoverage: "Address coverage",
           defaultRoute: "Default route"
+        },
+        traffic: {
+          title: "Live traffic",
+          description: "Real-time receive and transmit throughput over the last minute.",
+          interface: "Interface",
+          allInterfaces: "All interfaces",
+          received: "Received",
+          transmitted: "Transmitted",
+          chartLabel: "Live network receive and transmit traffic",
+          sampling: "Collecting the first traffic samples...",
+          ready: "Traffic monitoring is active.",
+          error: "Live traffic data is unavailable.",
+          window: "{{count}} samples · 2 second interval"
         }
       },
       storage: {
@@ -1880,6 +1914,17 @@ export const zhCN = {
         noRoutes: "当前没有可见路由。",
         interfacesTitle: "网络接口",
         interfacesDescription: "宿主报告的物理、虚拟、桥接、bond 和 VLAN 设备。",
+        openInterfaceDetails: "打开 {{name}} 的详情",
+        detailsEyebrow: "网络接口",
+        detailsDescription: "{{kind}}接口，已分配 {{count}} 个地址。",
+        addressesTitle: "已分配地址",
+        interfaceRoutesTitle: "接口路由",
+        routesEyebrow: "路由",
+        linkEyebrow: "链路",
+        flagsTitle: "接口标志",
+        noAddresses: "此接口尚未分配地址。",
+        noInterfaceRoutes: "当前没有使用此接口的路由。",
+        noFlags: "未报告接口标志。",
         routesTitle: "路由",
         routesDescription: "内核报告的默认路由和作用域路由。",
         readinessTitle: "配置就绪度",
@@ -1908,6 +1953,16 @@ export const zhCN = {
           mtu: "MTU",
           defaultRoute: "默认路由"
         },
+        detailFacts: {
+          kind: "类型",
+          index: "接口索引",
+          operState: "运行状态",
+          defaultRoute: "默认路由",
+          mac: "MAC 地址",
+          speed: "链路速率",
+          mtu: "MTU",
+          addresses: "地址数"
+        },
         states: {
           connected: "已连接",
           up: "已启用",
@@ -1928,6 +1983,19 @@ export const zhCN = {
           connected: "已连接链路",
           addressCoverage: "地址覆盖",
           defaultRoute: "默认路由"
+        },
+        traffic: {
+          title: "实时流量",
+          description: "展示最近一分钟的实时接收与发送速率。",
+          interface: "网口",
+          allInterfaces: "全部网口",
+          received: "接收",
+          transmitted: "发送",
+          chartLabel: "实时网络接收与发送流量",
+          sampling: "正在采集首批流量数据...",
+          ready: "流量监控运行中。",
+          error: "暂时无法读取实时流量数据。",
+          window: "{{count}} 个采样点 · 2 秒间隔"
         }
       },
       storage: {

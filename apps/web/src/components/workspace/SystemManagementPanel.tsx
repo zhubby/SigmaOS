@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Activity,
@@ -7,6 +7,7 @@ import {
   CircleHelp,
   CircleX,
   Database,
+  Download,
   HardDrive,
   LoaderCircle,
   Network,
@@ -15,12 +16,15 @@ import {
   Route,
   Settings,
   Trash2,
+  Upload,
   X,
   type LucideIcon
 } from "lucide-react";
 import {
   Bar,
   BarChart,
+  Area,
+  AreaChart,
   CartesianGrid,
   Cell,
   LabelList,
@@ -34,10 +38,12 @@ import {
 } from "recharts";
 import {
   getSystemNetwork,
+  getSystemNetworkTraffic,
   getSystemStorage,
   deleteStoragePool,
   createStoragePool,
   type NetworkSummary,
+  type NetworkTrafficSummary,
   type StorageFilesystem,
   type StorageSummary,
   type StorageRaidLevel
@@ -54,6 +60,7 @@ import {
 } from "../../config/storage-pool.js";
 import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
+import { calculateNetworkTrafficRate } from "../../lib/network-traffic.js";
 import { ManagementSkeletonBody, SkeletonBlock } from "./ManagementSkeleton.js";
 
 type StatusTone = "ready" | "warning" | "offline" | "neutral";
@@ -80,6 +87,15 @@ interface Gauge {
   display: string;
   tone: GaugeTone;
 }
+
+interface NetworkTrafficPoint {
+  timestamp: number;
+  rxBytesPerSecond: number;
+  txBytesPerSecond: number;
+}
+
+const NETWORK_TRAFFIC_INTERVAL_MS = 2_000;
+const NETWORK_TRAFFIC_HISTORY_LIMIT = 31;
 
 interface StorageHealthSignal {
   id: "capacity" | "smart" | "pools";
@@ -127,6 +143,7 @@ export function SystemNetworkManagementPanel({
   const [summary, setSummary] = useState<NetworkSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedInterfaceId, setSelectedInterfaceId] = useState<string | null>(null);
   const reportedIssueSignature = useRef<string | null>(null);
 
   useEffect(() => {
@@ -178,17 +195,20 @@ export function SystemNetworkManagementPanel({
   const status = summary?.status ?? "unavailable";
   const interfaces = summary?.interfaces ?? [];
   const routes = summary?.routes ?? [];
+  const selectedInterface = interfaces.find((networkInterface) => networkInterface.id === selectedInterfaceId) ?? null;
 
   return (
     <section className="workspace-management" aria-label={t("workspace.management.network.title")}>
       <header className="management-header">
         <div className="management-title-block">
-          <span className="eyebrow">{t("workspace.management.network.eyebrow")}</span>
-          <div className="management-title-line">
+          <span className="management-title-icon">
             <Network aria-hidden="true" size={20} />
+          </span>
+          <div className="management-title-copy">
+            <span className="eyebrow">{t("workspace.management.network.eyebrow")}</span>
             <h2>{t("workspace.management.network.title")}</h2>
+            <p>{t("workspace.management.network.description")}</p>
           </div>
-          <p>{t("workspace.management.network.description")}</p>
         </div>
         <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
           {loading ? (
@@ -244,6 +264,8 @@ export function SystemNetworkManagementPanel({
           ))}
         </div>
 
+        <NetworkTrafficMonitor interfaces={interfaces} locale={locale} t={translate} />
+
         <section className="management-section management-table-section">
           <SectionHeader
             title={t("workspace.management.network.interfacesTitle")}
@@ -267,7 +289,16 @@ export function SystemNetworkManagementPanel({
                 <tbody>
                   {interfaces.map((networkInterface) => (
                     <tr key={networkInterface.id}>
-                      <td title={networkInterface.name}>{networkInterface.name}</td>
+                      <td title={networkInterface.name}>
+                        <button
+                          type="button"
+                          className="network-interface-name-button"
+                          onClick={() => setSelectedInterfaceId(networkInterface.id)}
+                          aria-label={t("workspace.management.network.openInterfaceDetails", { name: networkInterface.name })}
+                        >
+                          {networkInterface.name}
+                        </button>
+                      </td>
                       <td>
                         <StatusIcon
                           tone={networkInterfaceTone(networkInterface)}
@@ -319,6 +350,16 @@ export function SystemNetworkManagementPanel({
         </div>
         </>}
       </div>
+
+      {selectedInterface ? (
+        <NetworkInterfaceDetailsModal
+          networkInterface={selectedInterface}
+          routes={routes.filter((route) => route.device === selectedInterface.name)}
+          locale={locale}
+          t={translate}
+          onClose={() => setSelectedInterfaceId(null)}
+        />
+      ) : null}
     </section>
   );
 }
@@ -545,12 +586,14 @@ export function SystemStorageManagementPanel({
     <section className="workspace-management" aria-label={t("workspace.management.storage.title")}>
       <header className="management-header">
         <div className="management-title-block">
-          <span className="eyebrow">{t("workspace.management.storage.eyebrow")}</span>
-          <div className="management-title-line">
+          <span className="management-title-icon">
             <Database aria-hidden="true" size={20} />
+          </span>
+          <div className="management-title-copy">
+            <span className="eyebrow">{t("workspace.management.storage.eyebrow")}</span>
             <h2>{t("workspace.management.storage.title")}</h2>
+            <p>{t("workspace.management.storage.description")}</p>
           </div>
-          <p>{t("workspace.management.storage.description")}</p>
         </div>
         <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
           {loading ? (
@@ -1527,6 +1570,168 @@ function NetworkReadinessChart({ gauges, t }: { gauges: Gauge[]; t: Translate })
   );
 }
 
+function NetworkTrafficMonitor({
+  interfaces,
+  locale,
+  t
+}: {
+  interfaces: NetworkInterface[];
+  locale: SupportedLocale;
+  t: Translate;
+}) {
+  const [selectedInterfaceId, setSelectedInterfaceId] = useState("all");
+  const [history, setHistory] = useState<NetworkTrafficPoint[]>([]);
+  const [trafficState, setTrafficState] = useState<"sampling" | "ready" | "error">("sampling");
+  const selectableInterfaces = useMemo(
+    () => interfaces.filter((networkInterface) => networkInterface.kind !== "loopback"),
+    [interfaces]
+  );
+  const interfaceKey = selectableInterfaces.map((networkInterface) => networkInterface.id).join("\u0000");
+
+  useEffect(() => {
+    if (selectedInterfaceId !== "all" && !selectableInterfaces.some((networkInterface) => networkInterface.id === selectedInterfaceId)) {
+      setSelectedInterfaceId("all");
+    }
+  }, [interfaceKey, selectableInterfaces, selectedInterfaceId]);
+
+  useEffect(() => {
+    let active = true;
+    let requestActive = false;
+    let previous: NetworkTrafficSummary | null = null;
+    const monitoredIds = new Set(
+      selectedInterfaceId === "all"
+        ? selectableInterfaces.map((networkInterface) => networkInterface.id)
+        : [selectedInterfaceId]
+    );
+
+    setHistory([]);
+    setTrafficState("sampling");
+
+    async function sample() {
+      if (requestActive) {
+        return;
+      }
+      requestActive = true;
+      try {
+        const current = await getSystemNetworkTraffic();
+        if (!active) {
+          return;
+        }
+        if (previous) {
+          const rate = calculateNetworkTrafficRate(previous, current, monitoredIds);
+          if (rate) {
+            setHistory((points) => [
+              ...points,
+              { timestamp: Date.parse(current.collectedAt), ...rate }
+            ].slice(-NETWORK_TRAFFIC_HISTORY_LIMIT));
+            setTrafficState("ready");
+          }
+        }
+        previous = current;
+      } catch {
+        if (active) {
+          setTrafficState("error");
+        }
+      } finally {
+        requestActive = false;
+      }
+    }
+
+    void sample();
+    const interval = window.setInterval(() => void sample(), NETWORK_TRAFFIC_INTERVAL_MS);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [interfaceKey, selectableInterfaces, selectedInterfaceId]);
+
+  const current = history.at(-1) ?? null;
+  const chartData = history.map((point) => ({
+    ...point,
+    label: new Intl.DateTimeFormat(locale, { minute: "2-digit", second: "2-digit" }).format(point.timestamp)
+  }));
+
+  return (
+    <section className="management-section network-traffic-section">
+      <header className="management-section-header network-traffic-header">
+        <div>
+          <h3>{t("workspace.management.network.traffic.title")}</h3>
+          <p>{t("workspace.management.network.traffic.description")}</p>
+        </div>
+        <label className="network-traffic-interface-select">
+          <span>{t("workspace.management.network.traffic.interface")}</span>
+          <select value={selectedInterfaceId} onChange={(event) => setSelectedInterfaceId(event.target.value)}>
+            <option value="all">{t("workspace.management.network.traffic.allInterfaces")}</option>
+            {selectableInterfaces.map((networkInterface) => (
+              <option key={networkInterface.id} value={networkInterface.id}>{networkInterface.name}</option>
+            ))}
+          </select>
+        </label>
+      </header>
+
+      <div className="network-traffic-body">
+        <div className="network-traffic-stats">
+          <div data-tone="rx">
+            <Download aria-hidden="true" size={16} />
+            <span>{t("workspace.management.network.traffic.received")}</span>
+            <strong>{formatNetworkTrafficRate(current?.rxBytesPerSecond ?? null, locale, t)}</strong>
+          </div>
+          <div data-tone="tx">
+            <Upload aria-hidden="true" size={16} />
+            <span>{t("workspace.management.network.traffic.transmitted")}</span>
+            <strong>{formatNetworkTrafficRate(current?.txBytesPerSecond ?? null, locale, t)}</strong>
+          </div>
+        </div>
+
+        <div className="network-traffic-chart" aria-label={t("workspace.management.network.traffic.chartLabel")}>
+          {chartData.length ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartData} margin={{ top: 10, right: 12, left: 2, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="networkTrafficRx" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="var(--accent-soft-text)" stopOpacity={0.38} />
+                    <stop offset="100%" stopColor="var(--accent-soft-text)" stopOpacity={0.02} />
+                  </linearGradient>
+                  <linearGradient id="networkTrafficTx" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="var(--success-text)" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="var(--success-text)" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="var(--line-soft)" strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="label" tick={{ fill: "var(--muted-2)", fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={28} />
+                <YAxis tickFormatter={(value) => formatNetworkTrafficRate(Number(value), locale, t)} tick={{ fill: "var(--muted-2)", fontSize: 10 }} tickLine={false} axisLine={false} width={72} />
+                <Tooltip
+                  contentStyle={{ background: "var(--modal-bg)", border: "1px solid var(--line)", borderRadius: 5, color: "var(--text)", fontSize: 11 }}
+                  labelStyle={{ color: "var(--muted)", marginBottom: 4 }}
+                  formatter={(value, name) => [
+                    formatNetworkTrafficRate(Number(value), locale, t),
+                    name === "rxBytesPerSecond"
+                      ? t("workspace.management.network.traffic.received")
+                      : t("workspace.management.network.traffic.transmitted")
+                  ]}
+                />
+                <Area type="monotone" dataKey="rxBytesPerSecond" stroke="var(--accent-soft-text)" strokeWidth={2} fill="url(#networkTrafficRx)" isAnimationActive={false} />
+                <Area type="monotone" dataKey="txBytesPerSecond" stroke="var(--success-text)" strokeWidth={2} fill="url(#networkTrafficTx)" isAnimationActive={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="network-traffic-empty" data-state={trafficState}>
+              {trafficState === "error" ? <CircleAlert aria-hidden="true" size={18} /> : <Activity aria-hidden="true" size={18} />}
+              <span>{t(`workspace.management.network.traffic.${trafficState}`)}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="network-traffic-legend" aria-live="polite">
+          <span><i data-tone="rx" />{t("workspace.management.network.traffic.received")}</span>
+          <span><i data-tone="tx" />{t("workspace.management.network.traffic.transmitted")}</span>
+          <small>{t("workspace.management.network.traffic.window", { count: history.length })}</small>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function NetworkReadinessValueLabel({
   x = 0,
   y = 0,
@@ -1576,6 +1781,174 @@ function NetworkRouteRow({ route }: { route: NetworkRoute }) {
       <em data-state={tone}>{isDefault ? t("workspace.management.network.defaultRoute") : route.family}</em>
       <small>{route.device ?? t("common.dash")}</small>
     </article>
+  );
+}
+
+function NetworkInterfaceDetailsModal({
+  networkInterface,
+  routes,
+  locale,
+  t,
+  onClose
+}: {
+  networkInterface: NetworkInterface;
+  routes: NetworkRoute[];
+  locale: SupportedLocale;
+  t: Translate;
+  onClose: () => void;
+}) {
+  const stateLabel = networkInterfaceStateLabel(networkInterface, t);
+  const kindLabel = t(`workspace.management.network.kinds.${networkInterface.kind}`);
+  const facts = [
+    { id: "kind", label: t("workspace.management.network.detailFacts.kind"), value: kindLabel },
+    { id: "index", label: t("workspace.management.network.detailFacts.index"), value: formatNullableNumber(networkInterface.index, locale, t) },
+    { id: "operState", label: t("workspace.management.network.detailFacts.operState"), value: networkInterface.operState ?? t("common.dash") },
+    { id: "defaultRoute", label: t("workspace.management.network.detailFacts.defaultRoute"), value: networkInterface.hasDefaultRoute ? t("common.yes") : t("common.no") },
+    { id: "mac", label: t("workspace.management.network.detailFacts.mac"), value: networkInterface.mac ?? t("common.dash") },
+    { id: "speed", label: t("workspace.management.network.detailFacts.speed"), value: formatSpeed(networkInterface.speedMbps, locale, t) },
+    { id: "mtu", label: t("workspace.management.network.detailFacts.mtu"), value: formatNullableNumber(networkInterface.mtu, locale, t) },
+    { id: "addresses", label: t("workspace.management.network.detailFacts.addresses"), value: formatLocaleNumber(networkInterface.addresses.length, locale) }
+  ];
+
+  useEffect(() => {
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  return (
+    <div
+      className="management-modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => event.currentTarget === event.target && onClose()}
+    >
+      <section
+        className="management-modal network-interface-details-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="network-interface-details-title"
+      >
+        <header className="network-interface-details-header">
+          <div className="network-interface-details-heading">
+            <span className="network-interface-details-icon" aria-hidden="true">
+              <Network size={20} />
+            </span>
+            <div>
+              <span className="eyebrow">{t("workspace.management.network.detailsEyebrow")}</span>
+              <h2 id="network-interface-details-title">{networkInterface.name}</h2>
+            </div>
+            <span className="management-row-status" data-state={networkInterfaceTone(networkInterface)}>
+              {stateLabel}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="management-icon-action"
+            onClick={onClose}
+            autoFocus
+            title={t("common.actions.cancel")}
+            aria-label={t("common.actions.cancel")}
+          >
+            <X aria-hidden="true" size={15} />
+          </button>
+        </header>
+
+        <div className="network-interface-details-body">
+          <section className="network-interface-overview">
+            <div className="network-interface-overview-status">
+              <StatusIcon tone={networkInterfaceTone(networkInterface)} label={stateLabel} />
+            </div>
+            <div className="network-interface-overview-copy">
+              <span className="eyebrow">{kindLabel}</span>
+              <strong>{stateLabel}</strong>
+              <p>{t("workspace.management.network.detailsDescription", {
+                kind: kindLabel,
+                count: formatLocaleNumber(networkInterface.addresses.length, locale)
+              })}</p>
+            </div>
+          </section>
+
+          <div className="network-interface-detail-facts">
+            {facts.map((fact) => <StoragePoolDetailFact key={fact.id} label={fact.label} value={fact.value} />)}
+          </div>
+
+          <div className="network-interface-detail-columns">
+            <section className="network-interface-detail-section" aria-labelledby="network-interface-addresses-title">
+              <header>
+                <div>
+                  <span className="eyebrow">IP</span>
+                  <h3 id="network-interface-addresses-title">{t("workspace.management.network.addressesTitle")}</h3>
+                </div>
+                <strong>{formatLocaleNumber(networkInterface.addresses.length, locale)}</strong>
+              </header>
+              {networkInterface.addresses.length ? (
+                <div className="network-interface-address-list">
+                  {networkInterface.addresses.map((address, index) => (
+                    <article key={`${address.family}-${address.address}-${index}`}>
+                      <span className="network-interface-family">{address.family}</span>
+                      <div>
+                        <strong title={address.cidr ?? address.address}>{address.cidr ?? address.address}</strong>
+                        <span>{[address.scope, address.label].filter(Boolean).join(" · ") || t("common.dash")}</span>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="network-interface-detail-empty">{t("workspace.management.network.noAddresses")}</p>
+              )}
+            </section>
+
+            <section className="network-interface-detail-section" aria-labelledby="network-interface-routes-title">
+              <header>
+                <div>
+                  <span className="eyebrow">{t("workspace.management.network.routesEyebrow")}</span>
+                  <h3 id="network-interface-routes-title">{t("workspace.management.network.interfaceRoutesTitle")}</h3>
+                </div>
+                <strong>{formatLocaleNumber(routes.length, locale)}</strong>
+              </header>
+              {routes.length ? (
+                <div className="network-interface-route-list">
+                  {routes.map((route, index) => (
+                    <article key={`${route.destination}-${route.gateway}-${index}`}>
+                      <Route aria-hidden="true" size={15} />
+                      <div>
+                        <strong title={route.destination}>{route.destination}</strong>
+                        <span title={route.gateway ?? route.preferredSource ?? t("common.dash")}>
+                          {route.gateway ?? route.preferredSource ?? t("common.dash")}
+                        </span>
+                      </div>
+                      <small>{[route.family, route.protocol, route.scope].filter(Boolean).join(" · ")}</small>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="network-interface-detail-empty">{t("workspace.management.network.noInterfaceRoutes")}</p>
+              )}
+            </section>
+          </div>
+
+          <section className="network-interface-flags" aria-labelledby="network-interface-flags-title">
+            <header>
+              <div>
+                <span className="eyebrow">{t("workspace.management.network.linkEyebrow")}</span>
+                <h3 id="network-interface-flags-title">{t("workspace.management.network.flagsTitle")}</h3>
+              </div>
+              <strong>{formatLocaleNumber(networkInterface.flags.length, locale)}</strong>
+            </header>
+            {networkInterface.flags.length ? (
+              <div>{networkInterface.flags.map((flag) => <span key={flag}>{flag}</span>)}</div>
+            ) : (
+              <p className="network-interface-detail-empty">{t("workspace.management.network.noFlags")}</p>
+            )}
+          </section>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -2011,6 +2384,10 @@ function formatSpeed(speedMbps: number | null, locale: SupportedLocale, t: Trans
     return `${formatLocaleNumber(speedMbps / 1000, locale, { maximumFractionDigits: 1 })} Gbps`;
   }
   return `${formatLocaleNumber(speedMbps, locale)} Mbps`;
+}
+
+function formatNetworkTrafficRate(value: number | null, locale: SupportedLocale, t: Translate): string {
+  return value === null ? t("common.dash") : `${formatBytes(Math.max(0, value), locale)}/s`;
 }
 
 function formatNullableNumber(value: number | null | undefined, locale: SupportedLocale, t: Translate): string {
