@@ -111,6 +111,7 @@ import {
   type ThemePreference
 } from "./lib/theme-settings.js";
 import { loadFileListingForView, syncSessionPath } from "./lib/session.js";
+import { readStoredStoragePoolId, writeStoredStoragePoolId } from "./lib/storage-pool-settings.js";
 
 type MobileView = "chat" | "workspace";
 const MAX_UPLOAD_BATCHES = 8;
@@ -189,6 +190,7 @@ export function App() {
   const uploadBatchSequenceRef = useRef(0);
   const uploadAbortControllersRef = useRef(new Map<string, Set<AbortController>>());
   const cancelledUploadBatchesRef = useRef(new Set<string>());
+  const preferredStoragePoolIdRef = useRef(readStoredStoragePoolId());
 
   const selectedRoot = roots.find((root) => root.id === selectedRootId);
   const storagePoolOptions = useMemo(() => {
@@ -352,6 +354,15 @@ export function App() {
       active = false;
     };
   }, [selectedRootId]);
+
+  useEffect(() => {
+    if (storageSummaryLoading || selectedStoragePoolId || storagePoolOptions.length === 0) {
+      return;
+    }
+
+    const preferredPool = storagePoolOptions.find((pool) => pool.id === preferredStoragePoolIdRef.current);
+    selectStoragePool(preferredPool?.id ?? storagePoolOptions[0]!.id);
+  }, [selectedStoragePoolId, storagePoolOptions, storageSummaryLoading]);
 
   useEffect(() => {
     if (!selectedStoragePoolId || selectedStoragePool) {
@@ -1480,6 +1491,9 @@ export function App() {
     if (!pool) {
       return;
     }
+
+    preferredStoragePoolIdRef.current = pool.id;
+    writeStoredStoragePoolId(pool.id);
 
     beginFileListingRequest();
     selectedRootIdRef.current = pool.rootId;

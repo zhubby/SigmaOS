@@ -4,6 +4,8 @@ import {
   ArrowDown,
   ArrowUp,
   ArchiveRestore,
+  Check,
+  ChevronDown,
   ChevronLeft,
   Container,
   Copy,
@@ -34,7 +36,6 @@ import type { SupportedLocale } from "../../i18n/locale.js";
 import { sortEntries, type FileSortDirection, type FileSortKey, type FileSortState } from "../../lib/file-listing-sort.js";
 import { formatFileModifiedAt } from "../../lib/format.js";
 import { ActivityMenu } from "../activity/ActivityMenu.js";
-import { CustomSelect } from "../common/CustomSelect.js";
 import { FileTypeIcon } from "../file/FileTypeIcon.js";
 import { PreviewContent, previewIcon } from "../preview/PreviewContent.js";
 import {
@@ -132,6 +133,99 @@ function SortDirectionIcon({ direction }: { direction: FileSortDirection }) {
   const Icon = direction === "desc" ? ArrowDown : ArrowUp;
 
   return <Icon aria-hidden="true" size={12} />;
+}
+
+function StoragePoolSwitcher({
+  pools,
+  selectedPoolId,
+  onSelect
+}: {
+  pools: FileStoragePoolOption[];
+  selectedPoolId: string;
+  onSelect: (poolId: string) => void;
+}) {
+  const { t } = useTranslation();
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const selectedPool = pools.find((pool) => pool.id === selectedPoolId);
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+
+    function closeOnPointerDown(event: PointerEvent) {
+      if (event.target instanceof Node && !containerRef.current?.contains(event.target)) {
+        setOpen(false);
+      }
+    }
+
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", closeOnPointerDown);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointerDown);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <div ref={containerRef} className={`storage-pool-switcher${open ? " is-open" : ""}`}>
+      <button
+        id="storage-pool-switcher"
+        className="storage-pool-switcher-trigger"
+        type="button"
+        aria-label={`${t("workspace.storagePoolLabel")}: ${selectedPool?.name ?? t("workspace.storagePoolPlaceholder")}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? "storage-pool-menu" : undefined}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span className="storage-pool-switcher-icon" data-state={selectedPool?.status ?? "unknown"}>
+          <HardDrive aria-hidden="true" size={16} />
+        </span>
+        <span className="storage-pool-switcher-copy">
+          <strong>{selectedPool?.name ?? t("workspace.storagePoolPlaceholder")}</strong>
+          <small>{selectedPool?.filesystem ?? t("common.states.unknown")}</small>
+        </span>
+        <ChevronDown aria-hidden="true" size={15} />
+      </button>
+
+      {open ? (
+        <div id="storage-pool-menu" className="storage-pool-menu" role="menu" aria-labelledby="storage-pool-switcher">
+          <div className="storage-pool-menu-heading">{t("workspace.storagePoolLabel")}</div>
+          {pools.map((pool) => {
+            const selected = pool.id === selectedPoolId;
+            return (
+              <button
+                key={pool.id}
+                className={`storage-pool-menu-option${selected ? " is-selected" : ""}`}
+                type="button"
+                role="menuitemradio"
+                aria-checked={selected}
+                onClick={() => {
+                  onSelect(pool.id);
+                  setOpen(false);
+                }}
+              >
+                <span className="storage-pool-status" data-state={pool.status} aria-hidden="true" />
+                <span className="storage-pool-menu-copy">
+                  <strong>{pool.name}</strong>
+                  <small>{[pool.filesystem, pool.path].filter(Boolean).join(" · ")}</small>
+                </span>
+                {selected ? <Check aria-hidden="true" size={15} /> : null}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function WorkspacePane({
@@ -305,12 +399,6 @@ export function WorkspacePane({
         .join("\n")
     : "";
   const gitStatusState = gitStatus && (gitStatus.dirty || gitStatus.ahead > 0 || gitStatus.behind > 0) ? "warning" : "ready";
-  const storagePoolOptions = storagePools.map((pool) => ({
-    value: pool.id,
-    label: pool.filesystem ? `${pool.name} · ${pool.filesystem}` : pool.name
-  }));
-  const selectedStoragePoolLabel =
-    storagePoolOptions.find((pool) => pool.value === selectedStoragePoolId)?.label ?? selectedStoragePoolId;
   const entryCount = formatLocaleNumber(sortedEntries.length, locale);
   const hasPreview = Boolean(selectedFilePath);
   const selectedFileName = selectedFilePath?.split("/").pop() ?? "";
@@ -736,17 +824,14 @@ export function WorkspacePane({
                   className={`files-navigation-bar${storagePools.length > 0 ? " has-storage-pool-switcher" : ""}`}
                 >
                   <div className="root-control storage-pool-control">
-                    <label htmlFor="storage-pool-select">{t("workspace.storagePoolLabel")}</label>
+                    <label htmlFor="storage-pool-switcher">{t("workspace.storagePoolLabel")}</label>
                     {fileListingLoading ? (
                       <SkeletonBlock className="files-skeleton-select" />
                     ) : (
-                      <CustomSelect
-                        id="storage-pool-select"
-                        value={selectedStoragePoolId}
-                        options={storagePoolOptions}
-                        ariaLabel={`${t("workspace.storagePoolLabel")}: ${selectedStoragePoolLabel}`}
-                        onChange={onSelectStoragePool}
-                        placeholder={t("workspace.storagePoolPlaceholder")}
+                      <StoragePoolSwitcher
+                        pools={storagePools}
+                        selectedPoolId={selectedStoragePoolId}
+                        onSelect={onSelectStoragePool}
                       />
                     )}
                   </div>
