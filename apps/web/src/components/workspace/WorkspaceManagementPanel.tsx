@@ -389,7 +389,10 @@ export function WorkspaceManagementPanel({
       <header className="management-header">
         <div className="management-title-block">
           <span className="eyebrow">{t(config.eyebrowKey)}</span>
-          <h2>{t(config.titleKey)}</h2>
+          <div className="management-title-line">
+            <HeaderIcon aria-hidden="true" size={20} />
+            <h2>{t(config.titleKey)}</h2>
+          </div>
           <p>{t(config.descriptionKey)}</p>
         </div>
         <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
@@ -598,7 +601,10 @@ function VirtualMachineManagementPanel({
       <header className="management-header">
         <div className="management-title-block">
           <span className="eyebrow">{t("workspace.management.virtualMachines.eyebrow")}</span>
-          <h2>{t("workspace.management.virtualMachines.title")}</h2>
+          <div className="management-title-line">
+            <MonitorCog aria-hidden="true" size={20} />
+            <h2>{t("workspace.management.virtualMachines.title")}</h2>
+          </div>
           <p>{t("workspace.management.virtualMachines.description")}</p>
         </div>
         <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
@@ -982,7 +988,10 @@ function DockerManagementPanel({
       <header className="management-header">
         <div className="management-title-block">
           <span className="eyebrow">{t("workspace.management.docker.eyebrow")}</span>
-          <h2>{t("workspace.management.docker.title")}</h2>
+          <div className="management-title-line">
+            <Container aria-hidden="true" size={20} />
+            <h2>{t("workspace.management.docker.title")}</h2>
+          </div>
           <p>{t("workspace.management.docker.description")}</p>
         </div>
         <div className="management-actions" aria-label={t("workspace.management.actions.label")}>

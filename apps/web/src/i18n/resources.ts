@@ -290,6 +290,7 @@ export const en = {
     terminal: {
       eyebrow: "Local shell",
       title: "Terminal",
+      description: "Direct shell access to the selected NAS root.",
       connectionError: "Unable to connect to the local terminal.",
       disconnectedError: "The local terminal connection was closed.",
       noRoot: "No NAS root selected",
@@ -1584,6 +1585,7 @@ export const zhCN = {
     terminal: {
       eyebrow: "本机 Shell",
       title: "终端",
+      description: "直接访问当前 NAS 根目录的本机 Shell。",
       connectionError: "无法连接到本机终端。",
       disconnectedError: "本机终端连接已关闭。",
       noRoot: "未选择 NAS 根目录",

@@ -343,7 +343,10 @@ export function ShareManagementPanel({
       <header className="management-header">
         <div className="management-title-block">
           <span className="eyebrow">{t("workspace.management.shares.eyebrow")}</span>
-          <h2>{t("workspace.management.shares.title")}</h2>
+          <div className="management-title-line">
+            <Share2 aria-hidden="true" size={20} />
+            <h2>{t("workspace.management.shares.title")}</h2>
+          </div>
           <p>{t("workspace.management.shares.description")}</p>
         </div>
         <div className="management-actions" aria-label={t("workspace.management.actions.label")}>

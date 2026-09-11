@@ -755,7 +755,10 @@ export function WorkspacePane({
               >
                 <div className="management-title-block files-title-block">
                   <span className="eyebrow">{t("workspace.filesEyebrow")}</span>
-                  <h2>{fileListingLoading ? <SkeletonBlock width="42%" /> : displayTitle}</h2>
+                  <div className="management-title-line">
+                    <Files aria-hidden="true" size={20} />
+                    <h2>{fileListingLoading ? <SkeletonBlock width="42%" /> : displayTitle}</h2>
+                  </div>
                   <p>{fileListingLoading ? <SkeletonBlock width="68%" /> : t("workspace.filesManagementDescription")}</p>
                 </div>
 

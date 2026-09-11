@@ -4,6 +4,8 @@ import {
   Activity,
   CircleAlert,
   CircleCheck,
+  CircleHelp,
+  CircleX,
   Database,
   HardDrive,
   LoaderCircle,
@@ -88,6 +90,22 @@ interface StorageHealthSignal {
   color: string;
 }
 
+function StatusIcon({ tone, label }: { tone: StatusTone; label: string }) {
+  const Icon = tone === "ready"
+    ? CircleCheck
+    : tone === "warning"
+      ? CircleAlert
+      : tone === "offline"
+        ? CircleX
+        : CircleHelp;
+
+  return (
+    <span className="management-row-status-icon" data-state={tone} title={label} aria-label={label}>
+      <Icon aria-hidden="true" size={17} strokeWidth={2.2} />
+    </span>
+  );
+}
+
 interface DiskCapacityUsage {
   totalBytes: number | null;
   usedBytes: number | null;
@@ -166,7 +184,10 @@ export function SystemNetworkManagementPanel({
       <header className="management-header">
         <div className="management-title-block">
           <span className="eyebrow">{t("workspace.management.network.eyebrow")}</span>
-          <h2>{t("workspace.management.network.title")}</h2>
+          <div className="management-title-line">
+            <Network aria-hidden="true" size={20} />
+            <h2>{t("workspace.management.network.title")}</h2>
+          </div>
           <p>{t("workspace.management.network.description")}</p>
         </div>
         <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
@@ -248,9 +269,10 @@ export function SystemNetworkManagementPanel({
                     <tr key={networkInterface.id}>
                       <td title={networkInterface.name}>{networkInterface.name}</td>
                       <td>
-                        <span className="management-row-status" data-state={networkInterfaceTone(networkInterface)}>
-                          {networkInterfaceStateLabel(networkInterface, translate)}
-                        </span>
+                        <StatusIcon
+                          tone={networkInterfaceTone(networkInterface)}
+                          label={networkInterfaceStateLabel(networkInterface, translate)}
+                        />
                       </td>
                       <td>{translate(`workspace.management.network.kinds.${networkInterface.kind}`)}</td>
                       <td title={formatAddresses(networkInterface)}>{formatAddresses(networkInterface)}</td>
@@ -524,7 +546,10 @@ export function SystemStorageManagementPanel({
       <header className="management-header">
         <div className="management-title-block">
           <span className="eyebrow">{t("workspace.management.storage.eyebrow")}</span>
-          <h2>{t("workspace.management.storage.title")}</h2>
+          <div className="management-title-line">
+            <Database aria-hidden="true" size={20} />
+            <h2>{t("workspace.management.storage.title")}</h2>
+          </div>
           <p>{t("workspace.management.storage.description")}</p>
         </div>
         <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
@@ -618,9 +643,7 @@ export function SystemStorageManagementPanel({
                         </button>
                       </td>
                       <td>
-                        <span className="management-row-status" data-state={storagePoolTone(pool)}>
-                          {storagePoolStatusLabel(pool, translate)}
-                        </span>
+                        <StatusIcon tone={storagePoolTone(pool)} label={storagePoolStatusLabel(pool, translate)} />
                       </td>
                       <td title={pool.raidPath}>{pool.raidLevel ?? t("common.dash")}</td>
                       <td>{formatStorageUsage(pool, locale, translate)}</td>

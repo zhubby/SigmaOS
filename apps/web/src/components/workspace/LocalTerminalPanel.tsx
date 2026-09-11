@@ -176,11 +176,11 @@ export function LocalTerminalPanel({
       <header className="workspace-terminal-header">
         <div className="workspace-terminal-title">
           <span className="eyebrow">{t("workspace.terminal.eyebrow")}</span>
-          <div>
-            <TerminalSquare aria-hidden="true" size={17} />
+          <div className="management-title-line">
+            <TerminalSquare aria-hidden="true" size={20} />
             <h2>{t("workspace.terminal.title")}</h2>
           </div>
-          <p>{connectionRoot?.name ?? t("workspace.terminal.noRoot")}</p>
+          <p>{t("workspace.terminal.description")}</p>
         </div>
         <div className="workspace-terminal-actions">
           <span className="management-status-pill" data-state={terminalStatusTone(status)} aria-live="polite">
