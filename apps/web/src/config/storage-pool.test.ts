@@ -19,7 +19,36 @@ const baseDisk: StorageDisk = {
   sizeBytes: 1_000,
   mountpoints: [],
   partitions: [],
-  smart: { health: "unknown", temperatureCelsius: null, powerOnHours: null, errorCount: null, message: null }
+  smart: {
+    health: "unknown",
+    available: null,
+    enabled: null,
+    protocol: null,
+    firmwareVersion: null,
+    temperatureCelsius: null,
+    temperatureMinCelsius: null,
+    temperatureMaxCelsius: null,
+    powerOnHours: null,
+    powerCycleCount: null,
+    errorCount: null,
+    selfTestStatus: null,
+    percentageUsed: null,
+    availableSparePercent: null,
+    availableSpareThresholdPercent: null,
+    unsafeShutdowns: null,
+    criticalWarning: null,
+    dataUnitsRead: null,
+    dataUnitsWritten: null,
+    hostReadCommands: null,
+    hostWriteCommands: null,
+    controllerBusyMinutes: null,
+    warningTemperatureTimeMinutes: null,
+    criticalTemperatureTimeMinutes: null,
+    errorLogEntries: null,
+    attributes: [],
+    selfTests: [],
+    message: null
+  }
 };
 
 const form = (overrides: Partial<StoragePoolFormState> = {}): StoragePoolFormState => ({

@@ -548,6 +548,11 @@
     max-height: calc(100dvh - 20px);
   }
 
+  .management-modal.storage-disk-details-modal {
+    width: 100%;
+    max-height: calc(100dvh - 20px);
+  }
+
   .storage-pool-details-body {
     padding: 12px;
   }
@@ -562,6 +567,29 @@
     width: 108px;
     height: 108px;
     flex-basis: 108px;
+  }
+
+  .storage-disk-details-body {
+    padding: 12px;
+  }
+
+  .storage-disk-capacity-overview {
+    grid-template-columns: 96px minmax(0, 1fr);
+    gap: 11px;
+    padding: 10px;
+  }
+
+  .storage-disk-capacity-chart {
+    width: 96px;
+    height: 96px;
+  }
+
+  .storage-disk-capacity-summary > strong {
+    font-size: 15px;
+  }
+
+  .storage-disk-detail-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .storage-pool-form {
@@ -594,6 +622,15 @@
   .management-workload small {
     grid-column: 2 / -1;
     justify-self: start;
+  }
+
+  .system-storage-disk-row {
+    grid-template-columns: minmax(0, 1fr) 42px minmax(70px, auto);
+  }
+
+  .system-storage-disk-row > small {
+    grid-column: auto;
+    justify-self: end;
   }
 
   .activity-popover {

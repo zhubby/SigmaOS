@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Activity,
@@ -17,11 +17,18 @@ import {
   type LucideIcon
 } from "lucide-react";
 import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  LabelList,
   PolarAngleAxis,
   RadialBar,
   RadialBarChart,
   ResponsiveContainer,
   Tooltip,
+  XAxis,
+  YAxis,
 } from "recharts";
 import {
   getSystemNetwork,
@@ -79,6 +86,15 @@ interface StorageHealthSignal {
   display: string;
   tone: GaugeTone;
   color: string;
+}
+
+interface DiskCapacityUsage {
+  totalBytes: number | null;
+  usedBytes: number | null;
+  availableBytes: number | null;
+  ratio: number | null;
+  pool: StoragePool | null;
+  mountTargets: string[];
 }
 
 export function SystemNetworkManagementPanel({
@@ -276,11 +292,7 @@ export function SystemNetworkManagementPanel({
               title={t("workspace.management.network.readinessTitle")}
               description={t("workspace.management.network.readinessDescription")}
             />
-            <div className="management-resource-list">
-              {networkGauges(summary, locale, translate).map((gauge) => (
-                <ResourceGauge key={gauge.id} gauge={gauge} />
-              ))}
-            </div>
+            <NetworkReadinessChart gauges={networkGauges(summary, locale, translate)} t={translate} />
           </section>
         </div>
         </>}
@@ -309,6 +321,7 @@ export function SystemStorageManagementPanel({
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedPool, setSelectedPool] = useState<StoragePool | null>(null);
+  const [selectedDisk, setSelectedDisk] = useState<StorageDisk | null>(null);
   const [deleteStep, setDeleteStep] = useState<"idle" | "warning" | "confirm">("idle");
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -400,6 +413,16 @@ export function SystemStorageManagementPanel({
       setDeleteStep("idle");
       setDeleteConfirmation("");
     }
+  }
+
+  function openDiskDetails(disk: StorageDisk) {
+    setSelectedDisk(disk);
+    onNotifyError(null);
+    onNotifySuccess(null);
+  }
+
+  function closeDiskDetails() {
+    setSelectedDisk(null);
   }
 
   function beginPoolDelete() {
@@ -623,7 +646,14 @@ export function SystemStorageManagementPanel({
             />
             <div className="management-workload-list">
               {disks.length ? (
-                disks.map((disk) => <StorageDiskRow key={disk.id} disk={disk} locale={locale} />)
+                disks.map((disk) => (
+                  <StorageDiskRow
+                    key={disk.id}
+                    disk={disk}
+                    locale={locale}
+                    onOpen={() => openDiskDetails(disk)}
+                  />
+                ))
               ) : (
                 <p className="management-empty">
                   {loading ? t("common.states.loading") : t("workspace.management.storage.noDisks")}
@@ -771,6 +801,16 @@ export function SystemStorageManagementPanel({
             </div>
           </section>
         </div>
+      ) : null}
+
+      {selectedDisk && summary ? (
+        <StorageDiskDetailsModal
+          disk={selectedDisk}
+          summary={summary}
+          locale={locale}
+          t={translate}
+          onClose={closeDiskDetails}
+        />
       ) : null}
 
       {createOpen ? (
@@ -1002,6 +1042,369 @@ function StoragePoolUsageChart({
   );
 }
 
+function SmartStatusChart({
+  health,
+  t,
+  detail = false
+}: {
+  health: StorageDisk["smart"]["health"];
+  t: Translate;
+  detail?: boolean;
+}) {
+  const tone = smartGaugeTone(health);
+  const StatusIcon = health === "passed" ? CircleCheck : health === "failed" || health === "error" ? CircleAlert : HardDrive;
+  const label = smartHealthLabel(health, t);
+  const chartData = [{ name: label, value: 100, fill: storageHealthColor(tone) }];
+
+  return (
+    <div
+      className={`storage-smart-status-chart${detail ? " is-detail" : ""}`}
+      data-state={tone}
+      role="img"
+      aria-label={label}
+      title={label}
+    >
+      <ResponsiveContainer width="100%" height="100%">
+        <RadialBarChart
+          data={chartData}
+          cx="50%"
+          cy="50%"
+          innerRadius="72%"
+          outerRadius="100%"
+          startAngle={90}
+          endAngle={-270}
+        >
+          <PolarAngleAxis type="number" domain={[0, 100]} tick={false} />
+          <RadialBar dataKey="value" cornerRadius={8} isAnimationActive={false} />
+        </RadialBarChart>
+      </ResponsiveContainer>
+      <StatusIcon aria-hidden="true" size={detail ? 22 : 16} />
+    </div>
+  );
+}
+
+function StorageDiskDetailsModal({
+  disk,
+  summary,
+  locale,
+  t,
+  onClose
+}: {
+  disk: StorageDisk;
+  summary: StorageSummary;
+  locale: SupportedLocale;
+  t: Translate;
+  onClose: () => void;
+}) {
+  const capacity = diskCapacityUsage(disk, summary);
+  const smart = disk.smart;
+  const deviceFacts = [
+    { id: "model", label: t("workspace.management.storage.diskFacts.model"), value: disk.model ?? t("common.dash") },
+    { id: "serial", label: t("workspace.management.storage.diskFacts.serial"), value: disk.serial ?? t("common.dash") },
+    { id: "protocol", label: t("workspace.management.storage.diskFacts.protocol"), value: smart.protocol ?? disk.transport ?? t("common.dash") },
+    { id: "firmware", label: t("workspace.management.storage.diskFacts.firmware"), value: smart.firmwareVersion ?? t("common.dash") },
+    { id: "media", label: t("workspace.management.storage.diskFacts.media"), value: storageMediaLabel(disk, t) },
+    { id: "capacity", label: t("workspace.management.storage.diskFacts.capacity"), value: formatNullableBytes(disk.sizeBytes, locale, t) }
+  ];
+  const smartFacts = [
+    { id: "available", label: t("workspace.management.storage.smartFacts.available"), value: formatBoolean(smart.available, t) },
+    { id: "enabled", label: t("workspace.management.storage.smartFacts.enabled"), value: formatBoolean(smart.enabled, t) },
+    { id: "temperature", label: t("workspace.management.storage.smartFacts.temperature"), value: formatTemperature(smart.temperatureCelsius, locale, t) },
+    { id: "temperatureMin", label: t("workspace.management.storage.smartFacts.temperatureMin"), value: formatTemperature(smart.temperatureMinCelsius, locale, t) },
+    { id: "temperatureMax", label: t("workspace.management.storage.smartFacts.temperatureMax"), value: formatTemperature(smart.temperatureMaxCelsius, locale, t) },
+    { id: "powerOn", label: t("workspace.management.storage.smartFacts.powerOn"), value: formatHours(smart.powerOnHours, locale, t) },
+    { id: "powerCycles", label: t("workspace.management.storage.smartFacts.powerCycles"), value: formatNullableNumber(smart.powerCycleCount, locale, t) },
+    { id: "errors", label: t("workspace.management.storage.smartFacts.errors"), value: formatNullableNumber(smart.errorCount, locale, t) },
+    { id: "selfTest", label: t("workspace.management.storage.smartFacts.selfTest"), value: smart.selfTestStatus ?? t("common.dash") }
+  ];
+  const nvmeFacts = [
+    { id: "lifeUsed", label: t("workspace.management.storage.smartFacts.lifeUsed"), value: formatPercentValue(smart.percentageUsed, locale, t) },
+    { id: "spare", label: t("workspace.management.storage.smartFacts.spare"), value: formatPercentValue(smart.availableSparePercent, locale, t) },
+    { id: "spareThreshold", label: t("workspace.management.storage.smartFacts.spareThreshold"), value: formatPercentValue(smart.availableSpareThresholdPercent, locale, t) },
+    { id: "unsafeShutdowns", label: t("workspace.management.storage.smartFacts.unsafeShutdowns"), value: formatNullableNumber(smart.unsafeShutdowns, locale, t) },
+    { id: "criticalWarning", label: t("workspace.management.storage.smartFacts.criticalWarning"), value: formatNullableNumber(smart.criticalWarning, locale, t) },
+    { id: "dataRead", label: t("workspace.management.storage.smartFacts.dataRead"), value: formatNullableNumber(smart.dataUnitsRead, locale, t) },
+    { id: "dataWritten", label: t("workspace.management.storage.smartFacts.dataWritten"), value: formatNullableNumber(smart.dataUnitsWritten, locale, t) },
+    { id: "hostReads", label: t("workspace.management.storage.smartFacts.hostReads"), value: formatNullableNumber(smart.hostReadCommands, locale, t) },
+    { id: "hostWrites", label: t("workspace.management.storage.smartFacts.hostWrites"), value: formatNullableNumber(smart.hostWriteCommands, locale, t) },
+    { id: "busyTime", label: t("workspace.management.storage.smartFacts.busyTime"), value: formatNullableNumber(smart.controllerBusyMinutes, locale, t) },
+    { id: "warningTemperatureTime", label: t("workspace.management.storage.smartFacts.warningTemperatureTime"), value: formatNullableNumber(smart.warningTemperatureTimeMinutes, locale, t) },
+    { id: "criticalTemperatureTime", label: t("workspace.management.storage.smartFacts.criticalTemperatureTime"), value: formatNullableNumber(smart.criticalTemperatureTimeMinutes, locale, t) },
+    { id: "errorLogEntries", label: t("workspace.management.storage.smartFacts.errorLogEntries"), value: formatNullableNumber(smart.errorLogEntries, locale, t) }
+  ].filter((fact) => fact.value !== t("common.dash"));
+
+  return (
+    <div
+      className="management-modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => event.currentTarget === event.target && onClose()}
+    >
+      <section
+        className="management-modal storage-disk-details-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="storage-disk-details-title"
+      >
+        <header>
+          <div className="storage-disk-details-heading">
+            <span className="eyebrow">{t("workspace.management.storage.diskDetailsEyebrow")}</span>
+            <h2 id="storage-disk-details-title">{disk.path}</h2>
+          </div>
+          <button
+            type="button"
+            className="management-icon-action"
+            onClick={onClose}
+            title={t("common.actions.cancel")}
+            aria-label={t("common.actions.cancel")}
+          >
+            <X aria-hidden="true" size={15} />
+          </button>
+        </header>
+
+        <div className="storage-disk-details-body">
+          <div className="storage-disk-capacity-overview">
+            <DiskCapacityChart usage={capacity} locale={locale} t={t} />
+            <div className="storage-disk-capacity-summary">
+              <span className="eyebrow">{t("workspace.management.storage.diskCapacityTitle")}</span>
+              <strong>{formatNullableBytes(capacity.totalBytes, locale, t)}</strong>
+              <p>{diskCapacitySource(capacity, t)}</p>
+              <dl>
+                <div>
+                  <dt>{t("workspace.management.storage.diskCapacityUsed")}</dt>
+                  <dd>{formatNullableBytes(capacity.usedBytes, locale, t)}</dd>
+                </div>
+                <div>
+                  <dt>{t("workspace.management.storage.diskCapacityAvailable")}</dt>
+                  <dd>{formatNullableBytes(capacity.availableBytes, locale, t)}</dd>
+                </div>
+              </dl>
+            </div>
+          </div>
+
+          <section className="storage-disk-detail-section storage-disk-smart-section">
+            <header>
+              <SmartStatusChart health={smart.health} t={t} detail />
+              <div>
+                <span className="eyebrow">SMART</span>
+                <h3>{smartHealthLabel(smart.health, t)}</h3>
+                <p>{t("workspace.management.storage.smartDetailsDescription")}</p>
+              </div>
+            </header>
+            <div className="storage-disk-detail-facts">
+              {smartFacts.map((fact) => <StoragePoolDetailFact key={fact.id} label={fact.label} value={fact.value} />)}
+            </div>
+            {nvmeFacts.length ? (
+              <>
+                <h4>{t("workspace.management.storage.nvmeDetailsTitle")}</h4>
+                <div className="storage-disk-detail-facts">
+                  {nvmeFacts.map((fact) => <StoragePoolDetailFact key={fact.id} label={fact.label} value={fact.value} />)}
+                </div>
+              </>
+            ) : null}
+            {smart.message ? <p className="storage-disk-smart-message">{smart.message}</p> : null}
+          </section>
+
+          <section className="storage-disk-detail-section">
+            <header>
+              <div>
+                <span className="eyebrow">{t("workspace.management.storage.diskDetailsEyebrow")}</span>
+                <h3>{t("workspace.management.storage.deviceDetailsTitle")}</h3>
+              </div>
+            </header>
+            <div className="storage-disk-detail-facts">
+              {deviceFacts.map((fact) => <StoragePoolDetailFact key={fact.id} label={fact.label} value={fact.value} />)}
+            </div>
+          </section>
+
+          <SmartAttributesTable disk={disk} locale={locale} t={t} />
+          <SmartSelfTestsTable disk={disk} locale={locale} t={t} />
+          <DiskPartitionsTable disk={disk} locale={locale} t={t} />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function DiskCapacityChart({
+  usage,
+  locale,
+  t
+}: {
+  usage: DiskCapacityUsage;
+  locale: SupportedLocale;
+  t: Translate;
+}) {
+  const value = usage.ratio === null ? 0 : usage.ratio * 100;
+  const tone = usageGaugeTone(usage.ratio);
+  const chartData = [{ name: t("workspace.management.storage.diskCapacityUsed"), value, fill: storageHealthColor(tone, "var(--accent-soft-text)") }];
+
+  return (
+    <div className="storage-disk-capacity-chart" aria-label={t("workspace.management.storage.diskCapacityChartLabel")}>
+      <ResponsiveContainer width="100%" height="100%">
+        <RadialBarChart
+          data={chartData}
+          cx="50%"
+          cy="50%"
+          innerRadius="68%"
+          outerRadius="94%"
+          startAngle={90}
+          endAngle={-270}
+        >
+          <PolarAngleAxis type="number" domain={[0, 100]} tick={false} />
+          <RadialBar
+            dataKey="value"
+            background={{ fill: "var(--surface)" }}
+            cornerRadius={7}
+            isAnimationActive={false}
+          />
+          {usage.ratio !== null ? (
+            <Tooltip
+              contentStyle={{ background: "var(--modal-bg)", border: "1px solid var(--line)", borderRadius: 5, color: "var(--text)", fontSize: 11 }}
+              formatter={(nextValue) => [formatCapacityPercent(Number(nextValue), locale), t("workspace.management.storage.diskCapacityUsed")]}
+            />
+          ) : null}
+        </RadialBarChart>
+      </ResponsiveContainer>
+      <div className="storage-disk-capacity-center">
+        <strong>{usage.ratio === null ? t("common.dash") : formatCapacityPercent(value, locale)}</strong>
+        <span>{t("workspace.management.storage.capacityUsedLabel")}</span>
+      </div>
+    </div>
+  );
+}
+
+function SmartAttributesTable({ disk, locale, t }: { disk: StorageDisk; locale: SupportedLocale; t: Translate }) {
+  const attributes = disk.smart.attributes ?? [];
+  if (!attributes.length) {
+    return null;
+  }
+  return (
+    <section className="storage-disk-detail-section">
+      <header>
+        <div>
+          <span className="eyebrow">SMART</span>
+          <h3>{t("workspace.management.storage.smartAttributesTitle")}</h3>
+        </div>
+        <strong>{formatLocaleNumber(attributes.length, locale)}</strong>
+      </header>
+      <div className="storage-disk-table-wrap">
+        <table className="storage-disk-details-table">
+          <thead>
+            <tr>
+              <th>{t("workspace.management.storage.smartAttributeColumns.id")}</th>
+              <th>{t("workspace.management.storage.smartAttributeColumns.name")}</th>
+              <th>{t("workspace.management.storage.smartAttributeColumns.current")}</th>
+              <th>{t("workspace.management.storage.smartAttributeColumns.worst")}</th>
+              <th>{t("workspace.management.storage.smartAttributeColumns.threshold")}</th>
+              <th>{t("workspace.management.storage.smartAttributeColumns.raw")}</th>
+              <th>{t("workspace.management.storage.smartAttributeColumns.flags")}</th>
+              <th>{t("workspace.management.storage.smartAttributeColumns.failed")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {attributes.map((attribute, index) => (
+              <tr key={`${attribute.id ?? "attribute"}-${attribute.name}-${index}`} data-state={attribute.whenFailed ? "danger" : "ready"}>
+                <td>{formatNullableNumber(attribute.id, locale, t)}</td>
+                <td title={attribute.name}>{attribute.name}</td>
+                <td>{formatNullableNumber(attribute.current, locale, t)}</td>
+                <td>{formatNullableNumber(attribute.worst, locale, t)}</td>
+                <td>{formatNullableNumber(attribute.threshold, locale, t)}</td>
+                <td title={attribute.raw ?? t("common.dash")}>{attribute.raw ?? t("common.dash")}</td>
+                <td>{attribute.flags ?? t("common.dash")}</td>
+                <td>{attribute.whenFailed ?? t("common.dash")}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function SmartSelfTestsTable({ disk, locale, t }: { disk: StorageDisk; locale: SupportedLocale; t: Translate }) {
+  const selfTests = disk.smart.selfTests ?? [];
+  if (!selfTests.length) {
+    return null;
+  }
+  return (
+    <section className="storage-disk-detail-section">
+      <header>
+        <div>
+          <span className="eyebrow">SMART</span>
+          <h3>{t("workspace.management.storage.smartSelfTestsTitle")}</h3>
+        </div>
+        <strong>{formatLocaleNumber(selfTests.length, locale)}</strong>
+      </header>
+      <div className="storage-disk-table-wrap">
+        <table className="storage-disk-details-table">
+          <thead>
+            <tr>
+              <th>{t("workspace.management.storage.smartSelfTestColumns.number")}</th>
+              <th>{t("workspace.management.storage.smartSelfTestColumns.type")}</th>
+              <th>{t("workspace.management.storage.smartSelfTestColumns.status")}</th>
+              <th>{t("workspace.management.storage.smartSelfTestColumns.remaining")}</th>
+              <th>{t("workspace.management.storage.smartSelfTestColumns.lifetime")}</th>
+              <th>{t("workspace.management.storage.smartSelfTestColumns.firstError")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {selfTests.map((test, index) => (
+              <tr key={`${test.number ?? "test"}-${index}`}>
+                <td>{formatNullableNumber(test.number, locale, t)}</td>
+                <td>{test.type ?? t("common.dash")}</td>
+                <td>{test.status ?? t("common.dash")}</td>
+                <td>{formatPercentValue(test.remainingPercent, locale, t)}</td>
+                <td>{formatHours(test.lifetimeHours, locale, t)}</td>
+                <td>{formatNullableNumber(test.firstErrorLba, locale, t)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function DiskPartitionsTable({ disk, locale, t }: { disk: StorageDisk; locale: SupportedLocale; t: Translate }) {
+  return (
+    <section className="storage-disk-detail-section">
+      <header>
+        <div>
+          <span className="eyebrow">{t("workspace.management.storage.diskDetailsEyebrow")}</span>
+          <h3>{t("workspace.management.storage.partitionsTitle")}</h3>
+        </div>
+        <strong>{formatLocaleNumber(disk.partitions.length, locale)}</strong>
+      </header>
+      {disk.partitions.length ? (
+        <div className="storage-disk-table-wrap">
+          <table className="storage-disk-details-table">
+            <thead>
+              <tr>
+                <th>{t("workspace.management.storage.partitionColumns.path")}</th>
+                <th>{t("workspace.management.storage.partitionColumns.filesystem")}</th>
+                <th>{t("workspace.management.storage.partitionColumns.size")}</th>
+                <th>{t("workspace.management.storage.partitionColumns.mounts")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {disk.partitions.map((partition) => (
+                <tr key={partition.id}>
+                  <td title={partition.path}>{partition.path}</td>
+                  <td>{partition.filesystem ?? t("common.dash")}</td>
+                  <td>{formatNullableBytes(partition.sizeBytes, locale, t)}</td>
+                  <td title={partition.mountpoints.join(", ")}>{partition.mountpoints.join(", ") || t("common.dash")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="storage-disk-detail-empty">{t("workspace.management.storage.noPartitions")}</p>
+      )}
+    </section>
+  );
+}
+
 function StoragePoolDetailFact({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -1047,19 +1450,90 @@ function MetricCard({ metric }: { metric: Metric }) {
   );
 }
 
-function ResourceGauge({ gauge }: { gauge: Gauge }) {
-  const style = { "--management-resource-value": `${gauge.value}%` } as CSSProperties;
+function NetworkReadinessChart({ gauges, t }: { gauges: Gauge[]; t: Translate }) {
+  return (
+    <div
+      className="network-readiness-chart"
+      role="img"
+      aria-label={t("workspace.management.network.readinessDescription")}
+    >
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart
+          data={gauges}
+          layout="vertical"
+          margin={{ top: 8, right: 18, bottom: 4, left: 4 }}
+          barCategoryGap="42%"
+        >
+          <CartesianGrid horizontal={false} stroke="var(--line-soft)" strokeDasharray="3 4" />
+          <XAxis
+            type="number"
+            domain={[0, 100]}
+            ticks={[0, 50, 100]}
+            axisLine={false}
+            tickLine={false}
+            tick={{ fill: "var(--muted-2)", fontSize: 10 }}
+            tickFormatter={(value) => `${value}%`}
+          />
+          <YAxis
+            type="category"
+            dataKey="label"
+            axisLine={false}
+            tickLine={false}
+            tickMargin={10}
+            tick={{ fill: "var(--text)", fontSize: 11, fontWeight: 800 }}
+            width={112}
+          />
+          <Bar
+            dataKey="value"
+            background={{ fill: "var(--surface)" }}
+            radius={[0, 5, 5, 0]}
+            barSize={16}
+            isAnimationActive={false}
+          >
+            {gauges.map((gauge) => (
+              <Cell key={gauge.id} fill={storageHealthColor(gauge.tone)} />
+            ))}
+            <LabelList
+              dataKey="display"
+              content={<NetworkReadinessValueLabel />}
+            />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function NetworkReadinessValueLabel({
+  x = 0,
+  y = 0,
+  width = 0,
+  height = 0,
+  value = ""
+}: {
+  x?: number | string;
+  y?: number | string;
+  width?: number | string;
+  height?: number | string;
+  value?: number | string;
+}) {
+  const barX = Number(x);
+  const barY = Number(y);
+  const barWidth = Number(width);
+  const barHeight = Number(height);
+  const placeInside = barWidth >= 58;
 
   return (
-    <div className="management-resource-row">
-      <div>
-        <span>{gauge.label}</span>
-        <em>{gauge.display}</em>
-      </div>
-      <div className="management-resource-track" style={style}>
-        <span data-tone={gauge.tone} />
-      </div>
-    </div>
+    <text
+      className="network-readiness-value"
+      x={placeInside ? barX + barWidth - 8 : barX + barWidth + 8}
+      y={barY + (barHeight / 2)}
+      fill={placeInside ? "white" : "var(--muted)"}
+      textAnchor={placeInside ? "end" : "start"}
+      dominantBaseline="central"
+    >
+      {value}
+    </text>
   );
 }
 
@@ -1082,21 +1556,39 @@ function NetworkRouteRow({ route }: { route: NetworkRoute }) {
   );
 }
 
-function StorageDiskRow({ disk, locale }: { disk: StorageDisk; locale: SupportedLocale }) {
+function StorageDiskRow({
+  disk,
+  locale,
+  onOpen
+}: {
+  disk: StorageDisk;
+  locale: SupportedLocale;
+  onOpen: () => void;
+}) {
   const { t } = useTranslation();
   const translate = t as Translate;
-  const tone = smartTone(disk.smart.health);
-  const model = [disk.model, disk.transport, disk.serial].filter(Boolean).join(" · ") || t("common.dash");
+  const model = [disk.model, disk.transport].filter(Boolean).join(" · ") || t("common.dash");
 
   return (
     <article className="management-workload system-storage-disk-row">
-      {statusIcon(tone)}
-      <div>
-        <strong title={disk.path}>{disk.path}</strong>
-        <span title={model}>{model}</span>
+      <div className="storage-disk-identity">
+        <HardDrive aria-hidden="true" size={18} />
+        <div>
+          <button
+            type="button"
+            className="storage-disk-name-button"
+            onClick={onOpen}
+            aria-label={t("workspace.management.storage.openDiskDetails", { name: disk.path })}
+          >
+            {disk.path}
+          </button>
+          <span title={model}>{model}</span>
+        </div>
       </div>
-      <em data-state={tone}>{smartHealthLabel(disk.smart.health, translate)}</em>
-      <small title={formatSmartDetail(disk, locale, translate)}>{formatSmartDetail(disk, locale, translate)}</small>
+      <SmartStatusChart health={disk.smart.health} t={translate} />
+      <small title={formatNullableBytes(disk.sizeBytes, locale, translate)}>
+        {formatNullableBytes(disk.sizeBytes, locale, translate)}
+      </small>
     </article>
   );
 }
@@ -1315,16 +1807,6 @@ function StorageHealthChart({
                   cornerRadius={5}
                   isAnimationActive={false}
                 />
-                <Tooltip
-                  contentStyle={{ background: "var(--modal-bg)", border: "1px solid var(--line)", borderRadius: 5, color: "var(--text)", fontSize: 11 }}
-                  formatter={(value, _name, item) => {
-                    const label = typeof item.payload?.label === "string" ? item.payload.label : t("workspace.management.storage.healthTitle");
-                    return [
-                      `${formatLocaleNumber(Number(value), locale, { maximumFractionDigits: 1 })}%`,
-                      label
-                    ];
-                  }}
-                />
               </RadialBarChart>
             </ResponsiveContainer>
             <div className="storage-health-chart-center" data-state={overallTone}>
@@ -1508,12 +1990,12 @@ function formatSpeed(speedMbps: number | null, locale: SupportedLocale, t: Trans
   return `${formatLocaleNumber(speedMbps, locale)} Mbps`;
 }
 
-function formatNullableNumber(value: number | null, locale: SupportedLocale, t: Translate): string {
-  return value === null ? t("common.dash") : formatLocaleNumber(value, locale);
+function formatNullableNumber(value: number | null | undefined, locale: SupportedLocale, t: Translate): string {
+  return typeof value !== "number" ? t("common.dash") : formatLocaleNumber(value, locale);
 }
 
-function formatNullableBytes(value: number | null, locale: SupportedLocale, t: Translate): string {
-  return value === null ? t("common.dash") : formatBytes(value, locale);
+function formatNullableBytes(value: number | null | undefined, locale: SupportedLocale, t: Translate): string {
+  return typeof value !== "number" ? t("common.dash") : formatBytes(value, locale);
 }
 
 function formatRatioPercent(value: number | null, locale: SupportedLocale, t: Translate): string {
@@ -1553,12 +2035,12 @@ function formatStorageUsage(pool: StoragePool, locale: SupportedLocale, t: Trans
   return `${formatBytes(pool.usedBytes, locale)} / ${formatBytes(pool.totalBytes, locale)} (${formatRatioPercent(pool.usedPercent, locale, t)})`;
 }
 
-function smartTone(health: StorageDisk["smart"]["health"]): StatusTone {
+function smartGaugeTone(health: StorageDisk["smart"]["health"]): GaugeTone {
   if (health === "passed") {
     return "ready";
   }
   if (health === "failed" || health === "error") {
-    return "offline";
+    return "danger";
   }
   return "neutral";
 }
@@ -1567,30 +2049,112 @@ function smartHealthLabel(health: StorageDisk["smart"]["health"], t: Translate):
   return t(`workspace.management.storage.smart.${health}`);
 }
 
-function formatSmartDetail(
-  disk: StorageDisk,
-  locale: SupportedLocale,
-  t: Translate
-): string {
-  const smart = disk.smart;
-  const detail = [
-    smart.temperatureCelsius === null
-      ? null
-      : t("workspace.management.storage.diskMeta.temperature", {
-          value: formatLocaleNumber(smart.temperatureCelsius, locale)
-        }),
-    smart.powerOnHours === null
-      ? null
-      : t("workspace.management.storage.diskMeta.powerOn", {
-          value: formatLocaleNumber(smart.powerOnHours, locale)
-        }),
-    smart.errorCount === null
-      ? null
-      : t("workspace.management.storage.diskMeta.errors", {
-          value: formatLocaleNumber(smart.errorCount, locale)
-        })
-  ].filter((item): item is string => Boolean(item));
-  return detail.join(" · ") || formatNullableBytes(disk.sizeBytes, locale, t);
+function diskCapacityUsage(disk: StorageDisk, summary: StorageSummary): DiskCapacityUsage {
+  const devicePaths = new Set([disk.path, ...disk.partitions.map((partition) => partition.path)]);
+  const pool = summary.pools.find((candidate) => (
+    candidate.memberDevices.some((device) => devicePaths.has(device) || diskOwnsDevicePath(disk.path, device))
+  )) ?? null;
+
+  if (pool) {
+    const ratio = pool.totalBytes !== null && pool.totalBytes > 0 && pool.usedBytes !== null
+        ? clampStorageRatio(pool.usedBytes / pool.totalBytes)
+        : pool.usedPercent;
+    const totalBytes = disk.sizeBytes;
+    const usedBytes = totalBytes !== null && ratio !== null ? Math.round(totalBytes * ratio) : null;
+    return {
+      totalBytes,
+      usedBytes,
+      availableBytes: totalBytes !== null && usedBytes !== null ? Math.max(totalBytes - usedBytes, 0) : null,
+      ratio,
+      pool,
+      mountTargets: pool.mountpoint ? [pool.mountpoint] : []
+    };
+  }
+
+  const mountsBySource = new Map(
+    summary.mounts
+      .filter((mount) => devicePaths.has(mount.source))
+      .map((mount) => [mount.source, mount] as const)
+  );
+  const mounts = [...mountsBySource.values()];
+  const measuredUsed = sumPresent(mounts.map((mount) => mount.usedBytes));
+  const measuredTotal = sumPresent(mounts.map((mount) => mount.totalBytes));
+  const totalBytes = disk.sizeBytes ?? measuredTotal;
+  const ratio = totalBytes !== null && totalBytes > 0 && measuredUsed !== null
+    ? clampStorageRatio(measuredUsed / totalBytes)
+    : null;
+
+  return {
+    totalBytes,
+    usedBytes: measuredUsed,
+    availableBytes: totalBytes !== null && measuredUsed !== null ? Math.max(totalBytes - measuredUsed, 0) : null,
+    ratio,
+    pool: null,
+    mountTargets: mounts.map((mount) => mount.target)
+  };
+}
+
+function diskOwnsDevicePath(diskPath: string, devicePath: string): boolean {
+  if (!devicePath.startsWith(diskPath)) {
+    return false;
+  }
+  const suffix = devicePath.slice(diskPath.length);
+  return /^\d+$/u.test(suffix) || /^p\d+$/u.test(suffix);
+}
+
+function sumPresent(values: Array<number | null>): number | null {
+  const present = values.filter((value): value is number => value !== null);
+  return present.length ? present.reduce((sum, value) => sum + value, 0) : null;
+}
+
+function diskCapacitySource(usage: DiskCapacityUsage, t: Translate): string {
+  if (usage.pool) {
+    return t("workspace.management.storage.diskCapacityPoolSource", { name: usage.pool.name });
+  }
+  if (usage.mountTargets.length) {
+    return t("workspace.management.storage.diskCapacityMountSource", { targets: usage.mountTargets.join(", ") });
+  }
+  return t("workspace.management.storage.diskCapacityUnavailable");
+}
+
+function storageMediaLabel(disk: StorageDisk, t: Translate): string {
+  if (disk.rotational === true) {
+    return t("workspace.management.storage.diskMedia.hdd");
+  }
+  if (disk.rotational === false) {
+    return t("workspace.management.storage.diskMedia.ssd");
+  }
+  return t("common.states.unknown");
+}
+
+function formatBoolean(value: boolean | null | undefined, t: Translate): string {
+  if (typeof value !== "boolean") {
+    return t("common.dash");
+  }
+  return value ? t("common.yes") : t("common.no");
+}
+
+function formatTemperature(value: number | null | undefined, locale: SupportedLocale, t: Translate): string {
+  return typeof value !== "number"
+    ? t("common.dash")
+    : t("workspace.management.storage.diskMeta.temperature", { value: formatLocaleNumber(value, locale) });
+}
+
+function formatHours(value: number | null | undefined, locale: SupportedLocale, t: Translate): string {
+  return typeof value !== "number"
+    ? t("common.dash")
+    : t("workspace.management.storage.diskMeta.powerOn", { value: formatLocaleNumber(value, locale) });
+}
+
+function formatPercentValue(value: number | null | undefined, locale: SupportedLocale, t: Translate): string {
+  return typeof value !== "number" ? t("common.dash") : `${formatLocaleNumber(value, locale, { maximumFractionDigits: 1 })}%`;
+}
+
+function formatCapacityPercent(value: number, locale: SupportedLocale): string {
+  if (value > 0 && value < 0.1) {
+    return "<0.1%";
+  }
+  return `${formatLocaleNumber(value, locale, { maximumFractionDigits: 1 })}%`;
 }
 
 function usageGaugeTone(value: number | null): GaugeTone {

@@ -561,11 +561,54 @@ export interface SystemNetworkSummary {
 
 export type SystemSmartHealth = "passed" | "failed" | "unknown" | "error";
 
+export interface SystemSmartAttribute {
+  id: number | null;
+  name: string;
+  current: number | null;
+  worst: number | null;
+  threshold: number | null;
+  raw: string | null;
+  flags: string | null;
+  whenFailed: string | null;
+}
+
+export interface SystemSmartSelfTest {
+  number: number | null;
+  type: string | null;
+  status: string | null;
+  remainingPercent: number | null;
+  lifetimeHours: number | null;
+  firstErrorLba: number | null;
+}
+
 export interface SystemSmartSummary {
   health: SystemSmartHealth;
+  available: boolean | null;
+  enabled: boolean | null;
+  protocol: string | null;
+  firmwareVersion: string | null;
   temperatureCelsius: number | null;
+  temperatureMinCelsius: number | null;
+  temperatureMaxCelsius: number | null;
   powerOnHours: number | null;
+  powerCycleCount: number | null;
   errorCount: number | null;
+  selfTestStatus: string | null;
+  percentageUsed: number | null;
+  availableSparePercent: number | null;
+  availableSpareThresholdPercent: number | null;
+  unsafeShutdowns: number | null;
+  criticalWarning: number | null;
+  dataUnitsRead: number | null;
+  dataUnitsWritten: number | null;
+  hostReadCommands: number | null;
+  hostWriteCommands: number | null;
+  controllerBusyMinutes: number | null;
+  warningTemperatureTimeMinutes: number | null;
+  criticalTemperatureTimeMinutes: number | null;
+  errorLogEntries: number | null;
+  attributes: SystemSmartAttribute[];
+  selfTests: SystemSmartSelfTest[];
   message: string | null;
 }
 

@@ -13,7 +13,9 @@ import type {
   SystemNetworkRoute,
   SystemNetworkSummary,
   SystemRaidArray,
+  SystemSmartAttribute,
   SystemSmartHealth,
+  SystemSmartSelfTest,
   SystemSmartSummary,
   SystemStorageDisk,
   SystemStorageMount,
@@ -553,9 +555,32 @@ async function collectSmartSummaries(
       if (!result.value) {
         smartByDevice.set(name, {
           health: "error",
+          available: null,
+          enabled: null,
+          protocol: null,
+          firmwareVersion: null,
           temperatureCelsius: null,
+          temperatureMinCelsius: null,
+          temperatureMaxCelsius: null,
           powerOnHours: null,
+          powerCycleCount: null,
           errorCount: null,
+          selfTestStatus: null,
+          percentageUsed: null,
+          availableSparePercent: null,
+          availableSpareThresholdPercent: null,
+          unsafeShutdowns: null,
+          criticalWarning: null,
+          dataUnitsRead: null,
+          dataUnitsWritten: null,
+          hostReadCommands: null,
+          hostWriteCommands: null,
+          controllerBusyMinutes: null,
+          warningTemperatureTimeMinutes: null,
+          criticalTemperatureTimeMinutes: null,
+          errorLogEntries: null,
+          attributes: [],
+          selfTests: [],
           message: result.issue?.message ?? null
         });
         return result.issue;
@@ -583,15 +608,77 @@ function mapSmartSummary(value: unknown): SystemSmartSummary {
   const currentTemperature = numberField(temperature, "current") ?? nvmeTemperature;
   const nvmeMediaErrors = numberField(nvmeLog, "media_errors");
   const ataErrors = numberField(ataErrorSummary, "count");
+  const smartSupport = asRecord(recordField(record, "smart_support"));
+  const device = asRecord(recordField(record, "device"));
+  const ataSmartData = asRecord(recordField(record, "ata_smart_data"));
+  const selfTestStatus = asRecord(recordField(ataSmartData, "self_test", "status"));
 
   return {
     health,
-    temperatureCelsius:
-      currentTemperature && currentTemperature > 200 ? Math.round(currentTemperature - 273.15) : currentTemperature,
+    available: booleanField(smartSupport, "available"),
+    enabled: booleanField(smartSupport, "enabled"),
+    protocol: stringField(device, "protocol"),
+    firmwareVersion: stringField(record, "firmware_version"),
+    temperatureCelsius: celsiusTemperature(currentTemperature),
+    temperatureMinCelsius: celsiusTemperature(
+      numberField(temperature, "min") ?? numberField(temperature, "lifetime_min")
+    ),
+    temperatureMaxCelsius: celsiusTemperature(
+      numberField(temperature, "max") ?? numberField(temperature, "lifetime_max")
+    ),
     powerOnHours: numberField(powerOnTime, "hours"),
+    powerCycleCount: numberField(record, "power_cycle_count") ?? numberField(nvmeLog, "power_cycles"),
     errorCount: ataErrors ?? nvmeMediaErrors,
+    selfTestStatus: stringField(selfTestStatus, "string"),
+    percentageUsed: numberField(nvmeLog, "percentage_used"),
+    availableSparePercent: numberField(nvmeLog, "available_spare"),
+    availableSpareThresholdPercent: numberField(nvmeLog, "available_spare_threshold"),
+    unsafeShutdowns: numberField(nvmeLog, "unsafe_shutdowns"),
+    criticalWarning: numberField(nvmeLog, "critical_warning"),
+    dataUnitsRead: numberField(nvmeLog, "data_units_read"),
+    dataUnitsWritten: numberField(nvmeLog, "data_units_written"),
+    hostReadCommands: numberField(nvmeLog, "host_reads"),
+    hostWriteCommands: numberField(nvmeLog, "host_writes"),
+    controllerBusyMinutes: numberField(nvmeLog, "controller_busy_time"),
+    warningTemperatureTimeMinutes: numberField(nvmeLog, "warning_temp_time"),
+    criticalTemperatureTimeMinutes: numberField(nvmeLog, "critical_comp_time"),
+    errorLogEntries: numberField(nvmeLog, "num_err_log_entries"),
+    attributes: mapSmartAttributes(recordField(record, "ata_smart_attributes", "table")),
+    selfTests: mapSmartSelfTests(recordField(record, "ata_smart_self_test_log", "standard", "table")),
     message: stringField(record, "smartctl", "exit_status") ?? null
   };
+}
+
+function celsiusTemperature(value: number | null): number | null {
+  return value !== null && value > 200 ? Math.round(value - 273.15) : value;
+}
+
+function mapSmartAttributes(value: unknown): SystemSmartAttribute[] {
+  return recordsFrom(value).map((attribute) => {
+    const raw = asRecord(recordField(attribute, "raw"));
+    const id = numberField(attribute, "id");
+    return {
+      id,
+      name: stringField(attribute, "name") ?? (id === null ? "SMART attribute" : `SMART ${id}`),
+      current: numberField(attribute, "value"),
+      worst: numberField(attribute, "worst"),
+      threshold: numberField(attribute, "thresh"),
+      raw: stringField(raw, "string") ?? stringFromNumberField(raw, "value"),
+      flags: stringField(asRecord(recordField(attribute, "flags")), "string"),
+      whenFailed: stringField(attribute, "when_failed")
+    };
+  });
+}
+
+function mapSmartSelfTests(value: unknown): SystemSmartSelfTest[] {
+  return recordsFrom(value).map((test) => ({
+    number: numberField(test, "num"),
+    type: stringField(asRecord(recordField(test, "type")), "string"),
+    status: stringField(asRecord(recordField(test, "status")), "string"),
+    remainingPercent: numberField(test, "remaining_percent"),
+    lifetimeHours: numberField(test, "lifetime_hours"),
+    firstErrorLba: numberField(test, "lba")
+  }));
 }
 
 function mapStorageDisk(
@@ -614,8 +701,20 @@ function mapStorageDisk(
     sizeBytes: numberField(device, "size"),
     mountpoints: mountpointsFrom(device),
     partitions,
-    smart: smartByDevice.get(path) ?? smartByDevice.get(name) ?? unknownSmart()
+    smart: smartSummaryForDisk(path, name, smartByDevice)
   };
+}
+
+function smartSummaryForDisk(
+  path: string,
+  name: string,
+  smartByDevice: Map<string, SystemSmartSummary>
+): SystemSmartSummary {
+  const nvmeControllerPath = path.match(/^\/dev\/(nvme\d+)n\d+$/u)?.[1];
+  return smartByDevice.get(path)
+    ?? smartByDevice.get(name)
+    ?? (nvmeControllerPath ? smartByDevice.get(`/dev/${nvmeControllerPath}`) : undefined)
+    ?? unknownSmart();
 }
 
 function mapStoragePartition(
@@ -729,9 +828,32 @@ function storageMetrics(
 function unknownSmart(): SystemSmartSummary {
   return {
     health: "unknown",
+    available: null,
+    enabled: null,
+    protocol: null,
+    firmwareVersion: null,
     temperatureCelsius: null,
+    temperatureMinCelsius: null,
+    temperatureMaxCelsius: null,
     powerOnHours: null,
+    powerCycleCount: null,
     errorCount: null,
+    selfTestStatus: null,
+    percentageUsed: null,
+    availableSparePercent: null,
+    availableSpareThresholdPercent: null,
+    unsafeShutdowns: null,
+    criticalWarning: null,
+    dataUnitsRead: null,
+    dataUnitsWritten: null,
+    hostReadCommands: null,
+    hostWriteCommands: null,
+    controllerBusyMinutes: null,
+    warningTemperatureTimeMinutes: null,
+    criticalTemperatureTimeMinutes: null,
+    errorLogEntries: null,
+    attributes: [],
+    selfTests: [],
     message: null
   };
 }
@@ -824,6 +946,11 @@ function numberField(record: Record<string, unknown> | null, ...keys: string[]):
   return null;
 }
 
+function stringFromNumberField(record: Record<string, unknown> | null, ...keys: string[]): string | null {
+  const value = numberField(record, ...keys);
+  return value === null ? null : String(value);
+}
+
 function booleanField(record: Record<string, unknown> | null, ...keys: string[]): boolean | null {
   const value = recordField(record, ...keys);
   return typeof value === "boolean" ? value : null;
@@ -837,6 +964,10 @@ function stringArrayField(record: Record<string, unknown> | null, ...keys: strin
 }
 
 function booleanFromNumberField(record: Record<string, unknown>, key: string): boolean | null {
+  const raw = recordField(record, key);
+  if (typeof raw === "boolean") {
+    return raw;
+  }
   const value = numberField(record, key);
   return value === null ? null : value !== 0;
 }

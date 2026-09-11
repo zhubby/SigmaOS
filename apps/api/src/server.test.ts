@@ -947,9 +947,42 @@ describe("API server", () => {
     const commandRunner = storageCommandRunner({
       smartSdb: JSON.stringify({
         smart_status: { passed: false },
-        temperature: { current: 42 },
+        smart_support: { available: true, enabled: true },
+        device: { protocol: "ATA" },
+        firmware_version: "FW-2026",
+        temperature: { current: 42, min: 18, max: 59 },
         power_on_time: { hours: 20_100 },
-        ata_smart_error_log: { summary: { count: 3 } }
+        power_cycle_count: 321,
+        ata_smart_data: { self_test: { status: { string: "Completed without error" } } },
+        ata_smart_error_log: { summary: { count: 3 } },
+        ata_smart_attributes: {
+          table: [
+            {
+              id: 5,
+              name: "Reallocated_Sector_Ct",
+              value: 98,
+              worst: 97,
+              thresh: 10,
+              when_failed: "",
+              flags: { string: "PO--CK" },
+              raw: { value: 2, string: "2" }
+            }
+          ]
+        },
+        ata_smart_self_test_log: {
+          standard: {
+            table: [
+              {
+                num: 1,
+                type: { string: "Short offline" },
+                status: { string: "Completed without error" },
+                remaining_percent: 0,
+                lifetime_hours: 20_000,
+                lba: null
+              }
+            ]
+          }
+        }
       })
     });
     const server = await buildServer({ config: testConfig(tempDir), db, system: { commandRunner } });
@@ -994,12 +1027,112 @@ describe("API server", () => {
             path: "/dev/sdb",
             smart: expect.objectContaining({
               health: "failed",
+              available: true,
+              enabled: true,
+              protocol: "ATA",
+              firmwareVersion: "FW-2026",
               temperatureCelsius: 42,
+              temperatureMinCelsius: 18,
+              temperatureMaxCelsius: 59,
               powerOnHours: 20100,
-              errorCount: 3
+              powerCycleCount: 321,
+              errorCount: 3,
+              selfTestStatus: "Completed without error",
+              attributes: [
+                expect.objectContaining({ id: 5, name: "Reallocated_Sector_Ct", current: 98, raw: "2", flags: "PO--CK" })
+              ],
+              selfTests: [
+                expect.objectContaining({ number: 1, type: "Short offline", lifetimeHours: 20000 })
+              ]
             })
           })
         ]),
+        issues: []
+      }
+    });
+    await server.close();
+  });
+
+  it("maps NVMe controller SMART data to its namespace disk", async () => {
+    const commandRunner = new FakeSystemCommandRunner({
+      "lsblk --json --bytes --output NAME,KNAME,PATH,TYPE,SIZE,MODEL,SERIAL,TRAN,ROTA,FSTYPE,LABEL,UUID,MOUNTPOINTS,PKNAME": JSON.stringify({
+        blockdevices: [
+          {
+            name: "nvme0n1",
+            path: "/dev/nvme0n1",
+            type: "disk",
+            size: 512_000,
+            model: "NVMe Disk",
+            serial: "nvme-a",
+            tran: "nvme",
+            rota: false,
+            mountpoints: []
+          }
+        ]
+      }),
+      "findmnt --json --bytes --output SOURCE,TARGET,FSTYPE,SIZE,USED,AVAIL,USE%": JSON.stringify({ filesystems: [] }),
+      "mdadm --detail --scan": "",
+      "smartctl --scan-open --json": JSON.stringify({
+        devices: [{ name: "/dev/nvme0", type: "nvme", protocol: "NVMe" }]
+      }),
+      "smartctl --all --json -d nvme /dev/nvme0": JSON.stringify({
+        smart_status: { passed: true },
+        smart_support: { available: true, enabled: true },
+        device: { protocol: "NVMe" },
+        firmware_version: "NVME-1",
+        temperature: { current: 318 },
+        power_on_time: { hours: 6260 },
+        power_cycle_count: 839,
+        nvme_smart_health_information_log: {
+          available_spare: 100,
+          available_spare_threshold: 10,
+          percentage_used: 4,
+          data_units_read: 40_738_318,
+          data_units_written: 51_196_721,
+          host_reads: 560_796_155,
+          host_writes: 2_010_927_049,
+          controller_busy_time: 2700,
+          unsafe_shutdowns: 33,
+          media_errors: 0,
+          num_err_log_entries: 1,
+          critical_warning: 0,
+          warning_temp_time: 2,
+          critical_comp_time: 0
+        }
+      })
+    });
+    const server = await buildServer({ config: testConfig(tempDir), db, system: { commandRunner } });
+    const response = await server.inject({ method: "GET", url: "/api/system/storage" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      storage: {
+        metrics: { smartPassed: 1, smartUnknown: 0 },
+        disks: [
+          expect.objectContaining({
+            path: "/dev/nvme0n1",
+            rotational: false,
+            smart: expect.objectContaining({
+              health: "passed",
+              protocol: "NVMe",
+              firmwareVersion: "NVME-1",
+              temperatureCelsius: 45,
+              powerOnHours: 6260,
+              percentageUsed: 4,
+              availableSparePercent: 100,
+              availableSpareThresholdPercent: 10,
+              unsafeShutdowns: 33,
+              hostReadCommands: 560796155,
+              hostWriteCommands: 2010927049,
+              controllerBusyMinutes: 2700,
+              warningTemperatureTimeMinutes: 2,
+              criticalTemperatureTimeMinutes: 0,
+              errorCount: 0,
+              errorLogEntries: 1,
+              criticalWarning: 0
+            })
+          })
+        ],
         issues: []
       }
     });
