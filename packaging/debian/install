@@ -11,6 +11,7 @@ package-lock.json usr/lib/sigmaos/
 packaging/etc/config.toml etc/sigmaos/
 packaging/scripts/sigmaos-first-boot.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-nginx.sh usr/lib/sigmaos/scripts/
+packaging/scripts/sigmaos-configure-locale.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-refresh-groups.sh usr/lib/sigmaos/scripts/
 packaging/nginx/sigmaos.conf usr/share/sigmaos/nginx/
 packaging/systemd/*.service lib/systemd/system/

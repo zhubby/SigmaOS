@@ -13,6 +13,9 @@ if [ "$1" = "configure" ]; then
   install -d -o sigmaos -g sigmaos -m 0755 /srv/nas /srv/iso
   chown -R sigmaos:sigmaos /var/lib/sigmaos
 
+  SIGMAOS_LOCALE=${SIGMAOS_LOCALE:-C.UTF-8} \
+    /usr/lib/sigmaos/scripts/sigmaos-configure-locale.sh
+
   if command -v systemctl >/dev/null 2>&1; then
     systemd-tmpfiles --create sigmaos.conf || true
 

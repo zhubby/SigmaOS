@@ -11,6 +11,7 @@ SIGMAOS_NODE_MIRROR=${SIGMAOS_NODE_MIRROR:-https://mirrors.aliyun.com/nodejs-rel
 SIGMAOS_NODE_VERSION=${SIGMAOS_NODE_VERSION:-22.23.2}
 SIGMAOS_NPM_REGISTRY=${SIGMAOS_NPM_REGISTRY:-https://registry.npmmirror.com}
 SIGMAOS_APT_BACKUP_DIR=${SIGMAOS_APT_BACKUP_DIR:-/var/backups/sigmaos-apt}
+SIGMAOS_LOCALE=${SIGMAOS_LOCALE:-C.UTF-8}
 NGINX_ENABLED=${SIGMAOS_ENABLE_NGINX:-1}
 DOCKER_ENABLED=${SIGMAOS_ENABLE_DOCKER:-0}
 VM_ENABLED=${SIGMAOS_ENABLE_VM:-0}
@@ -105,6 +106,7 @@ esac
 [ -n "$SIGMAOS_NODE_VERSION" ] || die "SIGMAOS_NODE_VERSION must not be empty"
 [ -n "$SIGMAOS_NPM_REGISTRY" ] || die "SIGMAOS_NPM_REGISTRY must not be empty"
 [ -n "$SIGMAOS_APT_BACKUP_DIR" ] || die "SIGMAOS_APT_BACKUP_DIR must not be empty"
+[ -n "$SIGMAOS_LOCALE" ] || die "SIGMAOS_LOCALE must not be empty"
 
 case "$NGINX_ENABLED" in
   0|1) ;;
@@ -210,6 +212,9 @@ install_node_22() {
 }
 
 configure_domestic_apt_mirrors
+
+SIGMAOS_LOCALE="$SIGMAOS_LOCALE" \
+  "$ROOT_DIR/packaging/scripts/sigmaos-configure-locale.sh"
 
 if [ "$(node_major)" -lt "$NODE_MAJOR_REQUIRED" ] 2>/dev/null || nodejs_from_nodesource || [ ! -x /usr/local/bin/node ]; then
   install_node_22

@@ -69,6 +69,7 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("usr/lib/sigmaos/apps/scheduler/dist/");
     expect(install).toContain("node_modules/* usr/lib/sigmaos/node_modules/");
     expect(install).toContain("packaging/scripts/sigmaos-nginx.sh usr/lib/sigmaos/scripts/");
+    expect(install).toContain("packaging/scripts/sigmaos-configure-locale.sh usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/nginx/sigmaos.conf usr/share/sigmaos/nginx/");
     expect(install).toContain("etc/sigmaos/");
     expect(install).toContain("lib/systemd/system/");
@@ -134,6 +135,7 @@ describe("native packaging artifacts", () => {
 
   it("ships an ARM-friendly host installer", async () => {
     const installer = await readPackagingFile("scripts", "install.sh");
+    const localeScript = await readPackagingFile("scripts", "sigmaos-configure-locale.sh");
     const buildDeb = await readPackagingFile("scripts", "build-deb.sh");
     const rules = await readPackagingFile("debian", "rules");
     const control = await readPackagingFile("debian", "control");
@@ -158,6 +160,10 @@ describe("native packaging artifacts", () => {
     expect(installer).toContain("SIGMAOS_ENABLE_DOCKER");
     expect(installer).toContain("docker-cli");
     expect(installer).toContain("SIGMAOS_ENABLE_VM");
+    expect(installer).toContain("SIGMAOS_LOCALE");
+    expect(localeScript).toContain("AcceptEnv");
+    expect(localeScript).toContain("LC_*");
+    expect(localeScript).toContain("C.UTF-8");
     expect(installer).toContain("Acquire::ForceIPv4=true");
     expect(installer).toContain("Acquire::http::Timeout=30");
     expect(installer).toContain("Acquire::https::Timeout=30");
