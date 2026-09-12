@@ -38,6 +38,7 @@ base = [
   "git",
   "rsync",
   "docker.io",
+  "docker-cli",
   "docker-compose",
   "libvirt-daemon-system",
   "libvirt-clients",

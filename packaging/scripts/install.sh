@@ -56,7 +56,9 @@ install_build_dependencies() {
 install_optional_runtime() {
   runtime_packages=""
   if [ "$DOCKER_ENABLED" = "1" ]; then
-    runtime_packages="$runtime_packages docker.io docker-compose"
+    # docker.io recommends the CLI, but does not pull it when the installer
+    # deliberately disables recommends. Keep the engine and client explicit.
+    runtime_packages="$runtime_packages docker.io docker-cli docker-compose"
   fi
   if [ "$VM_ENABLED" = "1" ]; then
     case "$ARCH" in

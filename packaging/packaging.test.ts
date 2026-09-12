@@ -95,6 +95,7 @@ describe("native packaging artifacts", () => {
     expect(manifest).toContain("nodejs");
     expect(manifest).toContain("sqlite3");
     expect(manifest).toContain("nginx");
+    expect(manifest).toContain("docker-cli");
     expect(manifest).toContain("nginx.service");
     expect(manifest).toContain("git");
     expect(manifest).toContain("sigmaos-share-helper.service");
@@ -129,6 +130,7 @@ describe("native packaging artifacts", () => {
     expect(installer).toContain("sigmaos-first-boot.sh");
     expect(installer).toContain("SIGMAOS_ENABLE_NGINX");
     expect(installer).toContain("SIGMAOS_ENABLE_DOCKER");
+    expect(installer).toContain("docker-cli");
     expect(installer).toContain("SIGMAOS_ENABLE_VM");
     expect(installer).toContain("Acquire::ForceIPv4=true");
     expect(installer).toContain("--force-confold");
