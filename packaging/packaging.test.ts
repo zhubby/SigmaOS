@@ -144,6 +144,8 @@ describe("native packaging artifacts", () => {
     expect(installer).toContain("--force-confold");
     expect(installer).toContain("--reinstall");
     expect(installer).toContain("qemu-system-arm");
+    expect(installer).toContain("net-autostart default");
+    expect(installer).toContain("net-start default");
     expect(installer).toContain("libvirt-daemon-system");
     expect(installer).toContain("sigmaos-nginx.sh");
     expect(installer).toContain("systemctl restart nginx");

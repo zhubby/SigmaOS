@@ -75,6 +75,22 @@ install_optional_runtime() {
   fi
 }
 
+ensure_vm_network() {
+  [ "$VM_ENABLED" = "1" ] || return 0
+  command -v virsh >/dev/null 2>&1 || return 0
+
+  if ! virsh -c qemu:///system net-info default >/dev/null 2>&1; then
+    return 0
+  fi
+
+  virsh -c qemu:///system net-autostart default \
+    || log "warning: could not mark libvirt default network for autostart"
+  if ! virsh -c qemu:///system net-list --name | grep -Fxq default; then
+    virsh -c qemu:///system net-start default \
+      || log "warning: could not start libvirt default network"
+  fi
+}
+
 node_major() {
   if ! command -v node >/dev/null 2>&1; then
     printf '0'
@@ -142,6 +158,7 @@ if command -v systemctl >/dev/null 2>&1; then
         systemctl enable --now "$vm_unit" || true
       fi
     done
+    ensure_vm_network
   fi
   systemctl enable --now \
     sigmaos-share-helper.service \
