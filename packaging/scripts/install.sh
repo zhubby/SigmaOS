@@ -22,6 +22,7 @@ die() {
 
 apt_install() {
   apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=3 \
+    -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
     -o Dpkg::Options::=--force-confold "$@"
 }
 

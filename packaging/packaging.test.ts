@@ -133,6 +133,8 @@ describe("native packaging artifacts", () => {
     expect(installer).toContain("docker-cli");
     expect(installer).toContain("SIGMAOS_ENABLE_VM");
     expect(installer).toContain("Acquire::ForceIPv4=true");
+    expect(installer).toContain("Acquire::http::Timeout=30");
+    expect(installer).toContain("Acquire::https::Timeout=30");
     expect(installer).toContain("--force-confold");
     expect(installer).toContain("qemu-system-arm");
     expect(installer).toContain("libvirt-daemon-system");
