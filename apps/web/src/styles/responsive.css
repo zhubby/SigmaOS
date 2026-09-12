@@ -92,6 +92,42 @@
   }
 }
 
+@media (max-width: 620px) {
+  .management-dialog-backdrop {
+    padding: 10px;
+  }
+
+  .vm-create-dialog {
+    max-height: calc(100dvh - 20px);
+  }
+
+  .vm-create-dialog-header,
+  .vm-create-dialog-body {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .vm-create-field-grid,
+  .vm-create-segmented {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vm-create-dialog-footer {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 11px 14px;
+  }
+
+  .vm-create-dialog-footer > span {
+    white-space: normal;
+  }
+
+  .vm-create-dialog-footer > div {
+    display: grid;
+    grid-template-columns: 1fr 1.3fr;
+  }
+}
+
 @media (max-width: 1180px) {
   .workspace-grid {
     grid-template-columns: 1fr;
