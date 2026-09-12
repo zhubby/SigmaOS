@@ -5,6 +5,7 @@ ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 ARCH=$(dpkg --print-architecture 2>/dev/null || true)
 NODE_MAJOR_REQUIRED=22
 NODE_SOURCE_FINGERPRINT=6F71F525282841EEDAF851B42F59B5F99B1BE0B4
+NGINX_ENABLED=${SIGMAOS_ENABLE_NGINX:-1}
 DEBIAN_FRONTEND=noninteractive
 export DEBIAN_FRONTEND
 
@@ -23,6 +24,11 @@ die() {
 case "$ARCH" in
   arm64|amd64) ;;
   *) die "unsupported Debian architecture: ${ARCH:-unknown}; use arm64 or amd64" ;;
+esac
+
+case "$NGINX_ENABLED" in
+  0|1) ;;
+  *) die "SIGMAOS_ENABLE_NGINX must be 0 or 1" ;;
 esac
 
 install_build_dependencies() {
@@ -97,4 +103,17 @@ if command -v systemctl >/dev/null 2>&1; then
     sigmaos-health.timer
 fi
 
-log "installed successfully; API listens on http://127.0.0.1:3010"
+if [ "$NGINX_ENABLED" = "1" ]; then
+  log "installing Nginx reverse proxy"
+  apt-get install -y --no-install-recommends nginx
+  SIGMAOS_NGINX_PORT=${SIGMAOS_NGINX_PORT:-80} \
+    /usr/lib/sigmaos/scripts/sigmaos-nginx.sh
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl enable nginx
+    systemctl restart nginx
+  fi
+  log "installed successfully; web UI is available on http://<host>:${SIGMAOS_NGINX_PORT:-80}"
+else
+  log "installed successfully; Nginx reverse proxy disabled"
+  log "API listens on http://127.0.0.1:3010"
+fi

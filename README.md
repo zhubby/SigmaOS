@@ -284,7 +284,9 @@ For an `arm64` CM5 (or an `amd64` Debian host), run the host installer from a ch
 sudo SIGMAOS_NAS_ROOT_PATH=/srv/nas packaging/scripts/install.sh
 ```
 
-The installer checks the Debian architecture, installs Node.js 22 from the verified NodeSource repository when needed, installs the native build toolchain, builds the package on the target host, and initializes the first-boot configuration. Building on the target keeps native `better-sqlite3` and `node-pty` binaries compatible with the board. It starts only the SigmaOS API, worker, and share-helper; indexer, scheduler, maintenance, health, and backup timers are enabled for their scheduled runs.
+The installer checks the Debian architecture, installs Node.js 22 from the verified NodeSource repository when needed, installs the native build toolchain, builds the package on the target host, and initializes the first-boot configuration. Building on the target keeps native `better-sqlite3` and `node-pty` binaries compatible with the board. It starts the SigmaOS API, worker, share-helper, and an Nginx reverse proxy on port 80 by default; indexer, scheduler, maintenance, health, and backup timers are enabled for their scheduled runs. The API remains loopback-only and Nginx is the LAN entry point.
+
+Set `SIGMAOS_NGINX_PORT` to choose another listener port, or set `SIGMAOS_ENABLE_NGINX=0` to keep the API loopback-only and skip Nginx installation.
 
 Optional integrations are listed as Debian `Suggests` rather than hard dependencies. Install the host tools you need (for example `git`, `ffmpeg`, `restic`, Samba, or NFS) separately; the core package does not enable those services implicitly.
 

@@ -10,6 +10,8 @@ package.json usr/lib/sigmaos/
 package-lock.json usr/lib/sigmaos/
 packaging/etc/config.toml etc/sigmaos/
 packaging/scripts/sigmaos-first-boot.sh usr/lib/sigmaos/scripts/
+packaging/scripts/sigmaos-nginx.sh usr/lib/sigmaos/scripts/
+packaging/nginx/sigmaos.conf usr/share/sigmaos/nginx/
 packaging/systemd/*.service lib/systemd/system/
 packaging/systemd/*.timer lib/systemd/system/
 packaging/tmpfiles.d/sigmaos.conf usr/lib/tmpfiles.d/

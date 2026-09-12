@@ -58,6 +58,8 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("usr/lib/sigmaos/apps/backup/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/scheduler/dist/");
     expect(install).toContain("node_modules/* usr/lib/sigmaos/node_modules/");
+    expect(install).toContain("packaging/scripts/sigmaos-nginx.sh usr/lib/sigmaos/scripts/");
+    expect(install).toContain("packaging/nginx/sigmaos.conf usr/share/sigmaos/nginx/");
     expect(install).toContain("etc/sigmaos/");
     expect(install).toContain("lib/systemd/system/");
     expect(install).toContain("tmpfiles.d/sigmaos.conf");
@@ -71,6 +73,7 @@ describe("native packaging artifacts", () => {
     expect(control).toContain("nfs-kernel-server");
     expect(control).toContain("minidlna");
     expect(control).toContain("restic");
+    expect(control).toContain("nginx");
     expect(control).not.toMatch(/^Depends:.*samba/m);
     const postrm = await readPackagingFile("debian", "postrm");
     expect(postrm.indexOf("optional-groups.conf")).toBeLessThan(postrm.indexOf("systemctl daemon-reload"));
@@ -87,6 +90,8 @@ describe("native packaging artifacts", () => {
     expect(firstBoot).toContain("[shares]");
     expect(manifest).toContain("nodejs");
     expect(manifest).toContain("sqlite3");
+    expect(manifest).toContain("nginx");
+    expect(manifest).toContain("nginx.service");
     expect(manifest).toContain("git");
     expect(manifest).toContain("sigmaos-share-helper.service");
     expect(manifest).toContain("samba");
@@ -106,6 +111,7 @@ describe("native packaging artifacts", () => {
     expect(buildImage).toContain("sigmaos-backup-daily.timer");
     expect(buildImage).toContain("sigmaos-backup-weekly.timer");
     expect(buildImage).toContain("sigmaos-health.timer");
+    expect(buildImage).toContain("sigmaos-nginx.sh");
     expect(firstBoot).toContain("password_file = \"/etc/sigmaos/restic-password\"");
     expect(firstBoot).not.toContain("restic-password\" =");
   });
@@ -117,7 +123,23 @@ describe("native packaging artifacts", () => {
     expect(installer).toContain("NodeSource signing key fingerprint");
     expect(installer).toContain("packaging/scripts/build-deb.sh");
     expect(installer).toContain("sigmaos-first-boot.sh");
+    expect(installer).toContain("SIGMAOS_ENABLE_NGINX");
+    expect(installer).toContain("sigmaos-nginx.sh");
+    expect(installer).toContain("systemctl restart nginx");
     expect(installer).toContain("systemctl enable --now");
+  });
+
+  it("ships a loopback API reverse proxy for LAN access", async () => {
+    const nginx = await readPackagingFile("nginx", "sigmaos.conf");
+    const nginxScript = await readPackagingFile("scripts", "sigmaos-nginx.sh");
+
+    expect(nginx).toContain("listen __SIGMAOS_NGINX_PORT__;");
+    expect(nginx).toContain("proxy_pass http://127.0.0.1:3010;");
+    expect(nginx).toContain("proxy_set_header Upgrade $http_upgrade;");
+    expect(nginx).toContain("client_max_body_size 4g;");
+    expect(nginxScript).toContain("nginx -t");
+    expect(nginxScript).toContain("enabled_dir=/etc/nginx/sites-enabled");
+    expect(nginxScript).toContain("ln -sfn");
   });
 
   it("ships a constrained root helper for host share configuration", async () => {
