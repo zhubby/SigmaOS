@@ -10,6 +10,7 @@ import {
   Container,
   Cpu,
   Database,
+  FolderOpen,
   HardDrive,
   Info,
   Layers,
@@ -63,6 +64,11 @@ import { SystemNetworkManagementPanel, SystemStorageManagementPanel } from "./Sy
 import { ShareManagementPanel } from "./ShareManagementPanel.js";
 import { applyTerminalOptions, terminalOptions } from "../../lib/terminal-theme.js";
 import { ManagementSkeletonBody, SkeletonBlock } from "./ManagementSkeleton.js";
+import {
+  StorageFilePickerDialog,
+  type StorageFilePickerPool,
+  type StorageFileSelection
+} from "./StorageFilePickerDialog.js";
 
 export type ManagementPanelId = "docker" | "virtualMachines" | "network" | "storage" | "shares";
 
@@ -304,6 +310,8 @@ const MANAGEMENT_PANELS: Record<Exclude<ManagementPanelId, "docker" | "network" 
 export function WorkspaceManagementPanel({
   panel,
   roots,
+  storagePools,
+  selectedStoragePoolId,
   sessionId,
   pendingApprovals,
   dockerOperations,
@@ -316,6 +324,8 @@ export function WorkspaceManagementPanel({
 }: {
   panel: ManagementPanelId;
   roots: NasRoot[];
+  storagePools: StorageFilePickerPool[];
+  selectedStoragePoolId: string;
   sessionId: string | null;
   pendingApprovals: PendingApproval[];
   dockerOperations: DockerOperation[];
@@ -370,9 +380,12 @@ export function WorkspaceManagementPanel({
   if (panel === "virtualMachines") {
     return (
       <VirtualMachineManagementPanel
+        storagePools={storagePools}
+        selectedStoragePoolId={selectedStoragePoolId}
         sessionId={sessionId}
         pendingApprovals={pendingApprovals}
         vmOperations={vmOperations}
+        locale={locale}
         onWorkQueuesChanged={onWorkQueuesChanged}
         onNotifyError={onNotifyError}
         onNotifySuccess={onNotifySuccess}
@@ -514,16 +527,22 @@ export function WorkspaceManagementPanel({
 }
 
 function VirtualMachineManagementPanel({
+  storagePools,
+  selectedStoragePoolId,
   sessionId,
   pendingApprovals,
   vmOperations,
+  locale,
   onWorkQueuesChanged,
   onNotifyError,
   onNotifySuccess
 }: {
+  storagePools: StorageFilePickerPool[];
+  selectedStoragePoolId: string;
   sessionId: string | null;
   pendingApprovals: PendingApproval[];
   vmOperations: VmOperation[];
+  locale: SupportedLocale;
   onWorkQueuesChanged: () => void | Promise<void>;
   onNotifyError: (message: string | null) => void;
   onNotifySuccess: (message: string | null) => void;
@@ -535,6 +554,7 @@ function VirtualMachineManagementPanel({
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [consoleSession, setConsoleSession] = useState<VmConsoleSession | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [isoPickerOpen, setIsoPickerOpen] = useState(false);
   const [form, setForm] = useState({
     name: "",
     vcpu: "2",
@@ -542,6 +562,8 @@ function VirtualMachineManagementPanel({
     diskGiB: "20",
     mediaMode: "iso" as "iso" | "disk",
     isoPath: "",
+    isoRootId: "",
+    isoStoragePoolId: "",
     diskPath: "",
     network: "default"
   });
@@ -599,7 +621,11 @@ function VirtualMachineManagementPanel({
     const proposed = await request("create", form.name.trim(), {
       vcpu: Number(form.vcpu), memoryBytes: Number(form.memoryGiB) * 1024 ** 3,
       diskSizeBytes: Number(form.diskGiB) * 1024 ** 3,
-      ...(form.mediaMode === "iso" ? { isoPath: mediaPath } : { diskPath: mediaPath }),
+      ...(form.mediaMode === "iso" ? {
+        isoPath: mediaPath,
+        isoRootId: form.isoRootId,
+        isoStoragePoolId: form.isoStoragePoolId
+      } : { diskPath: mediaPath }),
       networkName: form.network
     });
     if (proposed) setCreateOpen(false);
@@ -611,6 +637,16 @@ function VirtualMachineManagementPanel({
       network: host?.networkName ?? summary?.networks.find((network) => network.state === "active")?.name ?? "default"
     }));
     setCreateOpen(true);
+  }
+
+  function selectIso(selection: StorageFileSelection) {
+    setForm((current) => ({
+      ...current,
+      isoPath: selection.path,
+      isoRootId: selection.rootId,
+      isoStoragePoolId: selection.storagePoolId
+    }));
+    setIsoPickerOpen(false);
   }
 
   const host = summary?.host;
@@ -761,7 +797,24 @@ function VirtualMachineManagementPanel({
                   <button type="button" role="tab" aria-selected={form.mediaMode === "disk"} className={form.mediaMode === "disk" ? "is-active" : ""} onClick={() => setForm({ ...form, mediaMode: "disk" })}><Database size={15} /><span><strong>{t("workspace.management.virtualMachines.createDiskSource")}</strong><small>{t("workspace.management.virtualMachines.createDiskSourceDetail")}</small></span></button>
                 </div>
                 {form.mediaMode === "iso" ? (
-                  <label className="vm-create-field vm-create-path-field">{t("workspace.management.virtualMachines.createIsoPath")}<input value={form.isoPath} onChange={(event) => setForm({ ...form, isoPath: event.target.value })} placeholder="/srv/iso/installer.iso" required /><small>{t("workspace.management.virtualMachines.createIsoPathHint")}</small></label>
+                  <div className="vm-create-field vm-create-path-field">
+                    <span id="vm-create-iso-label">{t("workspace.management.virtualMachines.createIsoPath")}</span>
+                    <div className="vm-create-file-control">
+                      <input
+                        value={form.isoPath}
+                        readOnly
+                        required
+                        aria-labelledby="vm-create-iso-label"
+                        placeholder={t("workspace.management.virtualMachines.isoPickerPlaceholder")}
+                        onClick={() => setIsoPickerOpen(true)}
+                      />
+                      <button type="button" onClick={() => setIsoPickerOpen(true)}>
+                        <FolderOpen aria-hidden="true" size={15} />
+                        <span>{t("workspace.management.virtualMachines.isoPickerBrowse")}</span>
+                      </button>
+                    </div>
+                    <small>{t("workspace.management.virtualMachines.createIsoPathHint")}</small>
+                  </div>
                 ) : (
                   <label className="vm-create-field vm-create-path-field">{t("workspace.management.virtualMachines.createDiskPath")}<input value={form.diskPath} onChange={(event) => setForm({ ...form, diskPath: event.target.value })} placeholder="/var/lib/sigmaos/vmstore/existing.qcow2" required /><small>{t("workspace.management.virtualMachines.createDiskPathHint")}</small></label>
                 )}
@@ -777,6 +830,15 @@ function VirtualMachineManagementPanel({
             <footer className="vm-create-dialog-footer"><span>{form.name || t("workspace.management.virtualMachines.createReviewPlaceholder")} · {form.vcpu} vCPU · {form.memoryGiB} GiB</span><div><button type="button" onClick={() => setCreateOpen(false)} disabled={pendingAction !== null}>{t("common.actions.cancel")}</button><button type="submit" className="vm-create-submit" disabled={pendingAction !== null}>{pendingAction === `create:${form.name.trim()}` ? t("common.states.loading") : t("workspace.management.virtualMachines.create")}</button></div></footer>
           </form>
         </div>
+      ) : null}
+      {isoPickerOpen ? (
+        <StorageFilePickerDialog
+          pools={storagePools}
+          initialPoolId={form.isoStoragePoolId || selectedStoragePoolId}
+          locale={locale}
+          onCancel={() => setIsoPickerOpen(false)}
+          onSelect={selectIso}
+        />
       ) : null}
       {consoleSession ? <DockerConsoleDialog session={{ id: consoleSession.id, operationId: consoleSession.operationId, containerId: consoleSession.domainName, shell: "", expiresAt: consoleSession.expiresAt, websocketUrl: consoleSession.websocketUrl }} onClose={() => setConsoleSession(null)} /> : null}
     </section>

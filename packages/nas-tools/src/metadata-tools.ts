@@ -142,6 +142,12 @@ export function inferMimeType(filePath: string): string {
       return "video/quicktime";
     case ".pdf":
       return "application/pdf";
+    case ".docx":
+      return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    case ".xlsx":
+      return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    case ".pptx":
+      return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
     case ".zip":
       return "application/zip";
     case ".gz":
@@ -184,7 +190,16 @@ function isSpecialTextFileName(fileName: string): boolean {
   );
 }
 
-export type FilePreviewKind = "text" | "image" | "audio" | "video" | "pdf" | "unsupported";
+export type FilePreviewKind =
+  | "text"
+  | "image"
+  | "audio"
+  | "video"
+  | "pdf"
+  | "document"
+  | "spreadsheet"
+  | "presentation"
+  | "unsupported";
 
 export function inferPreviewKind(mimeType: string): FilePreviewKind {
   if (mimeType.startsWith("text/")) {
@@ -201,6 +216,15 @@ export function inferPreviewKind(mimeType: string): FilePreviewKind {
   }
   if (mimeType === "application/pdf") {
     return "pdf";
+  }
+  if (mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+    return "document";
+  }
+  if (mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
+    return "spreadsheet";
+  }
+  if (mimeType === "application/vnd.openxmlformats-officedocument.presentationml.presentation") {
+    return "presentation";
   }
   if (mimeType === "application/octet-stream") {
     return "text";

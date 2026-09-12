@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -6,6 +6,9 @@ import { createSession, ensureNasRoots, openSigmaDb, type SigmaDatabase } from "
 import type { SigmaConfig } from "@sigmaos/shared";
 import { buildServer } from "../server.js";
 import { vmQemuCommand, type VmCommandRunner } from "../lib/vm-service.js";
+import type { SystemCommandRunner } from "../lib/system-management.js";
+
+const TEST_STORAGE_POOL_ID = "/dev/md/test-pool";
 
 let tempDir: string;
 let rootDir: string;
@@ -114,6 +117,121 @@ describe("VM routes", () => {
     await server.close();
   });
 
+  it("resolves ISO files selected from a mounted storage pool", async () => {
+    const calls: string[][] = [];
+    const poolDir = path.join(rootDir, "pool");
+    const isoDir = path.join(poolDir, "images");
+    const isoPath = path.join(isoDir, "installer.iso");
+    await mkdir(isoDir, { recursive: true });
+    await writeFile(isoPath, "iso-image");
+    const session = createSession(db, { rootId: "local", currentPath: "." });
+    const server = await buildServer({
+      config: testConfig(),
+      db,
+      vm: { commandRunner: vmRunner(calls), kvmAvailable: true },
+      system: { commandRunner: storagePoolRunner(poolDir) }
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/vms/proposals",
+      payload: {
+        sessionId: session.id,
+        action: "create",
+        domainName: "new-vm",
+        isoPath: "pool/images/installer.iso",
+        isoRootId: "local",
+        isoStoragePoolId: TEST_STORAGE_POOL_ID
+      }
+    });
+
+    expect(response.statusCode).toBe(202);
+    const resolvedIsoPath = await realpath(isoPath);
+    expect(response.json().approval.proposal[0]).toMatchObject({
+      isoPath: resolvedIsoPath,
+      isoRootId: "local",
+      isoStoragePoolId: TEST_STORAGE_POOL_ID,
+      isoSourcePath: "pool/images/installer.iso"
+    });
+    const applied = await server.inject({
+      method: "POST",
+      url: `/api/approvals/${response.json().approval.id as string}/approve`
+    });
+    expect(applied.statusCode, JSON.stringify(applied.json())).toBe(202);
+    expect(calls.some((args) => args.includes("--cdrom") && args.includes(resolvedIsoPath))).toBe(true);
+    await server.close();
+  });
+
+  it("rejects non-ISO files selected from a storage pool", async () => {
+    const poolDir = path.join(rootDir, "pool");
+    await mkdir(poolDir);
+    await writeFile(path.join(poolDir, "notes.txt"), "not an image");
+    const session = createSession(db, { rootId: "local", currentPath: "." });
+    const server = await buildServer({
+      config: testConfig(),
+      db,
+      vm: { commandRunner: vmRunner(), kvmAvailable: true },
+      system: { commandRunner: storagePoolRunner(poolDir) }
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/vms/proposals",
+      payload: {
+        sessionId: session.id,
+        action: "create",
+        domainName: "new-vm",
+        isoPath: "pool/notes.txt",
+        isoRootId: "local",
+        isoStoragePoolId: TEST_STORAGE_POOL_ID
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toContain("ISO file");
+    await server.close();
+  });
+
+  it("revalidates a storage-pool ISO before applying an approval", async () => {
+    const poolDir = path.join(rootDir, "pool");
+    const isoPath = path.join(poolDir, "installer.iso");
+    const outsideIsoPath = path.join(rootDir, "outside.iso");
+    await mkdir(poolDir);
+    await writeFile(isoPath, "iso-image");
+    await writeFile(outsideIsoPath, "outside-image");
+    const session = createSession(db, { rootId: "local", currentPath: "." });
+    const server = await buildServer({
+      config: testConfig(),
+      db,
+      vm: { commandRunner: vmRunner(), kvmAvailable: true },
+      system: { commandRunner: storagePoolRunner(poolDir) }
+    });
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/vms/proposals",
+      payload: {
+        sessionId: session.id,
+        action: "create",
+        domainName: "new-vm",
+        isoPath: "pool/installer.iso",
+        isoRootId: "local",
+        isoStoragePoolId: TEST_STORAGE_POOL_ID
+      }
+    });
+    expect(response.statusCode).toBe(202);
+
+    await unlink(isoPath);
+    await symlink(outsideIsoPath, isoPath);
+    const applied = await server.inject({
+      method: "POST",
+      url: `/api/approvals/${response.json().approval.id as string}/approve`
+    });
+
+    expect(applied.statusCode).toBe(400);
+    expect(applied.json().error).toContain("outside the selected storage pool");
+    await server.close();
+  });
+
   it("rejects option-like network names", async () => {
     const session = createSession(db, { rootId: "local", currentPath: "." });
     const server = await buildServer({ config: testConfig(), db, vm: { commandRunner: vmRunner(), kvmAvailable: true } });
@@ -158,6 +276,35 @@ function vmRunner(calls: string[][] = []): VmCommandRunner {
       if (command === "free") return "Mem: 100 0 0 0 0 80";
       if (command === "df") return "size avail\n100000 50000";
       return "";
+    }
+  };
+}
+
+function storagePoolRunner(target: string): SystemCommandRunner {
+  return {
+    async run(command, args) {
+      if (command === "lsblk") return JSON.stringify({ blockdevices: [] });
+      if (command === "findmnt") {
+        return JSON.stringify({
+          filesystems: [{
+            source: TEST_STORAGE_POOL_ID,
+            target,
+            fstype: "ext4",
+            size: 1024,
+            used: 128,
+            avail: 896,
+            "use%": "12.5%"
+          }]
+        });
+      }
+      if (command === "mdadm" && args[0] === "--detail" && args[1] === "--scan") {
+        return `ARRAY ${TEST_STORAGE_POOL_ID} name=test-pool UUID=test-pool`;
+      }
+      if (command === "mdadm" && args[0] === "--detail") {
+        return ["Name : test-pool", "Raid Level : raid1", "State : clean", "UUID : test-pool"].join("\n");
+      }
+      if (command === "smartctl") return JSON.stringify({ devices: [] });
+      return JSON.stringify({});
     }
   };
 }

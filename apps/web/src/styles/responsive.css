@@ -126,6 +126,49 @@
     display: grid;
     grid-template-columns: 1fr 1.3fr;
   }
+
+  .vm-create-file-control {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .storage-file-picker-backdrop {
+    padding: 10px;
+  }
+
+  .storage-file-picker {
+    height: calc(100dvh - 20px);
+    max-height: calc(100dvh - 20px);
+  }
+
+  .storage-file-picker-header,
+  .storage-file-picker-toolbar,
+  .storage-file-picker-breadcrumbs,
+  .storage-file-picker-footer {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .storage-file-picker-file-meta {
+    display: none;
+  }
+
+  .storage-file-picker-row {
+    grid-template-columns: 30px minmax(0, 1fr) 20px;
+  }
+
+  .storage-file-picker-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .storage-file-picker-footer > span {
+    white-space: normal;
+  }
+
+  .storage-file-picker-footer > div {
+    display: grid;
+    grid-template-columns: 1fr 1.3fr;
+  }
 }
 
 @media (max-width: 1180px) {

@@ -38,6 +38,21 @@ describe("metadata tools", () => {
     }
   });
 
+  it("recognizes modern Office documents as dedicated preview kinds", () => {
+    expect(inferMimeType("report.docx")).toBe(
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    );
+    expect(inferMimeType("budget.xlsx")).toBe(
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    expect(inferMimeType("roadmap.pptx")).toBe(
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    );
+    expect(inferPreviewKind(inferMimeType("report.docx"))).toBe("document");
+    expect(inferPreviewKind(inferMimeType("budget.xlsx"))).toBe("spreadsheet");
+    expect(inferPreviewKind(inferMimeType("roadmap.pptx"))).toBe("presentation");
+  });
+
   it("allows generic octet-stream files to use text preview", () => {
     expect(inferMimeType("unknown.bin")).toBe("application/octet-stream");
     expect(inferPreviewKind(inferMimeType("unknown.bin"))).toBe("text");

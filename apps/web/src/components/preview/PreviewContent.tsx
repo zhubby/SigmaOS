@@ -4,10 +4,12 @@ import {
   AlertTriangle,
   File,
   FileText,
+  FileSpreadsheet,
   Folder,
   Image as ImageIcon,
   Music,
   PanelRight,
+  Presentation,
   Play,
   RefreshCw,
   Video
@@ -33,6 +35,7 @@ import {
   type DelimitedTablePreview,
   type TextPreviewDescriptor
 } from "../../preview-utils.js";
+import { isOfficePreviewKind, OfficePreview } from "./OfficePreview.js";
 
 export function PreviewContent({
   blobUrl,
@@ -115,6 +118,9 @@ export function PreviewContent({
   }
   if (meta.previewKind === "pdf") {
     return <iframe className="pdf-preview" title={meta.name} src={blobUrl} />;
+  }
+  if (isOfficePreviewKind(meta.previewKind)) {
+    return <OfficePreview blobUrl={blobUrl} meta={meta} />;
   }
   return (
     <div className="preview-empty">
@@ -287,6 +293,15 @@ export function previewIcon(kind: FilePreviewKind) {
   }
   if (kind === "pdf") {
     return <FileText aria-hidden="true" size={15} />;
+  }
+  if (kind === "document") {
+    return <FileText aria-hidden="true" size={15} />;
+  }
+  if (kind === "spreadsheet") {
+    return <FileSpreadsheet aria-hidden="true" size={15} />;
+  }
+  if (kind === "presentation") {
+    return <Presentation aria-hidden="true" size={15} />;
   }
   if (kind === "directory") {
     return <Folder aria-hidden="true" size={15} />;

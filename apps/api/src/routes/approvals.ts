@@ -40,7 +40,8 @@ import {
 } from "../lib/share-service.js";
 import { applyStoragePoolOperation } from "../lib/storage-service.js";
 import { StorageScopeError, resolveStoragePoolScope, validateStoragePoolProposal } from "../lib/storage-scope.js";
-import { applyVmOperation, safeVmMessage } from "../lib/vm-service.js";
+import { safeVmMessage } from "../lib/vm-service.js";
+import { applyApprovedVmOperation } from "./vms.js";
 
 export function registerApprovalRoutes(server: FastifyInstance, context: ApiRouteContext): void {
   const { config, db, system } = context;
@@ -268,8 +269,7 @@ export function registerApprovalRoutes(server: FastifyInstance, context: ApiRout
         return;
       }
       try {
-        const metadata = await applyVmOperation(config, operation, proposal, context.vm);
-        const applied = updateVmOperationStatus(db, operation.id, "applied", { ...metadata, appliedAt: new Date().toISOString() });
+        const applied = await applyApprovedVmOperation(context, approval.id);
         updateApprovalStatus(db, approval.id, "applied", ["approved"]);
         updateJobStatus(db, approval.jobId, "completed", null, ["waiting_approval"]);
         appendEvent(db, { sessionId: approval.sessionId, jobId: approval.jobId, type: "job.completed", payload: { jobId: approval.jobId, approvalId: approval.id, vmOperation: applied } });

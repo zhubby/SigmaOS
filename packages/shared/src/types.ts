@@ -1069,6 +1069,9 @@ export interface VmOperationProposal {
   memoryBytes?: number;
   diskSizeBytes?: number;
   isoPath?: string;
+  isoRootId?: string;
+  isoStoragePoolId?: string;
+  isoSourcePath?: string;
   diskPath?: string;
   networkName?: string;
   risk: "medium" | "high";

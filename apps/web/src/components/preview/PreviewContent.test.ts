@@ -43,3 +43,36 @@ describe("PreviewContent Markdown links", () => {
     expect(html).not.toContain('href="./AGENTS.md" target="_blank"');
   });
 });
+
+describe("PreviewContent Office files", () => {
+  it.each([
+    ["document", "report.docx"],
+    ["spreadsheet", "budget.xlsx"],
+    ["presentation", "roadmap.pptx"]
+  ] as const)("mounts the %s renderer for %s", (previewKind, name) => {
+    const html = renderToStaticMarkup(
+      createElement(PreviewContent, {
+        blobUrl: `/api/files/blob?path=${name}`,
+        videoUrl: "",
+        rootId: "root-1",
+        loading: false,
+        meta: {
+          ...markdownMeta,
+          path: name,
+          name,
+          mimeType: "application/octet-stream",
+          previewKind
+        },
+        error: null,
+        textPreview: null,
+        previewFileSizeLimitBytes: 64 * 1024,
+        locale: "en",
+        onOpenWorkspacePath: vi.fn()
+      })
+    );
+
+    expect(html).toContain(`office-${previewKind}-preview`);
+    expect(html).toContain("preview.officeLoading");
+    expect(html).not.toContain("cannot be previewed inline");
+  });
+});

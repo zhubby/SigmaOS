@@ -2496,6 +2496,23 @@ describe("API server", () => {
     await server.close();
   });
 
+  it.each([
+    ["report.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "document"],
+    ["budget.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "spreadsheet"],
+    ["roadmap.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "presentation"]
+  ] as const)("returns Office preview metadata for %s", async (name, mimeType, previewKind) => {
+    await writeFile(path.join(rootDir, name), "placeholder");
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    const response = await server.inject({
+      method: "GET",
+      url: `/api/files/meta?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=${name}`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ meta: { name, mimeType, previewKind } });
+    await server.close();
+  });
+
   it("caps text previews", async () => {
     await writeFile(path.join(rootDir, "long.txt"), "abcdef");
     const server = await buildServer({ config: testConfig(tempDir), db });

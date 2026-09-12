@@ -1149,6 +1149,8 @@ export function WorkspacePane({
             <WorkspaceManagementPanel
               panel={activePanel}
               roots={roots}
+              storagePools={storagePools}
+              selectedStoragePoolId={selectedStoragePoolId}
               sessionId={sessionId}
               pendingApprovals={pendingApprovals}
               dockerOperations={dockerOperations}

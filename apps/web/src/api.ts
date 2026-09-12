@@ -200,7 +200,17 @@ export interface AgentEvent {
   createdAt: string;
 }
 
-export type FilePreviewKind = "directory" | "text" | "image" | "audio" | "video" | "pdf" | "unsupported";
+export type FilePreviewKind =
+  | "directory"
+  | "text"
+  | "image"
+  | "audio"
+  | "video"
+  | "pdf"
+  | "document"
+  | "spreadsheet"
+  | "presentation"
+  | "unsupported";
 
 export type ModelProviderName = SharedModelProviderName;
 export type ModelProviderKind = ModelProviderName;
@@ -390,6 +400,8 @@ export async function proposeVmOperation(input: {
   memoryBytes?: number;
   diskSizeBytes?: number;
   isoPath?: string;
+  isoRootId?: string;
+  isoStoragePoolId?: string;
   diskPath?: string;
   networkName?: string;
 }): Promise<VmProposalResult> {
