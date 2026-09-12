@@ -9,3 +9,13 @@ override_dh_auto_build:
 
 override_dh_auto_test:
 	npm test
+
+# The package is assembled from debian/install. The repository's `make install`
+# target is for developer dependency setup and must not run during packaging.
+override_dh_auto_install:
+	:
+
+# Services are started by the installer after first-boot configuration. Timers
+# and units must not be enabled implicitly by debhelper during package install.
+override_dh_installsystemd:
+	dh_installsystemd --no-enable --no-start

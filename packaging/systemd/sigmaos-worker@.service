@@ -1,6 +1,6 @@
 [Unit]
 Description=SigmaOS agent worker instance %i
-Documentation=/usr/share/doc/sigmaos/README.md
+Documentation=file:///usr/share/doc/sigmaos/README.md
 After=sigmaos-api.service
 Requires=sigmaos-api.service
 

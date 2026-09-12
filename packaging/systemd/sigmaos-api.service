@@ -1,6 +1,6 @@
 [Unit]
 Description=SigmaOS API and web UI
-Documentation=/usr/share/doc/sigmaos/README.md
+Documentation=file:///usr/share/doc/sigmaos/README.md
 After=network-online.target local-fs.target
 Wants=network-online.target
 
@@ -8,7 +8,6 @@ Wants=network-online.target
 Type=simple
 User=sigmaos
 Group=sigmaos
-SupplementaryGroups=libvirt docker
 Environment=SIGMAOS_CONFIG=/etc/sigmaos/config.toml
 Environment=SIGMAOS_WEB_DIST=/usr/lib/sigmaos/apps/web/dist
 WorkingDirectory=/var/lib/sigmaos
@@ -20,7 +19,7 @@ RestartSec=3
 ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/var/lib/sigmaos /var/log/sigmaos /srv/nas /var/lib/sigmaos/vmstore /srv/iso
-BindReadOnlyPaths=/run/libvirt/libvirt-sock
+BindReadOnlyPaths=-/run/libvirt/libvirt-sock
 NoNewPrivileges=yes
 PrivateTmp=yes
 CapabilityBoundingSet=

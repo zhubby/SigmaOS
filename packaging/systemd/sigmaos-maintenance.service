@@ -1,6 +1,6 @@
 [Unit]
 Description=SigmaOS SQLite and trash maintenance
-Documentation=/usr/share/doc/sigmaos/README.md
+Documentation=file:///usr/share/doc/sigmaos/README.md
 After=local-fs.target
 RequiresMountsFor=/srv/nas /srv/backup
 

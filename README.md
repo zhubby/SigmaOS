@@ -276,6 +276,18 @@ SIGMAOS_DEB=/absolute/path/to/sigmaos_0.1.0_arm64.deb make appliance
 
 See [`packaging/appliance/README.md`](packaging/appliance/README.md) for image-builder inputs. Tagged releases are configured to publish `amd64` and `arm64` Debian artifacts with checksums through GitHub Actions.
 
+### Install on a Raspberry Pi OS or Debian host
+
+For an `arm64` CM5 (or an `amd64` Debian host), run the host installer from a checkout as root:
+
+```bash
+sudo SIGMAOS_NAS_ROOT_PATH=/srv/nas packaging/scripts/install.sh
+```
+
+The installer checks the Debian architecture, installs Node.js 22 from the verified NodeSource repository when needed, installs the native build toolchain, builds the package on the target host, and initializes the first-boot configuration. Building on the target keeps native `better-sqlite3` and `node-pty` binaries compatible with the board. It starts only the SigmaOS API, worker, and share-helper; indexer, scheduler, maintenance, health, and backup timers are enabled for their scheduled runs.
+
+Optional integrations are listed as Debian `Suggests` rather than hard dependencies. Install the host tools you need (for example `git`, `ffmpeg`, `restic`, Samba, or NFS) separately; the core package does not enable those services implicitly.
+
 ## Repository layout
 
 ```text

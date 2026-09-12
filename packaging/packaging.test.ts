@@ -38,6 +38,10 @@ describe("native packaging artifacts", () => {
     await expect(readPackagingFile("systemd", "sigmaos-maintenance.timer")).resolves.toContain(
       "OnCalendar=daily"
     );
+    await expect(readPackagingFile("debian", "postinst")).resolves.toContain("optional-groups.conf");
+    await expect(readPackagingFile("systemd", "sigmaos-api.service")).resolves.toContain(
+      "BindReadOnlyPaths=-/run/libvirt/libvirt-sock"
+    );
     await expect(readPackagingFile("systemd", "sigmaos-backup-daily.service")).resolves.toContain("LoadCredential=restic-password");
     await expect(readPackagingFile("systemd", "sigmaos-backup-weekly.timer")).resolves.toContain("OnCalendar=Sun");
   });
@@ -53,22 +57,23 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("usr/lib/sigmaos/apps/indexer/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/backup/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/scheduler/dist/");
+    expect(install).toContain("node_modules/* usr/lib/sigmaos/node_modules/");
     expect(install).toContain("etc/sigmaos/");
     expect(install).toContain("lib/systemd/system/");
     expect(install).toContain("tmpfiles.d/sigmaos.conf");
     expect(tmpfiles).toContain("/run/sigmaos");
     expect(tmpfiles).toContain("/run/mdadm");
+    expect(control).toContain("Depends: nodejs (>= 22), sqlite3, adduser");
+    expect(control).toContain("Suggests:");
     expect(control).toContain("git");
     expect(control).toContain("ffmpeg");
     expect(control).toContain("samba");
     expect(control).toContain("nfs-kernel-server");
     expect(control).toContain("minidlna");
-    expect(control).toContain("unzip");
-    expect(control).toContain("unrar-free");
     expect(control).toContain("restic");
-    expect(control).toContain("mdadm");
-    expect(control).toContain("btrfs-progs");
-    expect(control).toContain("smartmontools");
+    expect(control).not.toMatch(/^Depends:.*samba/m);
+    const postrm = await readPackagingFile("debian", "postrm");
+    expect(postrm.indexOf("optional-groups.conf")).toBeLessThan(postrm.indexOf("systemctl daemon-reload"));
   });
 
   it("ships first-boot and appliance image scaffolding", async () => {
@@ -103,6 +108,16 @@ describe("native packaging artifacts", () => {
     expect(buildImage).toContain("sigmaos-health.timer");
     expect(firstBoot).toContain("password_file = \"/etc/sigmaos/restic-password\"");
     expect(firstBoot).not.toContain("restic-password\" =");
+  });
+
+  it("ships an ARM-friendly host installer", async () => {
+    const installer = await readPackagingFile("scripts", "install.sh");
+
+    expect(installer).toContain("dpkg --print-architecture");
+    expect(installer).toContain("NodeSource signing key fingerprint");
+    expect(installer).toContain("packaging/scripts/build-deb.sh");
+    expect(installer).toContain("sigmaos-first-boot.sh");
+    expect(installer).toContain("systemctl enable --now");
   });
 
   it("ships a constrained root helper for host share configuration", async () => {
