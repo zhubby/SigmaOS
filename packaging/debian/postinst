@@ -16,24 +16,9 @@ if [ "$1" = "configure" ]; then
   if command -v systemctl >/dev/null 2>&1; then
     systemd-tmpfiles --create sigmaos.conf || true
 
-    # Docker and libvirt are optional. Add only groups that exist on this host;
-    # an unknown SupplementaryGroups entry prevents systemd from starting API.
-    optional_groups=""
-    for optional_group in libvirt docker; do
-      if getent group "$optional_group" >/dev/null 2>&1; then
-        optional_groups="$optional_groups $optional_group"
-      fi
-    done
-    if [ -n "$optional_groups" ]; then
-      install -d -m 0755 /etc/systemd/system/sigmaos-api.service.d
-      printf '[Service]\nSupplementaryGroups=%s\n' "${optional_groups# }" \
-        > /etc/systemd/system/sigmaos-api.service.d/optional-groups.conf
-    else
-      rm -f /etc/systemd/system/sigmaos-api.service.d/optional-groups.conf
-      rmdir /etc/systemd/system/sigmaos-api.service.d 2>/dev/null || true
-    fi
-
-    systemctl daemon-reload || true
+    # Optional runtime groups are host-dependent; keep the drop-in valid even
+    # when Docker/libvirt/KVM are installed after the SigmaOS package.
+    /usr/lib/sigmaos/scripts/sigmaos-refresh-groups.sh
     systemctl enable sigmaos-share-helper.service sigmaos-api.service sigmaos-worker@1.service sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer sigmaos-backup-daily.timer sigmaos-backup-weekly.timer sigmaos-health.timer || true
   fi
 fi

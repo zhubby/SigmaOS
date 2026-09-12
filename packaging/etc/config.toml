@@ -26,7 +26,7 @@ operation_timeout_ms = 120000
 console_shells = ["/bin/sh", "/bin/bash"]
 
 [vm]
-enabled = true
+enabled = false
 libvirt_uri = "qemu:///system"
 storage_path = "/var/lib/sigmaos/vmstore"
 network_name = "default"

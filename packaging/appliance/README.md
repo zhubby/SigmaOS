@@ -15,4 +15,4 @@ Required host tools:
 - `systemd-nspawn`
 - `tar`
 
-The manifest records required runtime components: Node, Pi, SQLite, Nginx, systemd units, OCR helpers, media helpers, archive helpers, and NAS health tooling. The resulting rootfs tarball is the handoff point for board-specific image tooling.
+The manifest records required runtime components: Node, Pi, SQLite, Nginx, Docker, libvirt/QEMU, systemd units, OCR helpers, media helpers, archive helpers, and NAS health tooling. Docker and VM management remain disabled by default in first-boot configuration; enable them explicitly when the appliance is intended to manage containers or virtual machines. The resulting rootfs tarball is the handoff point for board-specific image tooling.

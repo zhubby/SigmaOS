@@ -18,7 +18,7 @@ SigmaOS is under active v1 development. The file workspace, agent job pipeline, 
 
 The following surfaces are intentionally limited today:
 
-- Virtual machine management is a non-functional UI preview.
+- Virtual machine management supports libvirt/QEMU host discovery and approval-gated lifecycle operations when the optional runtime is installed.
 - Network and storage management are observational; the API does not apply host configuration.
 - OCR is reserved as an indexer hook but is not implemented.
 - Local restic backup is opt-in; after explicit repository initialization, daily/weekly services perform encrypted snapshots and staging-only restore.
@@ -154,7 +154,8 @@ Optional host tools enable additional features:
 | Archive extraction | `gzip`, `unzip`, `tar`, `bsdtar`, or `unrar` as appropriate |
 | Storage and network inspection | `ip`, `lsblk`, `findmnt`, `mdadm`, `smartctl` |
 | Share management | Samba, Apache WebDAV, vsftpd, NFS server, MiniDLNA, and the packaged share helper |
-| Docker management | Docker Engine socket access and the Docker CLI for Compose actions |
+| Docker management | Docker Engine socket access and the Docker CLI for Compose actions; enable explicitly on an appliance |
+| Virtual machines | `libvirt-daemon-system`, `libvirt-clients`, `qemu-system-arm` (arm64) or `qemu-system-x86` (amd64), `qemu-utils`, and `virtinst` |
 
 ## Local development
 
@@ -287,6 +288,8 @@ sudo SIGMAOS_NAS_ROOT_PATH=/srv/nas packaging/scripts/install.sh
 The installer checks the Debian architecture, installs Node.js 22 from the verified NodeSource repository when needed, installs the native build toolchain, builds the package on the target host, and initializes the first-boot configuration. Building on the target keeps native `better-sqlite3` and `node-pty` binaries compatible with the board. It starts the SigmaOS API, worker, share-helper, and an Nginx reverse proxy on port 80 by default; indexer, scheduler, maintenance, health, and backup timers are enabled for their scheduled runs. The API remains loopback-only and Nginx is the LAN entry point.
 
 Set `SIGMAOS_NGINX_PORT` to choose another listener port, or set `SIGMAOS_ENABLE_NGINX=0` to keep the API loopback-only and skip Nginx installation.
+
+Docker and VM runtimes are opt-in because Docker socket access is root-equivalent. Enable both during installation with `SIGMAOS_ENABLE_DOCKER=1 SIGMAOS_ENABLE_VM=1`; the installer installs the matching QEMU/libvirt packages, writes the feature flags, refreshes API access to the `docker`, `libvirt`, and `kvm` groups, and starts the runtime services.
 
 Optional integrations are listed as Debian `Suggests` rather than hard dependencies. Install the host tools you need (for example `git`, `ffmpeg`, `restic`, Samba, or NFS) separately; the core package does not enable those services implicitly.
 

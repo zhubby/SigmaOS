@@ -6,6 +6,8 @@ ARCH=$(dpkg --print-architecture 2>/dev/null || true)
 NODE_MAJOR_REQUIRED=22
 NODE_SOURCE_FINGERPRINT=6F71F525282841EEDAF851B42F59B5F99B1BE0B4
 NGINX_ENABLED=${SIGMAOS_ENABLE_NGINX:-1}
+DOCKER_ENABLED=${SIGMAOS_ENABLE_DOCKER:-0}
+VM_ENABLED=${SIGMAOS_ENABLE_VM:-0}
 DEBIAN_FRONTEND=noninteractive
 export DEBIAN_FRONTEND
 
@@ -30,12 +32,39 @@ case "$NGINX_ENABLED" in
   0|1) ;;
   *) die "SIGMAOS_ENABLE_NGINX must be 0 or 1" ;;
 esac
+case "$DOCKER_ENABLED" in
+  0|1) ;;
+  *) die "SIGMAOS_ENABLE_DOCKER must be 0 or 1" ;;
+esac
+case "$VM_ENABLED" in
+  0|1) ;;
+  *) die "SIGMAOS_ENABLE_VM must be 0 or 1" ;;
+esac
 
 install_build_dependencies() {
   log "installing build prerequisites"
   apt-get update
   apt-get install -y --no-install-recommends \
     ca-certificates curl gnupg build-essential debhelper dpkg-dev fakeroot rsync
+}
+
+install_optional_runtime() {
+  runtime_packages=""
+  if [ "$DOCKER_ENABLED" = "1" ]; then
+    runtime_packages="$runtime_packages docker.io docker-compose"
+  fi
+  if [ "$VM_ENABLED" = "1" ]; then
+    case "$ARCH" in
+      arm64) runtime_packages="$runtime_packages libvirt-daemon-system libvirt-clients qemu-system-arm qemu-utils virtinst" ;;
+      amd64) runtime_packages="$runtime_packages libvirt-daemon-system libvirt-clients qemu-system-x86 qemu-utils virtinst" ;;
+    esac
+  fi
+  if [ -n "$runtime_packages" ]; then
+    log "installing optional runtime components:$runtime_packages"
+    apt-get update
+    # shellcheck disable=SC2086
+    apt-get install -y --no-install-recommends $runtime_packages
+  fi
 }
 
 node_major() {
@@ -72,6 +101,7 @@ fi
 
 node --version | grep -Eq '^v22\.' || die "Node.js 22 is required; found $(node --version 2>/dev/null || printf 'none')"
 install_build_dependencies
+install_optional_runtime
 
 log "building the native ${ARCH} Debian package"
 "$ROOT_DIR/packaging/scripts/build-deb.sh"
@@ -86,10 +116,23 @@ apt-get install -y --no-install-recommends "$DEB_PATH"
 log "initializing SigmaOS configuration"
 SIGMAOS_ADMIN_DISPLAY_NAME=${SIGMAOS_ADMIN_DISPLAY_NAME:-SigmaOS Admin} \
 SIGMAOS_NAS_ROOT_PATH=${SIGMAOS_NAS_ROOT_PATH:-/srv/nas} \
+SIGMAOS_DOCKER_ENABLED="$DOCKER_ENABLED" \
+SIGMAOS_VM_ENABLED="$VM_ENABLED" \
   /usr/lib/sigmaos/scripts/sigmaos-first-boot.sh
 
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload
+  /usr/lib/sigmaos/scripts/sigmaos-refresh-groups.sh
+  if [ "$DOCKER_ENABLED" = "1" ]; then
+    systemctl enable --now docker.service
+  fi
+  if [ "$VM_ENABLED" = "1" ]; then
+    for vm_unit in libvirtd.service virtqemud.socket; do
+      if systemctl list-unit-files "$vm_unit" --no-legend 2>/dev/null | grep -q "$vm_unit"; then
+        systemctl enable --now "$vm_unit" || true
+      fi
+    done
+  fi
   systemctl enable --now \
     sigmaos-share-helper.service \
     sigmaos-api.service \

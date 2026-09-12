@@ -38,7 +38,9 @@ describe("native packaging artifacts", () => {
     await expect(readPackagingFile("systemd", "sigmaos-maintenance.timer")).resolves.toContain(
       "OnCalendar=daily"
     );
-    await expect(readPackagingFile("debian", "postinst")).resolves.toContain("optional-groups.conf");
+    await expect(readPackagingFile("debian", "postinst")).resolves.toContain("sigmaos-refresh-groups.sh");
+    await expect(readPackagingFile("scripts", "sigmaos-refresh-groups.sh")).resolves.toContain("optional-groups.conf");
+    await expect(readPackagingFile("scripts", "sigmaos-refresh-groups.sh")).resolves.toContain("kvm");
     await expect(readPackagingFile("systemd", "sigmaos-api.service")).resolves.toContain(
       "BindReadOnlyPaths=-/run/libvirt/libvirt-sock"
     );
@@ -85,6 +87,8 @@ describe("native packaging artifacts", () => {
     const buildImage = await readPackagingFile("appliance", "build-image.sh");
 
     expect(firstBoot).toContain("SIGMAOS_ADMIN_DISPLAY_NAME");
+    expect(firstBoot).toContain("SIGMAOS_DOCKER_ENABLED");
+    expect(firstBoot).toContain("SIGMAOS_VM_ENABLED");
     expect(firstBoot).toContain("[[nas_roots]]");
     expect(firstBoot).toContain("[model]");
     expect(firstBoot).toContain("[shares]");
@@ -124,6 +128,10 @@ describe("native packaging artifacts", () => {
     expect(installer).toContain("packaging/scripts/build-deb.sh");
     expect(installer).toContain("sigmaos-first-boot.sh");
     expect(installer).toContain("SIGMAOS_ENABLE_NGINX");
+    expect(installer).toContain("SIGMAOS_ENABLE_DOCKER");
+    expect(installer).toContain("SIGMAOS_ENABLE_VM");
+    expect(installer).toContain("qemu-system-arm");
+    expect(installer).toContain("libvirt-daemon-system");
     expect(installer).toContain("sigmaos-nginx.sh");
     expect(installer).toContain("systemctl restart nginx");
     expect(installer).toContain("systemctl enable --now");

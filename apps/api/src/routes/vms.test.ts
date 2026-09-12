@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createSession, ensureNasRoots, openSigmaDb, type SigmaDatabase } from "@sigmaos/db";
 import type { SigmaConfig } from "@sigmaos/shared";
 import { buildServer } from "../server.js";
-import type { VmCommandRunner } from "../lib/vm-service.js";
+import { vmQemuCommand, type VmCommandRunner } from "../lib/vm-service.js";
 
 let tempDir: string;
 let rootDir: string;
@@ -153,7 +153,7 @@ function vmRunner(calls: string[][] = []): VmCommandRunner {
       if (command === "virsh" && args.includes("dominfo")) return "State: running\nCPU(s): 2\nUsed memory: 2097152 KiB\nMax memory: 4194304 KiB\nUUID: guest-uuid";
       if (command === "virsh" && args.includes("net-list")) return " Name      State    Autostart\n--------------------------------\n default   active   yes\n";
       if (command === "virsh" && args.includes("pool-list")) return "";
-      if (command === "qemu-system-x86_64") return "QEMU emulator version 8.2.2";
+      if (command === vmQemuCommand()) return "QEMU emulator version 8.2.2";
       if (command === "nproc") return "8";
       if (command === "free") return "Mem: 100 0 0 0 0 80";
       if (command === "df") return "size avail\n100000 50000";

@@ -11,6 +11,22 @@ NAS_ROOT_PATH="${SIGMAOS_NAS_ROOT_PATH:-}"
 MODEL_PROVIDER="${SIGMAOS_MODEL_PROVIDER:-pi}"
 PI_COMMAND="${SIGMAOS_PI_COMMAND:-pi}"
 LOCAL_ENDPOINT="${SIGMAOS_LOCAL_ENDPOINT:-}"
+DOCKER_ENABLED="${SIGMAOS_DOCKER_ENABLED:-0}"
+VM_ENABLED="${SIGMAOS_VM_ENABLED:-0}"
+
+case "$DOCKER_ENABLED" in
+  0|1) ;;
+  *) printf "SIGMAOS_DOCKER_ENABLED must be 0 or 1\n" >&2; exit 1 ;;
+esac
+case "$VM_ENABLED" in
+  0|1) ;;
+  *) printf "SIGMAOS_VM_ENABLED must be 0 or 1\n" >&2; exit 1 ;;
+esac
+
+DOCKER_ENABLED_BOOL=false
+VM_ENABLED_BOOL=false
+[ "$DOCKER_ENABLED" = "1" ] && DOCKER_ENABLED_BOOL=true
+[ "$VM_ENABLED" = "1" ] && VM_ENABLED_BOOL=true
 
 ask_default() {
   prompt="$1"
@@ -34,7 +50,7 @@ if [ -z "$NAS_ROOT_PATH" ]; then
   NAS_ROOT_PATH="$(ask_default "NAS root path" "/srv/nas")"
 fi
 
-install -d -m 0750 "$DATA_DIR" "$DATA_DIR/trash" "$DATA_DIR/pi-sessions" "$DATA_DIR/reports" "$DATA_DIR/backup-staging" /srv/backup
+install -d -m 0750 "$DATA_DIR" "$DATA_DIR/trash" "$DATA_DIR/pi-sessions" "$DATA_DIR/reports" "$DATA_DIR/backup-staging" "$DATA_DIR/vmstore" /srv/backup
 install -d -m 0755 "$(dirname "$CONFIG_PATH")" "$NAS_ROOT_PATH"
 
 umask 077
@@ -59,11 +75,20 @@ pi_command = "$PI_COMMAND"
 local_endpoint = "$LOCAL_ENDPOINT"
 
 [docker]
-enabled = false
+enabled = $DOCKER_ENABLED_BOOL
 socket_path = "/var/run/docker.sock"
 compose_command = "docker"
 operation_timeout_ms = 120000
 console_shells = ["/bin/sh", "/bin/bash"]
+
+[vm]
+enabled = $VM_ENABLED_BOOL
+libvirt_uri = "qemu:///system"
+storage_path = "$DATA_DIR/vmstore"
+network_name = "default"
+iso_roots = ["/srv/iso"]
+operation_timeout_ms = 120000
+console_mode = "serial"
 
 [shares]
 enabled = false

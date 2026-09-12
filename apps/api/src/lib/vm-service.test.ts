@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SigmaConfig } from "@sigmaos/shared";
-import { collectVmSummary, type VmCommandRunner } from "./vm-service.js";
+import { collectVmSummary, vmQemuCommand, type VmCommandRunner } from "./vm-service.js";
 
 function config(): SigmaConfig {
   return {
@@ -18,6 +18,11 @@ function config(): SigmaConfig {
 }
 
 describe("VM service", () => {
+  it("selects the native QEMU binary for the host architecture", () => {
+    expect(vmQemuCommand("arm64")).toBe("qemu-system-aarch64");
+    expect(vmQemuCommand("x64")).toBe("qemu-system-x86_64");
+  });
+
   it("reports libvirt as unavailable when virsh cannot connect", async () => {
     const runner: VmCommandRunner = { run: async () => { throw new Error("virsh: failed to connect"); } };
     const summary = await collectVmSummary(config(), { commandRunner: runner, kvmAvailable: false });
@@ -31,7 +36,7 @@ describe("VM service", () => {
       run: async (command, args) => {
         if (command === "virsh" && args.includes("version")) return "Using library: libvirt 10.0.0\nUsing API: QEMU 10.0.0";
         if (command === "virsh" && args.includes("--name")) return "";
-        if (command === "qemu-system-x86_64") return "QEMU emulator version 8.2.2";
+        if (command === vmQemuCommand()) return "QEMU emulator version 8.2.2";
         if (command === "nproc") return "8";
         if (command === "free") return "Mem: 100 0 0 0 0 80";
         if (command === "df") return "1 2\n100000 50000";
@@ -50,7 +55,7 @@ describe("VM service", () => {
     const runner: VmCommandRunner = {
       run: async (command, args) => {
         if (command === "virsh" && args.includes("version")) return "Using library: libvirt 10.0.0";
-        if (command === "qemu-system-x86_64") throw new Error("command not found");
+        if (command === vmQemuCommand()) throw new Error("command not found");
         if (command === "nproc") return "8";
         if (command === "free") return "Mem: 100 0 0 0 0 80";
         if (command === "df") return "size avail\n100000 50000";

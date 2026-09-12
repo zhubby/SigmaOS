@@ -25,6 +25,10 @@ export interface VmRuntimeDependencies {
   kvmAvailable?: boolean;
 }
 
+export function vmQemuCommand(architecture = process.arch): "qemu-system-aarch64" | "qemu-system-x86_64" {
+  return architecture === "arm64" ? "qemu-system-aarch64" : "qemu-system-x86_64";
+}
+
 export const DEFAULT_VM_CONFIG: VmConfig = {
   enabled: false,
   libvirtUri: "qemu:///system",
@@ -66,7 +70,7 @@ export async function collectVmSummary(config: SigmaConfig, dependencies?: VmRun
     return unavailableSummary(vm, safeVmMessage(error));
   }
   try {
-    qemuVersion = (await runner.run("qemu-system-x86_64", ["--version"])).match(/version\s+(\S+)/iu)?.[1] ?? null;
+    qemuVersion = (await runner.run(vmQemuCommand(), ["--version"])).match(/version\s+(\S+)/iu)?.[1] ?? null;
   } catch (error) {
     issues.push(`QEMU is unavailable: ${safeVmMessage(error)}`);
   }

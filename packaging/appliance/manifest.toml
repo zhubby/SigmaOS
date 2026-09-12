@@ -20,7 +20,9 @@ units = [
   "sigmaos-backup-daily.timer",
   "sigmaos-backup-weekly.timer",
   "sigmaos-health.timer",
-  "nginx.service"
+  "nginx.service",
+  "docker.service",
+  "libvirtd.service"
 ]
 
 [packages]
@@ -34,7 +36,14 @@ base = [
   "nginx",
   "restic",
   "git",
-  "rsync"
+  "rsync",
+  "docker.io",
+  "docker-compose",
+  "libvirt-daemon-system",
+  "libvirt-clients",
+  "qemu-system-arm",
+  "qemu-utils",
+  "virtinst"
 ]
 ai = [
   "pi"
