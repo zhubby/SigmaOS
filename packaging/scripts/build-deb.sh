@@ -3,6 +3,8 @@ set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 BUILD_DIR="$ROOT_DIR/.sigmaos/deb-build"
+SIGMAOS_NPM_REGISTRY=${SIGMAOS_NPM_REGISTRY:-https://registry.npmmirror.com}
+export SIGMAOS_NPM_REGISTRY
 
 rm -rf "$BUILD_DIR"
 install -d "$BUILD_DIR"

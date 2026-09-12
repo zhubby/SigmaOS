@@ -12,7 +12,7 @@ Environment=SIGMAOS_SHARE_HELPER_SOCKET_PATH=/run/sigmaos/share-helper.sock
 WorkingDirectory=/var/lib/sigmaos
 StateDirectory=sigmaos
 LogsDirectory=sigmaos
-ExecStart=/usr/bin/node /usr/lib/sigmaos/apps/share-helper/dist/index.js
+ExecStart=/usr/local/bin/node /usr/lib/sigmaos/apps/share-helper/dist/index.js
 Restart=on-failure
 RestartSec=3
 ProtectSystem=strict

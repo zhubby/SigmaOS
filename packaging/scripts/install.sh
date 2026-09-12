@@ -4,12 +4,24 @@ set -eu
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 ARCH=$(dpkg --print-architecture 2>/dev/null || true)
 NODE_MAJOR_REQUIRED=22
-NODE_SOURCE_FINGERPRINT=6F71F525282841EEDAF851B42F59B5F99B1BE0B4
+SIGMAOS_APT_MIRROR=${SIGMAOS_APT_MIRROR:-https://mirrors.aliyun.com/debian}
+SIGMAOS_APT_SECURITY_MIRROR=${SIGMAOS_APT_SECURITY_MIRROR:-https://mirrors.aliyun.com/debian-security}
+SIGMAOS_RPI_MIRROR=${SIGMAOS_RPI_MIRROR:-https://mirrors.aliyun.com/raspberrypi}
+SIGMAOS_NODE_MIRROR=${SIGMAOS_NODE_MIRROR:-https://mirrors.aliyun.com/nodejs-release}
+SIGMAOS_NODE_VERSION=${SIGMAOS_NODE_VERSION:-22.23.2}
+SIGMAOS_NPM_REGISTRY=${SIGMAOS_NPM_REGISTRY:-https://registry.npmmirror.com}
+SIGMAOS_APT_BACKUP_DIR=${SIGMAOS_APT_BACKUP_DIR:-/var/backups/sigmaos-apt}
 NGINX_ENABLED=${SIGMAOS_ENABLE_NGINX:-1}
 DOCKER_ENABLED=${SIGMAOS_ENABLE_DOCKER:-0}
 VM_ENABLED=${SIGMAOS_ENABLE_VM:-0}
 DEBIAN_FRONTEND=noninteractive
 export DEBIAN_FRONTEND
+
+SIGMAOS_APT_MIRROR=${SIGMAOS_APT_MIRROR%/}
+SIGMAOS_APT_SECURITY_MIRROR=${SIGMAOS_APT_SECURITY_MIRROR%/}
+SIGMAOS_RPI_MIRROR=${SIGMAOS_RPI_MIRROR%/}
+SIGMAOS_NODE_MIRROR=${SIGMAOS_NODE_MIRROR%/}
+SIGMAOS_NPM_REGISTRY=${SIGMAOS_NPM_REGISTRY%/}
 
 log() {
   printf 'sigmaos-install: %s\n' "$*"
@@ -26,6 +38,58 @@ apt_install() {
     -o Dpkg::Options::=--force-confold "$@"
 }
 
+backup_apt_source() {
+  source=$1
+  install -d -m 0755 "$SIGMAOS_APT_BACKUP_DIR"
+  backup="$SIGMAOS_APT_BACKUP_DIR/$(basename "$source")"
+  [ -e "$backup" ] || cp -p "$source" "$backup"
+}
+
+rewrite_apt_uri() {
+  old_uri=$1
+  new_uri=$2
+  for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+    [ -f "$source" ] || continue
+    if grep -Fq "$old_uri" "$source"; then
+      backup_apt_source "$source"
+      sed -i "s|$old_uri|$new_uri|g" "$source"
+      log "updated APT source in $source"
+    fi
+  done
+}
+
+disable_nodesource_sources() {
+  for source in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+    [ -f "$source" ] || continue
+    grep -Eq '^[[:space:]]*[^#[:space:]].*deb\.nodesource\.com' "$source" || continue
+    case "$source" in
+      *.list)
+        backup_apt_source "$source"
+        sed -i '/deb\.nodesource\.com/s/^/# sigmaos disabled NodeSource: /' "$source"
+        log "disabled NodeSource entry in $source"
+        ;;
+      *.sources)
+        backup_apt_source "$source"
+        mv "$source" "$SIGMAOS_APT_BACKUP_DIR/$(basename "$source").sigmaos-disabled"
+        log "disabled NodeSource source file $source"
+        ;;
+    esac
+  done
+}
+
+configure_domestic_apt_mirrors() {
+  log "configuring domestic APT mirrors"
+  # Replace only known upstream URIs. Signed-By, suites, components, and any
+  # unrelated administrator-managed sources remain unchanged.
+  rewrite_apt_uri 'http://deb.debian.org/debian-security' "$SIGMAOS_APT_SECURITY_MIRROR"
+  rewrite_apt_uri 'https://deb.debian.org/debian-security' "$SIGMAOS_APT_SECURITY_MIRROR"
+  rewrite_apt_uri 'http://deb.debian.org/debian' "$SIGMAOS_APT_MIRROR"
+  rewrite_apt_uri 'https://deb.debian.org/debian' "$SIGMAOS_APT_MIRROR"
+  rewrite_apt_uri 'http://archive.raspberrypi.com/debian' "$SIGMAOS_RPI_MIRROR"
+  rewrite_apt_uri 'https://archive.raspberrypi.com/debian' "$SIGMAOS_RPI_MIRROR"
+  disable_nodesource_sources
+}
+
 [ "$(id -u)" -eq 0 ] || die "run as root (for example: sudo $0)"
 [ -f /etc/debian_version ] || die "a Debian-family host is required"
 
@@ -33,6 +97,14 @@ case "$ARCH" in
   arm64|amd64) ;;
   *) die "unsupported Debian architecture: ${ARCH:-unknown}; use arm64 or amd64" ;;
 esac
+
+[ -n "$SIGMAOS_APT_MIRROR" ] || die "SIGMAOS_APT_MIRROR must not be empty"
+[ -n "$SIGMAOS_APT_SECURITY_MIRROR" ] || die "SIGMAOS_APT_SECURITY_MIRROR must not be empty"
+[ -n "$SIGMAOS_RPI_MIRROR" ] || die "SIGMAOS_RPI_MIRROR must not be empty"
+[ -n "$SIGMAOS_NODE_MIRROR" ] || die "SIGMAOS_NODE_MIRROR must not be empty"
+[ -n "$SIGMAOS_NODE_VERSION" ] || die "SIGMAOS_NODE_VERSION must not be empty"
+[ -n "$SIGMAOS_NPM_REGISTRY" ] || die "SIGMAOS_NPM_REGISTRY must not be empty"
+[ -n "$SIGMAOS_APT_BACKUP_DIR" ] || die "SIGMAOS_APT_BACKUP_DIR must not be empty"
 
 case "$NGINX_ENABLED" in
   0|1) ;;
@@ -50,8 +122,13 @@ esac
 install_build_dependencies() {
   log "installing build prerequisites"
   apt_install update
+  if dpkg-query -W -f='${Version}' nodejs 2>/dev/null | grep -qi 'nodesource'; then
+    log "removing the obsolete NodeSource nodejs package"
+    apt_install remove -y nodejs
+  fi
   apt_install install -y --no-install-recommends \
-    ca-certificates curl gnupg build-essential debhelper dpkg-dev fakeroot rsync
+    ca-certificates curl build-essential debhelper dpkg-dev fakeroot rsync \
+    nodejs npm xz-utils
 }
 
 install_optional_runtime() {
@@ -100,31 +177,47 @@ node_major() {
   node --version | sed 's/^v//' | cut -d. -f1
 }
 
+nodejs_from_nodesource() {
+  dpkg-query -W -f='${Version}' nodejs 2>/dev/null | grep -qi 'nodesource'
+}
+
 install_node_22() {
   log "installing Node.js ${NODE_MAJOR_REQUIRED}"
   install_build_dependencies
 
-  key_dir=$(mktemp -d)
-  trap 'rm -rf "$key_dir"' EXIT HUP INT TERM
-  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key -o "$key_dir/nodesource.key"
-  gpg --show-keys --with-colons "$key_dir/nodesource.key" | grep -Fq "$NODE_SOURCE_FINGERPRINT" \
-    || die "NodeSource signing key fingerprint did not match"
-  gpg --batch --yes --dearmor -o "$key_dir/nodesource.gpg" "$key_dir/nodesource.key"
-  install -d -m 0755 /etc/apt/keyrings
-  install -m 0644 "$key_dir/nodesource.gpg" /etc/apt/keyrings/nodesource.gpg
-  printf '%s\n' \
-    'deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main' \
-    > /etc/apt/sources.list.d/nodesource.list
-  apt_install update
-  apt_install install -y --no-install-recommends nodejs
+  case "$ARCH" in
+    arm64) node_arch=arm64 ;;
+    amd64) node_arch=x64 ;;
+  esac
+  node_filename="node-v${SIGMAOS_NODE_VERSION}-linux-${node_arch}.tar.xz"
+  node_dir="/opt/sigmaos/node/node-v${SIGMAOS_NODE_VERSION}-linux-${node_arch}"
+  node_tmp=$(mktemp -d)
+  trap 'rm -rf "$node_tmp"' EXIT HUP INT TERM
+  curl -fsSL "$SIGMAOS_NODE_MIRROR/v${SIGMAOS_NODE_VERSION}/$node_filename" \
+    -o "$node_tmp/$node_filename"
+  curl -fsSL "$SIGMAOS_NODE_MIRROR/v${SIGMAOS_NODE_VERSION}/SHASUMS256.txt" \
+    -o "$node_tmp/SHASUMS256.txt"
+  node_sha256=$(awk -v filename="$node_filename" '$2 == filename { print $1; exit }' "$node_tmp/SHASUMS256.txt")
+  [ -n "$node_sha256" ] || die "Node.js checksum is missing for $node_filename"
+  printf '%s  %s\n' "$node_sha256" "$node_tmp/$node_filename" | sha256sum -c - \
+    || die "Node.js archive checksum did not match"
+  install -d -m 0755 /opt/sigmaos/node
+  tar -xJf "$node_tmp/$node_filename" -C /opt/sigmaos/node
+  [ -x "$node_dir/bin/node" ] || die "Node.js archive did not contain $node_dir/bin/node"
+  ln -sfn "$node_dir/bin/node" /usr/local/bin/node
+  ln -sfn "$node_dir/bin/npm" /usr/local/bin/npm
+  ln -sfn "$node_dir/bin/npx" /usr/local/bin/npx
 }
 
-if [ "$(node_major)" -lt "$NODE_MAJOR_REQUIRED" ] 2>/dev/null; then
+configure_domestic_apt_mirrors
+
+if [ "$(node_major)" -lt "$NODE_MAJOR_REQUIRED" ] 2>/dev/null || nodejs_from_nodesource || [ ! -x /usr/local/bin/node ]; then
   install_node_22
 fi
 
 node --version | grep -Eq '^v22\.' || die "Node.js 22 is required; found $(node --version 2>/dev/null || printf 'none')"
 install_build_dependencies
+npm config set registry "$SIGMAOS_NPM_REGISTRY" --global
 install_optional_runtime
 
 log "building the native ${ARCH} Debian package"

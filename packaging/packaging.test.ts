@@ -25,6 +25,8 @@ describe("native packaging artifacts", () => {
       expect(unit).toContain("NoNewPrivileges=yes");
       expect(unit).toContain("CapabilityBoundingSet=");
       expect(unit).toContain("ReadWritePaths=/var/lib/sigmaos");
+      expect(unit).toContain("ExecStart=/usr/local/bin/node");
+      expect(unit).not.toContain("ExecStart=/usr/bin/node");
       expect(unit).not.toContain("RuntimeDirectory=sigmaos");
     }
 
@@ -73,7 +75,7 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("tmpfiles.d/sigmaos.conf");
     expect(tmpfiles).toContain("/run/sigmaos");
     expect(tmpfiles).toContain("/run/mdadm");
-    expect(control).toContain("Depends: nodejs (>= 22), sqlite3, adduser");
+    expect(control).toContain("Depends: nodejs (>= 20), sqlite3, adduser");
     expect(control).toContain("Suggests:");
     expect(control).toContain("git");
     expect(control).toContain("ffmpeg");
@@ -123,15 +125,33 @@ describe("native packaging artifacts", () => {
     expect(buildImage).toContain("sigmaos-backup-weekly.timer");
     expect(buildImage).toContain("sigmaos-health.timer");
     expect(buildImage).toContain("sigmaos-nginx.sh");
+    expect(buildImage).toContain("SIGMAOS_NODE_MIRROR");
+    expect(buildImage).toContain("SHASUMS256.txt");
+    expect(buildImage).toContain("/usr/local/bin/node");
     expect(firstBoot).toContain("password_file = \"/etc/sigmaos/restic-password\"");
     expect(firstBoot).not.toContain("restic-password\" =");
   });
 
   it("ships an ARM-friendly host installer", async () => {
     const installer = await readPackagingFile("scripts", "install.sh");
+    const buildDeb = await readPackagingFile("scripts", "build-deb.sh");
+    const rules = await readPackagingFile("debian", "rules");
+    const control = await readPackagingFile("debian", "control");
 
     expect(installer).toContain("dpkg --print-architecture");
-    expect(installer).toContain("NodeSource signing key fingerprint");
+    expect(installer).toContain("SIGMAOS_APT_MIRROR");
+    expect(installer).toContain("SIGMAOS_APT_SECURITY_MIRROR");
+    expect(installer).toContain("SIGMAOS_RPI_MIRROR");
+    expect(installer).toContain("SIGMAOS_NODE_MIRROR");
+    expect(installer).toContain("mirrors.aliyun.com/nodejs-release");
+    expect(installer).toContain("SHASUMS256.txt");
+    expect(installer).toContain("SIGMAOS_NPM_REGISTRY");
+    expect(installer).toContain("SIGMAOS_APT_BACKUP_DIR");
+    expect(installer).toContain("/var/backups/sigmaos-apt");
+    expect(installer).toContain("mirrors.aliyun.com/debian");
+    expect(installer).toContain("mirrors.aliyun.com/raspberrypi");
+    expect(installer).toContain("disable_nodesource_sources");
+    expect(installer).not.toContain("deb.nodesource.com/node_22.x");
     expect(installer).toContain("packaging/scripts/build-deb.sh");
     expect(installer).toContain("sigmaos-first-boot.sh");
     expect(installer).toContain("SIGMAOS_ENABLE_NGINX");
@@ -150,6 +170,10 @@ describe("native packaging artifacts", () => {
     expect(installer).toContain("sigmaos-nginx.sh");
     expect(installer).toContain("systemctl restart nginx");
     expect(installer).toContain("systemctl enable --now");
+    expect(buildDeb).toContain("registry.npmmirror.com");
+    expect(rules).toContain("npm ci --registry");
+    expect(control).toContain("Build-Depends: debhelper-compat (= 13), nodejs, npm");
+    expect(control).toContain("Depends: nodejs (>= 20)");
   });
 
   it("ships a loopback API reverse proxy for LAN access", async () => {
