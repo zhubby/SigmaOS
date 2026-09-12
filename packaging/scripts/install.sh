@@ -119,7 +119,9 @@ DEB_PATH=$(find "$ROOT_DIR/.sigmaos" -maxdepth 1 -type f \
 [ -n "$DEB_PATH" ] || die "could not find the ${ARCH} Debian package"
 
 log "installing $DEB_PATH"
-apt_install install -y --no-install-recommends "$DEB_PATH"
+# The checkout build keeps the package version stable; force the local artifact
+# to replace an already-installed package from an earlier checkout revision.
+apt_install install -y --no-install-recommends --reinstall "$DEB_PATH"
 
 log "initializing SigmaOS configuration"
 SIGMAOS_ADMIN_DISPLAY_NAME=${SIGMAOS_ADMIN_DISPLAY_NAME:-SigmaOS Admin} \

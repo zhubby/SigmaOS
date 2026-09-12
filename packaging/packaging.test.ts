@@ -142,6 +142,7 @@ describe("native packaging artifacts", () => {
     expect(installer).toContain("Acquire::http::Timeout=30");
     expect(installer).toContain("Acquire::https::Timeout=30");
     expect(installer).toContain("--force-confold");
+    expect(installer).toContain("--reinstall");
     expect(installer).toContain("qemu-system-arm");
     expect(installer).toContain("libvirt-daemon-system");
     expect(installer).toContain("sigmaos-nginx.sh");
