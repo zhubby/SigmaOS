@@ -21,7 +21,8 @@ die() {
 }
 
 apt_install() {
-  apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=3 "$@"
+  apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=3 \
+    -o Dpkg::Options::=--force-confold "$@"
 }
 
 [ "$(id -u)" -eq 0 ] || die "run as root (for example: sudo $0)"
