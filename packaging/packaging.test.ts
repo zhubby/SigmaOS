@@ -41,6 +41,12 @@ describe("native packaging artifacts", () => {
     await expect(readPackagingFile("debian", "postinst")).resolves.toContain("sigmaos-refresh-groups.sh");
     await expect(readPackagingFile("scripts", "sigmaos-refresh-groups.sh")).resolves.toContain("optional-groups.conf");
     await expect(readPackagingFile("scripts", "sigmaos-refresh-groups.sh")).resolves.toContain("kvm");
+    await expect(readPackagingFile("scripts", "sigmaos-refresh-groups.sh")).resolves.toContain(
+      "org.libvirt.unix.manage"
+    );
+    await expect(readPackagingFile("debian", "postrm")).resolves.toContain(
+      "49-sigmaos-libvirt.rules"
+    );
     await expect(readPackagingFile("systemd", "sigmaos-api.service")).resolves.toContain(
       "BindReadOnlyPaths=-/run/libvirt/libvirt-sock"
     );

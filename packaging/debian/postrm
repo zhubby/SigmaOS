@@ -3,6 +3,7 @@ set -e
 
 if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
   rm -f /etc/systemd/system/sigmaos-api.service.d/optional-groups.conf
+  rm -f /etc/polkit-1/rules.d/49-sigmaos-libvirt.rules
   rmdir /etc/systemd/system/sigmaos-api.service.d 2>/dev/null || true
 fi
 

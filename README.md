@@ -289,7 +289,7 @@ The installer checks the Debian architecture, installs Node.js 22 from the verif
 
 Set `SIGMAOS_NGINX_PORT` to choose another listener port, or set `SIGMAOS_ENABLE_NGINX=0` to keep the API loopback-only and skip Nginx installation.
 
-Docker and VM runtimes are opt-in because Docker socket access is root-equivalent. Enable both during installation with `SIGMAOS_ENABLE_DOCKER=1 SIGMAOS_ENABLE_VM=1`; the installer installs the Docker engine, CLI, Compose plugin, and matching QEMU/libvirt packages, writes the feature flags, refreshes API access to the `docker`, `libvirt`, and `kvm` groups, and starts the runtime services.
+Docker and VM runtimes are opt-in because Docker socket access is root-equivalent. Enable both during installation with `SIGMAOS_ENABLE_DOCKER=1 SIGMAOS_ENABLE_VM=1`; the installer installs the Docker engine, CLI, Compose plugin, and matching QEMU/libvirt packages, writes the feature flags, refreshes API access to the `docker`, `libvirt`, and `kvm` groups, grants the SigmaOS service account the non-interactive libvirt polkit action, and starts the runtime services.
 
 Optional integrations are listed as Debian `Suggests` rather than hard dependencies. Install the host tools you need (for example `git`, `ffmpeg`, `restic`, Samba, or NFS) separately; the core package does not enable those services implicitly.
 
