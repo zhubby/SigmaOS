@@ -20,6 +20,10 @@ die() {
   exit 1
 }
 
+apt_install() {
+  apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=3 "$@"
+}
+
 [ "$(id -u)" -eq 0 ] || die "run as root (for example: sudo $0)"
 [ -f /etc/debian_version ] || die "a Debian-family host is required"
 
@@ -43,8 +47,8 @@ esac
 
 install_build_dependencies() {
   log "installing build prerequisites"
-  apt-get update
-  apt-get install -y --no-install-recommends \
+  apt_install update
+  apt_install install -y --no-install-recommends \
     ca-certificates curl gnupg build-essential debhelper dpkg-dev fakeroot rsync
 }
 
@@ -61,9 +65,9 @@ install_optional_runtime() {
   fi
   if [ -n "$runtime_packages" ]; then
     log "installing optional runtime components:$runtime_packages"
-    apt-get update
+    apt_install update
     # shellcheck disable=SC2086
-    apt-get install -y --no-install-recommends $runtime_packages
+    apt_install install -y --no-install-recommends $runtime_packages
   fi
 }
 
@@ -91,8 +95,8 @@ install_node_22() {
   printf '%s\n' \
     'deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main' \
     > /etc/apt/sources.list.d/nodesource.list
-  apt-get update
-  apt-get install -y --no-install-recommends nodejs
+  apt_install update
+  apt_install install -y --no-install-recommends nodejs
 }
 
 if [ "$(node_major)" -lt "$NODE_MAJOR_REQUIRED" ] 2>/dev/null; then
@@ -111,7 +115,7 @@ DEB_PATH=$(find "$ROOT_DIR/.sigmaos" -maxdepth 1 -type f \
 [ -n "$DEB_PATH" ] || die "could not find the ${ARCH} Debian package"
 
 log "installing $DEB_PATH"
-apt-get install -y --no-install-recommends "$DEB_PATH"
+apt_install install -y --no-install-recommends "$DEB_PATH"
 
 log "initializing SigmaOS configuration"
 SIGMAOS_ADMIN_DISPLAY_NAME=${SIGMAOS_ADMIN_DISPLAY_NAME:-SigmaOS Admin} \
@@ -148,7 +152,7 @@ fi
 
 if [ "$NGINX_ENABLED" = "1" ]; then
   log "installing Nginx reverse proxy"
-  apt-get install -y --no-install-recommends nginx
+  apt_install install -y --no-install-recommends nginx
   SIGMAOS_NGINX_PORT=${SIGMAOS_NGINX_PORT:-80} \
     /usr/lib/sigmaos/scripts/sigmaos-nginx.sh
   if command -v systemctl >/dev/null 2>&1; then
