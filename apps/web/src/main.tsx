@@ -8,7 +8,6 @@ const bootScreen = document.getElementById("sigmaos-boot");
 const bootTitle = bootScreen?.querySelector<HTMLElement>("[data-boot-title]");
 const bootDetail = bootScreen?.querySelector<HTMLElement>("[data-boot-detail]");
 const bootSystem = bootScreen?.querySelector<HTMLElement>("[data-boot-system]");
-const bootRetry = bootScreen?.querySelector<HTMLButtonElement>("[data-boot-retry]");
 const isChinese = document.documentElement.lang.toLowerCase().startsWith("zh");
 
 if (isChinese) {
@@ -44,7 +43,6 @@ function showBootError(): void {
   if (bootDetail) {
     bootDetail.textContent = isChinese ? "请重新加载页面后再试" : "Reload the page to try again";
   }
-  bootRetry?.addEventListener("click", () => window.location.reload(), { once: true });
 }
 
 void initI18n()
@@ -54,6 +52,7 @@ void initI18n()
         <App />
       </StrictMode>
     );
+    window.dispatchEvent(new Event("sigmaos:ready"));
     window.requestAnimationFrame(() => dismissBootScreen());
   })
   .catch(() => showBootError());

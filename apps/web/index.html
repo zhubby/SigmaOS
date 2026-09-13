@@ -328,6 +328,44 @@
         <button class="sigmaos-boot-retry" type="button" data-boot-retry>Reload</button>
       </div>
     </div>
+    <script>
+      (() => {
+        const bootScreen = document.getElementById("sigmaos-boot");
+        if (!bootScreen) return;
+
+        const bootTitle = bootScreen.querySelector("[data-boot-title]");
+        const bootDetail = bootScreen.querySelector("[data-boot-detail]");
+        const bootRetry = bootScreen.querySelector("[data-boot-retry]");
+        const isChinese = document.documentElement.lang.toLowerCase().startsWith("zh");
+        let ready = false;
+
+        const showError = () => {
+          if (ready) return;
+          bootScreen.dataset.state = "error";
+          bootScreen.setAttribute("aria-busy", "false");
+          if (bootTitle) bootTitle.textContent = isChinese ? "SigmaOS 启动失败" : "SigmaOS could not start";
+          if (bootDetail) bootDetail.textContent = isChinese ? "请重新加载页面后再试" : "Reload the page to try again";
+        };
+
+        const timeout = window.setTimeout(showError, 15000);
+        const handleError = () => showError();
+        const handleReady = () => {
+          ready = true;
+          window.clearTimeout(timeout);
+          window.removeEventListener("error", handleError, true);
+          window.removeEventListener("unhandledrejection", handleError);
+        };
+
+        window.addEventListener("error", handleError, true);
+        window.addEventListener("unhandledrejection", handleError);
+        window.addEventListener("sigmaos:ready", handleReady, { once: true });
+        bootRetry?.addEventListener("click", () => {
+          const url = new URL(window.location.href);
+          url.searchParams.set("_sigmaos_reload", Date.now().toString());
+          window.location.replace(url.toString());
+        });
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -1,10 +1,10 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
-import fastifyStatic from "@fastify/static";
 import { ensureNasRoots, openSigmaDb } from "@sigmaos/db";
 import { loadConfig } from "@sigmaos/shared";
 import { createSystemCommandRunner } from "./lib/system-management.js";
 import { buildServer } from "./server.js";
+import { registerWebApp } from "./web-static.js";
 
 const config = loadConfig();
 const db = openSigmaDb(config.databasePath);
@@ -20,15 +20,7 @@ const server = await buildServer({
 const webDist = resolveWebDist();
 
 if (existsSync(webDist)) {
-  await server.register(fastifyStatic, {
-    root: webDist,
-    prefix: "/",
-    wildcard: true
-  });
-
-  server.setNotFoundHandler((_request, reply) => {
-    reply.sendFile("index.html");
-  });
+  await registerWebApp(server, webDist);
 }
 
 await server.listen({ host: config.api.host, port: config.api.port });
