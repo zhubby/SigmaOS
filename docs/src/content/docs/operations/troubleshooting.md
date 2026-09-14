@@ -6,7 +6,7 @@ status: current
 audience: [operator]
 sourceOfTruth: [apps/api/src/routes/health-status.ts, packaging/systemd/sigmaos-api.service, packaging/systemd/sigmaos-indexer.service, apps/api/src/web-static.ts]
 sidebar:
-  order: 3
+  order: 4
 ---
 
 优先查看对应 service 的 journald，再检查 `/health`、`/api/system/health`、`/api/indexer/status`、`/api/roots/readiness` 和 `/api/backup/status`。`/health` 只代表 API liveness，不代表 NAS、索引或 backup 已就绪。

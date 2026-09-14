@@ -13,7 +13,10 @@ SigmaOS 是面向个人设备的原生 Linux NAS appliance。它以 React/Vite �
 
 从这里开始：
 
+- [快速开始](/docs/start/quick-start/)
+- [Web 工作区使用指南](/docs/how-to/web-workspace/)
 - [本地开发](/docs/start/local-development/)
 - [配置与运行时边界](/docs/start/configuration/)
 - [系统架构](/docs/architecture/system-overview/)
 - [部署与恢复](/docs/operations/deployment/)
+- [Appliance 镜像构建](/docs/operations/appliance-image/)

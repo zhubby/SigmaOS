@@ -12,3 +12,99 @@ sidebar:
 生产部署使用 Debian package 和 Node.js 22，不把 SigmaOS 自身放入 Docker。API、worker、share-helper、terminal-helper 是常驻服务；indexer、scheduler、maintenance、health、backup 由 oneshot service 和 timer 驱动。
 
 Nginx 只反向代理到 loopback API。运行时路径主要是 `/usr/lib/sigmaos`、`/etc/sigmaos`、`/var/lib/sigmaos`、`/run/sigmaos` 和配置的 `/srv` roots。API 静态提供 React Web 与 `/docs/` 文档站。
+
+## 安装前检查
+
+安装脚本支持 Debian 系的 `amd64` 和 `arm64`，必须由 root 执行，并要求一个已经存在的非 root 终端用户。生产 NAS 应先挂载到 `/srv` 下的路径；脚本默认使用 `/srv/nas`，默认不启用 Docker、VM 和 restic backup。
+
+确认：
+
+```bash
+dpkg --print-architecture
+id <terminal-user>
+findmnt /srv/nas
+```
+
+安装脚本会调整已知 Debian、Raspberry Pi 和 NodeSource 源，并把原文件备份到 `/var/backups/sigmaos-apt`。在受管控主机上运行前，应先审阅 `SIGMAOS_APT_*` 和 `SIGMAOS_*_MIRROR` 参数。
+
+## 从源码构建 Debian 包
+
+在目标架构主机上执行构建，让 `better-sqlite3`、`node-pty` 等原生模块与运行环境一致：
+
+```bash
+npm ci
+npm --prefix docs ci
+npm run build
+./packaging/scripts/build-deb.sh
+```
+
+构建产物位于 `.sigmaos/`。Debian rules 会重新安装 root 与 docs 依赖并执行完整构建，因此不要把 `node_modules` 或 `dist` 手工复制进包。
+
+## 安装与首次启动
+
+最小安装示例：
+
+```bash
+sudo SIGMAOS_TERMINAL_USER=<terminal-user> \
+  ./packaging/scripts/install.sh
+```
+
+常用开关：
+
+```bash
+sudo SIGMAOS_TERMINAL_USER=<terminal-user> \
+  SIGMAOS_ENABLE_NGINX=1 \
+  SIGMAOS_ENABLE_DOCKER=0 \
+  SIGMAOS_ENABLE_VM=0 \
+  SIGMAOS_NAS_ROOT_PATH=/srv/nas \
+  ./packaging/scripts/install.sh
+```
+
+脚本会安装 Node.js 22、构建并安装本架构 `.deb`，然后执行 `sigmaos-first-boot.sh`。首次初始化会创建 `/etc/sigmaos/config.toml`、`/var/lib/sigmaos`、`/srv/nas`、`/srv/iso` 和本地管理员记录。交互终端会询问管理员显示名与 NAS root；非交互运行可通过 `SIGMAOS_ADMIN_DISPLAY_NAME` 和 `SIGMAOS_NAS_ROOT_PATH` 提供值。
+
+核心服务会被 `enable --now`：
+
+```bash
+sudo systemctl status sigmaos-api.service sigmaos-worker@1.service
+sudo systemctl status sigmaos-share-helper.service sigmaos-terminal-helper.service
+```
+
+索引、scheduler、maintenance、health 和 backup timers 默认只启用，不会在安装命令中立刻执行。需要立即刷新时运行：
+
+```bash
+sudo systemctl start sigmaos-indexer.service
+sudo systemctl start sigmaos-health.service
+```
+
+## Nginx 与验收
+
+启用 Nginx 后，`sigmaos-nginx.sh` 会生成 `/etc/nginx/sites-available/sigmaos.conf`，删除默认站点并代理到 `127.0.0.1:3010`。默认端口为 80，可通过 `SIGMAOS_NGINX_PORT` 修改。
+
+```bash
+curl -fsS http://127.0.0.1:3010/health
+curl -I http://<host>/
+curl -I http://<host>/docs/
+curl -fsS http://127.0.0.1:3010/api/roots/readiness
+curl -fsS http://127.0.0.1:3010/api/system/health
+```
+
+验收至少包含：Web 首页、`/docs/`、root readiness、文件浏览、终端身份、一次索引和一次 health run。`/health` 返回成功只表示 API liveness，不表示 NAS 已挂载或备份可用。
+
+## 升级与回滚
+
+升级前保留当前 `.deb`、`/etc/sigmaos/config.toml`、`/var/lib/sigmaos` 和数据库备份；先停止会访问 SQLite 或 NAS 的 timers：
+
+```bash
+sudo systemctl stop sigmaos-indexer.timer sigmaos-scheduler.timer \
+  sigmaos-maintenance.timer sigmaos-health.timer \
+  sigmaos-backup-daily.timer sigmaos-backup-weekly.timer
+sudo dpkg -i .sigmaos/sigmaos_<version>_<arch>.deb
+sudo systemctl daemon-reload
+sudo systemctl restart sigmaos-api.service sigmaos-worker@1.service
+```
+
+确认新版本通过验收后再重新启用 timers。降级只能恢复程序包，迁移脚本没有通用的数据库反向迁移；若新版本已改变 schema，应使用升级前的 SQLite 备份和对应版本包一起恢复。
+
+构建前先运行 `npm run version:check`。构建过程会在源码复制到 Debian staging 之前冻结 commit、tag/branch、构建时间、来源和 dirty 状态，并将 `/usr/lib/sigmaos/build-info.json` 随包安装。运行中的 API 通过 `/api/system/build-info` 暴露可公开的追溯字段，Web 设置的“版本”分类展示同一份信息。
+
+发布 tag 必须严格匹配根 `package.json`、所有 workspace、Debian changelog 和 appliance manifest 中的统一 SemVer。使用 `npm run release -- patch|minor|major --note "..."` 只准备版本差异；commit、tag、push 和发布仍由维护者单独执行。

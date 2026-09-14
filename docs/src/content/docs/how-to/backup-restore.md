@@ -6,7 +6,7 @@ status: current
 audience: [operator]
 sourceOfTruth: [apps/backup/src/index.ts, apps/backup/src/backup.ts, packaging/systemd/sigmaos-backup-daily.timer]
 sidebar:
-  order: 1
+  order: 2
 ---
 
 备份是显式 opt-in 能力。先配置 repository 和受保护的 password file，再执行 validate 和一次性的 init。daily/weekly timer 永远不会隐式初始化仓库。
