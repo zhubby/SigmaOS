@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { execFile } from "node:child_process";
+import console from "node:console";
+import process from "node:process";
 import { promisify } from "node:util";
 import { readVersionState, requiresVersionBump, versionStateErrors } from "./versioning.mjs";
 
