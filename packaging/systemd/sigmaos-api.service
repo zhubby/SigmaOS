@@ -11,6 +11,7 @@ Group=sigmaos
 Environment=SIGMAOS_CONFIG=/etc/sigmaos/config.toml
 Environment=SIGMAOS_WEB_DIST=/usr/lib/sigmaos/apps/web/dist
 Environment=SIGMAOS_DOCS_DIST=/usr/lib/sigmaos/docs/dist
+Environment=SIGMAOS_BUILD_INFO_PATH=/usr/lib/sigmaos/build-info.json
 WorkingDirectory=/var/lib/sigmaos
 StateDirectory=sigmaos
 LogsDirectory=sigmaos

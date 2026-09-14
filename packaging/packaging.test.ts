@@ -70,9 +70,13 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("usr/lib/sigmaos/apps/scheduler/dist/");
     expect(install).toContain("node_modules/* usr/lib/sigmaos/node_modules/");
     expect(install).toContain("docs/dist/* usr/lib/sigmaos/docs/dist/");
+    expect(install).toContain(".sigmaos/build-info.json usr/lib/sigmaos/");
     expect(install).not.toContain("docs/node_modules");
     await expect(readPackagingFile("systemd", "sigmaos-api.service")).resolves.toContain(
       "Environment=SIGMAOS_DOCS_DIST=/usr/lib/sigmaos/docs/dist"
+    );
+    await expect(readPackagingFile("systemd", "sigmaos-api.service")).resolves.toContain(
+      "Environment=SIGMAOS_BUILD_INFO_PATH=/usr/lib/sigmaos/build-info.json"
     );
     expect(install).toContain("packaging/scripts/sigmaos-nginx.sh usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/scripts/sigmaos-configure-locale.sh usr/lib/sigmaos/scripts/");
@@ -139,6 +143,8 @@ describe("native packaging artifacts", () => {
     expect(buildImage).toContain("SIGMAOS_NODE_MIRROR");
     expect(buildImage).toContain("SHASUMS256.txt");
     expect(buildImage).toContain("/usr/local/bin/node");
+    expect(buildImage).toContain("PRODUCT_VERSION");
+    expect(buildImage).not.toContain("sigmaos_0.1.0");
     expect(firstBoot).toContain("password_file = \"/etc/sigmaos/restic-password\"");
     expect(firstBoot).not.toContain("restic-password\" =");
   });
@@ -188,6 +194,9 @@ describe("native packaging artifacts", () => {
     expect(installer).toContain("systemctl restart nginx");
     expect(installer).toContain("systemctl enable --now");
     expect(buildDeb).toContain("registry.npmmirror.com");
+    expect(buildDeb).toContain("SIGMAOS_BUILD_COMMIT_SHA");
+    expect(buildDeb).toContain("SIGMAOS_BUILD_DIRTY");
+    expect(buildDeb).toContain("SIGMAOS_BUILD_SOURCE");
     expect(rules).toContain("npm ci --registry");
     expect(control).toContain("Build-Depends: debhelper-compat (= 13), nodejs, npm");
     expect(control).toContain("Depends: nodejs (>= 20)");

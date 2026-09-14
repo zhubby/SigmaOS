@@ -998,6 +998,10 @@ export const en = {
         title: "Overview",
         description: "Service status and appliance identity."
       },
+      version: {
+        title: "Version",
+        description: "Release identity and source traceability."
+      },
       modelProviders: {
         title: "Model Providers",
         description: "Third-party model provider credentials and endpoint routing."
@@ -1025,6 +1029,32 @@ export const en = {
       advanced: {
         title: "Advanced",
         description: "Runtime paths, process details, and service configuration."
+      }
+    },
+    version: {
+      buildIdentity: "Build identity",
+      buildIdentityDescription: "Version and immutable source metadata for this running build.",
+      metadataUnavailable: "Build metadata could not be loaded for this session.",
+      commit: "Commit SHA",
+      shortCommit: "Short SHA",
+      tag: "Git tag",
+      branch: "Branch",
+      builtAt: "Built at",
+      source: "Build source",
+      workingTree: "Source state",
+      readOnly: "Read-only metadata",
+      copyCommit: "Copy full commit SHA",
+      copied: "Commit SHA copied",
+      copyFailed: "Could not copy commit SHA",
+      sources: {
+        release: "Release",
+        ci: "CI",
+        local: "Local",
+        unknown: "Unknown"
+      },
+      dirty: {
+        modified: "Modified",
+        clean: "Clean"
       }
     },
     modelProvider: {
@@ -2372,6 +2402,10 @@ export const zhCN = {
         title: "概览",
         description: "服务状态和设备身份。"
       },
+      version: {
+        title: "版本",
+        description: "发布身份和源码追溯信息。"
+      },
       modelProviders: {
         title: "模型 Provider",
         description: "第三方模型 provider 凭据和端点路由。"
@@ -2399,6 +2433,32 @@ export const zhCN = {
       advanced: {
         title: "高级",
         description: "运行时路径、进程详情和服务配置。"
+      }
+    },
+    version: {
+      buildIdentity: "构建身份",
+      buildIdentityDescription: "当前运行构建的版本和不可变源码元数据。",
+      metadataUnavailable: "本次会话无法加载构建元数据。",
+      commit: "提交 SHA",
+      shortCommit: "短 SHA",
+      tag: "Git tag",
+      branch: "分支",
+      builtAt: "构建时间",
+      source: "构建来源",
+      workingTree: "源码状态",
+      readOnly: "只读元数据",
+      copyCommit: "复制完整提交 SHA",
+      copied: "已复制提交 SHA",
+      copyFailed: "无法复制提交 SHA",
+      sources: {
+        release: "正式发布",
+        ci: "CI",
+        local: "本地构建",
+        unknown: "未知"
+      },
+      dirty: {
+        modified: "包含未提交修改",
+        clean: "干净"
       }
     },
     modelProvider: {

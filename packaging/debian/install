@@ -10,6 +10,7 @@ docs/dist/* usr/lib/sigmaos/docs/dist/
 node_modules/* usr/lib/sigmaos/node_modules/
 package.json usr/lib/sigmaos/
 package-lock.json usr/lib/sigmaos/
+.sigmaos/build-info.json usr/lib/sigmaos/
 packaging/etc/config.toml etc/sigmaos/
 packaging/scripts/sigmaos-first-boot.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-nginx.sh usr/lib/sigmaos/scripts/

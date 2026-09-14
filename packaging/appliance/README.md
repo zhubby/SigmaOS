@@ -14,8 +14,9 @@ Inputs:
 
 Required host tools:
 
+- `node`
 - `mmdebstrap`
 - `systemd-nspawn`
 - `tar`
 
-The manifest records required runtime components: Node, Pi, SQLite, Nginx, Docker, libvirt/QEMU, systemd units, OCR helpers, media helpers, archive helpers, and NAS health tooling. Docker and VM management remain disabled by default in first-boot configuration; enable them explicitly when the appliance is intended to manage containers or virtual machines. The image builder uses the configured domestic mirror for the base rootfs; pass `SIGMAOS_APT_MIRROR` to use an internal mirror. The resulting rootfs tarball is the handoff point for board-specific image tooling.
+When `SIGMAOS_DEB` is omitted, the builder reads the product version from the root `package.json` and expects `.sigmaos/appliance/sigmaos_<version>_<arch>.deb`. The manifest records required runtime components: Node, Pi, SQLite, Nginx, Docker, libvirt/QEMU, systemd units, OCR helpers, media helpers, archive helpers, and NAS health tooling. Docker and VM management remain disabled by default in first-boot configuration; enable them explicitly when the appliance is intended to manage containers or virtual machines. The image builder uses the configured domestic mirror for the base rootfs; pass `SIGMAOS_APT_MIRROR` to use an internal mirror. The resulting rootfs tarball is the handoff point for board-specific image tooling.

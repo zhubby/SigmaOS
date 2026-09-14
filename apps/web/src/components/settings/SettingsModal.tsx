@@ -14,6 +14,7 @@ import {
   Lock,
   MemoryStick,
   Network,
+  Package,
   Plus,
   Search,
   Server,
@@ -23,6 +24,7 @@ import {
   X
 } from "lucide-react";
 import type {
+  BuildInfo,
   DockerSettings,
   FileOperation,
   PendingApproval,
@@ -67,6 +69,7 @@ import {
 import type { ResolvedTheme, ThemePreference } from "../../lib/theme-settings.js";
 import { BrandBanner } from "../common/BrandBanner.js";
 import { CustomSelect } from "../common/CustomSelect.js";
+import { VersionSettingsPage } from "./VersionSettingsPage.js";
 
 interface SettingsModalProps {
   activeSection: SettingsSectionId;
@@ -78,6 +81,8 @@ interface SettingsModalProps {
   settings: ModelProviderSettings | null;
   systemInfo: SystemInfo | null;
   systemInfoError: string | null;
+  buildInfo: BuildInfo | null;
+  buildInfoError: string | null;
   pendingApprovals: PendingApproval[];
   operations: FileOperation[];
   operationsReady: boolean;
@@ -118,6 +123,8 @@ export function SettingsModal({
   settings,
   systemInfo,
   systemInfoError,
+  buildInfo,
+  buildInfoError,
   pendingApprovals,
   operations,
   operationsReady,
@@ -155,7 +162,7 @@ export function SettingsModal({
       )
     : SETTINGS_SECTIONS;
   const groups = [...new Set(visibleSections.map((section) => section.group))];
-  const currentState = settingsSectionState(currentSection, settings, dockerSettings);
+  const currentState = settingsSectionState(currentSection, settings, dockerSettings, buildInfo);
   const providerOptions = PROVIDER_OPTIONS.map((provider) => ({
     value: provider,
     label: providerLabel(provider, t)
@@ -198,7 +205,7 @@ export function SettingsModal({
                     {settingsSectionIcon(section.id)}
                     <span>
                       <strong>{settingsSectionTitle(section, t)}</strong>
-                      <small>{settingsSectionLabel(section, settings, loading, t, dockerSettings)}</small>
+                      <small>{settingsSectionLabel(section, settings, loading, t, dockerSettings, buildInfo)}</small>
                     </span>
                   </button>
                 ))}
@@ -224,12 +231,19 @@ export function SettingsModal({
               <div className="settings-header-meta" aria-label={t("settings.status")}>
                 <span data-state={currentState}>
                   {settingsStateIcon(currentState)}
-                  {settingsSectionLabel(currentSection, settings, loading, t, dockerSettings)}
+                  {settingsSectionLabel(currentSection, settings, loading, t, dockerSettings, buildInfo)}
                 </span>
-                <span>
-                  <Lock aria-hidden="true" size={13} />
-                  {t("settings.secretsMasked")}
-                </span>
+                {activeSection === "version" ? (
+                  <span>
+                    <ShieldCheck aria-hidden="true" size={13} />
+                    {t("settings.version.readOnly")}
+                  </span>
+                ) : (
+                  <span>
+                    <Lock aria-hidden="true" size={13} />
+                    {t("settings.secretsMasked")}
+                  </span>
+                )}
               </div>
             </div>
             <button type="button" onClick={onClose} title={t("common.actions.closeSettings")}>
@@ -244,6 +258,7 @@ export function SettingsModal({
               dockerSettings={dockerSettings}
               systemInfo={systemInfo}
               systemInfoError={systemInfoError}
+              buildInfo={buildInfo}
               locale={resolvedLocale}
               onSectionChange={onSectionChange}
             />
@@ -412,6 +427,15 @@ export function SettingsModal({
             </form>
           ) : null}
 
+          {activeSection === "version" ? (
+            <VersionSettingsPage
+              buildInfo={buildInfo}
+              error={buildInfoError}
+              loading={loading}
+              locale={resolvedLocale}
+            />
+          ) : null}
+
           {activeSection === "appearance" ? (
             <SettingsAppearancePage
               languagePreference={languagePreference}
@@ -492,6 +516,7 @@ function SettingsOverview({
   dockerSettings,
   systemInfo,
   systemInfoError,
+  buildInfo,
   locale,
   onSectionChange
 }: {
@@ -500,6 +525,7 @@ function SettingsOverview({
   dockerSettings: DockerSettings | null;
   systemInfo: SystemInfo | null;
   systemInfoError: string | null;
+  buildInfo: BuildInfo | null;
   locale: SupportedLocale;
   onSectionChange: (section: SettingsSectionId) => void;
 }) {
@@ -535,7 +561,7 @@ function SettingsOverview({
         },
         {
           value: formatLocaleNumber(
-            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings, dockerSettings) === "ready")
+            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings, dockerSettings, buildInfo) === "ready")
               .length,
             locale
           ),
@@ -543,7 +569,7 @@ function SettingsOverview({
         },
         {
           value: formatLocaleNumber(
-            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings, dockerSettings) === "missing")
+            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings, dockerSettings, buildInfo) === "missing")
               .length,
             locale
           ),
@@ -620,8 +646,8 @@ function SettingsOverview({
                 <strong>{settingsSectionTitle(section, t)}</strong>
                 <small>{settingsSectionDescription(section, t)}</small>
               </span>
-              <em data-state={settingsSectionState(section, settings, dockerSettings)}>
-                {settingsSectionLabel(section, settings, loading, t, dockerSettings)}
+              <em data-state={settingsSectionState(section, settings, dockerSettings, buildInfo)}>
+                {settingsSectionLabel(section, settings, loading, t, dockerSettings, buildInfo)}
               </em>
             </button>
           ))}
@@ -2222,6 +2248,8 @@ function settingsSectionIcon(section: SettingsSectionId) {
   switch (section) {
     case "overview":
       return <HardDrive aria-hidden="true" size={16} />;
+    case "version":
+      return <Package aria-hidden="true" size={16} />;
     case "model-providers":
       return <KeyRound aria-hidden="true" size={16} />;
     case "agents":

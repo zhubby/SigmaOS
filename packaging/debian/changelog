@@ -1,3 +1,9 @@
+sigmaos (0.2.0) unstable; urgency=medium
+
+  * Add unified version governance and deployed build traceability.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Mon, 14 Sep 2026 14:13:01 +0800
+
 sigmaos (0.1.0) unstable; urgency=medium
 
   * Initial native NAS appliance package scaffold.

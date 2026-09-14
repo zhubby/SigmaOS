@@ -829,6 +829,45 @@ describe("API server", () => {
     }
   });
 
+  it("returns immutable public build information for deployment traceability", async () => {
+    process.env.SIGMAOS_TEST_SECRET = "do-not-leak-from-build-info";
+    const server = await buildServer({
+      config: testConfig(tempDir),
+      db,
+      buildInfo: {
+        version: "0.2.0",
+        commitSha: "abcdef0123456789",
+        commitShortSha: "abcdef012345",
+        tag: "v0.2.0",
+        branch: "main",
+        builtAt: "2026-09-14T00:00:00.000Z",
+        source: "release",
+        dirty: false
+      }
+    });
+    try {
+      const response = await server.inject({ method: "GET", url: "/api/system/build-info" });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({
+        build: {
+          version: "0.2.0",
+          commitSha: "abcdef0123456789",
+          commitShortSha: "abcdef012345",
+          tag: "v0.2.0",
+          branch: "main",
+          builtAt: "2026-09-14T00:00:00.000Z",
+          source: "release",
+          dirty: false
+        }
+      });
+      expect(response.payload).not.toContain("do-not-leak-from-build-info");
+    } finally {
+      delete process.env.SIGMAOS_TEST_SECRET;
+      await server.close();
+    }
+  });
+
   it("returns read-only network management summary from host commands", async () => {
     const commandRunner = new FakeSystemCommandRunner({
       "ip -j link": JSON.stringify([

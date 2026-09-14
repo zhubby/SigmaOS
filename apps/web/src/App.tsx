@@ -8,6 +8,7 @@ import {
   deleteSession,
   extractFile,
   getApprovals,
+  getBuildInfo,
   getDockerOperations,
   getVmOperations,
   getDockerSettings,
@@ -35,6 +36,7 @@ import {
   updateSessionPath,
   uploadFile,
   type AgentEvent,
+  type BuildInfo,
   type FileEntry,
   type FileMeta,
   type FileOperation,
@@ -163,6 +165,8 @@ export function App() {
   const [dockerSettings, setDockerSettings] = useState<DockerSettings | null>(null);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [systemInfoError, setSystemInfoError] = useState<string | null>(null);
+  const [buildInfo, setBuildInfo] = useState<BuildInfo | null>(null);
+  const [buildInfoError, setBuildInfoError] = useState<string | null>(null);
   const [modelSettingsForm, setModelSettingsForm] = useState<ModelProviderFormState>(() =>
     modelSettingsToForm(null)
   );
@@ -641,12 +645,14 @@ export function App() {
     setSettingsLoading(true);
     setError(null);
     setSystemInfoError(null);
+    setBuildInfoError(null);
     try {
-      const [settingsResult, toolPolicyResult, dockerSettingsResult, systemInfoResult] = await Promise.allSettled([
+      const [settingsResult, toolPolicyResult, dockerSettingsResult, systemInfoResult, buildInfoResult] = await Promise.allSettled([
         getModelProviderSettings(),
         getPiToolPolicySettings(),
         getDockerSettings(),
-        getSystemInfo()
+        getSystemInfo(),
+        getBuildInfo()
       ]);
 
       const errors: string[] = [];
@@ -682,6 +688,13 @@ export function App() {
         const message = toErrorMessage(systemInfoResult.reason);
         setSystemInfoError(message);
         errors.push(message);
+      }
+
+      if (buildInfoResult.status === "fulfilled") {
+        setBuildInfo(buildInfoResult.value);
+      } else {
+        setBuildInfo(null);
+        setBuildInfoError(toErrorMessage(buildInfoResult.reason));
       }
 
       if (errors.length > 0) {
@@ -1882,6 +1895,8 @@ export function App() {
           dockerForm={dockerSettingsForm}
           systemInfo={systemInfo}
           systemInfoError={systemInfoError}
+          buildInfo={buildInfo}
+          buildInfoError={buildInfoError}
           pendingApprovals={approvals}
           operations={operations}
           operationsReady={operationsReady}

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { dockerSettingsToForm, modelSettingsToForm, settingsSectionState, type SettingsSection } from "./settings.js";
+import type { TFunction } from "i18next";
+import {
+  dockerSettingsToForm,
+  modelSettingsToForm,
+  settingsSectionLabel,
+  settingsSectionState,
+  type SettingsSection
+} from "./settings.js";
 
 describe("settings helpers", () => {
   it("treats saved Docker settings as configured even when disabled", () => {
@@ -41,5 +48,28 @@ describe("settings helpers", () => {
       apiKey: "",
       clearApiKey: false
     });
+  });
+
+  it("reports the running version in the dedicated settings section", () => {
+    const section: SettingsSection = {
+      id: "version",
+      group: "sigmaos"
+    };
+    const buildInfo = {
+      version: "0.2.0",
+      commitSha: "0123456789abcdef",
+      commitShortSha: "0123456789ab",
+      tag: "v0.2.0",
+      branch: "main",
+      builtAt: "2026-09-14T08:00:00.000Z",
+      source: "release" as const,
+      dirty: false
+    };
+    const t = ((key: string) => key) as TFunction<"translation">;
+
+    expect(settingsSectionState(section, null, null, buildInfo)).toBe("ready");
+    expect(settingsSectionLabel(section, null, false, t, null, buildInfo)).toBe("v0.2.0");
+    expect(settingsSectionState(section, null, null, null)).toBe("missing");
+    expect(settingsSectionLabel(section, null, false, t, null, null)).toBe("common.states.unavailable");
   });
 });

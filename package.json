@@ -1,6 +1,6 @@
 {
   "name": "sigmaos",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -9,7 +9,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently -n api,worker,web -c blue,green,magenta \"npm run dev -w @sigmaos/api\" \"npm run dev -w @sigmaos/worker\" \"npm run dev -w @sigmaos/web\"",
+    "dev": "npm run build:metadata && concurrently -n api,worker,web -c blue,green,magenta \"npm run dev -w @sigmaos/api\" \"npm run dev -w @sigmaos/worker\" \"npm run dev -w @sigmaos/web\"",
     "index": "npm run once -w @sigmaos/indexer",
     "backup": "npm run dev -w @sigmaos/backup",
     "schedule": "npm run dev -w @sigmaos/scheduler",
@@ -20,7 +20,10 @@
     "docs:test": "npm --prefix docs test",
     "docs:build": "npm --prefix docs run build",
     "docs:browser": "npm --prefix docs run browser",
-    "build": "npm run build --workspaces --if-present && npm run docs:build",
+    "build": "npm run build:metadata && npm run build --workspaces --if-present && npm run docs:build",
+    "build:metadata": "node scripts/generate-build-info.mjs",
+    "release": "node scripts/release.mjs",
+    "version:check": "node scripts/version-check.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && npm run docs:check",
     "test": "vitest run && npm run docs:test",
     "lint": "eslint ."

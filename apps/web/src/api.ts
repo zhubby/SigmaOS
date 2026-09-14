@@ -8,6 +8,7 @@ import type {
   GitFileStatus,
   IndexRootStatus,
   ModelProviderName as SharedModelProviderName,
+  PublicBuildInfo,
   PublicModelProviderSettings,
   PublicShareSettings,
   DockerSummary as PublicDockerSummary,
@@ -239,6 +240,7 @@ export interface PiToolPolicySettings {
 }
 
 export type SystemInfo = PublicSystemInfo;
+export type BuildInfo = PublicBuildInfo;
 export type SystemInfoStorageVolume = PublicSystemInfo["storage"]["volumes"][number];
 export type NetworkSummary = SystemNetworkSummary;
 export type NetworkTrafficSummary = SystemNetworkTrafficSummary;
@@ -348,6 +350,13 @@ export async function getSystemInfo(): Promise<SystemInfo> {
   await ensureOk(response);
   const body = (await response.json()) as { info: SystemInfo };
   return body.info;
+}
+
+export async function getBuildInfo(): Promise<BuildInfo> {
+  const response = await fetch("/api/system/build-info");
+  await ensureOk(response);
+  const body = (await response.json()) as { build: BuildInfo };
+  return body.build;
 }
 
 export async function getSystemNetwork(): Promise<NetworkSummary> {

@@ -380,6 +380,19 @@ export function isModelProviderName(value: unknown): value is ModelProviderName 
   );
 }
 
+export type BuildSource = "release" | "ci" | "local" | "unknown";
+
+export interface PublicBuildInfo {
+  version: string;
+  commitSha: string | null;
+  commitShortSha: string | null;
+  tag: string | null;
+  branch: string | null;
+  builtAt: string | null;
+  source: BuildSource;
+  dirty: boolean | null;
+}
+
 export interface PublicSystemInfo {
   collectedAt: string;
   identity: {

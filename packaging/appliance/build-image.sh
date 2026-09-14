@@ -10,9 +10,6 @@ MIRROR="${MIRROR%/}"
 NODE_MIRROR="${SIGMAOS_NODE_MIRROR:-https://mirrors.aliyun.com/nodejs-release}"
 NODE_MIRROR="${NODE_MIRROR%/}"
 NODE_VERSION="${SIGMAOS_NODE_VERSION:-22.23.2}"
-DEB_PATH="${SIGMAOS_DEB:-$OUT_DIR/sigmaos_0.1.0_${ARCH}.deb}"
-ROOTFS="$OUT_DIR/rootfs"
-TARBALL="$OUT_DIR/sigmaos-rootfs-${ARCH}.tar"
 
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -20,6 +17,12 @@ need() {
     exit 1
   fi
 }
+
+need node
+PRODUCT_VERSION=$(node -e 'const fs = require("node:fs"); const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(value.version);' "$ROOT_DIR/package.json")
+DEB_PATH="${SIGMAOS_DEB:-$OUT_DIR/sigmaos_${PRODUCT_VERSION}_${ARCH}.deb}"
+ROOTFS="$OUT_DIR/rootfs"
+TARBALL="$OUT_DIR/sigmaos-rootfs-${ARCH}.tar"
 
 need mmdebstrap
 need systemd-nspawn

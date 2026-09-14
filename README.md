@@ -257,6 +257,16 @@ npm test
 npm run build
 ```
 
+SigmaOS uses one SemVer across the root manifest, application and package workspaces, Debian package, and appliance manifest. Prepare a release from a clean worktree with:
+
+```bash
+npm run release -- patch --note "Describe the operator-visible change"
+```
+
+Use `minor` or `major` when appropriate. The command only updates version sources and the Debian changelog; it does not commit, tag, push, or publish. Review and commit the resulting diff, create the matching `v<version>` tag separately, and use `npm run version:check` to validate consistency. Runtime, configuration, script, and packaging changes require a version bump relative to the pull request base; documentation, tests, and CI-only changes may share the next product release.
+
+Every build writes `.sigmaos/build-info.json` with the product version, commit SHA, tag or branch, build time, build source, and dirty state. The API exposes the public subset at `/api/system/build-info`, and the web UI shows it under Settings > Version. Debian packages install the immutable metadata at `/usr/lib/sigmaos/build-info.json`.
+
 The equivalent Make targets are available through `make check` and `make ci`. The production API serves `apps/web/dist` when it is present, so a source build can be run with the API and worker in separate shells:
 
 ```bash
@@ -277,7 +287,7 @@ Package artifacts are written under `.sigmaos/`. The package installs the built 
 To build the generic Debian Bookworm rootfs tarball, install `mmdebstrap`, `systemd-nspawn`, and `tar`, then point the appliance builder at the architecture-matching package:
 
 ```bash
-SIGMAOS_DEB=/absolute/path/to/sigmaos_0.1.0_arm64.deb make appliance
+SIGMAOS_DEB=/absolute/path/to/sigmaos_<version>_arm64.deb make appliance
 ```
 
 See [`packaging/appliance/README.md`](packaging/appliance/README.md) for image-builder inputs. Tagged releases are configured to publish `amd64` and `arm64` Debian artifacts with checksums through GitHub Actions.

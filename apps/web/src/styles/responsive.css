@@ -79,6 +79,14 @@
     grid-column: auto;
   }
 
+  .settings-version-details {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-version-details > div:first-child {
+    grid-column: auto;
+  }
+
   .settings-storage-row {
     grid-template-columns: 1fr;
   }
@@ -496,6 +504,17 @@
 
   .settings-summary-list div {
     grid-template-columns: 96px minmax(0, 1fr);
+  }
+
+  .settings-version-release {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .settings-version-release strong {
+    grid-row: auto;
+    grid-column: auto;
+    font-size: 21px;
   }
 
   .settings-metric-grid {

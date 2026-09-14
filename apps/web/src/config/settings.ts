@@ -1,5 +1,6 @@
 import type { TFunction } from "i18next";
 import type {
+  BuildInfo,
   DockerSettings,
   ModelProviderSettings,
   ModelProviderName,
@@ -12,6 +13,7 @@ import type { SupportedLocale } from "../i18n/locale.js";
 
 export type SettingsSectionId =
   | "overview"
+  | "version"
   | "model-providers"
   | "agents"
   | "docker"
@@ -65,6 +67,10 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     group: "sigmaos"
   },
   {
+    id: "version",
+    group: "sigmaos"
+  },
+  {
     id: "model-providers",
     group: "ai"
   },
@@ -96,6 +102,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
 
 const SECTION_TITLE_KEYS = {
   overview: "settings.sections.overview.title",
+  version: "settings.sections.version.title",
   "model-providers": "settings.sections.modelProviders.title",
   agents: "settings.sections.agents.title",
   docker: "settings.sections.docker.title",
@@ -107,6 +114,7 @@ const SECTION_TITLE_KEYS = {
 
 const SECTION_DESCRIPTION_KEYS = {
   overview: "settings.sections.overview.description",
+  version: "settings.sections.version.description",
   "model-providers": "settings.sections.modelProviders.description",
   agents: "settings.sections.agents.description",
   docker: "settings.sections.docker.description",
@@ -184,13 +192,17 @@ export function settingsUpdatedAtLabel(
 export function settingsSectionState(
   section: SettingsSection,
   settings: ModelProviderSettings | null,
-  dockerSettings: DockerSettings | null
+  dockerSettings: DockerSettings | null,
+  buildInfo: BuildInfo | null = null
 ): SettingsState {
   if (section.id === "model-providers") {
     return settings?.apiKeyConfigured ? "ready" : "missing";
   }
   if (section.id === "docker") {
     return dockerSettings ? "ready" : "missing";
+  }
+  if (section.id === "version") {
+    return buildInfo && buildInfo.version !== "unknown" ? "ready" : "missing";
   }
   return "ready";
 }
@@ -200,10 +212,17 @@ export function settingsSectionLabel(
   settings: ModelProviderSettings | null,
   loading: boolean,
   t: Translate,
-  dockerSettings: DockerSettings | null
+  dockerSettings: DockerSettings | null,
+  buildInfo: BuildInfo | null = null
 ): string {
-  if (loading && (section.id === "model-providers" || section.id === "docker")) {
+  if (loading && (section.id === "model-providers" || section.id === "docker" || section.id === "version")) {
     return t("common.states.loading");
+  }
+  if (section.id === "version") {
+    if (!buildInfo) {
+      return t("common.states.unavailable");
+    }
+    return buildInfo.version === "unknown" ? t("common.states.unknown") : `v${buildInfo.version}`;
   }
   if (section.id === "docker") {
     if (!dockerSettings) {
@@ -211,7 +230,7 @@ export function settingsSectionLabel(
     }
     return dockerSettings.enabled ? t("settings.docker.enabled") : t("settings.docker.disabled");
   }
-  const state = settingsSectionState(section, settings, dockerSettings);
+  const state = settingsSectionState(section, settings, dockerSettings, buildInfo);
   if (state === "ready") {
     return t("common.states.configured");
   }
