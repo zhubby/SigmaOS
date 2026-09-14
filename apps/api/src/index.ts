@@ -20,9 +20,10 @@ const server = await buildServer({
   terminal: createTerminalRuntime(config.terminal)
 });
 const webDist = resolveWebDist();
+const docsDist = resolveDocsDist();
 
 if (existsSync(webDist)) {
-  await registerWebApp(server, webDist);
+  await registerWebApp(server, webDist, docsDist);
 }
 
 await server.listen({ host: config.api.host, port: config.api.port });
@@ -38,4 +39,16 @@ function resolveWebDist(): string {
   ];
 
   return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!;
+}
+
+function resolveDocsDist(): string | undefined {
+  const configured = process.env.SIGMAOS_DOCS_DIST;
+  const candidates = [
+    configured,
+    path.resolve(process.cwd(), "docs/dist"),
+    path.resolve(process.cwd(), "../docs/dist"),
+    "/usr/lib/sigmaos/docs/dist"
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  return candidates.find((candidate) => existsSync(candidate));
 }

@@ -15,9 +15,14 @@
     "schedule": "npm run dev -w @sigmaos/scheduler",
     "maintenance": "npm run dev -w @sigmaos/scheduler -- --maintenance",
     "postinstall": "node scripts/fix-node-pty-permissions.mjs",
-    "build": "npm run build --workspaces --if-present",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
+    "docs:dev": "npm --prefix docs run dev",
+    "docs:check": "npm --prefix docs run check",
+    "docs:test": "npm --prefix docs test",
+    "docs:build": "npm --prefix docs run build",
+    "docs:browser": "npm --prefix docs run browser",
+    "build": "npm run build --workspaces --if-present && npm run docs:build",
+    "typecheck": "tsc --noEmit -p tsconfig.json && npm run docs:check",
+    "test": "vitest run && npm run docs:test",
     "lint": "eslint ."
   },
   "devDependencies": {

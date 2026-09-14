@@ -65,6 +65,7 @@ import {
   previewFileSizeLimitMiBToBytes
 } from "../../lib/preview-settings.js";
 import type { ResolvedTheme, ThemePreference } from "../../lib/theme-settings.js";
+import { BrandBanner } from "../common/BrandBanner.js";
 import { CustomSelect } from "../common/CustomSelect.js";
 
 interface SettingsModalProps {
@@ -171,7 +172,7 @@ export function SettingsModal({
       >
         <aside className="settings-rail" aria-label={t("settings.sectionsLabel")}>
           <div className="settings-rail-brand">
-            <img className="brand-banner" src="/sigmaos-banner.svg" alt={t("common.appName")} />
+            <BrandBanner alt={t("common.appName")} />
           </div>
 
           <label className="settings-search">

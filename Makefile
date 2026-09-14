@@ -3,13 +3,14 @@ NPM ?= npm
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install dev dev-api dev-web dev-worker dev-indexer dev-scheduler index schedule maintenance preview-web start-api start-worker start-indexer start-scheduler typecheck lint test build check ci clean deb appliance
+.PHONY: help install dev dev-api dev-web dev-worker dev-indexer dev-scheduler docs-dev docs-check docs-test docs-build docs-browser index schedule maintenance preview-web start-api start-worker start-indexer start-scheduler typecheck lint test build check ci clean deb appliance
 
 help: ## Show available targets.
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_.-]+:.*##/ { printf "  %-18s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 install: ## Install workspace dependencies.
 	$(NPM) install
+	$(NPM) --prefix docs ci
 
 dev: ## Run the API, worker, and web development servers.
 	$(NPM) run dev
@@ -28,6 +29,21 @@ dev-indexer: ## Run the indexer in watch mode.
 
 dev-scheduler: ## Run the scheduler development process.
 	$(NPM) run dev -w @sigmaos/scheduler
+
+docs-dev: ## Run the Starlight development server.
+	$(NPM) run docs:dev
+
+docs-check: ## Check Starlight content and configuration.
+	$(NPM) run docs:check
+
+docs-test: ## Run documentation metadata tests.
+	$(NPM) run docs:test
+
+docs-build: ## Build the Starlight site.
+	$(NPM) run docs:build
+
+docs-browser: ## Run documentation browser smoke tests.
+	$(NPM) run docs:browser
 
 index: ## Run one indexing pass.
 	$(NPM) run index

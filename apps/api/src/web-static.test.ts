@@ -7,19 +7,27 @@ import { registerWebApp } from "./web-static.js";
 
 let server: FastifyInstance;
 let webDist: string;
+let docsDist: string;
 
 beforeEach(async () => {
   webDist = await mkdtemp(path.join(os.tmpdir(), "sigmaos-web-static-"));
+  docsDist = await mkdtemp(path.join(os.tmpdir(), "sigmaos-docs-static-"));
   await mkdir(path.join(webDist, "assets"));
+  await mkdir(path.join(docsDist, "_astro"));
   await writeFile(path.join(webDist, "index.html"), "<!doctype html><title>SigmaOS current</title>");
   await writeFile(path.join(webDist, "assets", "index-current.js"), "console.log('current');");
+  await writeFile(path.join(docsDist, "index.html"), "<!doctype html><title>SigmaOS docs</title>");
+  await mkdir(path.join(docsDist, "architecture", "system-overview"), { recursive: true });
+  await writeFile(path.join(docsDist, "architecture", "system-overview", "index.html"), "<title>System overview</title>");
+  await writeFile(path.join(docsDist, "_astro", "docs-current.js"), "console.log('docs');");
   server = Fastify();
-  await registerWebApp(server, webDist);
+  await registerWebApp(server, webDist, docsDist);
 });
 
 afterEach(async () => {
   await server.close();
   await rm(webDist, { recursive: true, force: true });
+  await rm(docsDist, { recursive: true, force: true });
 });
 
 describe("web static delivery", () => {
@@ -65,5 +73,25 @@ describe("web static delivery", () => {
     expect(navigation.headers["cache-control"]).toBe("no-store");
     expect(missingApi.statusCode).toBe(404);
     expect(missingApi.headers["content-type"]).toContain("application/json");
+  });
+
+  it("serves docs under a reserved prefix without falling back to the React shell", async () => {
+    const redirect = await server.inject({ method: "GET", url: "/docs" });
+    const home = await server.inject({ method: "GET", url: "/docs/" });
+    const page = await server.inject({ method: "GET", url: "/docs/architecture/system-overview/" });
+    const asset = await server.inject({ method: "GET", url: "/docs/_astro/docs-current.js" });
+    const missing = await server.inject({ method: "GET", url: "/docs/missing/" });
+
+    expect(redirect.statusCode).toBe(308);
+    expect(redirect.headers.location).toBe("/docs/");
+    expect(home.statusCode).toBe(200);
+    expect(home.body).toContain("SigmaOS docs");
+    expect(home.headers["cache-control"]).toBe("no-store");
+    expect(page.statusCode).toBe(200);
+    expect(page.body).toContain("System overview");
+    expect(asset.statusCode).toBe(200);
+    expect(asset.headers["cache-control"]).toBe("public, max-age=31536000, immutable");
+    expect(missing.statusCode).toBe(404);
+    expect(missing.body).not.toContain("SigmaOS current");
   });
 });

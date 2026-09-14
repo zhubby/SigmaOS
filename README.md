@@ -182,6 +182,8 @@ npm run schedule
 npm run maintenance
 ```
 
+The Starlight documentation site is built separately with `npm run docs:build` and is served by the production API at `http://127.0.0.1:3010/docs/` when its static output is present. Use `npm run docs:dev` for the standalone documentation development server.
+
 The packaged `sigmaos-indexer.timer` runs every 30 minutes, so search is eventually consistent after uploads, edits, moves, and deletes. Run `npm run index` for an immediate development refresh. A failed file retains its last successful index entry, and an incomplete directory traversal does not remove stale entries that could not be verified.
 
 Inspect the latest run for every configured root, or one root, through the read-only status endpoint:
@@ -320,7 +322,7 @@ packaging/
   appliance/      Rootfs image scaffold
   debian/         Debian package metadata
   systemd/        Runtime services and timers
-docs/             Capability and specification coverage notes
+docs/             Starlight technical, architecture, and operations documentation
 ```
 
 ## License

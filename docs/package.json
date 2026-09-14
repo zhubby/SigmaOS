@@ -1,0 +1,25 @@
+{
+  "name": "@sigmaos/docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev --host 127.0.0.1 --port 4321",
+    "check": "astro check",
+    "test": "node --test tests/content.test.mjs",
+    "build": "astro check && astro build",
+    "preview": "astro preview --host 127.0.0.1 --port 4321",
+    "browser": "playwright test"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.10",
+    "@astrojs/starlight": "0.42.0",
+    "astro": "7.3.2",
+    "astro-mermaid": "2.1.0",
+    "@playwright/test": "1.55.0",
+    "mermaid": "11.17.2",
+    "playwright": "1.55.0",
+    "starlight-links-validator": "0.26.0",
+    "yaml": "2.8.3"
+  }
+}

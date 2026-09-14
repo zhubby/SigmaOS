@@ -1,9 +1,11 @@
 node_modules/
 dist/
 .vite/
+.astro/
 coverage/
 .sigmaos/
 *.log
+test-results/
+playwright-report/
 .env
 .DS_Store
-

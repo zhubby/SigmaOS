@@ -10,6 +10,7 @@ User=sigmaos
 Group=sigmaos
 Environment=SIGMAOS_CONFIG=/etc/sigmaos/config.toml
 Environment=SIGMAOS_WEB_DIST=/usr/lib/sigmaos/apps/web/dist
+Environment=SIGMAOS_DOCS_DIST=/usr/lib/sigmaos/docs/dist
 WorkingDirectory=/var/lib/sigmaos
 StateDirectory=sigmaos
 LogsDirectory=sigmaos

@@ -44,6 +44,7 @@ import {
   splitWorkspaceMessagePaths
 } from "../../lib/chat-paths.js";
 import { sessionTitle } from "../../lib/session.js";
+import { BrandBanner } from "../common/BrandBanner.js";
 
 type ApprovalRisk = PendingApproval["proposal"][number]["risk"];
 type ApprovalCardKind = "file" | "tool" | "docker" | "vm" | "share" | "storage";
@@ -327,7 +328,7 @@ export function ChatPane({
     <section className={`chat-pane ${active ? "is-mobile-active" : ""}`} aria-label={t("chat.agents")}>
       <aside className="agent-list" aria-label={t("chat.agentSessions")}>
         <div className="brand">
-          <img className="brand-banner" src="/sigmaos-banner.svg" alt="" aria-hidden="true" />
+          <BrandBanner />
           <button
             className="settings-button brand-settings-button"
             type="button"

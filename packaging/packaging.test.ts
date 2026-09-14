@@ -69,6 +69,11 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("usr/lib/sigmaos/apps/backup/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/scheduler/dist/");
     expect(install).toContain("node_modules/* usr/lib/sigmaos/node_modules/");
+    expect(install).toContain("docs/dist/* usr/lib/sigmaos/docs/dist/");
+    expect(install).not.toContain("docs/node_modules");
+    await expect(readPackagingFile("systemd", "sigmaos-api.service")).resolves.toContain(
+      "Environment=SIGMAOS_DOCS_DIST=/usr/lib/sigmaos/docs/dist"
+    );
     expect(install).toContain("packaging/scripts/sigmaos-nginx.sh usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/scripts/sigmaos-configure-locale.sh usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/scripts/sigmaos-refresh-terminal.sh usr/lib/sigmaos/scripts/");

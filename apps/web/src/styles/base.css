@@ -255,13 +255,22 @@ button:disabled {
 }
 
 .brand-banner {
-  display: block;
+  display: grid;
   width: min(148px, 100%);
-  height: auto;
   filter: drop-shadow(0 8px 18px rgb(88 101 242 / 16%));
-  transition:
-    filter 140ms ease,
-    opacity 140ms ease;
+  transition: filter 140ms ease;
+}
+
+.brand-banner-art {
+  display: block;
+  grid-area: 1 / 1;
+  width: 100%;
+  height: auto;
+  transition: opacity 140ms ease;
+}
+
+.brand-banner-art-light {
+  opacity: 0;
 }
 
 .brand:hover .brand-banner,
