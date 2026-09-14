@@ -64,7 +64,7 @@ ln -sfn "$node_dir/bin/npx" "$ROOTFS/usr/local/bin/npx"
 cp "$DEB_PATH" "$ROOTFS/tmp/sigmaos.deb"
 systemd-nspawn -D "$ROOTFS" /bin/sh -eu -c "apt-get update && apt-get install -y /tmp/sigmaos.deb && rm /tmp/sigmaos.deb"
 systemd-nspawn -D "$ROOTFS" /usr/lib/sigmaos/scripts/sigmaos-nginx.sh
-systemd-nspawn -D "$ROOTFS" systemctl enable nginx.service sigmaos-share-helper.service sigmaos-api.service sigmaos-worker@1.service sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer sigmaos-backup-daily.timer sigmaos-backup-weekly.timer sigmaos-health.timer
+systemd-nspawn -D "$ROOTFS" systemctl enable nginx.service sigmaos-share-helper.service sigmaos-terminal-helper.service sigmaos-api.service sigmaos-worker@1.service sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer sigmaos-backup-daily.timer sigmaos-backup-weekly.timer sigmaos-health.timer
 
 tar --numeric-owner -C "$ROOTFS" -cpf "$TARBALL" .
 printf "SigmaOS appliance rootfs written to %s\n" "$TARBALL"

@@ -5,17 +5,10 @@ import {
   MIN_TERMINAL_COLS,
   MIN_TERMINAL_ROWS,
   terminalDimension,
-  terminalMessage,
-  terminalShell
+  terminalMessage
 } from "./terminal.js";
 
 describe("terminal helpers", () => {
-  it("uses an absolute configured shell and falls back to sh", () => {
-    expect(terminalShell({ SHELL: "/bin/bash" })).toBe("/bin/bash");
-    expect(terminalShell({ SHELL: "bash" })).toBe("/bin/sh");
-    expect(terminalShell({})).toBe("/bin/sh");
-  });
-
   it("accepts terminal dimensions only inside the supported bounds", () => {
     expect(terminalDimension(MIN_TERMINAL_COLS, MIN_TERMINAL_COLS, MAX_TERMINAL_COLS)).toBe(MIN_TERMINAL_COLS);
     expect(terminalDimension(MAX_TERMINAL_ROWS, MIN_TERMINAL_ROWS, MAX_TERMINAL_ROWS)).toBe(MAX_TERMINAL_ROWS);

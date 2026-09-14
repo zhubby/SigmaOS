@@ -52,7 +52,7 @@ The following surfaces are intentionally limited today:
 ### Host management
 
 - Read-only CPU, memory, process, runtime, storage, SMART, RAID, mount, and network reporting.
-- A local PTY terminal over WebSocket using the API service account.
+- A local PTY terminal over WebSocket using a separately configured non-root host user (the API remains `sigmaos`).
 - Optional Docker Engine and Compose discovery, metrics, logs, lifecycle actions, and one-time approved console sessions.
 - Approval-gated SMB, WebDAV, FTP, NFS, and DLNA share configuration through a separate privileged helper.
 - English and Simplified Chinese UI, light/dark themes, preview limits, and editor font settings.
@@ -93,6 +93,8 @@ flowchart LR
   Indexer --> DB
   Scheduler --> DB
   API --> Host
+  API -->|Unix socket| TerminalBroker[Terminal broker]
+  TerminalBroker -->|PTY as configured user| Host
   API -->|Unix socket| Helper
   Helper --> Host
 ```
@@ -107,6 +109,7 @@ The main runtime components are:
 | `apps/indexer` | Walks NAS roots, hashes files, extracts bounded text, and maintains the FTS index. |
 | `apps/scheduler` | Generates duplicate, backup, provider, and health reports; checkpoints and optimizes SQLite. |
 | `apps/share-helper` | Applies approved host share configuration through a restricted Unix socket service. |
+| `apps/terminal-helper` | Runs WebSocket terminal PTYs as the configured non-root passwd user. |
 | `packages/agent` | Pi SDK integration, NAS-scoped tools, session persistence, and tool policy enforcement. |
 | `packages/db` | SQLite connection, migrations, repositories, job queue, approvals, operations, and FTS queries. |
 | `packages/nas-tools` | Root-relative path validation, symlink escape protection, file reads, metadata, and mutations. |
@@ -132,7 +135,7 @@ SigmaOS currently assumes a trusted, single-user appliance. It has no multi-user
 - Write-capable Pi tools default to approval or disabled policies, configurable from the UI.
 - Approved file changes are audited. Trash uses a SigmaOS-managed quarantine area, and v1 never permanently deletes it during maintenance.
 - Docker management is disabled by default. Access to `/var/run/docker.sock` is effectively root-equivalent.
-- The local terminal is a real shell running as the API service account and should be treated as privileged access.
+- The local terminal is a real interactive login shell running through `apps/terminal-helper` as the configured non-root passwd user. The API service itself remains `sigmaos`; `NoNewPrivileges` on the broker prevents terminal `sudo` escalation.
 - Share changes are isolated in `apps/share-helper`, which writes allowlisted host configuration files and reloads allowlisted services.
 
 Always configure at least one explicit NAS root. When no root is provided, the development fallback is the host filesystem root.
@@ -285,7 +288,7 @@ For an `arm64` CM5 (or an `amd64` Debian host), run the host installer from a ch
 sudo SIGMAOS_NAS_ROOT_PATH=/srv/nas packaging/scripts/install.sh
 ```
 
-The installer checks the Debian architecture, switches Debian and Raspberry Pi APT entries to domestic mirrors, installs Node.js 22 from the verified Aliyun Node.js release mirror when needed, and configures npm to use `https://registry.npmmirror.com`. It then installs the native build toolchain, builds the package on the target host, and initializes the first-boot configuration. Building on the target keeps native `better-sqlite3` and `node-pty` binaries compatible with the board. It starts the SigmaOS API, worker, share-helper, and an Nginx reverse proxy on port 80 by default; indexer, scheduler, maintenance, health, and backup timers are enabled for their scheduled runs. The API remains loopback-only and Nginx is the LAN entry point.
+The installer checks the Debian architecture, switches Debian and Raspberry Pi APT entries to domestic mirrors, installs Node.js 22 from the verified Aliyun Node.js release mirror when needed, and configures npm to use `https://registry.npmmirror.com`. It then installs the native build toolchain, builds the package on the target host, and initializes the first-boot configuration. Building on the target keeps native `better-sqlite3` and `node-pty` binaries compatible with the board. It starts the SigmaOS API, worker, share-helper, terminal-helper, and an Nginx reverse proxy on port 80 by default; indexer, scheduler, maintenance, health, and backup timers are enabled for their scheduled runs. The API remains loopback-only and Nginx is the LAN entry point.
 
 The mirror defaults can be overridden for a private mirror or restored to another mirror with `SIGMAOS_APT_MIRROR`, `SIGMAOS_APT_SECURITY_MIRROR`, `SIGMAOS_RPI_MIRROR`, `SIGMAOS_NODE_MIRROR`, `SIGMAOS_NODE_VERSION`, and `SIGMAOS_NPM_REGISTRY`. The installer only rewrites known Debian/Raspberry Pi URIs, saves original source files under `/var/backups/sigmaos-apt`, preserves `signed-by`, suites, components, and unrelated sources, and disables any NodeSource entry after switching to the domestic Node.js binary distribution. To restore an original source, copy its backup from `/var/backups/sigmaos-apt` back to `/etc/apt/sources.list.d` (or uncomment the marked NodeSource line) before running the installer again with an explicit `SIGMAOS_NODE_MIRROR`.
 

@@ -1,5 +1,6 @@
 apps/api/dist/* usr/lib/sigmaos/apps/api/dist/
 apps/share-helper/dist/* usr/lib/sigmaos/apps/share-helper/dist/
+apps/terminal-helper/dist/* usr/lib/sigmaos/apps/terminal-helper/dist/
 apps/worker/dist/* usr/lib/sigmaos/apps/worker/dist/
 apps/indexer/dist/* usr/lib/sigmaos/apps/indexer/dist/
 apps/backup/dist/* usr/lib/sigmaos/apps/backup/dist/
@@ -13,6 +14,7 @@ packaging/scripts/sigmaos-first-boot.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-nginx.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-configure-locale.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-refresh-groups.sh usr/lib/sigmaos/scripts/
+packaging/scripts/sigmaos-refresh-terminal.sh usr/lib/sigmaos/scripts/
 packaging/nginx/sigmaos.conf usr/share/sigmaos/nginx/
 packaging/systemd/*.service lib/systemd/system/
 packaging/systemd/*.timer lib/systemd/system/

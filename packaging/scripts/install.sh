@@ -15,6 +15,7 @@ SIGMAOS_LOCALE=${SIGMAOS_LOCALE:-C.UTF-8}
 NGINX_ENABLED=${SIGMAOS_ENABLE_NGINX:-1}
 DOCKER_ENABLED=${SIGMAOS_ENABLE_DOCKER:-0}
 VM_ENABLED=${SIGMAOS_ENABLE_VM:-0}
+TERMINAL_USER=${SIGMAOS_TERMINAL_USER:-${SUDO_USER:-}}
 DEBIAN_FRONTEND=noninteractive
 export DEBIAN_FRONTEND
 
@@ -107,6 +108,11 @@ esac
 [ -n "$SIGMAOS_NPM_REGISTRY" ] || die "SIGMAOS_NPM_REGISTRY must not be empty"
 [ -n "$SIGMAOS_APT_BACKUP_DIR" ] || die "SIGMAOS_APT_BACKUP_DIR must not be empty"
 [ -n "$SIGMAOS_LOCALE" ] || die "SIGMAOS_LOCALE must not be empty"
+[ -n "$TERMINAL_USER" ] || die "set SIGMAOS_TERMINAL_USER or run through sudo from a non-root user"
+case "$TERMINAL_USER" in
+  *[!a-zA-Z0-9._-]*|root|sigmaos) die "SIGMAOS_TERMINAL_USER must name a distinct non-root local user" ;;
+esac
+getent passwd "$TERMINAL_USER" >/dev/null || die "terminal user does not exist: $TERMINAL_USER"
 
 case "$NGINX_ENABLED" in
   0|1) ;;
@@ -242,11 +248,13 @@ SIGMAOS_ADMIN_DISPLAY_NAME=${SIGMAOS_ADMIN_DISPLAY_NAME:-SigmaOS Admin} \
 SIGMAOS_NAS_ROOT_PATH=${SIGMAOS_NAS_ROOT_PATH:-/srv/nas} \
 SIGMAOS_DOCKER_ENABLED="$DOCKER_ENABLED" \
 SIGMAOS_VM_ENABLED="$VM_ENABLED" \
+SIGMAOS_TERMINAL_USER="$TERMINAL_USER" \
   /usr/lib/sigmaos/scripts/sigmaos-first-boot.sh
 
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload
   /usr/lib/sigmaos/scripts/sigmaos-refresh-groups.sh
+  /usr/lib/sigmaos/scripts/sigmaos-refresh-terminal.sh
   if [ "$DOCKER_ENABLED" = "1" ]; then
     systemctl enable --now docker.service
   fi
@@ -260,6 +268,7 @@ if command -v systemctl >/dev/null 2>&1; then
   fi
   systemctl enable --now \
     sigmaos-share-helper.service \
+    sigmaos-terminal-helper.service \
     sigmaos-api.service \
     sigmaos-worker@1.service
   systemctl enable \

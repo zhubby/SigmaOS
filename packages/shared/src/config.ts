@@ -9,6 +9,7 @@ import type {
   ShareDefinitionConfig,
   ShareProtocolConfig,
   SigmaConfig,
+  TerminalConfig,
   VmConfig
 } from "./types.js";
 
@@ -99,6 +100,10 @@ interface TomlConfig {
       }>;
     }>;
   };
+  terminal?: {
+    user?: string;
+    helper_socket_path?: string;
+  };
   nas_roots?: Array<{
     id?: string;
     name?: string;
@@ -182,6 +187,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
     },
     vm: loadVmConfig(env, fileConfig, workspaceRoot),
     shares: loadShareConfig(env, fileConfig),
+    terminal: loadTerminalConfig(env, fileConfig),
     nasRoots,
     backup,
     health
@@ -394,6 +400,16 @@ function loadShareConfig(env: NodeJS.ProcessEnv, fileConfig: TomlConfig): ShareC
       password: null
     },
     shares: (shares?.items ?? []).map(normalizeShareItem).filter((item): item is ShareDefinitionConfig => item !== null)
+  };
+}
+
+function loadTerminalConfig(env: NodeJS.ProcessEnv, fileConfig: TomlConfig): TerminalConfig {
+  return {
+    user: normalizeText(env.SIGMAOS_TERMINAL_USER) ?? normalizeText(fileConfig.terminal?.user),
+    helperSocketPath:
+      normalizeText(env.SIGMAOS_TERMINAL_HELPER_SOCKET_PATH) ??
+      normalizeText(fileConfig.terminal?.helper_socket_path) ??
+      "/run/sigmaos/terminal-helper.sock"
   };
 }
 

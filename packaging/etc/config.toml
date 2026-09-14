@@ -39,6 +39,10 @@ enabled = false
 helper_socket_path = "/run/sigmaos/share-helper.sock"
 account_username = "sigma-share"
 
+[terminal]
+user = ""
+helper_socket_path = "/run/sigmaos/terminal-helper.sock"
+
 [[nas_roots]]
 id = "primary"
 name = "Primary NAS"

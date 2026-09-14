@@ -13,6 +13,17 @@ PI_COMMAND="${SIGMAOS_PI_COMMAND:-pi}"
 LOCAL_ENDPOINT="${SIGMAOS_LOCAL_ENDPOINT:-}"
 DOCKER_ENABLED="${SIGMAOS_DOCKER_ENABLED:-0}"
 VM_ENABLED="${SIGMAOS_VM_ENABLED:-0}"
+TERMINAL_USER="${SIGMAOS_TERMINAL_USER:-${SUDO_USER:-}}"
+
+if [ -n "$TERMINAL_USER" ]; then
+  case "$TERMINAL_USER" in
+    *[!a-zA-Z0-9._-]*|root|sigmaos) printf "SIGMAOS_TERMINAL_USER must name a distinct non-root local user\n" >&2; exit 1 ;;
+  esac
+  getent passwd "$TERMINAL_USER" >/dev/null || {
+    printf "terminal user does not exist: %s\n" "$TERMINAL_USER" >&2
+    exit 1
+  }
+fi
 
 case "$DOCKER_ENABLED" in
   0|1) ;;
@@ -94,6 +105,10 @@ console_mode = "serial"
 enabled = false
 helper_socket_path = "/run/sigmaos/share-helper.sock"
 account_username = "sigma-share"
+
+[terminal]
+user = "$TERMINAL_USER"
+helper_socket_path = "/run/sigmaos/terminal-helper.sock"
 
 [[nas_roots]]
 id = "$NAS_ROOT_ID"

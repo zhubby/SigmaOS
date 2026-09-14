@@ -27,6 +27,7 @@ function config(root: string, repository: string, passwordFile: string): SigmaCo
     model: { provider: "pi", piCommand: "pi", localEndpoint: null },
     docker: { enabled: false, socketPath: "/var/run/docker.sock", composeCommand: "docker", operationTimeoutMs: 120000, consoleShells: ["/bin/sh"], composeRoots: [] },
     shares: { enabled: false, helperSocketPath: "/run/sigmaos/share-helper.sock", account: { username: "share", password: null }, shares: [] },
+    terminal: { user: "test-user", helperSocketPath: "/tmp/terminal-helper.sock" },
     nasRoots: [{ id: "local", name: "Local", path: root, mountPolicy: "optional" }],
     backup: { enabled: true, repositoryPath: repository, passwordFile, stagingPath: path.join(path.dirname(root), "staging"), requireMount: false, retryCount: 1, timeoutMs: 1000, keepDaily: 7, keepWeekly: 4 },
     health: { staleIndexWarningMs: 7200000, staleIndexCriticalMs: 21600000, stalledRunMs: 900000, consecutiveFailureThreshold: 2, backupStaleMs: 93600000 }

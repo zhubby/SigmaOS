@@ -13,6 +13,8 @@
 | API 监听 | `http://127.0.0.1:3010`，仅由 Nginx 反向代理 |
 | 配置 | `/etc/sigmaos/config.toml` |
 | 持久数据 | `/var/lib/sigmaos` |
+| Web 终端用户 | 配置文件 `[terminal].user`，本机示例为 `zhubby` |
+| Web 终端 broker | `sigmaos-terminal-helper.service`，Unix socket `/run/sigmaos/terminal-helper.sock` |
 | 发布包归档 | `/home/zhubby/sigmaos-deployments/<时间戳>/` |
 | 部署前备份 | `/var/backups/sigmaos/deploy-<时间戳>/` |
 
@@ -25,6 +27,8 @@ SSH 和 `sudo` 密码只能在提示符中交互输入，不得写入本文档�
 - 每次部署使用新的 `mktemp` staging 目录，并排除 `.git`、`node_modules`、`.sigmaos`、`dist` 和 `coverage`。
 - Debian 包版本当前保持不变，安装时必须使用 `--reinstall`。使用 `--force-confold` 保留现有配置。
 - indexer、scheduler 和 health 是一次性任务。部署后按顺序运行，避免 indexer 与 scheduler 并发写 SQLite 导致 `SQLITE_BUSY`。
+- API 始终以 `sigmaos` 身份运行；Web 终端由独立的 `sigmaos-terminal-helper.service` 按 `[terminal].user` 启动。该用户必须是非 root 本机账号，工作目录和 HOME 从 passwd 获取，shell 以交互登录模式运行。
+- 终端用户缺失、不存在、home 不是目录或 passwd shell 不可执行时，broker 必须失败关闭，不能回退为 `sigmaos`、`/var/lib/sigmaos` 或 `/bin/sh`。
 - 在浏览器验收完成前，不删除新旧 Debian 包和部署前备份。
 
 ## 通用准备
@@ -98,6 +102,7 @@ ssh -t "$SIGMAOS_TARGET" 'sudo systemctl enable --now sigmaos-indexer.timer sigm
 
 ```bash
 ssh "$SIGMAOS_TARGET" 'set -eu; dpkg-query -W sigmaos build-essential debhelper dpkg-dev fakeroot rsync nodejs npm; test "$(node --version | cut -d. -f1)" = v22'
+ssh "$SIGMAOS_TARGET" 'set -eu; getent passwd zhubby; test -d /home/zhubby; test -x /usr/bin/zsh'
 ```
 
 在 CM5 staging 目录中构建并运行打包测试：
@@ -167,6 +172,7 @@ systemctl stop \
 systemctl stop \
   sigmaos-worker@1.service \
   sigmaos-api.service \
+  sigmaos-terminal-helper.service \
   sigmaos-share-helper.service \
   sigmaos-indexer.service \
   sigmaos-scheduler.service \
@@ -198,9 +204,11 @@ fi
 
 systemctl daemon-reload
 /usr/lib/sigmaos/scripts/sigmaos-refresh-groups.sh
+/usr/lib/sigmaos/scripts/sigmaos-refresh-terminal.sh
 
 systemctl enable \
   sigmaos-share-helper.service \
+  sigmaos-terminal-helper.service \
   sigmaos-api.service \
   sigmaos-worker@1.service \
   sigmaos-indexer.timer \
@@ -212,6 +220,7 @@ systemctl enable \
   nginx.service
 
 systemctl start sigmaos-share-helper.service
+systemctl start sigmaos-terminal-helper.service
 systemctl start sigmaos-api.service
 systemctl start sigmaos-worker@1.service
 systemctl start nginx.service
@@ -244,6 +253,9 @@ exit
 
 ```bash
 ssh "$SIGMAOS_TARGET" 'systemctl is-active nginx.service sigmaos-share-helper.service sigmaos-api.service sigmaos-worker@1.service'
+ssh "$SIGMAOS_TARGET" 'systemctl is-active sigmaos-terminal-helper.service'
+ssh "$SIGMAOS_TARGET" 'systemctl show -p User -p Group -p WorkingDirectory sigmaos-terminal-helper.service'
+ssh "$SIGMAOS_TARGET" 'sudo test -S /run/sigmaos/terminal-helper.sock && sudo stat -c "%A %U:%G %n" /run/sigmaos/terminal-helper.sock'
 ssh "$SIGMAOS_TARGET" 'systemctl is-active sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer sigmaos-backup-daily.timer sigmaos-backup-weekly.timer sigmaos-health.timer'
 ssh "$SIGMAOS_TARGET" 'systemctl show -p Result sigmaos-indexer.service sigmaos-scheduler.service sigmaos-health.service'
 ssh "$SIGMAOS_TARGET" 'systemctl list-timers --all --no-pager sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer sigmaos-backup-daily.timer sigmaos-backup-weekly.timer sigmaos-health.timer'
@@ -269,6 +281,36 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 - 不存在或已从新版本删除的 `/assets/*.js` 返回 `404`，不能回退为 `index.html`。
 - 使用浏览器无痕窗口打开 `http://192.168.11.91/`，页面应离开 Loading 并进入工作区。
 - 浏览器开发者工具的 Network 面板中，不应有 HTML 被当作 JavaScript 返回，也不应持续出现失败的 API 请求。
+
+### Web 终端身份
+
+在浏览器工作区打开“终端”，逐条执行以下命令。目标 CM5 的本机配置用户为 `zhubby`；若 `[terminal].user` 配置为其他非 root 用户，预期值应相应变化：
+
+```sh
+whoami
+pwd
+printf '%s\n' "$HOME"
+printf '%s\n' "$SHELL"
+printf '%s\n' "$0"
+[[ -o interactive ]] && echo interactive=true
+[[ -o login ]] && echo login=true
+sudo -n true && echo 'unexpected sudo access' || echo 'sudo blocked'
+```
+
+验收结果必须为：
+
+- `whoami` 为 `zhubby`。
+- `pwd` 和 `$HOME` 为 `/home/zhubby`。
+- `$SHELL` 为 `/usr/bin/zsh`，`$0` 为登录 zsh（通常显示 `-zsh` 或 `zsh`，具体取决于 zsh 版本）。
+- 两个 shell 选项均为 `true`。
+- `sudo -n true` 失败，终端不能通过 `sudo` 提权。
+
+如需核对服务端身份，不要从 API 服务进程推断终端身份：
+
+```bash
+ssh "$SIGMAOS_TARGET" 'systemctl show -p User -p Group sigmaos-api.service sigmaos-terminal-helper.service'
+ssh "$SIGMAOS_TARGET" 'sudo grep -E "^(User|Group|WorkingDirectory|Environment=SIGMAOS_TERMINAL_USER|BindPaths|ReadWritePaths)=" /etc/systemd/system/sigmaos-terminal-helper.service.d/identity.conf'
+```
 
 验收通过后才可删除 staging：
 
@@ -308,7 +350,7 @@ sudo systemctl stop \
   sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer \
   sigmaos-backup-daily.timer sigmaos-backup-weekly.timer sigmaos-health.timer
 sudo systemctl stop \
-  sigmaos-worker@1.service sigmaos-api.service sigmaos-share-helper.service \
+  sigmaos-worker@1.service sigmaos-api.service sigmaos-terminal-helper.service sigmaos-share-helper.service \
   sigmaos-indexer.service sigmaos-scheduler.service sigmaos-maintenance.service \
   sigmaos-backup-daily.service sigmaos-backup-weekly.service sigmaos-health.service
 
@@ -357,6 +399,19 @@ ssh "$SIGMAOS_TARGET" 'sudo journalctl -u nginx.service -u sigmaos-api.service -
 - 不存在的 `/assets/*.js` 返回 `200` 或 `text/html`：旧静态资源回退逻辑仍在运行；确认 `sigmaos-api.service` 已重启并加载新包。
 - API 返回正常但当前浏览器仍 Loading：用无痕窗口验证，再清除该站点缓存并刷新。
 - Nginx 返回 `502`：检查 `systemctl status sigmaos-api.service` 和 API 日志。
+
+### Web 终端无法连接或身份不正确
+
+```bash
+ssh "$SIGMAOS_TARGET" 'sudo systemctl status sigmaos-terminal-helper.service --no-pager'
+ssh "$SIGMAOS_TARGET" 'sudo journalctl -u sigmaos-terminal-helper.service -n 200 --no-pager'
+ssh "$SIGMAOS_TARGET" 'sudo grep -E "^(user|helper_socket_path)" /etc/sigmaos/config.toml'
+```
+
+- `Terminal user is not configured`：设置 `/etc/sigmaos/config.toml` 的 `[terminal] user = "zhubby"`，然后运行 `sudo /usr/lib/sigmaos/scripts/sigmaos-refresh-terminal.sh` 并重启 broker。
+- `Terminal helper must run as ...`：drop-in 的 `User=` 与 passwd 中的 UID 不一致；重新生成 drop-in，确认 `systemctl daemon-reload` 后再启动。
+- `home is not a directory` 或 `shell is not executable`：修复 passwd 账号或路径。不要把配置改成 `sigmaos`、root 或 `/bin/sh` 作为回退。
+- 终端能连接但 `pwd` 为 `/var/lib/sigmaos`：服务仍在运行旧包或旧 drop-in；确认 `WorkingDirectory=/home/zhubby`、`BindPaths=/home/zhubby`，并重启 `sigmaos-terminal-helper.service` 与 `sigmaos-api.service`。
 
 ### timer 显示 `active (elapsed)` 且没有 NEXT
 

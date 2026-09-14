@@ -12,6 +12,7 @@ package = "sigmaos.deb"
 [services]
 units = [
   "sigmaos-api.service",
+  "sigmaos-terminal-helper.service",
   "sigmaos-share-helper.service",
   "sigmaos-worker@1.service",
   "sigmaos-indexer.timer",

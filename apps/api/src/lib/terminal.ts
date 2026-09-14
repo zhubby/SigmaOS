@@ -1,6 +1,3 @@
-import path from "node:path";
-import * as nodePty from "node-pty";
-
 export const DEFAULT_TERMINAL_COLS = 120;
 export const DEFAULT_TERMINAL_ROWS = 32;
 export const MIN_TERMINAL_COLS = 2;
@@ -9,6 +6,8 @@ export const MIN_TERMINAL_ROWS = 1;
 export const MAX_TERMINAL_ROWS = 200;
 
 export interface TerminalPty {
+  readonly cwd: string;
+  readonly shell: string;
   onData(listener: (data: string) => void): { dispose(): void };
   onExit(listener: (event: { exitCode: number; signal?: number }) => void): { dispose(): void };
   write(data: string): void;
@@ -24,21 +23,10 @@ export interface TerminalRuntime {
       name: string;
       cols: number;
       rows: number;
-      cwd: string;
+      cwd?: string;
       env: NodeJS.ProcessEnv;
     }
-  ): TerminalPty;
-}
-
-export const systemTerminalRuntime: TerminalRuntime = {
-  spawn(shell, args, options) {
-    return nodePty.spawn(shell, args, options);
-  }
-};
-
-export function terminalShell(environment: NodeJS.ProcessEnv = process.env): string {
-  const configuredShell = environment.SHELL?.trim();
-  return configuredShell && path.isAbsolute(configuredShell) ? configuredShell : "/bin/sh";
+  ): TerminalPty | Promise<TerminalPty>;
 }
 
 export function terminalDimension(value: unknown, min: number, max: number): number | null {

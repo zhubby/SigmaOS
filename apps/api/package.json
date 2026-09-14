@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "build": "cd ../.. && tsup apps/api/src/index.ts --format esm --platform node --target node22 --external=better-sqlite3 --external=@fastify/cors --external=@fastify/static --external=@fastify/websocket --external=fastify --external=node-pty --out-dir apps/api/dist"
+    "build": "cd ../.. && tsup apps/api/src/index.ts --format esm --platform node --target node22 --external=better-sqlite3 --external=@fastify/cors --external=@fastify/static --external=@fastify/websocket --external=fastify --out-dir apps/api/dist"
   },
   "dependencies": {
     "@fastify/cors": "^11.1.0",
@@ -18,7 +18,6 @@
     "@sigmaos/db": "0.1.0",
     "@sigmaos/nas-tools": "0.1.0",
     "@sigmaos/shared": "0.1.0",
-    "fastify": "^5.5.0",
-    "node-pty": "^1.1.0"
+    "fastify": "^5.5.0"
   }
 }

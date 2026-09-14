@@ -47,6 +47,10 @@ describe("loadConfig", () => {
       },
       shares: []
     });
+    expect(config.terminal).toEqual({
+      user: null,
+      helperSocketPath: "/run/sigmaos/terminal-helper.sock"
+    });
   });
 
   it("loads Docker settings from TOML", async () => {
@@ -84,6 +88,32 @@ describe("loadConfig", () => {
           path: path.join(tempDir, "compose/apps")
         }
       ]
+    });
+  });
+
+  it("loads the terminal user and helper socket from TOML and environment", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-config-"));
+    const configPath = path.join(tempDir, "config.toml");
+    await writeFile(
+      configPath,
+      `
+        [terminal]
+        user = "zhubby"
+        helper_socket_path = "/tmp/terminal.sock"
+      `
+    );
+
+    expect(loadConfig({ SIGMAOS_CONFIG: configPath } as NodeJS.ProcessEnv, tempDir).terminal).toEqual({
+      user: "zhubby",
+      helperSocketPath: "/tmp/terminal.sock"
+    });
+    expect(loadConfig({
+      SIGMAOS_CONFIG: configPath,
+      SIGMAOS_TERMINAL_USER: "operator",
+      SIGMAOS_TERMINAL_HELPER_SOCKET_PATH: "/run/operator-terminal.sock"
+    } as NodeJS.ProcessEnv, tempDir).terminal).toEqual({
+      user: "operator",
+      helperSocketPath: "/run/operator-terminal.sock"
     });
   });
 

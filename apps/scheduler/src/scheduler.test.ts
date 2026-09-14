@@ -56,6 +56,7 @@ beforeEach(async () => {
       },
       shares: []
     },
+    terminal: { user: "test-user", helperSocketPath: "/tmp/terminal-helper.sock" },
     nasRoots: [{ id: "local", name: "Local", path: rootDir }]
   };
   upsertIndexedFile(db, {

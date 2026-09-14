@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ensureNasRoots, openSigmaDb, type SigmaDatabase } from "@sigmaos/db";
 import type { SigmaConfig } from "@sigmaos/shared";
 import { buildServer } from "../server.js";
-import { terminalShell, type TerminalPty, type TerminalRuntime } from "../lib/terminal.js";
+import { type TerminalPty, type TerminalRuntime } from "../lib/terminal.js";
 
 let tempDir: string;
 let rootDir: string;
@@ -32,9 +32,8 @@ describe("terminal WebSocket", () => {
     const homeDir = os.homedir();
 
     expect(await nextMessage(socket)).toEqual({ type: "ready", cwd: homeDir });
-    expect(runtime.shell).toBe(terminalShell());
+    expect(runtime.shell).toBe("");
     expect(runtime.options).toMatchObject({
-      cwd: homeDir,
       cols: 120,
       rows: 32,
       name: "xterm-256color"
@@ -94,6 +93,8 @@ class FakeTerminalRuntime implements TerminalRuntime {
 }
 
 class FakeTerminal implements TerminalPty {
+  readonly cwd = os.homedir();
+  readonly shell = "/usr/bin/zsh";
   writes: string[] = [];
   resizes: Array<[number, number]> = [];
   killed = false;
@@ -157,6 +158,7 @@ function testConfig(): SigmaConfig {
       account: { username: "sigma-share", password: null },
       shares: []
     },
+    terminal: { user: "test-user", helperSocketPath: "/tmp/terminal-helper.sock" },
     nasRoots: [{ id: "local", name: "Local", path: rootDir }]
   };
 }

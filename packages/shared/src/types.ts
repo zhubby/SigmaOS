@@ -292,6 +292,11 @@ export interface ShareConfig {
   shares: ShareDefinitionConfig[];
 }
 
+export interface TerminalConfig {
+  user: string | null;
+  helperSocketPath: string;
+}
+
 export interface ShareSettingsRecord extends ShareConfig {
   updatedAt: string;
 }
@@ -324,6 +329,7 @@ export interface SigmaConfig {
   docker: DockerConfig;
   vm?: VmConfig;
   shares: ShareConfig;
+  terminal: TerminalConfig;
   nasRoots: NasRootConfig[];
   backup?: BackupConfig;
   health?: {

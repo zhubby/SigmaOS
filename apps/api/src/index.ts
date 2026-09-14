@@ -3,6 +3,7 @@ import path from "node:path";
 import { ensureNasRoots, openSigmaDb } from "@sigmaos/db";
 import { loadConfig } from "@sigmaos/shared";
 import { createSystemCommandRunner } from "./lib/system-management.js";
+import { createTerminalRuntime } from "./lib/terminal-broker.js";
 import { buildServer } from "./server.js";
 import { registerWebApp } from "./web-static.js";
 
@@ -15,7 +16,8 @@ const server = await buildServer({
   db,
   system: {
     commandRunner: createSystemCommandRunner(config.shares.helperSocketPath)
-  }
+  },
+  terminal: createTerminalRuntime(config.terminal)
 });
 const webDist = resolveWebDist();
 

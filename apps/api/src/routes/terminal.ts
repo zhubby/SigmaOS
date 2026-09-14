@@ -1,22 +1,20 @@
-import os from "node:os";
 import type { FastifyInstance } from "fastify";
 import { getNasRoot } from "@sigmaos/db";
 import type { ApiRouteContext } from "../context.js";
 import {
   DEFAULT_TERMINAL_COLS,
   DEFAULT_TERMINAL_ROWS,
-  systemTerminalRuntime,
   terminalMessage,
-  terminalShell,
   type TerminalPty
 } from "../lib/terminal.js";
+import { createTerminalRuntime } from "../lib/terminal-broker.js";
 
 interface TerminalQuery {
   rootId?: string;
 }
 
 export function registerTerminalRoutes(server: FastifyInstance, context: ApiRouteContext): void {
-  const runtime = context.terminal ?? systemTerminalRuntime;
+  const runtime = context.terminal ?? createTerminalRuntime(context.config.terminal);
 
   server.get<{ Querystring: TerminalQuery }>("/api/terminal", { websocket: true }, async (socket, request) => {
     const root = request.query.rootId ? getNasRoot(context.db, request.query.rootId) : null;
@@ -57,12 +55,10 @@ export function registerTerminalRoutes(server: FastifyInstance, context: ApiRout
     };
 
     try {
-      const cwd = os.homedir();
-      terminal = runtime.spawn(terminalShell(), [], {
+      terminal = await runtime.spawn("", [], {
         name: "xterm-256color",
         cols: DEFAULT_TERMINAL_COLS,
         rows: DEFAULT_TERMINAL_ROWS,
-        cwd,
         env: {
           ...process.env,
           TERM: "xterm-256color"
@@ -102,7 +98,7 @@ export function registerTerminalRoutes(server: FastifyInstance, context: ApiRout
       });
       socket.on("close", cleanup);
       socket.on("error", cleanup);
-      sendSocket(socket, { type: "ready", cwd });
+      sendSocket(socket, { type: "ready", cwd: terminal.cwd });
     } catch (error) {
       cleanup();
       sendSocket(socket, { type: "error", error: terminalErrorMessage(error) });
