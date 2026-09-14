@@ -227,6 +227,7 @@ describe("native packaging artifacts", () => {
     expect(unit).toContain("terminal-helper.sock");
     expect(unit).toContain("CapabilityBoundingSet=");
     expect(unit).toContain("InaccessiblePaths=/etc/sigmaos /var/lib/sigmaos /var/log/sigmaos");
+    expect(unit).toContain("ReadWritePaths=/run/sigmaos /srv/nas");
     expect(refresh).toContain("User=%s\\n");
     expect(refresh).toContain("WorkingDirectory=%s\\n");
     expect(refresh).toContain("BindPaths=%s\\n");
