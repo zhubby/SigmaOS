@@ -31,7 +31,7 @@ describe("terminal WebSocket", () => {
     const socket = await connect(server);
     const homeDir = os.homedir();
 
-    expect(await nextMessage(socket)).toEqual({ type: "ready", cwd: homeDir });
+    expect(await nextMessage(socket)).toMatchObject({ type: "ready", cwd: homeDir });
     expect(runtime.shell).toBe("");
     expect(runtime.options).toMatchObject({
       cols: 120,
@@ -49,7 +49,32 @@ describe("terminal WebSocket", () => {
 
     socket.close();
     await socketEvent(socket, "close");
-    await waitFor(() => runtime.terminal.killed);
+    expect(runtime.terminal.killed).toBe(false);
+    await server.close();
+    expect(runtime.terminal.killed).toBe(true);
+  });
+
+  it("reuses detached sessions and replays output after reconnecting", async () => {
+    const runtime = new FakeTerminalRuntime();
+    const server = await buildServer({ config: testConfig(), db, terminal: runtime });
+    const socket = await connect(server);
+    const ready = await nextMessage(socket);
+    const sessionId = ready.sessionId;
+
+    socket.close();
+    await socketEvent(socket, "close");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(runtime.terminal.killed).toBe(false);
+    runtime.terminal.emitData("during-refresh");
+
+    const reconnect = await connect(server, "local", String(sessionId));
+    expect(await nextMessage(reconnect)).toEqual({ type: "ready", cwd: os.homedir(), sessionId });
+    expect(await nextMessage(reconnect)).toEqual({ type: "output", data: "during-refresh" });
+    expect(runtime.spawnCount).toBe(1);
+
+    reconnect.send(JSON.stringify({ type: "close" }));
+    await socketEvent(reconnect, "close");
+    expect(runtime.terminal.killed).toBe(true);
     await server.close();
   });
 
@@ -81,11 +106,13 @@ describe("terminal WebSocket", () => {
 class FakeTerminalRuntime implements TerminalRuntime {
   terminal = new FakeTerminal();
   spawned = false;
+  spawnCount = 0;
   shell = "";
   options: Parameters<TerminalRuntime["spawn"]>[2] | null = null;
 
   spawn(shell: string, _args: string[], options: Parameters<TerminalRuntime["spawn"]>[2]): TerminalPty {
     this.spawned = true;
+    this.spawnCount += 1;
     this.shell = shell;
     this.options = options;
     return this.terminal;
@@ -100,9 +127,13 @@ class FakeTerminal implements TerminalPty {
   killed = false;
   private readonly dataListeners = new Set<(data: string) => void>();
   private readonly exitListeners = new Set<(event: { exitCode: number; signal?: number }) => void>();
+  private readonly pendingData: string[] = [];
 
   onData(listener: (data: string) => void): { dispose(): void } {
     this.dataListeners.add(listener);
+    for (const data of this.pendingData.splice(0)) {
+      listener(data);
+    }
     return { dispose: () => this.dataListeners.delete(listener) };
   }
 
@@ -124,6 +155,10 @@ class FakeTerminal implements TerminalPty {
   }
 
   emitData(data: string): void {
+    if (!this.dataListeners.size) {
+      this.pendingData.push(data);
+      return;
+    }
     for (const listener of this.dataListeners) {
       listener(data);
     }
@@ -163,28 +198,59 @@ function testConfig(): SigmaConfig {
   };
 }
 
-async function connect(server: Awaited<ReturnType<typeof buildServer>>, rootId = "local"): Promise<WebSocket> {
-  await server.listen({ host: "127.0.0.1", port: 0 });
+async function connect(
+  server: Awaited<ReturnType<typeof buildServer>>,
+  rootId = "local",
+  sessionId?: string
+): Promise<WebSocket> {
+  if (!server.server.listening) {
+    await server.listen({ host: "127.0.0.1", port: 0 });
+  }
   const address = server.server.address();
   if (!address || typeof address === "string") {
     throw new Error("Test server did not expose a TCP address");
   }
-  const socket = new WebSocket(`ws://127.0.0.1:${address.port}/api/terminal?rootId=${rootId}`);
+  const query = new URLSearchParams({ rootId, ...(sessionId ? { sessionId } : {}) });
+  const socket = new WebSocket(`ws://127.0.0.1:${address.port}/api/terminal?${query.toString()}`);
+  messageQueues.set(socket, { queue: [], waiter: null });
+  socket.addEventListener("message", (event) => {
+    const state = messageQueues.get(socket);
+    if (!state) {
+      return;
+    }
+    const message = JSON.parse(String(event.data)) as Record<string, unknown>;
+    if (state.waiter) {
+      state.waiter(message);
+      state.waiter = null;
+    } else {
+      state.queue.push(message);
+    }
+  });
   await socketEvent(socket, "open");
   return socket;
 }
 
+const messageQueues = new WeakMap<WebSocket, {
+  queue: Record<string, unknown>[];
+  waiter: ((message: Record<string, unknown>) => void) | null;
+}>();
+
 function nextMessage(socket: WebSocket): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("Timed out waiting for terminal message")), 2_000);
-    socket.addEventListener(
-      "message",
-      (event) => {
+    const state = messageQueues.get(socket);
+    const queued = state?.queue.shift();
+    if (queued) {
+      clearTimeout(timer);
+      resolve(queued);
+      return;
+    }
+    if (state) {
+      state.waiter = (message) => {
         clearTimeout(timer);
-        resolve(JSON.parse(String(event.data)) as Record<string, unknown>);
-      },
-      { once: true }
-    );
+        resolve(message);
+      };
+    }
   });
 }
 

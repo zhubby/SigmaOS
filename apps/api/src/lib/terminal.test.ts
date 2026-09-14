@@ -29,4 +29,8 @@ describe("terminal helpers", () => {
     expect(terminalMessage(JSON.stringify({ type: "resize", cols: 1, rows: 32 }))).toBeNull();
     expect(terminalMessage("not json")).toBeNull();
   });
+
+  it("parses an explicit close message", () => {
+    expect(terminalMessage(JSON.stringify({ type: "close" }))).toEqual({ type: "close" });
+  });
 });

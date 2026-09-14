@@ -1,20 +1,22 @@
 import type { FastifyInstance } from "fastify";
 import { getNasRoot } from "@sigmaos/db";
 import type { ApiRouteContext } from "../context.js";
-import {
-  DEFAULT_TERMINAL_COLS,
-  DEFAULT_TERMINAL_ROWS,
-  terminalMessage,
-  type TerminalPty
-} from "../lib/terminal.js";
+import { terminalMessage } from "../lib/terminal.js";
 import { createTerminalRuntime } from "../lib/terminal-broker.js";
+import { TerminalSessionManager, type TerminalSession } from "../lib/terminal-sessions.js";
 
 interface TerminalQuery {
   rootId?: string;
+  sessionId?: string;
+  reset?: string;
 }
 
 export function registerTerminalRoutes(server: FastifyInstance, context: ApiRouteContext): void {
   const runtime = context.terminal ?? createTerminalRuntime(context.config.terminal);
+  const sessions = new TerminalSessionManager(runtime);
+  server.addHook("onClose", async () => {
+    sessions.closeAll();
+  });
 
   server.get<{ Querystring: TerminalQuery }>("/api/terminal", { websocket: true }, async (socket, request) => {
     const root = request.query.rootId ? getNasRoot(context.db, request.query.rootId) : null;
@@ -23,62 +25,49 @@ export function registerTerminalRoutes(server: FastifyInstance, context: ApiRout
       return;
     }
 
-    let terminal: TerminalPty | null = null;
     let closed = false;
-    let dataSubscription: { dispose(): void } | null = null;
-    let exitSubscription: { dispose(): void } | null = null;
+    let sessionId: string | null = null;
+    let attachedSession: TerminalSession | null = null;
 
-    const cleanup = () => {
+    const detachConnection = () => {
       if (closed) {
         return;
       }
       closed = true;
-      dataSubscription?.dispose();
-      exitSubscription?.dispose();
-      dataSubscription = null;
-      exitSubscription = null;
-      try {
-        terminal?.kill();
-      } catch {
-        // The process may already have exited.
+      if (attachedSession) {
+        sessions.detach(attachedSession.id, socket);
       }
-      terminal = null;
     };
+    socket.on("close", detachConnection);
+    socket.on("error", detachConnection);
 
     const fail = (message: string) => {
       if (closed) {
         return;
       }
+      closed = true;
       sendSocket(socket, { type: "error", error: message });
-      cleanup();
+      if (sessionId) {
+        sessions.close(sessionId);
+      }
       socket.close();
     };
 
     try {
-      terminal = await runtime.spawn("", [], {
-        name: "xterm-256color",
-        cols: DEFAULT_TERMINAL_COLS,
-        rows: DEFAULT_TERMINAL_ROWS,
-        env: {
-          ...process.env,
-          TERM: "xterm-256color"
-        }
-      });
-
-      dataSubscription = terminal.onData((data) => {
-        if (!closed) {
-          sendSocket(socket, { type: "output", data });
-        }
-      });
-      exitSubscription = terminal.onExit(({ exitCode }) => {
-        if (!closed) {
-          sendSocket(socket, { type: "exit", exitCode });
-          socket.close();
-        }
-      });
+      if (request.query.reset === "1" && request.query.sessionId) {
+        sessions.close(request.query.sessionId, root.id);
+      }
+      const session = await sessions.acquire(root.id, request.query.sessionId);
+      if (closed) {
+        sessions.close(session.id);
+        return;
+      }
+      sessionId = session.id;
+      attachedSession = session;
+      session.attach(socket, sendSocket);
 
       socket.on("message", (raw: unknown) => {
-        if (closed || !terminal) {
+        if (closed) {
           return;
         }
         const message = terminalMessage(socketDataToString(raw));
@@ -88,19 +77,22 @@ export function registerTerminalRoutes(server: FastifyInstance, context: ApiRout
         }
         try {
           if (message.type === "input") {
-            terminal.write(message.data);
+            session.terminal.write(message.data);
+          } else if (message.type === "resize") {
+            session.terminal.resize(message.cols, message.rows);
           } else {
-            terminal.resize(message.cols, message.rows);
+            closed = true;
+            sessions.close(session.id);
+            socket.close();
           }
         } catch {
           fail("Unable to update terminal session");
         }
       });
-      socket.on("close", cleanup);
-      socket.on("error", cleanup);
-      sendSocket(socket, { type: "ready", cwd: terminal.cwd });
     } catch (error) {
-      cleanup();
+      if (sessionId) {
+        sessions.close(sessionId);
+      }
       sendSocket(socket, { type: "error", error: terminalErrorMessage(error) });
       socket.close();
     }

@@ -6,6 +6,11 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import type { NasRoot } from "../../api.js";
 import type { CodeFontSettings } from "../../lib/editor-settings.js";
+import {
+  clearStoredTerminalSessionId,
+  readStoredTerminalSessionId,
+  writeStoredTerminalSessionId
+} from "../../lib/terminal-session.js";
 import type { ResolvedTheme } from "../../lib/theme-settings.js";
 import { applyTerminalOptions, terminalOptions } from "../../lib/terminal-theme.js";
 import { SkeletonBlock } from "./ManagementSkeleton.js";
@@ -15,6 +20,7 @@ type TerminalStatus = "connecting" | "connected" | "disconnected" | "error" | "e
 interface TerminalMessage {
   type: "ready" | "output" | "exit" | "error";
   cwd?: string;
+  sessionId?: string;
   data?: string;
   exitCode?: number;
   error?: string;
@@ -38,21 +44,18 @@ export function LocalTerminalPanel({
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
+  const sessionIdsRef = useRef(new Map<string, string>());
+  const resetSessionRef = useRef(false);
+  const resetSessionIdRef = useRef<string | null>(null);
   const activeRef = useRef(active);
-  const [connectionRoot, setConnectionRoot] = useState<NasRoot | null>(root ?? null);
   const [connectionKey, setConnectionKey] = useState(0);
   const [status, setStatus] = useState<TerminalStatus>("connecting");
 
   activeRef.current = active;
 
   useEffect(() => {
-    if (!connectionRoot && root) {
-      setConnectionRoot(root);
-    }
-  }, [connectionRoot, root]);
-
-  useEffect(() => {
-    if (!connectionRoot || !terminalHostRef.current) {
+    const rootId = root?.id;
+    if (!rootId || !terminalHostRef.current) {
       return;
     }
 
@@ -87,7 +90,15 @@ export function LocalTerminalPanel({
     resizeObserver.observe(host);
     fitAndResize();
 
-    const socket = new WebSocket(terminalWebSocketUrl(connectionRoot.id));
+    const storedSessionId =
+      readStoredTerminalSessionId(rootId) ??
+      sessionIdsRef.current.get(rootId) ??
+      (resetSessionRef.current ? resetSessionIdRef.current : null);
+    const socket = new WebSocket(
+      terminalWebSocketUrl(rootId, storedSessionId, resetSessionRef.current && resetSessionIdRef.current === storedSessionId)
+    );
+    resetSessionRef.current = false;
+    resetSessionIdRef.current = null;
     socketRef.current = socket;
     dataDisposable = terminal.onData((data) => {
       if (socket.readyState === WebSocket.OPEN) {
@@ -104,6 +115,10 @@ export function LocalTerminalPanel({
         return;
       }
       if (message.type === "ready") {
+        if (message.sessionId) {
+          sessionIdsRef.current.set(rootId, message.sessionId);
+          writeStoredTerminalSessionId(rootId, message.sessionId);
+        }
         setStatus("connected");
         fitAndResize();
       }
@@ -141,7 +156,7 @@ export function LocalTerminalPanel({
       terminalRef.current = null;
       terminal.dispose();
     };
-  }, [connectionKey, connectionRoot, onNotifyError, t]);
+  }, [connectionKey, onNotifyError, root?.id, t]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -165,7 +180,13 @@ export function LocalTerminalPanel({
     if (!root) {
       return;
     }
-    setConnectionRoot(root);
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: "close" }));
+    }
+    clearStoredTerminalSessionId(root.id);
+    resetSessionRef.current = true;
+    resetSessionIdRef.current = sessionIdsRef.current.get(root.id) ?? readStoredTerminalSessionId(root.id);
+    sessionIdsRef.current.delete(root.id);
     setConnectionKey((current) => current + 1);
   }
 
@@ -207,8 +228,14 @@ export function LocalTerminalPanel({
   );
 }
 
-function terminalWebSocketUrl(rootId: string): string {
+function terminalWebSocketUrl(rootId: string, sessionId: string | null, reset = false): string {
   const url = new URL(`/api/terminal?rootId=${encodeURIComponent(rootId)}`, window.location.href);
+  if (sessionId) {
+    url.searchParams.set("sessionId", sessionId);
+  }
+  if (reset && sessionId) {
+    url.searchParams.set("reset", "1");
+  }
   url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return url.toString();
 }

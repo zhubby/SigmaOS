@@ -39,6 +39,7 @@ export function terminalDimension(value: unknown, min: number, max: number): num
 export function terminalMessage(raw: string):
   | { type: "input"; data: string }
   | { type: "resize"; cols: number; rows: number }
+  | { type: "close" }
   | null {
   try {
     const parsed = JSON.parse(raw) as { type?: unknown; data?: unknown; cols?: unknown; rows?: unknown };
@@ -51,6 +52,9 @@ export function terminalMessage(raw: string):
       if (cols !== null && rows !== null) {
         return { type: "resize", cols, rows };
       }
+    }
+    if (parsed.type === "close") {
+      return { type: "close" };
     }
   } catch {
     return null;
