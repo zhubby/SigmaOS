@@ -59,4 +59,17 @@ describe("build information loading", () => {
   it("rejects metadata with unexpected public field types", () => {
     expect(parseBuildInfo({ version: "0.2.0", source: "secret", dirty: "false" })).toBeNull();
   });
+
+  it("rejects an invalid build timestamp before it reaches the web formatter", () => {
+    expect(parseBuildInfo({
+      version: "0.2.0",
+      commitSha: "abcdef0123456789",
+      commitShortSha: "abcdef012345",
+      tag: "v0.2.0",
+      branch: "main",
+      builtAt: "not-a-date",
+      source: "release",
+      dirty: false
+    })).toBeNull();
+  });
 });

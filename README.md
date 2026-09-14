@@ -263,7 +263,7 @@ SigmaOS uses one SemVer across the root manifest, application and package worksp
 npm run release -- patch --note "Describe the operator-visible change"
 ```
 
-Use `minor` or `major` when appropriate. The command only updates version sources and the Debian changelog; it does not commit, tag, push, or publish. Review and commit the resulting diff, create the matching `v<version>` tag separately, and use `npm run version:check` to validate consistency. Runtime, configuration, script, and packaging changes require a version bump relative to the pull request base; documentation, tests, and CI-only changes may share the next product release.
+Use `minor` or `major` when appropriate. The command only updates version sources and the Debian changelog; it does not commit, tag, push, or publish. Review and commit the resulting diff, create the matching `v<version>` tag separately, and use `npm run version:check` to validate consistency. Runtime, configuration, script, and packaging changes require a monotonic version bump relative to the comparison base; documentation, tests, and CI-only changes may share the next product release.
 
 Every build writes `.sigmaos/build-info.json` with the product version, commit SHA, tag or branch, build time, build source, and dirty state. The API exposes the public subset at `/api/system/build-info`, and the web UI shows it under Settings > Version. Debian packages install the immutable metadata at `/usr/lib/sigmaos/build-info.json`.
 

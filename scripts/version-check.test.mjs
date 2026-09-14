@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { URL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { requiresVersionBump } from "./versioning.mjs";
 
@@ -16,5 +18,12 @@ describe("version policy", () => {
     expect(requiresVersionBump(".context/compound-engineering/todos/001-ready-p2-task.md")).toBe(false);
     expect(requiresVersionBump("apps/api/src/server.test.ts")).toBe(false);
     expect(requiresVersionBump("apps/web/src/App.spec.tsx")).toBe(false);
+  });
+
+  it("checks pull requests and direct branch pushes against a base revision", async () => {
+    const workflow = await readFile(new URL("../.github/workflows/package-release.yml", import.meta.url), "utf8");
+
+    expect(workflow).toContain("github.event.pull_request.base.sha");
+    expect(workflow).toContain("github.ref_type == 'branch' && github.event.before");
   });
 });

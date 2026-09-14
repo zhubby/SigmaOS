@@ -32,6 +32,16 @@ export function bumpVersion(version, increment) {
   }
 }
 
+export function compareStableVersions(left, right) {
+  const leftVersion = parseStableVersion(left);
+  const rightVersion = parseStableVersion(right);
+  for (const key of ["major", "minor", "patch"]) {
+    const difference = leftVersion[key] - rightVersion[key];
+    if (difference !== 0) return Math.sign(difference);
+  }
+  return 0;
+}
+
 export async function readVersionState(repoRoot) {
   const manifestPaths = await discoverPackageManifests(repoRoot);
   const manifests = await Promise.all(

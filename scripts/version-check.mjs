@@ -4,7 +4,12 @@ import { execFile } from "node:child_process";
 import console from "node:console";
 import process from "node:process";
 import { promisify } from "node:util";
-import { readVersionState, requiresVersionBump, versionStateErrors } from "./versioning.mjs";
+import {
+  compareStableVersions,
+  readVersionState,
+  requiresVersionBump,
+  versionStateErrors
+} from "./versioning.mjs";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = (await runGit(["rev-parse", "--show-toplevel"])).trim();
@@ -23,6 +28,8 @@ if (base) {
       errors.push(
         `Runtime or packaging changes require a version bump from ${state.version}: ${versionedChanges.join(", ")}`
       );
+    } else if (compareStableVersions(state.version, baseManifest.version) < 0) {
+      errors.push(`Version must advance beyond ${baseManifest.version}; received ${state.version}`);
     }
   }
 }

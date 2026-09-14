@@ -41,7 +41,7 @@ jobs:
 
       - name: Verify version policy
         env:
-          SIGMAOS_VERSION_BASE: ${{ github.event.pull_request.base.sha || '' }}
+          SIGMAOS_VERSION_BASE: ${{ github.event.pull_request.base.sha || (github.ref_type == 'branch' && github.event.before) || '' }}
           SIGMAOS_RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: npm run version:check
 

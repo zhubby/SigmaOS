@@ -2,7 +2,13 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { bumpVersion, prepareRelease, readVersionState, versionStateErrors } from "./versioning.mjs";
+import {
+  bumpVersion,
+  compareStableVersions,
+  prepareRelease,
+  readVersionState,
+  versionStateErrors
+} from "./versioning.mjs";
 
 let fixtureRoot;
 
@@ -22,6 +28,12 @@ describe("release versioning", () => {
     expect(bumpVersion("0.1.9", "major")).toBe("1.0.0");
     expect(() => bumpVersion("0.1", "patch")).toThrow(/stable SemVer/u);
     expect(() => bumpVersion("0.1.0", "prerelease")).toThrow(/Unsupported release increment/u);
+  });
+
+  it("orders stable versions for monotonic CI checks", () => {
+    expect(compareStableVersions("0.2.0", "0.1.9")).toBe(1);
+    expect(compareStableVersions("0.2.0", "0.2.0")).toBe(0);
+    expect(compareStableVersions("0.1.9", "0.2.0")).toBe(-1);
   });
 
   it("updates manifests, dependencies, lock entries, and packaging versions", async () => {

@@ -53,7 +53,7 @@ export function parseBuildInfo(value: unknown): PublicBuildInfo | null {
     !isNullableString(candidate.commitShortSha) ||
     !isNullableString(candidate.tag) ||
     !isNullableString(candidate.branch) ||
-    !isNullableString(candidate.builtAt) ||
+    !isNullableTimestamp(candidate.builtAt) ||
     typeof candidate.source !== "string" ||
     !BUILD_SOURCES.has(candidate.source as BuildSource) ||
     !isNullableBoolean(candidate.dirty)
@@ -100,4 +100,8 @@ function isNullableString(value: unknown): value is string | null {
 
 function isNullableBoolean(value: unknown): value is boolean | null {
   return value === null || typeof value === "boolean";
+}
+
+function isNullableTimestamp(value: unknown): value is string | null {
+  return value === null || (typeof value === "string" && Number.isFinite(Date.parse(value)));
 }
