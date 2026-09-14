@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, realpath, rm, symlink, unlink, writeFile } from "node:f
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createSession, ensureNasRoots, openSigmaDb, type SigmaDatabase } from "@sigmaos/db";
+import { createSession, ensureNasRoots, listEvents, openSigmaDb, type SigmaDatabase } from "@sigmaos/db";
 import type { SigmaConfig } from "@sigmaos/shared";
 import { buildServer } from "../server.js";
 import { vmQemuCommand, type VmCommandRunner } from "../lib/vm-service.js";
@@ -145,19 +145,13 @@ describe("VM routes", () => {
       }
     });
 
-    expect(response.statusCode).toBe(202);
+    expect(response.statusCode, JSON.stringify(response.json())).toBe(202);
     const resolvedIsoPath = await realpath(isoPath);
-    expect(response.json().approval.proposal[0]).toMatchObject({
-      isoPath: resolvedIsoPath,
-      isoRootId: "local",
-      isoStoragePoolId: TEST_STORAGE_POOL_ID,
-      isoSourcePath: "pool/images/installer.iso"
+    expect(response.json()).toMatchObject({
+      approval: null,
+      job: { status: "completed" },
+      operation: { status: "applied", approvalId: null, metadata: { proposal: { isoPath: resolvedIsoPath, isoRootId: "local", isoStoragePoolId: TEST_STORAGE_POOL_ID, isoSourcePath: "pool/images/installer.iso" } } }
     });
-    const applied = await server.inject({
-      method: "POST",
-      url: `/api/approvals/${response.json().approval.id as string}/approve`
-    });
-    expect(applied.statusCode, JSON.stringify(applied.json())).toBe(202);
     expect(calls.some((args) => args.includes("--cdrom") && args.includes(resolvedIsoPath))).toBe(true);
     await server.close();
   });
@@ -192,7 +186,7 @@ describe("VM routes", () => {
     await server.close();
   });
 
-  it("revalidates a storage-pool ISO before applying an approval", async () => {
+  it("rejects a storage-pool ISO symlink that escapes the selected pool", async () => {
     const poolDir = path.join(rootDir, "pool");
     const isoPath = path.join(poolDir, "installer.iso");
     const outsideIsoPath = path.join(rootDir, "outside.iso");
@@ -206,6 +200,8 @@ describe("VM routes", () => {
       vm: { commandRunner: vmRunner(), kvmAvailable: true },
       system: { commandRunner: storagePoolRunner(poolDir) }
     });
+    await unlink(isoPath);
+    await symlink(outsideIsoPath, isoPath);
     const response = await server.inject({
       method: "POST",
       url: "/api/vms/proposals",
@@ -218,17 +214,8 @@ describe("VM routes", () => {
         isoStoragePoolId: TEST_STORAGE_POOL_ID
       }
     });
-    expect(response.statusCode).toBe(202);
-
-    await unlink(isoPath);
-    await symlink(outsideIsoPath, isoPath);
-    const applied = await server.inject({
-      method: "POST",
-      url: `/api/approvals/${response.json().approval.id as string}/approve`
-    });
-
-    expect(applied.statusCode).toBe(400);
-    expect(applied.json().error).toContain("outside the selected storage pool");
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toContain("outside the selected storage pool");
     await server.close();
   });
 
@@ -243,6 +230,141 @@ describe("VM routes", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json().error).toContain("Network name");
+    await server.close();
+  });
+
+  it("creates a VM immediately without an approval record", async () => {
+    const isoDir = path.join(tempDir, "iso");
+    await mkdir(isoDir);
+    const isoPath = path.join(isoDir, "installer.iso");
+    await writeFile(isoPath, "iso-image");
+    const calls: string[][] = [];
+    const session = createSession(db, { rootId: "local", currentPath: "." });
+    const server = await buildServer({ config: testConfig(), db, vm: { commandRunner: vmRunner(calls), kvmAvailable: true } });
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/vms/proposals",
+      payload: {
+        sessionId: session.id,
+        action: "create",
+        domainName: "custom-vm",
+        isoPath,
+        vcpu: 4,
+        vcpuTopology: { sockets: 1, cores: 2, threads: 2 },
+        memoryBytes: 4 * 1024 ** 3,
+        diskSizeBytes: 32 * 1024 ** 3,
+        firmware: "uefi",
+        cpuMode: "custom",
+        cpuModel: "Skylake-Client",
+        diskBus: "virtio",
+        diskCache: "none",
+        diskDiscard: "unmap",
+        networkModel: "virtio",
+        graphics: "spice",
+        videoModel: "virtio",
+        bootMenu: true,
+        autostart: true
+      }
+    });
+
+    expect(response.statusCode, JSON.stringify(response.json())).toBe(202);
+    expect(response.json()).toMatchObject({
+      approval: null,
+      job: { status: "completed" },
+      operation: { status: "applied", approvalId: null, targetId: "custom-vm" }
+    });
+    expect(listEvents(db, { sessionId: session.id }).map((event) => event.type)).toEqual(["job.running", "job.completed"]);
+    const approvals = await server.inject({ method: "GET", url: "/api/approvals" });
+    expect(approvals.json().approvals).toHaveLength(0);
+    const operations = await server.inject({ method: "GET", url: `/api/vms/operations?sessionId=${session.id}` });
+    expect(operations.json().operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: "applied", approvalId: null, targetId: "custom-vm" })
+    ]));
+    const virtInstall = calls.find((call) => call[0] === "virt-install");
+    expect(virtInstall).toEqual(expect.arrayContaining([
+      "--vcpus", "4,sockets=1,cores=2,threads=2", "--cpu", "Skylake-Client",
+      "--boot", "uefi,menu=on", "--graphics", "spice", "--video", "virtio", "--autostart"
+    ]));
+    await server.close();
+  });
+
+  it("records a failed direct creation without creating an approval", async () => {
+    const isoDir = path.join(tempDir, "iso");
+    await mkdir(isoDir);
+    const isoPath = path.join(isoDir, "installer.iso");
+    await writeFile(isoPath, "iso-image");
+    const session = createSession(db, { rootId: "local", currentPath: "." });
+    const runner = vmRunner();
+    const failingRunner: VmCommandRunner = {
+      async run(command, args) {
+        if (command === "virt-install") throw new Error("virt-install failed");
+        return runner.run(command, args);
+      }
+    };
+    const server = await buildServer({ config: testConfig(), db, vm: { commandRunner: failingRunner, kvmAvailable: true } });
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/vms/proposals",
+      payload: { sessionId: session.id, action: "create", domainName: "failed-vm", isoPath }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toContain("virt-install failed");
+    const approvals = await server.inject({ method: "GET", url: "/api/approvals" });
+    expect(approvals.json().approvals).toHaveLength(0);
+    const operations = await server.inject({ method: "GET", url: `/api/vms/operations?sessionId=${session.id}` });
+    expect(operations.json().operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: "failed", approvalId: null, targetId: "failed-vm" })
+    ]));
+    expect(listEvents(db, { sessionId: session.id }).map((event) => event.type)).toEqual(["job.running", "job.failed"]);
+    await server.close();
+  });
+
+  it("rejects a vCPU topology that does not match vCPU", async () => {
+    const session = createSession(db, { rootId: "local", currentPath: "." });
+    const server = await buildServer({ config: testConfig(), db, vm: { commandRunner: vmRunner(), kvmAvailable: true } });
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/vms/proposals",
+      payload: {
+        sessionId: session.id,
+        action: "create",
+        domainName: "bad-topology",
+        isoPath: path.join(tempDir, "iso", "installer.iso"),
+        vcpu: 4,
+        vcpuTopology: { sockets: 1, cores: 1, threads: 1 }
+      }
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toContain("topology");
+    await server.close();
+  });
+
+  it("rejects unsupported and option-like advanced create values", async () => {
+    const session = createSession(db, { rootId: "local", currentPath: "." });
+    const server = await buildServer({ config: testConfig(), db, vm: { commandRunner: vmRunner(), kvmAvailable: true } });
+    const cases = [
+      { domainName: "bad-firmware", options: { firmware: "efi" } },
+      { domainName: "bad-machine", options: { machineType: "--q35" } },
+      { domainName: "bad-mac", options: { macAddress: "52:54:00:12:34" } }
+    ];
+
+    for (const advanced of cases) {
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/vms/proposals",
+        payload: {
+          sessionId: session.id,
+          action: "create",
+          domainName: advanced.domainName,
+          isoPath: path.join(tempDir, "iso", "installer.iso"),
+          ...advanced.options
+        }
+      });
+      expect(response.statusCode, JSON.stringify(response.json())).toBe(400);
+    }
+
+    expect(listEvents(db, { sessionId: session.id })).toHaveLength(0);
     await server.close();
   });
 });

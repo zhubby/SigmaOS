@@ -5476,6 +5476,80 @@
   font-family: inherit;
 }
 
+.vm-create-stepper {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 20px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.vm-create-stepper button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--muted-2);
+  text-align: left;
+  background: transparent;
+}
+
+.vm-create-stepper button:not(:disabled):hover {
+  border-color: var(--line);
+  color: var(--text);
+  background: var(--subtle-bg);
+}
+
+.vm-create-stepper button[data-state="current"] {
+  border-color: var(--approval-border-hover);
+  color: var(--accent-soft-text);
+  background: var(--accent-soft-bg);
+}
+
+.vm-create-stepper button[data-state="complete"] {
+  color: var(--text);
+}
+
+.vm-create-stepper button:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+
+.vm-create-stepper button > span {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-family: var(--code-font-family);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.vm-create-stepper button[data-state="complete"] > span {
+  color: var(--accent-soft-text);
+  border-color: var(--accent-soft-text);
+}
+
+.vm-create-stepper strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vm-create-stage {
+  min-height: 320px;
+}
+
 .vm-create-section {
   padding: 0 0 18px;
 }
@@ -5522,6 +5596,10 @@
 
 .vm-create-field-grid-single {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.vm-create-field-grid-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .vm-create-field {
@@ -5571,6 +5649,110 @@
   color: var(--muted-2);
   font-size: 10px;
   line-height: 1.35;
+}
+
+.vm-create-subsection {
+  margin-top: 17px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.vm-create-subsection h5 {
+  margin-bottom: 10px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.vm-create-toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.vm-create-toggle {
+  display: flex !important;
+  grid-template-columns: none !important;
+  align-items: flex-start;
+  gap: 8px !important;
+  min-height: 46px;
+  padding: 9px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: var(--subtle-bg);
+}
+
+.vm-create-toggle input {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  accent-color: var(--accent);
+}
+
+.vm-create-toggle span {
+  display: grid;
+  gap: 3px;
+}
+
+.vm-create-toggle strong {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.vm-create-toggle small {
+  min-height: 0;
+}
+
+.vm-create-topology {
+  margin-top: 10px;
+}
+
+.vm-create-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 18px;
+  padding: 11px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: var(--subtle-bg);
+}
+
+.vm-create-summary > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.vm-create-summary span {
+  color: var(--muted-2);
+  font-size: 10px;
+}
+
+.vm-create-summary strong {
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--code-font-family);
+  font-size: 11px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vm-create-error {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 14px;
+  padding: 9px 10px;
+  border: 1px solid var(--danger-border, var(--line));
+  border-radius: 4px;
+  color: var(--danger, #ff8f8f);
+  background: var(--danger-bg, var(--subtle-bg));
+  font-size: 11px;
 }
 
 .vm-create-path-field {
@@ -5706,6 +5888,10 @@
 }
 
 .vm-create-dialog-footer button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-height: 34px;
   padding: 0 12px;
   border: 1px solid var(--line);

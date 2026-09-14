@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SigmaConfig } from "@sigmaos/shared";
-import { collectVmSummary, vmQemuCommand, type VmCommandRunner } from "./vm-service.js";
+import { buildVmCreateArgs, collectVmSummary, vmQemuCommand, type VmCommandRunner } from "./vm-service.js";
 
 function config(): SigmaConfig {
   return {
@@ -22,6 +22,41 @@ describe("VM service", () => {
   it("selects the native QEMU binary for the host architecture", () => {
     expect(vmQemuCommand("arm64")).toBe("qemu-system-aarch64");
     expect(vmQemuCommand("x64")).toBe("qemu-system-x86_64");
+  });
+
+  it("builds deterministic virt-install arguments for advanced VM options", () => {
+    const args = buildVmCreateArgs(config().vm!, "guest", "/tmp/vmstore/guest.qcow2", {
+      action: "create",
+      domainName: "guest",
+      vcpu: 4,
+      vcpuTopology: { sockets: 1, cores: 2, threads: 2 },
+      memoryBytes: 4 * 1024 ** 3,
+      diskBus: "scsi",
+      diskCache: "none",
+      diskDiscard: "unmap",
+      networkName: "default",
+      networkModel: "e1000",
+      macAddress: "52:54:00:12:34:56",
+      firmware: "uefi",
+      cpuMode: "custom",
+      cpuModel: "Skylake-Client",
+      memoryBacking: "hugepages",
+      graphics: "spice",
+      videoModel: "qxl",
+      bootMenu: true,
+      autostart: true,
+      risk: "high",
+      summary: "Create virtual machine guest"
+    });
+    expect(args).toEqual(expect.arrayContaining([
+      "--vcpus", "4,sockets=1,cores=2,threads=2",
+      "--disk", "path=/tmp/vmstore/guest.qcow2,format=qcow2,bus=scsi,cache=none,discard=unmap",
+      "--network", "network=default,model=e1000,mac=52:54:00:12:34:56",
+      "--cpu", "Skylake-Client",
+      "--memorybacking", "hugepages=yes",
+      "--boot", "uefi,menu=on",
+      "--graphics", "spice", "--video", "qxl", "--autostart", "--import"
+    ]));
   });
 
   it("reports libvirt as unavailable when virsh cannot connect", async () => {

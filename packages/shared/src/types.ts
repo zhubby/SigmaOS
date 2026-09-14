@@ -1024,6 +1024,15 @@ export type VmOperationAction =
   | "delete"
   | "console";
 export type VmOperationStatus = "proposed" | "approved" | "applied" | "failed";
+export type VmFirmware = "bios" | "uefi";
+export type VmCpuMode = "host-model" | "host-passthrough" | "custom";
+export type VmMemoryBacking = "default" | "hugepages";
+export type VmDiskBus = "virtio" | "scsi" | "sata" | "ide";
+export type VmDiskCache = "none" | "writeback" | "writethrough" | "directsync" | "unsafe";
+export type VmDiskDiscard = "ignore" | "unmap";
+export type VmNetworkModel = "virtio" | "e1000" | "rtl8139";
+export type VmGraphics = "none" | "spice" | "vnc";
+export type VmVideoModel = "none" | "virtio" | "qxl" | "vga";
 
 export interface VmHostSummary {
   status: VmHostStatus;
@@ -1085,14 +1094,30 @@ export interface VmOperationProposal {
   domainName?: string;
   snapshotName?: string;
   vcpu?: number;
+  vcpuTopology?: { sockets: number; cores: number; threads: number };
   memoryBytes?: number;
+  memoryBacking?: VmMemoryBacking;
+  osVariant?: string;
+  firmware?: VmFirmware;
+  machineType?: string;
+  cpuMode?: VmCpuMode;
+  cpuModel?: string;
   diskSizeBytes?: number;
+  diskBus?: VmDiskBus;
+  diskCache?: VmDiskCache;
+  diskDiscard?: VmDiskDiscard;
   isoPath?: string;
   isoRootId?: string;
   isoStoragePoolId?: string;
   isoSourcePath?: string;
   diskPath?: string;
   networkName?: string;
+  networkModel?: VmNetworkModel;
+  macAddress?: string;
+  graphics?: VmGraphics;
+  videoModel?: VmVideoModel;
+  bootMenu?: boolean;
+  autostart?: boolean;
   risk: "medium" | "high";
   summary: string;
 }

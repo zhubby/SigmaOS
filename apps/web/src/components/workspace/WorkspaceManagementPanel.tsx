@@ -7,6 +7,8 @@ import {
   Boxes,
   CircleAlert,
   CircleCheck,
+  ChevronLeft,
+  ChevronRight,
   Container,
   Cpu,
   Database,
@@ -24,6 +26,7 @@ import {
   RotateCw,
   ScrollText,
   Server,
+  Settings2,
   TerminalSquare,
   Trash2,
   X,
@@ -63,6 +66,7 @@ import type { en } from "../../i18n/resources.js";
 import { SystemNetworkManagementPanel, SystemStorageManagementPanel } from "./SystemManagementPanel.js";
 import { ShareManagementPanel } from "./ShareManagementPanel.js";
 import { applyTerminalOptions, terminalOptions } from "../../lib/terminal-theme.js";
+import { initialVmCreateForm, validateVmCreateStep, type VmCreateForm } from "../../lib/vm-create-form.js";
 import { ManagementSkeletonBody, SkeletonBlock } from "./ManagementSkeleton.js";
 import {
   StorageFilePickerDialog,
@@ -555,18 +559,10 @@ function VirtualMachineManagementPanel({
   const [consoleSession, setConsoleSession] = useState<VmConsoleSession | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [isoPickerOpen, setIsoPickerOpen] = useState(false);
-  const [form, setForm] = useState({
-    name: "",
-    vcpu: "2",
-    memoryGiB: "2",
-    diskGiB: "20",
-    mediaMode: "iso" as "iso" | "disk",
-    isoPath: "",
-    isoRootId: "",
-    isoStoragePoolId: "",
-    diskPath: "",
-    network: "default"
-  });
+  const [createStep, setCreateStep] = useState(1);
+  const [furthestCreateStep, setFurthestCreateStep] = useState(1);
+  const [wizardError, setWizardError] = useState<string | null>(null);
+  const [form, setForm] = useState<VmCreateForm>(() => initialVmCreateForm());
 
   async function refresh() {
     setLoading(true); setError(null);
@@ -586,7 +582,7 @@ function VirtualMachineManagementPanel({
     setPendingAction(`${action}:${domainName}`);
     try {
       await proposeVmOperation({ sessionId, action, domainName, ...extra });
-      onNotifySuccess(t("workspace.management.virtualMachines.proposalCreated"));
+      onNotifySuccess(t(action === "create" ? "workspace.management.virtualMachines.created" : "workspace.management.virtualMachines.proposalCreated"));
       await onWorkQueuesChanged();
       return true;
     } catch (nextError) { onNotifyError(errorMessage(nextError)); return false; }
@@ -616,27 +612,64 @@ function VirtualMachineManagementPanel({
 
   async function createVm(event: FormEvent) {
     event.preventDefault();
+    const validation = validateVmCreateStep(4, form, t);
+    if (validation) { setWizardError(validation); return; }
     const mediaPath = form.mediaMode === "iso" ? form.isoPath.trim() : form.diskPath.trim();
     if (!form.name.trim() || !mediaPath) return;
     const proposed = await request("create", form.name.trim(), {
       vcpu: Number(form.vcpu), memoryBytes: Number(form.memoryGiB) * 1024 ** 3,
       diskSizeBytes: Number(form.diskGiB) * 1024 ** 3,
+      ...(form.osVariant.trim() ? { osVariant: form.osVariant.trim() } : {}),
+      ...(form.cpuMode ? { cpuMode: form.cpuMode } : {}),
+      ...(form.cpuMode === "custom" && form.cpuModel.trim() ? { cpuModel: form.cpuModel.trim() } : {}),
+      ...(form.customTopology ? { vcpuTopology: { sockets: Number(form.sockets), cores: Number(form.cores), threads: Number(form.threads) } } : {}),
+      memoryBacking: form.memoryBacking,
       ...(form.mediaMode === "iso" ? {
         isoPath: mediaPath,
         isoRootId: form.isoRootId,
         isoStoragePoolId: form.isoStoragePoolId
       } : { diskPath: mediaPath }),
-      networkName: form.network
+      networkName: form.network,
+      networkModel: form.networkModel,
+      ...(form.macAddress.trim() ? { macAddress: form.macAddress.trim() } : {}),
+      diskBus: form.diskBus,
+      diskCache: form.diskCache,
+      diskDiscard: form.diskDiscard,
+      firmware: form.firmware,
+      ...(form.machineType.trim() ? { machineType: form.machineType.trim() } : {}),
+      graphics: form.graphics,
+      videoModel: form.videoModel,
+      bootMenu: form.bootMenu,
+      autostart: form.autostart
     });
     if (proposed) setCreateOpen(false);
   }
 
   function openCreateVm() {
-    setForm((current) => ({
-      ...current,
-      network: host?.networkName ?? summary?.networks.find((network) => network.state === "active")?.name ?? "default"
-    }));
+    setForm(initialVmCreateForm(host?.networkName ?? summary?.networks.find((network) => network.state === "active")?.name ?? "default"));
+    setCreateStep(1);
+    setFurthestCreateStep(1);
+    setWizardError(null);
     setCreateOpen(true);
+  }
+
+  function advanceWizard() {
+    const validation = validateVmCreateStep(createStep, form, t);
+    if (validation) { setWizardError(validation); return; }
+    setWizardError(null);
+    const nextStep = Math.min(4, createStep + 1);
+    setCreateStep(nextStep);
+    setFurthestCreateStep((current) => Math.max(current, nextStep));
+  }
+
+  function retreatWizard() {
+    setWizardError(null);
+    setCreateStep((current) => Math.max(1, current - 1));
+  }
+
+  function updateCreateForm<Key extends keyof VmCreateForm>(key: Key, value: VmCreateForm[Key]) {
+    setForm((current) => ({ ...current, [key]: value }));
+    setWizardError(null);
   }
 
   function selectIso(selection: StorageFileSelection) {
@@ -773,61 +806,65 @@ function VirtualMachineManagementPanel({
                 <span><Cpu size={14} />{host?.cpuCount ?? "-"} {t("workspace.management.virtualMachines.createHostCpu")}</span>
                 <span><Network size={14} />{summary?.networks.length ?? 0} {t("workspace.management.virtualMachines.createNetworks")}</span>
               </div>
+              <nav className="vm-create-stepper" aria-label={String(t("workspace.management.virtualMachines.createSteps"))}>
+                {["createIdentity", "createResources", "createStorageNetwork", "createAdvanced"].map((key, index) => {
+                  const step = index + 1;
+                  const state = step === createStep ? "current" : step < createStep || step <= furthestCreateStep ? "complete" : "upcoming";
+                  return <button key={key} type="button" data-state={state} aria-current={step === createStep ? "step" : undefined} disabled={step > furthestCreateStep} onClick={() => { setCreateStep(step); setWizardError(null); }}><span>{step < createStep || step < furthestCreateStep ? <CircleCheck size={13} /> : step}</span><strong>{String(t(`workspace.management.virtualMachines.${key}` as never))}</strong></button>;
+                })}
+              </nav>
 
-              <section className="vm-create-section">
-                <div className="vm-create-section-heading"><span>01</span><div><h4>{t("workspace.management.virtualMachines.createIdentity")}</h4><p>{t("workspace.management.virtualMachines.createIdentityDetail")}</p></div></div>
-                <div className="vm-create-field-grid vm-create-field-grid-single">
-                  <label className="vm-create-field">{t("workspace.management.virtualMachines.name")}<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,62}" placeholder="home-lab" autoFocus /><small>{t("workspace.management.virtualMachines.createNameHint")}</small></label>
-                </div>
-              </section>
-
-              <section className="vm-create-section">
-                <div className="vm-create-section-heading"><span>02</span><div><h4>{t("workspace.management.virtualMachines.createResources")}</h4><p>{t("workspace.management.virtualMachines.createResourcesDetail")}</p></div></div>
-                <div className="vm-create-field-grid">
-                  <label className="vm-create-field"><span>{t("workspace.management.virtualMachines.createVcpu")}</span><input type="number" min="1" max="128" value={form.vcpu} onChange={(event) => setForm({ ...form, vcpu: event.target.value })} /><small>{t("workspace.management.virtualMachines.createVcpuHint")}</small></label>
-                  <label className="vm-create-field"><span>{t("workspace.management.virtualMachines.memory")} <em>GiB</em></span><input type="number" min="1" max="1024" value={form.memoryGiB} onChange={(event) => setForm({ ...form, memoryGiB: event.target.value })} /><small>{t("workspace.management.virtualMachines.createMemoryHint")}</small></label>
-                  <label className="vm-create-field"><span>{t("workspace.management.virtualMachines.disk")} <em>GiB</em></span><input type="number" min="1" max="65536" value={form.diskGiB} onChange={(event) => setForm({ ...form, diskGiB: event.target.value })} disabled={form.mediaMode === "disk"} /><small>{form.mediaMode === "disk" ? t("workspace.management.virtualMachines.createExistingDiskSizeHint") : t("workspace.management.virtualMachines.createDiskHint")}</small></label>
-                </div>
-              </section>
-
-              <section className="vm-create-section">
-                <div className="vm-create-section-heading"><span>03</span><div><h4>{t("workspace.management.virtualMachines.createSource")}</h4><p>{t("workspace.management.virtualMachines.createSourceDetail")}</p></div></div>
-                <div className="vm-create-segmented" role="tablist" aria-label={t("workspace.management.virtualMachines.createSource")}>
-                  <button type="button" role="tab" aria-selected={form.mediaMode === "iso"} className={form.mediaMode === "iso" ? "is-active" : ""} onClick={() => setForm({ ...form, mediaMode: "iso" })}><HardDrive size={15} /><span><strong>{t("workspace.management.virtualMachines.createIsoSource")}</strong><small>{t("workspace.management.virtualMachines.createIsoSourceDetail")}</small></span></button>
-                  <button type="button" role="tab" aria-selected={form.mediaMode === "disk"} className={form.mediaMode === "disk" ? "is-active" : ""} onClick={() => setForm({ ...form, mediaMode: "disk" })}><Database size={15} /><span><strong>{t("workspace.management.virtualMachines.createDiskSource")}</strong><small>{t("workspace.management.virtualMachines.createDiskSourceDetail")}</small></span></button>
-                </div>
-                {form.mediaMode === "iso" ? (
-                  <div className="vm-create-field vm-create-path-field">
-                    <span id="vm-create-iso-label">{t("workspace.management.virtualMachines.createIsoPath")}</span>
-                    <div className="vm-create-file-control">
-                      <input
-                        value={form.isoPath}
-                        readOnly
-                        required
-                        aria-labelledby="vm-create-iso-label"
-                        placeholder={t("workspace.management.virtualMachines.isoPickerPlaceholder")}
-                        onClick={() => setIsoPickerOpen(true)}
-                      />
-                      <button type="button" onClick={() => setIsoPickerOpen(true)}>
-                        <FolderOpen aria-hidden="true" size={15} />
-                        <span>{t("workspace.management.virtualMachines.isoPickerBrowse")}</span>
-                      </button>
-                    </div>
-                    <small>{t("workspace.management.virtualMachines.createIsoPathHint")}</small>
+              {createStep === 1 ? (
+                <section className="vm-create-section vm-create-stage">
+                  <div className="vm-create-section-heading"><span>01</span><div><h4>{t("workspace.management.virtualMachines.createIdentity")}</h4><p>{t("workspace.management.virtualMachines.createIdentityDetail")}</p></div></div>
+                  <div className="vm-create-field-grid vm-create-field-grid-two">
+                    <label className="vm-create-field">{t("workspace.management.virtualMachines.name")}<input value={form.name} onChange={(event) => updateCreateForm("name", event.target.value)} pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,62}" placeholder="home-lab" autoFocus /><small>{t("workspace.management.virtualMachines.createNameHint")}</small></label>
+                    <label className="vm-create-field">{t("workspace.management.virtualMachines.osVariant")}<input value={form.osVariant} onChange={(event) => updateCreateForm("osVariant", event.target.value)} placeholder="ubuntu24.04" /><small>{t("workspace.management.virtualMachines.osVariantHint")}</small></label>
                   </div>
-                ) : (
-                  <label className="vm-create-field vm-create-path-field">{t("workspace.management.virtualMachines.createDiskPath")}<input value={form.diskPath} onChange={(event) => setForm({ ...form, diskPath: event.target.value })} placeholder="/var/lib/sigmaos/vmstore/existing.qcow2" required /><small>{t("workspace.management.virtualMachines.createDiskPathHint")}</small></label>
-                )}
-              </section>
+                </section>
+              ) : null}
 
-              <section className="vm-create-section">
-                <div className="vm-create-section-heading"><span>04</span><div><h4>{t("workspace.management.virtualMachines.createNetwork")}</h4><p>{t("workspace.management.virtualMachines.createNetworkDetail")}</p></div></div>
-                <label className="vm-create-field vm-create-path-field">{t("workspace.management.virtualMachines.network")}<select value={form.network} onChange={(event) => setForm({ ...form, network: event.target.value })}>{(summary?.networks.length ? summary.networks : [{ name: "default", state: "unknown", mode: "nat" as const }]).map((network) => <option key={network.name} value={network.name}>{network.name} · {network.mode} · {network.state}</option>)}</select><small>{t("workspace.management.virtualMachines.createNetworkHint")}</small></label>
-              </section>
+              {createStep === 2 ? (
+                <section className="vm-create-section vm-create-stage">
+                  <div className="vm-create-section-heading"><span>02</span><div><h4>{t("workspace.management.virtualMachines.createResources")}</h4><p>{t("workspace.management.virtualMachines.createResourcesDetail")}</p></div></div>
+                  <div className="vm-create-field-grid">
+                    <label className="vm-create-field"><span>{t("workspace.management.virtualMachines.createVcpu")}</span><input type="number" min="1" max="128" value={form.vcpu} onChange={(event) => updateCreateForm("vcpu", event.target.value)} /><small>{t("workspace.management.virtualMachines.createVcpuHint")}</small></label>
+                    <label className="vm-create-field"><span>{t("workspace.management.virtualMachines.memory")} <em>GiB</em></span><input type="number" min="0.25" max="1024" step="0.25" value={form.memoryGiB} onChange={(event) => updateCreateForm("memoryGiB", event.target.value)} /><small>{t("workspace.management.virtualMachines.createMemoryHint")}</small></label>
+                    <label className="vm-create-field">{t("workspace.management.virtualMachines.cpuMode")}<select value={form.cpuMode} onChange={(event) => updateCreateForm("cpuMode", event.target.value as VmCreateForm["cpuMode"])}><option value="host-model">host-model</option><option value="host-passthrough">host-passthrough</option><option value="custom">{t("workspace.management.virtualMachines.custom")}</option></select><small>{t("workspace.management.virtualMachines.cpuModeHint")}</small></label>
+                    {form.cpuMode === "custom" ? <label className="vm-create-field">{t("workspace.management.virtualMachines.cpuModel")}<input value={form.cpuModel} onChange={(event) => updateCreateForm("cpuModel", event.target.value)} placeholder="Skylake-Client" /><small>{t("workspace.management.virtualMachines.cpuModelHint")}</small></label> : null}
+                    <label className="vm-create-field">{t("workspace.management.virtualMachines.memoryBacking")}<select value={form.memoryBacking} onChange={(event) => updateCreateForm("memoryBacking", event.target.value as VmCreateForm["memoryBacking"])}><option value="default">{t("workspace.management.virtualMachines.systemDefault")}</option><option value="hugepages">HugePages</option></select><small>{t("workspace.management.virtualMachines.memoryBackingHint")}</small></label>
+                  </div>
+                  <label className="vm-create-toggle"><input type="checkbox" checked={form.customTopology} onChange={(event) => updateCreateForm("customTopology", event.target.checked)} /><span><strong>{t("workspace.management.virtualMachines.customTopology")}</strong><small>{t("workspace.management.virtualMachines.customTopologyHint")}</small></span></label>
+                  {form.customTopology ? <div className="vm-create-field-grid vm-create-topology"><label className="vm-create-field">{t("workspace.management.virtualMachines.sockets")}<input type="number" min="1" max="16" value={form.sockets} onChange={(event) => updateCreateForm("sockets", event.target.value)} /></label><label className="vm-create-field">{t("workspace.management.virtualMachines.cores")}<input type="number" min="1" max="128" value={form.cores} onChange={(event) => updateCreateForm("cores", event.target.value)} /></label><label className="vm-create-field">{t("workspace.management.virtualMachines.threads")}<input type="number" min="1" max="16" value={form.threads} onChange={(event) => updateCreateForm("threads", event.target.value)} /></label></div> : null}
+                </section>
+              ) : null}
 
-              <div className="vm-create-review"><Info size={16} /><div><strong>{t("workspace.management.virtualMachines.createApprovalTitle")}</strong><p>{t("workspace.management.virtualMachines.createApprovalDetail")}</p></div></div>
+              {createStep === 3 ? (
+                <section className="vm-create-section vm-create-stage">
+                  <div className="vm-create-section-heading"><span>03</span><div><h4>{t("workspace.management.virtualMachines.createStorageNetwork")}</h4><p>{t("workspace.management.virtualMachines.createStorageNetworkDetail")}</p></div></div>
+                  <div className="vm-create-segmented" role="tablist" aria-label={String(t("workspace.management.virtualMachines.createSource"))}>
+                    <button type="button" role="tab" aria-selected={form.mediaMode === "iso"} className={form.mediaMode === "iso" ? "is-active" : ""} onClick={() => updateCreateForm("mediaMode", "iso")}><HardDrive size={15} /><span><strong>{t("workspace.management.virtualMachines.createIsoSource")}</strong><small>{t("workspace.management.virtualMachines.createIsoSourceDetail")}</small></span></button>
+                    <button type="button" role="tab" aria-selected={form.mediaMode === "disk"} className={form.mediaMode === "disk" ? "is-active" : ""} onClick={() => updateCreateForm("mediaMode", "disk")}><Database size={15} /><span><strong>{t("workspace.management.virtualMachines.createDiskSource")}</strong><small>{t("workspace.management.virtualMachines.createDiskSourceDetail")}</small></span></button>
+                  </div>
+                  {form.mediaMode === "iso" ? <div className="vm-create-field-grid vm-create-field-grid-two vm-create-path-field"><div className="vm-create-field"><span id="vm-create-iso-label">{t("workspace.management.virtualMachines.createIsoPath")}</span><div className="vm-create-file-control"><input value={form.isoPath} readOnly aria-labelledby="vm-create-iso-label" placeholder={String(t("workspace.management.virtualMachines.isoPickerPlaceholder"))} onClick={() => setIsoPickerOpen(true)} /><button type="button" onClick={() => setIsoPickerOpen(true)}><FolderOpen aria-hidden="true" size={15} /><span>{t("workspace.management.virtualMachines.isoPickerBrowse")}</span></button></div><small>{t("workspace.management.virtualMachines.createIsoPathHint")}</small></div><label className="vm-create-field"><span>{t("workspace.management.virtualMachines.disk")} <em>GiB</em></span><input type="number" min="1" max="65536" value={form.diskGiB} onChange={(event) => updateCreateForm("diskGiB", event.target.value)} /><small>{t("workspace.management.virtualMachines.createDiskHint")}</small></label></div> : <label className="vm-create-field vm-create-path-field">{t("workspace.management.virtualMachines.createDiskPath")}<input value={form.diskPath} onChange={(event) => updateCreateForm("diskPath", event.target.value)} placeholder="/var/lib/sigmaos/vmstore/existing.qcow2" /><small>{t("workspace.management.virtualMachines.createDiskPathHint")}</small></label>}
+                  <div className="vm-create-subsection"><h5>{t("workspace.management.virtualMachines.diskOptions")}</h5><div className="vm-create-field-grid"><label className="vm-create-field">{t("workspace.management.virtualMachines.diskBus")}<select value={form.diskBus} onChange={(event) => updateCreateForm("diskBus", event.target.value as VmCreateForm["diskBus"])}>{["virtio", "scsi", "sata", "ide"].map((value) => <option key={value} value={value}>{value}</option>)}</select></label><label className="vm-create-field">{t("workspace.management.virtualMachines.diskCache")}<select value={form.diskCache} onChange={(event) => updateCreateForm("diskCache", event.target.value as VmCreateForm["diskCache"])}>{["none", "writeback", "writethrough", "directsync", "unsafe"].map((value) => <option key={value} value={value}>{value}</option>)}</select></label><label className="vm-create-field">Discard<select value={form.diskDiscard} onChange={(event) => updateCreateForm("diskDiscard", event.target.value as VmCreateForm["diskDiscard"])}><option value="ignore">ignore</option><option value="unmap">unmap</option></select></label></div></div>
+                  <div className="vm-create-subsection"><h5>{t("workspace.management.virtualMachines.createNetwork")}</h5><div className="vm-create-field-grid"><label className="vm-create-field">{t("workspace.management.virtualMachines.network")}<select value={form.network} onChange={(event) => updateCreateForm("network", event.target.value)}>{(summary?.networks.length ? summary.networks : [{ name: "default", state: "unknown", mode: "nat" as const }]).map((network) => <option key={network.name} value={network.name}>{network.name} · {network.mode} · {network.state}</option>)}</select></label><label className="vm-create-field">{t("workspace.management.virtualMachines.networkModel")}<select value={form.networkModel} onChange={(event) => updateCreateForm("networkModel", event.target.value as VmCreateForm["networkModel"])}><option value="virtio">virtio</option><option value="e1000">e1000</option><option value="rtl8139">rtl8139</option></select></label><label className="vm-create-field">{t("workspace.management.virtualMachines.macAddress")}<input value={form.macAddress} onChange={(event) => updateCreateForm("macAddress", event.target.value)} placeholder="52:54:00:12:34:56" /><small>{t("workspace.management.virtualMachines.macAddressHint")}</small></label></div></div>
+                </section>
+              ) : null}
+
+              {createStep === 4 ? (
+                <section className="vm-create-section vm-create-stage">
+                  <div className="vm-create-section-heading"><span>04</span><div><h4>{t("workspace.management.virtualMachines.createAdvanced")}</h4><p>{t("workspace.management.virtualMachines.createAdvancedDetail")}</p></div></div>
+                  <div className="vm-create-field-grid"><label className="vm-create-field">{t("workspace.management.virtualMachines.firmware")}<select value={form.firmware} onChange={(event) => updateCreateForm("firmware", event.target.value as VmCreateForm["firmware"])}><option value="bios">BIOS</option><option value="uefi">UEFI</option></select></label><label className="vm-create-field">{t("workspace.management.virtualMachines.machineType")}<input value={form.machineType} onChange={(event) => updateCreateForm("machineType", event.target.value)} placeholder="q35" /><small>{t("workspace.management.virtualMachines.machineTypeHint")}</small></label><label className="vm-create-field">{t("workspace.management.virtualMachines.graphics")}<select value={form.graphics} onChange={(event) => updateCreateForm("graphics", event.target.value as VmCreateForm["graphics"])}><option value="none">none</option><option value="spice">SPICE</option><option value="vnc">VNC</option></select></label><label className="vm-create-field">{t("workspace.management.virtualMachines.videoModel")}<select value={form.videoModel} onChange={(event) => updateCreateForm("videoModel", event.target.value as VmCreateForm["videoModel"])}>{["none", "virtio", "qxl", "vga"].map((value) => <option key={value} value={value}>{value}</option>)}</select></label></div>
+                  <div className="vm-create-toggle-grid"><label className="vm-create-toggle"><input type="checkbox" checked={form.bootMenu} onChange={(event) => updateCreateForm("bootMenu", event.target.checked)} /><span><strong>{t("workspace.management.virtualMachines.bootMenu")}</strong><small>{t("workspace.management.virtualMachines.bootMenuHint")}</small></span></label><label className="vm-create-toggle"><input type="checkbox" checked={form.autostart} onChange={(event) => updateCreateForm("autostart", event.target.checked)} /><span><strong>{t("workspace.management.virtualMachines.autostart")}</strong><small>{t("workspace.management.virtualMachines.autostartHint")}</small></span></label></div>
+                  <div className="vm-create-summary"><div><span>{t("workspace.management.virtualMachines.name")}</span><strong>{form.name}</strong></div><div><span>{t("workspace.management.virtualMachines.createResources")}</span><strong>{form.vcpu} vCPU · {form.memoryGiB} GiB</strong></div><div><span>{t("workspace.management.virtualMachines.createSource")}</span><strong title={form.mediaMode === "iso" ? form.isoPath : form.diskPath}>{form.mediaMode === "iso" ? form.isoPath : form.diskPath}</strong></div><div><span>{t("workspace.management.virtualMachines.network")}</span><strong>{form.network} · {form.networkModel}</strong></div><div><span>{t("workspace.management.virtualMachines.firmware")}</span><strong>{form.firmware.toUpperCase()} · {form.graphics}</strong></div></div>
+                  <div className="vm-create-review"><Info size={16} /><div><strong>{t("workspace.management.virtualMachines.createDirectTitle")}</strong><p>{t("workspace.management.virtualMachines.createDirectDetail")}</p></div></div>
+                </section>
+              ) : null}
+
+              {wizardError ? <p className="vm-create-error" role="alert"><CircleAlert size={14} />{wizardError}</p> : null}
             </div>
-            <footer className="vm-create-dialog-footer"><span>{form.name || t("workspace.management.virtualMachines.createReviewPlaceholder")} · {form.vcpu} vCPU · {form.memoryGiB} GiB</span><div><button type="button" onClick={() => setCreateOpen(false)} disabled={pendingAction !== null}>{t("common.actions.cancel")}</button><button type="submit" className="vm-create-submit" disabled={pendingAction !== null}>{pendingAction === `create:${form.name.trim()}` ? t("common.states.loading") : t("workspace.management.virtualMachines.create")}</button></div></footer>
+            <footer className="vm-create-dialog-footer"><span>{t("workspace.management.virtualMachines.stepCounter", { current: createStep, total: 4 })} · {form.name || t("workspace.management.virtualMachines.createReviewPlaceholder")}</span><div><button type="button" onClick={() => setCreateOpen(false)} disabled={pendingAction !== null}>{t("common.actions.cancel")}</button>{createStep > 1 ? <button type="button" onClick={retreatWizard} disabled={pendingAction !== null}><ChevronLeft size={14} />{t("workspace.management.virtualMachines.previous")}</button> : null}{createStep < 4 ? <button type="button" className="vm-create-submit" onClick={advanceWizard}><span>{t("workspace.management.virtualMachines.next")}</span><ChevronRight size={14} /></button> : <button type="submit" className="vm-create-submit" disabled={pendingAction !== null}>{pendingAction === `create:${form.name.trim()}` ? <><LoaderCircle className="spin" size={14} />{t("workspace.management.virtualMachines.creating")}</> : <><Settings2 size={14} />{t("workspace.management.virtualMachines.createNow")}</>}</button>}</div></footer>
           </form>
         </div>
       ) : null}

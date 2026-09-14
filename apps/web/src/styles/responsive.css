@@ -116,8 +116,26 @@
   }
 
   .vm-create-field-grid,
-  .vm-create-segmented {
+  .vm-create-segmented,
+  .vm-create-toggle-grid,
+  .vm-create-summary {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vm-create-stepper {
+    gap: 3px;
+  }
+
+  .vm-create-stepper button {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    padding: 6px 3px;
+    text-align: center;
+  }
+
+  .vm-create-stepper strong {
+    max-width: 100%;
+    font-size: 10px;
   }
 
   .vm-create-dialog-footer {

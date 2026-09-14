@@ -31,6 +31,15 @@ import type {
   , VmOperationRecord
   , VmOperationAction
   , VmOperationProposal as SharedVmOperationProposal
+  , VmCpuMode
+  , VmDiskBus
+  , VmDiskCache
+  , VmDiskDiscard
+  , VmFirmware
+  , VmGraphics
+  , VmMemoryBacking
+  , VmNetworkModel
+  , VmVideoModel
 } from "@sigmaos/shared";
 
 export interface NasRoot {
@@ -79,7 +88,7 @@ export type SystemHealth = SystemHealthSummary;
 export type VmSummary = PublicVmSummary;
 export type VmOperation = VmOperationRecord;
 export type VmAction = VmOperationAction;
-export interface VmProposalResult { message: AgentMessage; job: Job; approval: PendingApproval; operation: VmOperation; }
+export interface VmProposalResult { message: AgentMessage; job: Job; approval: PendingApproval | null; operation: VmOperation; }
 export interface VmConsoleSession { id: string; operationId: string; approvalId: string; domainName: string; status: string; createdAt: string; expiresAt: string; usedAt: string | null; websocketUrl: string; }
 
 export interface Session {
@@ -406,13 +415,29 @@ export async function proposeVmOperation(input: {
   domainName?: string;
   snapshotName?: string;
   vcpu?: number;
+  vcpuTopology?: { sockets: number; cores: number; threads: number };
   memoryBytes?: number;
+  memoryBacking?: VmMemoryBacking;
+  osVariant?: string;
+  firmware?: VmFirmware;
+  machineType?: string;
+  cpuMode?: VmCpuMode;
+  cpuModel?: string;
   diskSizeBytes?: number;
+  diskBus?: VmDiskBus;
+  diskCache?: VmDiskCache;
+  diskDiscard?: VmDiskDiscard;
   isoPath?: string;
   isoRootId?: string;
   isoStoragePoolId?: string;
   diskPath?: string;
   networkName?: string;
+  networkModel?: VmNetworkModel;
+  macAddress?: string;
+  graphics?: VmGraphics;
+  videoModel?: VmVideoModel;
+  bootMenu?: boolean;
+  autostart?: boolean;
 }): Promise<VmProposalResult> {
   const response = await fetch("/api/vms/proposals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
   await ensureOk(response);

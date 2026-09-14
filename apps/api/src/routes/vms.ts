@@ -4,18 +4,33 @@ import path from "node:path";
 import type { FastifyInstance } from "fastify";
 import {
   appendEvent,
+  createVmOperationRecord,
   createUserMessageAndJob,
   createVmConsoleAuthorization,
   createVmOperationApproval,
   getApproval,
+  getJob,
   getSession,
   getVmOperation,
   getVmOperationByApproval,
   listVmOperations,
   consumeVmConsoleAuthorization,
+  updateJobStatus,
   updateVmOperationStatus
 } from "@sigmaos/db";
-import type { VmOperationAction, VmOperationProposal } from "@sigmaos/shared";
+import type {
+  VmCpuMode,
+  VmDiskBus,
+  VmDiskCache,
+  VmDiskDiscard,
+  VmFirmware,
+  VmGraphics,
+  VmMemoryBacking,
+  VmNetworkModel,
+  VmOperationAction,
+  VmOperationProposal,
+  VmVideoModel
+} from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
 import { applyVmOperation, collectVmSummary, safeVmMessage, DEFAULT_VM_CONFIG } from "../lib/vm-service.js";
 import { resolveScopedExistingPath, resolveStoragePoolScope } from "../lib/storage-scope.js";
@@ -26,13 +41,29 @@ type VmProposalBody = {
   domainName?: string;
   snapshotName?: string;
   vcpu?: number;
+  vcpuTopology?: { sockets?: number; cores?: number; threads?: number };
   memoryBytes?: number;
+  memoryBacking?: VmMemoryBacking;
+  osVariant?: string;
+  firmware?: VmFirmware;
+  machineType?: string;
+  cpuMode?: VmCpuMode;
+  cpuModel?: string;
   diskSizeBytes?: number;
+  diskBus?: VmDiskBus;
+  diskCache?: VmDiskCache;
+  diskDiscard?: VmDiskDiscard;
   isoPath?: string;
   isoRootId?: string;
   isoStoragePoolId?: string;
   diskPath?: string;
   networkName?: string;
+  networkModel?: VmNetworkModel;
+  macAddress?: string;
+  graphics?: VmGraphics;
+  videoModel?: VmVideoModel;
+  bootMenu?: boolean;
+  autostart?: boolean;
 };
 
 export function registerVmRoutes(server: FastifyInstance, context: ApiRouteContext): void {
@@ -45,6 +76,39 @@ export function registerVmRoutes(server: FastifyInstance, context: ApiRouteConte
     if (!session) { reply.status(404).send({ error: "Session not found" }); return; }
     try {
       const proposal = await buildVmProposal(request.body ?? {}, context);
+      if (proposal.action === "create") {
+        const { message, job } = createUserMessageAndJob(context.db, { sessionId: session.id, content: proposal.summary, status: "running" });
+        const operation = createVmOperationRecord(context.db, { jobId: job.id, proposal });
+        appendEvent(context.db, { sessionId: session.id, jobId: job.id, type: "job.running", payload: { jobId: job.id, vmOperation: operation } });
+        try {
+          let executionConfig = context.config;
+          let executionProposal = proposal;
+          if (proposal.isoRootId || proposal.isoStoragePoolId || proposal.isoSourcePath) {
+            const storageIso = await resolveStorageIso({
+              ...(proposal.isoSourcePath ? { isoPath: proposal.isoSourcePath } : {}),
+              ...(proposal.isoRootId ? { isoRootId: proposal.isoRootId } : {}),
+              ...(proposal.isoStoragePoolId ? { isoStoragePoolId: proposal.isoStoragePoolId } : {})
+            }, context);
+            if (!storageIso) throw new Error("Stored ISO selection is incomplete");
+            const vmConfig = context.config.vm ?? DEFAULT_VM_CONFIG;
+            executionConfig = { ...context.config, vm: { ...vmConfig, isoRoots: [...vmConfig.isoRoots, storageIso.mountpointPath] } };
+            executionProposal = { ...proposal, isoPath: storageIso.absolutePath };
+          }
+          const metadata = await applyVmOperation(executionConfig, operation, executionProposal, context.vm);
+          const applied = updateVmOperationStatus(context.db, operation.id, "applied", { ...metadata, appliedAt: new Date().toISOString() });
+          if (!applied) throw new Error("VM operation record disappeared before completion");
+          updateJobStatus(context.db, job.id, "completed", null, ["running"]);
+          appendEvent(context.db, { sessionId: session.id, jobId: job.id, type: "job.completed", payload: { jobId: job.id, vmOperation: applied } });
+          reply.status(202).send({ message, job: getJob(context.db, job.id) ?? job, approval: null, operation: applied });
+        } catch (error) {
+          const messageText = safeVmMessage(error);
+          const failed = updateVmOperationStatus(context.db, operation.id, "failed", { error: messageText, failedAt: new Date().toISOString() });
+          updateJobStatus(context.db, job.id, "failed", messageText, ["running"]);
+          appendEvent(context.db, { sessionId: session.id, jobId: job.id, type: "job.failed", payload: { jobId: job.id, error: messageText, vmOperation: failed } });
+          reply.status(400).send({ error: messageText });
+        }
+        return;
+      }
       const { message, job } = createUserMessageAndJob(context.db, { sessionId: session.id, content: proposal.summary, status: "waiting_approval" });
       const { approval, operation } = createVmOperationApproval(context.db, { jobId: job.id, proposal });
       appendEvent(context.db, { sessionId: session.id, jobId: job.id, type: "approval.pending", payload: { approvalId: approval.id, proposal: approval.proposal, summary: proposal.summary } });
@@ -97,12 +161,13 @@ async function buildVmProposal(body: VmProposalBody, context: ApiRouteContext): 
   if (action === "create" && isoPath && !storageIso && !vmConfig.isoRoots.some((root) => isInside(root, isoPath))) throw new Error("ISO path must stay inside a configured ISO root");
   if (action === "create" && body.diskPath && !isInside(vmConfig.storagePath, body.diskPath)) throw new Error("Disk path must stay inside the configured VM storage path");
   if (body.networkName && !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/u.test(body.networkName)) throw new Error("Network name is invalid");
+  const advanced = action === "create" ? validateCreateOptions(body) : {};
   const risk = action === "delete" || action === "create" ? "high" : "medium";
   return {
     action, ...(domainName ? { domainName } : {}), ...(normalizeDomain(body.snapshotName) ? { snapshotName: normalizeDomain(body.snapshotName)! } : {}),
-    ...(body.vcpu ? { vcpu: Math.max(1, Math.min(128, Math.floor(body.vcpu))) } : {}),
-    ...(body.memoryBytes ? { memoryBytes: Math.max(256 * 1024 ** 2, Math.min(1024 * 1024 ** 3, Math.floor(body.memoryBytes))) } : {}),
-    ...(body.diskSizeBytes ? { diskSizeBytes: Math.max(1 * 1024 ** 3, Math.min(64 * 1024 ** 4, Math.floor(body.diskSizeBytes))) } : {}),
+    ...(body.vcpu !== undefined ? { vcpu: boundedInteger(body.vcpu, 1, 128, "vCPU") } : {}),
+    ...(body.memoryBytes !== undefined ? { memoryBytes: boundedInteger(body.memoryBytes, 256 * 1024 ** 2, 1024 * 1024 ** 3, "Memory") } : {}),
+    ...(body.diskSizeBytes !== undefined ? { diskSizeBytes: boundedInteger(body.diskSizeBytes, 1 * 1024 ** 3, 64 * 1024 ** 4, "Disk size") } : {}),
     ...(isoPath ? { isoPath } : {}),
     ...(storageIso ? {
       isoRootId: storageIso.rootId,
@@ -110,9 +175,79 @@ async function buildVmProposal(body: VmProposalBody, context: ApiRouteContext): 
       isoSourcePath: storageIso.sourcePath
     } : {}),
     ...(body.diskPath ? { diskPath: body.diskPath } : {}),
-    ...(body.networkName ? { networkName: body.networkName } : {}), risk,
+    ...(body.networkName ? { networkName: body.networkName } : {}),
+    ...advanced,
+    risk,
     summary: action === "create" ? `Create virtual machine ${domainName}` : `${action} virtual machine ${domainName}`
   };
+}
+
+function validateCreateOptions(body: VmProposalBody): Partial<VmOperationProposal> {
+  if (body.bootMenu !== undefined && typeof body.bootMenu !== "boolean") throw new Error("Boot menu must be a boolean");
+  if (body.autostart !== undefined && typeof body.autostart !== "boolean") throw new Error("Autostart must be a boolean");
+  if (body.vcpuTopology && (body.vcpuTopology.sockets === undefined || body.vcpuTopology.cores === undefined || body.vcpuTopology.threads === undefined)) {
+    throw new Error("vCPU topology requires sockets, cores, and threads");
+  }
+  const topology = body.vcpuTopology
+    ? {
+      sockets: boundedInteger(body.vcpuTopology.sockets!, 1, 16, "vCPU sockets"),
+      cores: boundedInteger(body.vcpuTopology.cores!, 1, 128, "vCPU cores"),
+      threads: boundedInteger(body.vcpuTopology.threads!, 1, 16, "vCPU threads")
+    }
+    : undefined;
+  if (topology && topology.sockets * topology.cores * topology.threads > 128) {
+    throw new Error("vCPU topology must not exceed 128 total vCPUs");
+  }
+  if (topology && body.vcpu !== undefined && topology.sockets * topology.cores * topology.threads !== boundedInteger(body.vcpu, 1, 128, "vCPU")) {
+    throw new Error("vCPU topology must match the total vCPU count");
+  }
+  const cpuMode = oneOf(body.cpuMode, ["host-model", "host-passthrough", "custom"] as const, "CPU mode");
+  const cpuModel = safeToken(body.cpuModel, "CPU model");
+  if (cpuMode === "custom" && !cpuModel) throw new Error("A CPU model is required for custom CPU mode");
+  if (cpuModel && cpuMode !== "custom") throw new Error("CPU model requires custom CPU mode");
+  return {
+    ...(topology ? { vcpuTopology: topology } : {}),
+    ...(safeToken(body.osVariant, "OS variant") ? { osVariant: safeToken(body.osVariant, "OS variant")! } : {}),
+    ...(oneOf(body.firmware, ["bios", "uefi"] as const, "Firmware") ? { firmware: oneOf(body.firmware, ["bios", "uefi"] as const, "Firmware")! } : {}),
+    ...(safeToken(body.machineType, "Machine type") ? { machineType: safeToken(body.machineType, "Machine type")! } : {}),
+    ...(cpuMode ? { cpuMode } : {}),
+    ...(cpuModel ? { cpuModel } : {}),
+    ...(oneOf(body.memoryBacking, ["default", "hugepages"] as const, "Memory backing") ? { memoryBacking: oneOf(body.memoryBacking, ["default", "hugepages"] as const, "Memory backing")! } : {}),
+    ...(oneOf(body.diskBus, ["virtio", "scsi", "sata", "ide"] as const, "Disk bus") ? { diskBus: oneOf(body.diskBus, ["virtio", "scsi", "sata", "ide"] as const, "Disk bus")! } : {}),
+    ...(oneOf(body.diskCache, ["none", "writeback", "writethrough", "directsync", "unsafe"] as const, "Disk cache") ? { diskCache: oneOf(body.diskCache, ["none", "writeback", "writethrough", "directsync", "unsafe"] as const, "Disk cache")! } : {}),
+    ...(oneOf(body.diskDiscard, ["ignore", "unmap"] as const, "Disk discard") ? { diskDiscard: oneOf(body.diskDiscard, ["ignore", "unmap"] as const, "Disk discard")! } : {}),
+    ...(oneOf(body.networkModel, ["virtio", "e1000", "rtl8139"] as const, "Network model") ? { networkModel: oneOf(body.networkModel, ["virtio", "e1000", "rtl8139"] as const, "Network model")! } : {}),
+    ...(body.macAddress ? { macAddress: normalizeMac(body.macAddress) } : {}),
+    ...(oneOf(body.graphics, ["none", "spice", "vnc"] as const, "Graphics") ? { graphics: oneOf(body.graphics, ["none", "spice", "vnc"] as const, "Graphics")! } : {}),
+    ...(oneOf(body.videoModel, ["none", "virtio", "qxl", "vga"] as const, "Video model") ? { videoModel: oneOf(body.videoModel, ["none", "virtio", "qxl", "vga"] as const, "Video model")! } : {}),
+    ...(body.bootMenu !== undefined ? { bootMenu: body.bootMenu === true } : {}),
+    ...(body.autostart !== undefined ? { autostart: body.autostart === true } : {})
+  };
+}
+
+function boundedInteger(value: number, min: number, max: number, label: string): number {
+  if (!Number.isFinite(value) || !Number.isInteger(value)) throw new Error(`${label} must be an integer`);
+  if (value < min || value > max) throw new Error(`${label} must be between ${min} and ${max}`);
+  return value;
+}
+
+function oneOf<T extends string>(value: T | undefined, values: readonly T[], label: string): T | undefined {
+  if (value === undefined || value === "") return undefined;
+  if (!values.includes(value)) throw new Error(`${label} is invalid`);
+  return value;
+}
+
+function safeToken(value: string | undefined, label: string): string | undefined {
+  if (!value?.trim()) return undefined;
+  const normalized = value.trim();
+  if (normalized.startsWith("-") || !/^[A-Za-z0-9][A-Za-z0-9_.:+-]{0,63}$/u.test(normalized)) throw new Error(`${label} is invalid`);
+  return normalized;
+}
+
+function normalizeMac(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (!/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/u.test(normalized)) throw new Error("MAC address is invalid");
+  return normalized;
 }
 
 export async function applyApprovedVmOperation(context: ApiRouteContext, approvalId: string): Promise<unknown> {

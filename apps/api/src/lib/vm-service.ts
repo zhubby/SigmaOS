@@ -153,10 +153,7 @@ export async function applyVmOperation(
           throw new Error("Existing virtual machine disk was not found");
         }
       }
-      const args = ["--connect", vmConfig.libvirtUri, "--name", domain, "--memory", String(Math.round((proposal.memoryBytes ?? 2 * 1024 ** 3) / 1024 ** 2)), "--vcpus", String(proposal.vcpu ?? 2), "--disk", `path=${diskPath},format=qcow2`, "--network", `network=${proposal.networkName ?? vmConfig.networkName}`, "--noautoconsole", proposal.isoPath ? "--cdrom" : "--import"];
-      if (proposal.isoPath) {
-        args.push(proposal.isoPath);
-      }
+      const args = buildVmCreateArgs(vmConfig, domain, diskPath, proposal);
       await runner.run("virt-install", args);
       break;
     }
@@ -165,6 +162,55 @@ export async function applyVmOperation(
     default: throw new Error("Unsupported virtual machine action");
   }
   return { action: proposal.action, domainName: domain };
+}
+
+export function buildVmCreateArgs(
+  vmConfig: VmConfig,
+  domain: string,
+  diskPath: string,
+  proposal: VmOperationProposal
+): string[] {
+  const vcpu = proposal.vcpuTopology
+    ? `${proposal.vcpu ?? proposal.vcpuTopology.sockets * proposal.vcpuTopology.cores * proposal.vcpuTopology.threads},sockets=${proposal.vcpuTopology.sockets},cores=${proposal.vcpuTopology.cores},threads=${proposal.vcpuTopology.threads}`
+    : String(proposal.vcpu ?? 2);
+  const diskOptions = [
+    `path=${diskPath}`,
+    "format=qcow2",
+    ...(proposal.diskBus ? [`bus=${proposal.diskBus}`] : []),
+    ...(proposal.diskCache ? [`cache=${proposal.diskCache}`] : []),
+    ...(proposal.diskDiscard ? [`discard=${proposal.diskDiscard}`] : [])
+  ];
+  const networkOptions = [
+    `network=${proposal.networkName ?? vmConfig.networkName}`,
+    ...(proposal.networkModel ? [`model=${proposal.networkModel}`] : []),
+    ...(proposal.macAddress ? [`mac=${proposal.macAddress}`] : [])
+  ];
+  const args = [
+    "--connect", vmConfig.libvirtUri,
+    "--name", domain,
+    "--memory", String(Math.round((proposal.memoryBytes ?? 2 * 1024 ** 3) / 1024 ** 2)),
+    "--vcpus", vcpu,
+    "--disk", diskOptions.join(","),
+    "--network", networkOptions.join(","),
+    "--noautoconsole"
+  ];
+  if (proposal.osVariant) args.push("--os-variant", proposal.osVariant);
+  if (proposal.machineType) args.push("--machine", proposal.machineType);
+  if (proposal.cpuMode) args.push("--cpu", proposal.cpuMode === "custom" ? proposal.cpuModel! : proposal.cpuMode);
+  if (proposal.memoryBacking === "hugepages") args.push("--memorybacking", "hugepages=yes");
+  if (proposal.firmware || proposal.bootMenu !== undefined) {
+    const boot = [
+      ...(proposal.firmware === "uefi" ? ["uefi"] : []),
+      ...(proposal.bootMenu !== undefined ? [`menu=${proposal.bootMenu ? "on" : "off"}`] : [])
+    ];
+    if (boot.length) args.push("--boot", boot.join(","));
+  }
+  if (proposal.graphics) args.push("--graphics", proposal.graphics);
+  if (proposal.videoModel) args.push("--video", proposal.videoModel);
+  if (proposal.autostart === true) args.push("--autostart");
+  if (proposal.isoPath) args.push("--cdrom", proposal.isoPath);
+  else args.push("--import");
+  return args;
 }
 
 export function buildVmUnavailableSummary(config: VmConfig, error: string | null): VmSummary {
