@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, chmod, mkdir, readdir, realpath, rm, stat } from "node:fs/promises";
+import { access, chmod, mkdir, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -43,21 +43,27 @@ export interface PlayerController {
 }
 
 export async function probePlayer(config: PlayerConfig): Promise<PlayerProbe> {
-  const [mpvAvailable, drmProbe, audioProbe] = await Promise.all([
+  const [mpvAvailable, drmProbe, drmOutputProbe, audioProbe] = await Promise.all([
     commandAvailable("mpv"),
     probeDevice("/dev/dri", /^card\d+$/),
+    probeDrmOutput(config.drmConnector),
     probeDevice("/dev/snd")
   ]);
-  const drmAvailable = drmProbe.available;
+  const drmAvailable = drmProbe.available && (!drmOutputProbe.hasConnectors || drmOutputProbe.connected);
   const audioAvailable = audioProbe.available;
   const errors: string[] = [];
   if (!mpvAvailable) errors.push("mpv is not installed");
   const permissionDenied =
-    config.videoOutput === "drm" && drmProbe.permissionDenied ||
+    config.videoOutput === "drm" && (drmProbe.permissionDenied || drmOutputProbe.permissionDenied) ||
     config.audioOutput === "alsa" && audioProbe.permissionDenied;
   if (config.videoOutput === "drm") {
-    if (drmProbe.permissionDenied) errors.push("Player user cannot access DRM devices under /dev/dri");
-    else if (!drmAvailable) errors.push("No DRM device found under /dev/dri");
+    if (drmProbe.permissionDenied || drmOutputProbe.permissionDenied) {
+      errors.push("Player user cannot access DRM devices under /dev/dri");
+    } else if (!drmAvailable) {
+      errors.push(drmOutputProbe.hasConnectors
+        ? "No connected DRM display found under /sys/class/drm"
+        : "No DRM device found under /dev/dri");
+    }
   }
   if (config.audioOutput === "alsa") {
     if (audioProbe.permissionDenied) errors.push("Player user cannot access ALSA devices under /dev/snd");
@@ -186,10 +192,16 @@ class MpvPlayerController implements PlayerController {
       );
     }
     if (this.config.videoOutput === "drm" && !this.capabilities.drmAvailable) {
-      throw new PlayerUnavailableError("No DRM device found under /dev/dri", "DRM_UNAVAILABLE");
+      throw new PlayerUnavailableError(
+        this.capabilities.error ?? "No connected DRM display found",
+        "DRM_UNAVAILABLE"
+      );
     }
     if (this.config.audioOutput === "alsa" && !this.capabilities.audioAvailable) {
-      throw new PlayerUnavailableError("No ALSA device found under /dev/snd", "AUDIO_UNAVAILABLE");
+      throw new PlayerUnavailableError(
+        this.capabilities.error ?? "No ALSA device found under /dev/snd",
+        "AUDIO_UNAVAILABLE"
+      );
     }
     this.status = {
       ...this.status,
@@ -243,12 +255,15 @@ class MpvPlayerController implements PlayerController {
     const child = this.spawnProcess("mpv", args, { stdio: ["ignore", "ignore", "pipe"] });
     this.child = child;
     let stderr = "";
+    let childError: string | null = null;
     child.stderr?.on("data", (chunk: Buffer | string) => {
       stderr = `${stderr}${chunk.toString("utf8")}`.slice(-4096);
     });
     child.once("error", (error) => {
+      const message = error.message || "Unable to start mpv";
+      childError = message;
       if (this.child === child) {
-        this.setError(error.message || "Unable to start mpv", "MPV_UNAVAILABLE");
+        this.setError(message, "MPV_UNAVAILABLE");
       }
     });
     child.once("exit", (code, signal) => {
@@ -277,10 +292,10 @@ class MpvPlayerController implements PlayerController {
       this.stopping = true;
       child.kill("SIGTERM");
       if (this.child === child) this.child = null;
-      throw new PlayerUnavailableError(
-        summarizeProcessError(stderr, null, null, this.allowedRoots) || "mpv did not create its IPC socket",
-        "MPV_UNAVAILABLE"
-      );
+      const message = childError ?? (summarizeProcessError(stderr, null, null, this.allowedRoots) || "mpv did not create its IPC socket");
+      const code = childError ? "MPV_UNAVAILABLE" : "PLAYBACK_FAILED";
+      this.setError(message, code);
+      throw new PlayerUnavailableError(message, code);
     }
     const socket = net.createConnection(this.ipcSocketPath);
     this.ipc = socket;
@@ -302,7 +317,10 @@ class MpvPlayerController implements PlayerController {
       if (this.ipc === socket) this.ipc = null;
       this.stopping = true;
       child.kill("SIGTERM");
-      throw error;
+      const message = error instanceof Error ? error.message : "mpv IPC connection failed";
+      const code = error instanceof PlayerUnavailableError ? error.code : "HELPER_UNAVAILABLE";
+      this.setError(message, code);
+      throw new PlayerUnavailableError(message, code);
     }
     this.sendMpvUnchecked(["observe_property", 1, "time-pos"]);
     this.sendMpvUnchecked(["observe_property", 2, "duration"]);
@@ -454,6 +472,12 @@ interface DeviceProbe {
   permissionDenied: boolean;
 }
 
+interface DrmOutputProbe {
+  connected: boolean;
+  hasConnectors: boolean;
+  permissionDenied: boolean;
+}
+
 async function probeDevice(directory: string, requiredEntry?: string | RegExp): Promise<DeviceProbe> {
   try {
     await access(directory, fsConstants.F_OK | fsConstants.X_OK);
@@ -480,6 +504,34 @@ async function probeDevice(directory: string, requiredEntry?: string | RegExp): 
     return isPermissionError(error)
       ? { available: true, permissionDenied: true }
       : { available: false, permissionDenied: false };
+  }
+}
+
+async function probeDrmOutput(requestedConnector: string | null): Promise<DrmOutputProbe> {
+  try {
+    const entries = (await readdir("/sys/class/drm")).filter((entry) => {
+      const isConnector = /(?:HDMI|DP|DVI|eDP|Virtual)/.test(entry) && !entry.includes("Writeback");
+      return isConnector && (!requestedConnector || entry === requestedConnector || entry.endsWith(`-${requestedConnector}`));
+    });
+    if (entries.length === 0) {
+      return { connected: false, hasConnectors: Boolean(requestedConnector), permissionDenied: false };
+    }
+    let permissionDenied = false;
+    for (const entry of entries) {
+      try {
+        const status = await readFile(path.join("/sys/class/drm", entry, "status"), "utf8");
+        if (status.trim() === "connected") {
+          return { connected: true, hasConnectors: true, permissionDenied: false };
+        }
+      } catch (error) {
+        if (isPermissionError(error)) permissionDenied = true;
+      }
+    }
+    return { connected: false, hasConnectors: true, permissionDenied };
+  } catch (error) {
+    return isPermissionError(error)
+      ? { connected: false, hasConnectors: true, permissionDenied: true }
+      : { connected: false, hasConnectors: false, permissionDenied: false };
   }
 }
 
@@ -516,7 +568,8 @@ function summarizeProcessError(stderr: string, code: number | null, signal: Node
   const detail = stderr.trim().split("\n").filter(Boolean).at(-1) ?? "";
   const sanitized = allowedRoots.reduce((message, root) => message.replaceAll(root, "<nas>"), detail);
   if (sanitized) return sanitized.slice(0, 4096);
-  return signal ? `mpv exited with signal ${signal}` : `mpv exited with code ${code ?? "unknown"}`;
+  if (signal) return `mpv exited with signal ${signal}`;
+  return code === null ? "" : `mpv exited with code ${code}`;
 }
 
 function isPathInside(parent: string, candidate: string): boolean {
