@@ -15,6 +15,8 @@ SIGMAOS_LOCALE=${SIGMAOS_LOCALE:-C.UTF-8}
 NGINX_ENABLED=${SIGMAOS_ENABLE_NGINX:-1}
 DOCKER_ENABLED=${SIGMAOS_ENABLE_DOCKER:-0}
 VM_ENABLED=${SIGMAOS_ENABLE_VM:-0}
+PLAYER_ENABLED=${SIGMAOS_ENABLE_PLAYER:-0}
+PLAYER_USER=${SIGMAOS_PLAYER_USER:-sigmaos}
 TERMINAL_USER=${SIGMAOS_TERMINAL_USER:-${SUDO_USER:-}}
 DEBIAN_FRONTEND=noninteractive
 export DEBIAN_FRONTEND
@@ -126,6 +128,13 @@ case "$VM_ENABLED" in
   0|1) ;;
   *) die "SIGMAOS_ENABLE_VM must be 0 or 1" ;;
 esac
+case "$PLAYER_ENABLED" in
+  0|1) ;;
+  *) die "SIGMAOS_ENABLE_PLAYER must be 0 or 1" ;;
+esac
+case "$PLAYER_USER" in
+  *[!a-zA-Z0-9._-]*|root) die "SIGMAOS_PLAYER_USER must name a non-root local user" ;;
+esac
 
 install_build_dependencies() {
   log "installing build prerequisites"
@@ -151,6 +160,9 @@ install_optional_runtime() {
       arm64) runtime_packages="$runtime_packages libvirt-daemon-system libvirt-clients qemu-system-arm qemu-utils virtinst" ;;
       amd64) runtime_packages="$runtime_packages libvirt-daemon-system libvirt-clients qemu-system-x86 qemu-utils virtinst" ;;
     esac
+  fi
+  if [ "$PLAYER_ENABLED" = "1" ]; then
+    runtime_packages="$runtime_packages mpv seatd"
   fi
   if [ -n "$runtime_packages" ]; then
     log "installing optional runtime components:$runtime_packages"
@@ -248,6 +260,8 @@ SIGMAOS_ADMIN_DISPLAY_NAME=${SIGMAOS_ADMIN_DISPLAY_NAME:-SigmaOS Admin} \
 SIGMAOS_NAS_ROOT_PATH=${SIGMAOS_NAS_ROOT_PATH:-/srv/nas} \
 SIGMAOS_DOCKER_ENABLED="$DOCKER_ENABLED" \
 SIGMAOS_VM_ENABLED="$VM_ENABLED" \
+SIGMAOS_PLAYER_ENABLED="$PLAYER_ENABLED" \
+SIGMAOS_PLAYER_USER="$PLAYER_USER" \
 SIGMAOS_TERMINAL_USER="$TERMINAL_USER" \
   /usr/lib/sigmaos/scripts/sigmaos-first-boot.sh
 
@@ -255,6 +269,7 @@ if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload
   /usr/lib/sigmaos/scripts/sigmaos-refresh-groups.sh
   /usr/lib/sigmaos/scripts/sigmaos-refresh-terminal.sh
+  SIGMAOS_PLAYER_USER="$PLAYER_USER" /usr/lib/sigmaos/scripts/sigmaos-refresh-player.sh
   if [ "$DOCKER_ENABLED" = "1" ]; then
     systemctl enable --now docker.service
   fi
@@ -271,6 +286,9 @@ if command -v systemctl >/dev/null 2>&1; then
     sigmaos-terminal-helper.service \
     sigmaos-api.service \
     sigmaos-worker@1.service
+  if [ "$PLAYER_ENABLED" = "1" ]; then
+    systemctl enable --now sigmaos-player-helper.service
+  fi
   systemctl enable \
     sigmaos-indexer.timer \
     sigmaos-scheduler.timer \

@@ -13,6 +13,8 @@ PI_COMMAND="${SIGMAOS_PI_COMMAND:-pi}"
 LOCAL_ENDPOINT="${SIGMAOS_LOCAL_ENDPOINT:-}"
 DOCKER_ENABLED="${SIGMAOS_DOCKER_ENABLED:-0}"
 VM_ENABLED="${SIGMAOS_VM_ENABLED:-0}"
+PLAYER_ENABLED="${SIGMAOS_PLAYER_ENABLED:-${SIGMAOS_ENABLE_PLAYER:-0}}"
+PLAYER_USER="${SIGMAOS_PLAYER_USER:-sigmaos}"
 TERMINAL_USER="${SIGMAOS_TERMINAL_USER:-${SUDO_USER:-}}"
 
 if [ -n "$TERMINAL_USER" ]; then
@@ -33,11 +35,24 @@ case "$VM_ENABLED" in
   0|1) ;;
   *) printf "SIGMAOS_VM_ENABLED must be 0 or 1\n" >&2; exit 1 ;;
 esac
+case "$PLAYER_ENABLED" in
+  0|1) ;;
+  *) printf "SIGMAOS_PLAYER_ENABLED must be 0 or 1\n" >&2; exit 1 ;;
+esac
+case "$PLAYER_USER" in
+  *[!a-zA-Z0-9._-]*|root) printf "SIGMAOS_PLAYER_USER must name a non-root local user\n" >&2; exit 1 ;;
+esac
+getent passwd "$PLAYER_USER" >/dev/null || {
+  printf "player user does not exist: %s\n" "$PLAYER_USER" >&2
+  exit 1
+}
 
 DOCKER_ENABLED_BOOL=false
 VM_ENABLED_BOOL=false
+PLAYER_ENABLED_BOOL=false
 [ "$DOCKER_ENABLED" = "1" ] && DOCKER_ENABLED_BOOL=true
 [ "$VM_ENABLED" = "1" ] && VM_ENABLED_BOOL=true
+[ "$PLAYER_ENABLED" = "1" ] && PLAYER_ENABLED_BOOL=true
 
 ask_default() {
   prompt="$1"
@@ -112,6 +127,16 @@ helper_socket_path = "/run/sigmaos/terminal-helper.sock"
 session_idle_timeout_ms = 1800000
 connect_timeout_ms = 10000
 max_sessions = 32
+
+[player]
+enabled = $PLAYER_ENABLED_BOOL
+helper_socket_path = "/run/sigmaos/player-helper.sock"
+video_output = "drm"
+drm_connector = ""
+audio_output = "alsa"
+audio_device = ""
+hwdec = "auto-safe"
+user = "$PLAYER_USER"
 
 [[nas_roots]]
 id = "$NAS_ROOT_ID"

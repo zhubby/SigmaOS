@@ -24,24 +24,25 @@ import type {
   ShareSummary as PublicShareSummary,
   SystemNetworkSummary,
   SystemNetworkTrafficSummary,
-  SystemStorageSummary
-  , BackupRunSummary,
+  SystemStorageSummary,
+  BackupRunSummary,
   RootReadiness,
   IndexerAlert,
-  SystemHealthSummary
-  , VmSummary as PublicVmSummary
-  , VmOperationRecord
-  , VmOperationAction
-  , VmOperationProposal as SharedVmOperationProposal
-  , VmCpuMode
-  , VmDiskBus
-  , VmDiskCache
-  , VmDiskDiscard
-  , VmFirmware
-  , VmGraphics
-  , VmMemoryBacking
-  , VmNetworkModel
-  , VmVideoModel
+  SystemHealthSummary,
+  VmSummary as PublicVmSummary,
+  VmOperationRecord,
+  VmOperationAction,
+  VmOperationProposal as SharedVmOperationProposal,
+  VmCpuMode,
+  VmDiskBus,
+  VmDiskCache,
+  VmDiskDiscard,
+  VmFirmware,
+  VmGraphics,
+  VmMemoryBacking,
+  VmNetworkModel,
+  VmVideoModel,
+  PlayerStatus as SharedPlayerStatus
 } from "@sigmaos/shared";
 
 export interface NasRoot {
@@ -273,6 +274,12 @@ export type DockerContainerDetails = SharedDockerContainerDetails;
 export type DockerComposeProject = DockerSummary["composeProjects"][number];
 export type DockerOperation = DockerOperationRecord;
 export type ShareOperation = ShareOperationRecord;
+export type PlayerStatus = SharedPlayerStatus;
+export type PlayerCommand =
+  | { type: "play"; rootId: string; storagePoolId: string; path: string; startPositionSeconds?: number }
+  | { type: "pause" | "resume" | "stop" }
+  | { type: "seek"; seconds: number }
+  | { type: "set_volume"; volume: number };
 
 export interface FileMeta {
   path: string;
@@ -985,6 +992,24 @@ export function getFileVideoUrl(rootId: string, currentPath: string, storagePool
   return `/api/files/video?${params.toString()}`;
 }
 
+export async function getPlayerStatus(): Promise<PlayerStatus> {
+  const response = await fetch("/api/player/status");
+  await ensureOk(response);
+  const body = (await response.json()) as { status: PlayerStatus };
+  return body.status;
+}
+
+export async function sendPlayerCommand(command: PlayerCommand): Promise<PlayerStatus> {
+  const response = await fetch("/api/player/command", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(command)
+  });
+  await ensureOk(response);
+  const body = (await response.json()) as { status: PlayerStatus };
+  return body.status;
+}
+
 export async function getApprovals(): Promise<PendingApproval[]> {
   const response = await fetch("/api/approvals");
   await ensureOk(response);
@@ -1053,14 +1078,20 @@ async function ensureOk(response: Response): Promise<void> {
   }
 
   let message = response.statusText;
+  let code: string | undefined;
   try {
-    const body = (await response.json()) as { error?: string };
+    const body = (await response.json()) as { error?: string; code?: string };
     message = body.error ?? message;
+    code = body.code;
   } catch {
     // Keep status text.
   }
 
-  throw new Error(message);
+  const error = Object.assign(new Error(message), {
+    statusCode: response.status,
+    ...(code ? { code } : {})
+  });
+  throw error;
 }
 
 function readXhrError(xhr: XMLHttpRequest): Error {

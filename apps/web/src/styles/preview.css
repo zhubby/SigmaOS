@@ -349,6 +349,124 @@
   width: min(100%, 420px);
 }
 
+.hdmi-player-controls {
+  display: grid;
+  gap: 9px;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--preview-toolbar-bg);
+}
+
+.hdmi-player-heading,
+.hdmi-player-actions,
+.hdmi-player-progress,
+.hdmi-player-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hdmi-player-heading {
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.hdmi-player-title {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.hdmi-player-title strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hdmi-player-state {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.hdmi-player-state.is-error {
+  color: var(--danger-ui-text);
+}
+
+.hdmi-player-progress {
+  min-width: 0;
+}
+
+.hdmi-player-progress input,
+.hdmi-player-volume input {
+  accent-color: var(--accent);
+}
+
+.hdmi-player-progress input {
+  flex: 1 1 auto;
+  min-width: 80px;
+}
+
+.hdmi-player-progress > span:last-child {
+  flex: 0 0 auto;
+  min-width: 78px;
+  color: var(--muted);
+  font-family: var(--code-font-family, monospace);
+  font-size: 10px;
+  text-align: right;
+}
+
+.hdmi-player-actions {
+  min-width: 0;
+}
+
+.hdmi-player-actions .is-primary {
+  color: var(--accent);
+}
+
+.hdmi-player-volume {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 90px;
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.hdmi-player-volume input {
+  width: 100%;
+}
+
+.hdmi-player-error {
+  min-width: 0;
+  color: var(--danger-ui-text);
+  font-size: 11px;
+}
+
+.hdmi-player-error span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .hdmi-player-actions {
+    flex-wrap: wrap;
+  }
+
+  .hdmi-player-volume {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+}
+
 .pdf-preview {
   width: 100%;
   min-height: 0;

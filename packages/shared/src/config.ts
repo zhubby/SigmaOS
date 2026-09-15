@@ -12,6 +12,7 @@ import type {
   ShareConfig,
   ShareDefinitionConfig,
   ShareProtocolConfig,
+  PlayerConfig,
   SigmaConfig,
   TerminalConfig,
   VmConfig
@@ -111,6 +112,16 @@ interface TomlConfig {
     connect_timeout_ms?: number;
     max_sessions?: number;
   };
+  player?: {
+    enabled?: boolean;
+    helper_socket_path?: string;
+    video_output?: "drm";
+    drm_connector?: string;
+    audio_output?: "alsa";
+    audio_device?: string;
+    hwdec?: "auto-safe" | "auto" | "no";
+    user?: string;
+  };
   nas_roots?: Array<{
     id?: string;
     name?: string;
@@ -195,6 +206,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
     vm: loadVmConfig(env, fileConfig, workspaceRoot),
     shares: loadShareConfig(env, fileConfig),
     terminal: loadTerminalConfig(env, fileConfig),
+    player: loadPlayerConfig(env, fileConfig),
     nasRoots,
     backup,
     health
@@ -429,6 +441,34 @@ function loadTerminalConfig(env: NodeJS.ProcessEnv, fileConfig: TomlConfig): Ter
       env.SIGMAOS_TERMINAL_MAX_SESSIONS,
       fileConfig.terminal?.max_sessions ?? 32
     )
+  };
+}
+
+function loadPlayerConfig(env: NodeJS.ProcessEnv, fileConfig: TomlConfig): PlayerConfig {
+  const player = fileConfig.player;
+  const videoOutput = env.SIGMAOS_PLAYER_VIDEO_OUTPUT ?? player?.video_output ?? "drm";
+  const audioOutput = env.SIGMAOS_PLAYER_AUDIO_OUTPUT ?? player?.audio_output ?? "alsa";
+  const hwdec = env.SIGMAOS_PLAYER_HWDEC ?? player?.hwdec ?? "auto-safe";
+  const helperSocketPath =
+    normalizeText(env.SIGMAOS_PLAYER_HELPER_SOCKET_PATH) ??
+    normalizeText(player?.helper_socket_path) ??
+    "/run/sigmaos/player-helper.sock";
+  const playerUser = normalizeText(env.SIGMAOS_PLAYER_USER) ?? normalizeText(player?.user) ?? "sigmaos";
+  return {
+    enabled: toBoolean(env.SIGMAOS_PLAYER_ENABLED, player?.enabled ?? false),
+    helperSocketPath: path.isAbsolute(helperSocketPath) ? helperSocketPath : "/run/sigmaos/player-helper.sock",
+    videoOutput: videoOutput === "drm" ? "drm" : "drm",
+    drmConnector:
+      normalizeText(env.SIGMAOS_PLAYER_DRM_CONNECTOR) ??
+      normalizeText(player?.drm_connector) ??
+      null,
+    audioOutput: audioOutput === "alsa" ? "alsa" : "alsa",
+    audioDevice:
+      normalizeText(env.SIGMAOS_PLAYER_AUDIO_DEVICE) ??
+      normalizeText(player?.audio_device) ??
+      null,
+    hwdec: hwdec === "auto" || hwdec === "no" || hwdec === "auto-safe" ? hwdec : "auto-safe",
+    user: /^[a-zA-Z0-9._-]+$/.test(playerUser) && playerUser !== "root" ? playerUser : "sigmaos"
   };
 }
 

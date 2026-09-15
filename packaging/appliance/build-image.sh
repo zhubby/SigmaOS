@@ -10,6 +10,7 @@ MIRROR="${MIRROR%/}"
 NODE_MIRROR="${SIGMAOS_NODE_MIRROR:-https://mirrors.aliyun.com/nodejs-release}"
 NODE_MIRROR="${NODE_MIRROR%/}"
 NODE_VERSION="${SIGMAOS_NODE_VERSION:-22.23.2}"
+PLAYER_ENABLED="${SIGMAOS_ENABLE_PLAYER:-0}"
 
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -30,6 +31,11 @@ need tar
 need curl
 need sha256sum
 
+case "$PLAYER_ENABLED" in
+  0|1) ;;
+  *) printf "SIGMAOS_ENABLE_PLAYER must be 0 or 1\n" >&2; exit 1 ;;
+esac
+
 if [ ! -f "$DEB_PATH" ]; then
   printf "Missing SigmaOS deb at %s. Build it first with packaging/scripts/build-deb.sh or set SIGMAOS_DEB.\n" "$DEB_PATH" >&2
   exit 1
@@ -41,7 +47,7 @@ install -d "$OUT_DIR"
 mmdebstrap \
   --architectures="$ARCH" \
   --variant=minbase \
-  --include=systemd-sysv,ca-certificates,curl,nodejs,npm,sqlite3,tmux,nginx,restic,git,rsync,docker.io,docker-cli,docker-compose,libvirt-daemon-system,libvirt-clients,qemu-system-arm,qemu-utils,virtinst,gzip,unzip,libarchive-tools,unrar-free,mdadm,btrfs-progs,tesseract-ocr,poppler-utils,ffmpeg,imagemagick,smartmontools,samba,apache2,apache2-utils,vsftpd,libpam-pwdfile,nfs-kernel-server,minidlna \
+  --include=systemd-sysv,ca-certificates,curl,nodejs,npm,sqlite3,tmux,nginx,restic,git,rsync,docker.io,docker-cli,docker-compose,libvirt-daemon-system,libvirt-clients,qemu-system-arm,qemu-utils,virtinst,gzip,unzip,libarchive-tools,unrar-free,mdadm,btrfs-progs,tesseract-ocr,poppler-utils,ffmpeg,imagemagick,mpv,seatd,smartmontools,samba,apache2,apache2-utils,vsftpd,libpam-pwdfile,nfs-kernel-server,minidlna \
   "$SUITE" "$ROOTFS" "$MIRROR"
 
 case "$ARCH" in
@@ -67,7 +73,13 @@ ln -sfn "$node_dir/bin/npx" "$ROOTFS/usr/local/bin/npx"
 cp "$DEB_PATH" "$ROOTFS/tmp/sigmaos.deb"
 systemd-nspawn -D "$ROOTFS" /bin/sh -eu -c "apt-get update && apt-get install -y /tmp/sigmaos.deb && rm /tmp/sigmaos.deb"
 systemd-nspawn -D "$ROOTFS" /usr/lib/sigmaos/scripts/sigmaos-nginx.sh
-systemd-nspawn -D "$ROOTFS" systemctl enable nginx.service sigmaos-share-helper.service sigmaos-terminal-helper.service sigmaos-api.service sigmaos-worker@1.service sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer sigmaos-backup-daily.timer sigmaos-backup-weekly.timer sigmaos-health.timer
+if [ "$PLAYER_ENABLED" = "1" ]; then
+  systemd-nspawn -D "$ROOTFS" /bin/sh -eu -c \
+    'sed -i "/^\\[player\\]/,/^\\[/ s/^enabled = false$/enabled = true/" /etc/sigmaos/config.toml'
+  systemd-nspawn -D "$ROOTFS" systemctl enable nginx.service sigmaos-share-helper.service sigmaos-terminal-helper.service sigmaos-player-helper.service sigmaos-api.service sigmaos-worker@1.service sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer sigmaos-backup-daily.timer sigmaos-backup-weekly.timer sigmaos-health.timer
+else
+  systemd-nspawn -D "$ROOTFS" systemctl enable nginx.service sigmaos-share-helper.service sigmaos-terminal-helper.service sigmaos-api.service sigmaos-worker@1.service sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer sigmaos-backup-daily.timer sigmaos-backup-weekly.timer sigmaos-health.timer
+fi
 
 tar --numeric-owner -C "$ROOTFS" -cpf "$TARBALL" .
 printf "SigmaOS appliance rootfs written to %s\n" "$TARBALL"

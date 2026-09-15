@@ -3884,6 +3884,16 @@ function testConfig(dataDir: string): SigmaConfig {
       user: "test-user",
       helperSocketPath: "/tmp/terminal-helper.sock"
     },
+    player: {
+      enabled: false,
+      helperSocketPath: "/tmp/player-helper.sock",
+      videoOutput: "drm",
+      drmConnector: null,
+      audioOutput: "alsa",
+      audioDevice: null,
+      hwdec: "auto-safe",
+      user: "sigmaos"
+    },
     nasRoots: [{ id: "local", name: "Local", path: rootDir }]
   };
 }

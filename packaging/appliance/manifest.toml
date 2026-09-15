@@ -13,6 +13,7 @@ package = "sigmaos.deb"
 units = [
   "sigmaos-api.service",
   "sigmaos-terminal-helper.service",
+  "sigmaos-player-helper.service",
   "sigmaos-share-helper.service",
   "sigmaos-worker@1.service",
   "sigmaos-indexer.timer",
@@ -56,6 +57,10 @@ ocr_media_helpers = [
   "poppler-utils",
   "ffmpeg",
   "imagemagick"
+]
+media_playback = [
+  "mpv",
+  "seatd"
 ]
 nas_health = [
   "mdadm",

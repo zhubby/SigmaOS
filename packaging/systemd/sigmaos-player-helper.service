@@ -1,0 +1,29 @@
+[Unit]
+Description=SigmaOS local HDMI media player helper
+Documentation=file:///usr/share/doc/sigmaos/README.md
+After=local-fs.target systemd-tmpfiles-setup.service
+RequiresMountsFor=/srv/nas
+
+[Service]
+Type=simple
+User=sigmaos
+Group=sigmaos
+Environment=SIGMAOS_CONFIG=/etc/sigmaos/config.toml
+Environment=HOME=/var/lib/sigmaos
+WorkingDirectory=/var/lib/sigmaos
+ExecStart=/usr/local/bin/node /usr/lib/sigmaos/apps/player-helper/dist/index.js
+Restart=on-failure
+RestartSec=3
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/srv/nas
+ReadWritePaths=/run/sigmaos
+NoNewPrivileges=yes
+PrivateTmp=yes
+CapabilityBoundingSet=
+MemoryMax=512M
+CPUQuota=150%
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target

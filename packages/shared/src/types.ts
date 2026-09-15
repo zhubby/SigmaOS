@@ -300,6 +300,17 @@ export interface TerminalConfig {
   maxSessions?: number;
 }
 
+export interface PlayerConfig {
+  enabled: boolean;
+  helperSocketPath: string;
+  videoOutput: "drm";
+  drmConnector: string | null;
+  audioOutput: "alsa";
+  audioDevice: string | null;
+  hwdec: "auto-safe" | "auto" | "no";
+  user: string;
+}
+
 export interface ShareSettingsRecord extends ShareConfig {
   updatedAt: string;
 }
@@ -333,6 +344,7 @@ export interface SigmaConfig {
   vm?: VmConfig;
   shares: ShareConfig;
   terminal: TerminalConfig;
+  player: PlayerConfig;
   nasRoots: NasRootConfig[];
   backup?: BackupConfig;
   health?: {

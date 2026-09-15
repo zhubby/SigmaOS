@@ -5,6 +5,7 @@ import { loadConfig } from "@sigmaos/shared";
 import { loadBuildInfo } from "./lib/build-info.js";
 import { createSystemCommandRunner } from "./lib/system-management.js";
 import { createTerminalRuntime } from "./lib/terminal-broker.js";
+import { createPlayerRuntime } from "./lib/player.js";
 import { buildServer } from "./server.js";
 import { registerWebApp } from "./web-static.js";
 
@@ -20,7 +21,8 @@ const server = await buildServer({
   system: {
     commandRunner: createSystemCommandRunner(config.shares.helperSocketPath)
   },
-  terminal: createTerminalRuntime(config.terminal)
+  terminal: createTerminalRuntime(config.terminal),
+  player: createPlayerRuntime(config.player)
 });
 const webDist = resolveWebDist();
 const docsDist = resolveDocsDist();

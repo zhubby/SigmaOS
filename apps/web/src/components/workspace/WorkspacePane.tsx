@@ -15,6 +15,7 @@ import {
   GitBranch,
   HardDrive,
   MessageSquarePlus,
+  MonitorPlay,
   MonitorCog,
   Network,
   PanelRightClose,
@@ -29,7 +30,7 @@ import {
   Upload,
   type LucideIcon
 } from "lucide-react";
-import type { DockerOperation, FileEntry, FileListing, FileMeta, FileOperation, NasRoot, PendingApproval, TextPreview, VmOperation } from "../../api.js";
+import type { DockerOperation, FileEntry, FileListing, FileMeta, FileOperation, NasRoot, PendingApproval, PlayerCommand, PlayerStatus, TextPreview, VmOperation } from "../../api.js";
 import { describeFileVisual, isHiddenName } from "../../file-type-utils.js";
 import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
@@ -38,6 +39,7 @@ import { formatFileModifiedAt } from "../../lib/format.js";
 import { ActivityMenu } from "../activity/ActivityMenu.js";
 import { FileTypeIcon } from "../file/FileTypeIcon.js";
 import { PreviewContent, previewIcon } from "../preview/PreviewContent.js";
+import { PlayerControls } from "../preview/PlayerControls.js";
 import {
   collectUploadSourcesFromDataTransfer,
   collectUploadSourcesFromFileList,
@@ -248,6 +250,7 @@ export function WorkspacePane({
   textPreview,
   blobUrl,
   videoUrl,
+  playerStatus,
   previewFileSizeLimitBytes,
   previewCollapsed,
   searchQuery,
@@ -273,6 +276,9 @@ export function WorkspacePane({
   onOpenWorkspacePath,
   onInsertWorkspacePath,
   onOpenEditor,
+  onPlayToHdmi,
+  onPlayerCommand,
+  onRetryPlayer,
   onRequestCreateFolder,
   onRequestRename,
   onRequestTrash,
@@ -306,6 +312,7 @@ export function WorkspacePane({
   textPreview: TextPreview | null;
   blobUrl: string;
   videoUrl: string;
+  playerStatus: PlayerStatus | null;
   previewFileSizeLimitBytes: number;
   previewCollapsed: boolean;
   searchQuery: string;
@@ -331,6 +338,9 @@ export function WorkspacePane({
   onOpenWorkspacePath: (path: string) => void;
   onInsertWorkspacePath: (path: string) => void;
   onOpenEditor: (meta: FileMeta) => void;
+  onPlayToHdmi: () => void;
+  onPlayerCommand: (command: Exclude<PlayerCommand, { type: "play" }>) => void;
+  onRetryPlayer: () => void;
   onRequestCreateFolder: (folderName: string) => Promise<void>;
   onRequestRename: (entry: FileEntry, targetName: string) => Promise<void>;
   onRequestTrash: (entry: FileEntry) => Promise<void>;
@@ -1092,6 +1102,17 @@ export function WorkspacePane({
                               {t(`preview.kind.${previewMeta.previewKind}`)}
                             </span>
                           ) : null}
+                          {previewMeta?.previewKind === "video" ? (
+                            <button
+                              type="button"
+                              className="preview-tool-button"
+                              onClick={onPlayToHdmi}
+                              title={t("preview.hdmiPlayer.playToHdmi")}
+                              aria-label={t("preview.hdmiPlayer.playToHdmi")}
+                            >
+                              <MonitorPlay aria-hidden="true" size={14} />
+                            </button>
+                          ) : null}
                           {canEditPreview && previewMeta ? (
                             <button
                               type="button"
@@ -1140,6 +1161,9 @@ export function WorkspacePane({
                         locale={locale}
                         onOpenWorkspacePath={onOpenWorkspacePath}
                       />
+                      {playerStatus ? (
+                        <PlayerControls status={playerStatus} onCommand={onPlayerCommand} onRetry={onRetryPlayer} />
+                      ) : null}
                     </>
                   ) : null}
                 </section>

@@ -36,6 +36,9 @@ describe("native packaging artifacts", () => {
     await expect(readPackagingFile("systemd", "sigmaos-share-helper.service")).resolves.toContain(
       "After=network-online.target local-fs.target systemd-tmpfiles-setup.service"
     );
+    await expect(readPackagingFile("systemd", "sigmaos-player-helper.service")).resolves.toContain(
+      "ProtectSystem=strict"
+    );
 
     await expect(readPackagingFile("systemd", "sigmaos-maintenance.timer")).resolves.toContain(
       "OnCalendar=daily"
@@ -68,6 +71,7 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("usr/lib/sigmaos/apps/indexer/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/backup/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/scheduler/dist/");
+    expect(install).toContain("usr/lib/sigmaos/apps/player-helper/dist/");
     expect(install).toContain("node_modules/* usr/lib/sigmaos/node_modules/");
     expect(install).toContain("docs/dist/* usr/lib/sigmaos/docs/dist/");
     expect(install).toContain(".sigmaos/build-info.json usr/lib/sigmaos/");
@@ -81,6 +85,7 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("packaging/scripts/sigmaos-nginx.sh usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/scripts/sigmaos-configure-locale.sh usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/scripts/sigmaos-refresh-terminal.sh usr/lib/sigmaos/scripts/");
+    expect(install).toContain("packaging/scripts/sigmaos-refresh-player.sh usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/nginx/sigmaos.conf usr/share/sigmaos/nginx/");
     expect(install).toContain("etc/sigmaos/");
     expect(install).toContain("lib/systemd/system/");
@@ -88,6 +93,7 @@ describe("native packaging artifacts", () => {
     expect(tmpfiles).toContain("/run/sigmaos");
     expect(tmpfiles).toContain("/run/mdadm");
     expect(control).toContain("Depends: nodejs (>= 20), sqlite3, tmux, adduser");
+    expect(control).toContain("mpv");
     expect(control).toContain("Suggests:");
     expect(control).toContain("git");
     expect(control).toContain("ffmpeg");
@@ -123,6 +129,8 @@ describe("native packaging artifacts", () => {
     expect(manifest).toContain("git");
     expect(manifest).toContain("sigmaos-share-helper.service");
     expect(manifest).toContain("sigmaos-terminal-helper.service");
+    expect(manifest).toContain("sigmaos-player-helper.service");
+    expect(manifest).toContain("mpv");
     expect(manifest).toContain("samba");
     expect(buildImage).toMatch(/--include=.*(^|,)git(,|\\|\s)/s);
     expect(buildImage).toMatch(/--include=.*(^|,)samba(,|\\|\s)/s);

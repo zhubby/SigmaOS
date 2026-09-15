@@ -14,6 +14,7 @@ import {
   getDockerSettings,
   getFileBlobUrl,
   getFileVideoUrl,
+  getPlayerStatus,
   getFileMeta,
   getFiles,
   getOperations,
@@ -33,6 +34,7 @@ import {
   savePiToolPolicySettings,
   searchFiles,
   sendMessage,
+  sendPlayerCommand,
   updateSessionPath,
   uploadFile,
   type AgentEvent,
@@ -54,7 +56,9 @@ import {
   type SystemInfo,
   type StorageSummary,
   type TextPreview,
-  type TranscriptMessage
+  type TranscriptMessage,
+  type PlayerCommand,
+  type PlayerStatus
 } from "./api.js";
 import { ChatPane, composeAgentMessage } from "./components/chat/ChatPane.js";
 import { FileEditorModal } from "./components/editor/FileEditorModal.js";
@@ -117,6 +121,28 @@ import { readStoredStoragePoolId, writeStoredStoragePoolId } from "./lib/storage
 
 type MobileView = "chat" | "workspace";
 const MAX_UPLOAD_BATCHES = 8;
+const PLAYER_ERROR_CODES = new Set([
+  "PLAYER_DISABLED",
+  "HELPER_UNAVAILABLE",
+  "MPV_UNAVAILABLE",
+  "DRM_UNAVAILABLE",
+  "AUDIO_UNAVAILABLE",
+  "PERMISSION_DENIED",
+  "PLAYBACK_FAILED",
+  "PLAYER_BUSY",
+  "INVALID_COMMAND",
+  "INVALID_PATH",
+  "INTERNAL"
+]);
+
+function playerErrorCode(error: unknown): NonNullable<PlayerStatus["errorCode"]> {
+  const candidate = typeof error === "object" && error !== null && "code" in error
+    ? (error as { code?: unknown }).code
+    : null;
+  return typeof candidate === "string" && PLAYER_ERROR_CODES.has(candidate)
+    ? candidate as NonNullable<PlayerStatus["errorCode"]>
+    : "INTERNAL";
+}
 
 export function App() {
   const { t } = useTranslation();
@@ -143,6 +169,7 @@ export function App() {
   const [textPreview, setTextPreview] = useState<TextPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [playerStatus, setPlayerStatus] = useState<PlayerStatus | null>(null);
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [editorMeta, setEditorMeta] = useState<FileMeta | null>(null);
   const [message, setMessage] = useState("");
@@ -550,6 +577,38 @@ export function App() {
       active = false;
     };
   }, [previewFileSizeLimitBytes, selectedRootId, selectedStoragePoolId, selectedFilePath]);
+
+  useEffect(() => {
+    const playerAreaVisible = Boolean(
+      selectedFilePath &&
+        !previewCollapsed &&
+        (typeof window === "undefined" || window.innerWidth > 860 || mobileView === "workspace")
+    );
+    if (!playerAreaVisible) {
+      return;
+    }
+
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      try {
+        const nextStatus = await getPlayerStatus();
+        if (!active) return;
+        setPlayerStatus(nextStatus);
+        const activePlayback = nextStatus.state === "starting" || nextStatus.state === "playing" || nextStatus.state === "paused";
+        if (activePlayback) {
+          timer = setTimeout(poll, 1000);
+        }
+      } catch {
+        if (active) timer = setTimeout(poll, 5000);
+      }
+    };
+    void poll();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [mobileView, playerStatus?.state, previewCollapsed, selectedFilePath]);
 
   useEffect(() => {
     if (!resizing) {
@@ -1580,6 +1639,60 @@ export function App() {
     }
   }
 
+  async function playSelectedOnHdmi() {
+    if (!selectedRootId || !selectedStoragePoolId || !selectedFilePath || previewMeta?.previewKind !== "video") {
+      return;
+    }
+    try {
+      setPlayerStatus(
+        await sendPlayerCommand({
+          type: "play",
+          rootId: selectedRootId,
+          storagePoolId: selectedStoragePoolId,
+          path: selectedFilePath
+        })
+      );
+    } catch (nextError) {
+      reportPlayerError(nextError);
+    }
+  }
+
+  function issuePlayerCommand(command: Exclude<PlayerCommand, { type: "play" }>) {
+    void sendPlayerCommand(command)
+      .then(setPlayerStatus)
+      .catch((nextError: unknown) => reportPlayerError(nextError));
+  }
+
+  function retryHdmiPlay() {
+    void playSelectedOnHdmi();
+  }
+
+  function reportPlayerError(nextError: unknown) {
+    const message = toErrorMessage(nextError);
+    const errorCode = playerErrorCode(nextError);
+    setPlayerStatus((current) => ({
+      state: "error",
+      rootId: selectedRootId || current?.rootId || null,
+      storagePoolId: selectedStoragePoolId || current?.storagePoolId || null,
+      relativePath: selectedFilePath || current?.relativePath || null,
+      fileName: previewMeta?.name || current?.fileName || selectedFilePath?.split("/").pop() || null,
+      positionSeconds: current?.positionSeconds ?? 0,
+      durationSeconds: current?.durationSeconds ?? null,
+      volume: current?.volume ?? 100,
+      capabilities: current?.capabilities ?? {
+        mpvAvailable: false,
+        drmAvailable: false,
+        audioAvailable: false,
+        hardwareDecode: "unknown",
+        error: message
+      },
+      error: message,
+      errorCode,
+      updatedAt: new Date().toISOString()
+    }));
+    setError(message);
+  }
+
   function insertWorkspacePathInComposer(relativePath: string) {
     if (!selectedRoot) {
       return;
@@ -1829,6 +1942,7 @@ export function App() {
         textPreview={textPreview}
         blobUrl={blobUrl}
         videoUrl={videoUrl}
+        playerStatus={playerStatus}
         previewFileSizeLimitBytes={previewFileSizeLimitBytes}
         previewCollapsed={previewCollapsed}
         searchQuery={searchQuery}
@@ -1854,6 +1968,9 @@ export function App() {
         onOpenWorkspacePath={(path) => void openWorkspacePath(path)}
         onInsertWorkspacePath={(path) => insertWorkspacePathInComposer(path)}
         onOpenEditor={setEditorMeta}
+        onPlayToHdmi={() => void playSelectedOnHdmi()}
+        onPlayerCommand={issuePlayerCommand}
+        onRetryPlayer={retryHdmiPlay}
         onRequestCreateFolder={(folderName) => requestFolderCreate(folderName)}
         onRequestRename={(entry, targetName) => requestFileRename(entry, targetName)}
         onRequestTrash={(entry) => requestFileTrash(entry)}

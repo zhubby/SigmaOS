@@ -54,6 +54,60 @@ describe("loadConfig", () => {
       connectTimeoutMs: 10_000,
       maxSessions: 32
     });
+    expect(config.player).toEqual({
+      enabled: false,
+      helperSocketPath: "/run/sigmaos/player-helper.sock",
+      videoOutput: "drm",
+      drmConnector: null,
+      audioOutput: "alsa",
+      audioDevice: null,
+      hwdec: "auto-safe",
+      user: "sigmaos"
+    });
+  });
+
+  it("loads HDMI player settings from TOML and environment overrides", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-config-"));
+    const configPath = path.join(tempDir, "config.toml");
+    await writeFile(
+      configPath,
+      `
+        [player]
+        enabled = true
+        helper_socket_path = "/tmp/player.sock"
+        drm_connector = "HDMI-A-1"
+        audio_device = "alsa/plughw:1,0"
+        hwdec = "auto"
+        user = "operator"
+      `
+    );
+
+    expect(loadConfig({ SIGMAOS_CONFIG: configPath } as NodeJS.ProcessEnv, tempDir).player).toMatchObject({
+      enabled: true,
+      helperSocketPath: "/tmp/player.sock",
+      drmConnector: "HDMI-A-1",
+      audioDevice: "alsa/plughw:1,0",
+      hwdec: "auto",
+      user: "operator"
+    });
+    expect(loadConfig({
+      SIGMAOS_CONFIG: configPath,
+      SIGMAOS_PLAYER_ENABLED: "0",
+      SIGMAOS_PLAYER_HELPER_SOCKET_PATH: "/run/override-player.sock"
+    } as NodeJS.ProcessEnv, tempDir).player).toMatchObject({
+      enabled: false,
+      helperSocketPath: "/run/override-player.sock"
+    });
+  });
+
+  it("falls back from unsafe player identity and socket settings", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-config-player-"));
+    const configPath = path.join(tempDir, "config.toml");
+    await writeFile(configPath, `[player]\nuser = "root"\nhelper_socket_path = "relative.sock"\n`);
+    expect(loadConfig({ SIGMAOS_CONFIG: configPath } as NodeJS.ProcessEnv, tempDir).player).toMatchObject({
+      user: "sigmaos",
+      helperSocketPath: "/run/sigmaos/player-helper.sock"
+    });
   });
 
   it("loads Docker settings from TOML", async () => {
