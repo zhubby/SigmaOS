@@ -3,28 +3,89 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DockerSocketClient } from "./docker-client.js";
+import { DockerRequestError, DockerSocketClient } from "./docker-client.js";
 
 let tempDir: string;
 let socketPath: string;
 let server: http.Server;
+let daemonApiVersion: string;
+let daemonMinimumApiVersion: string;
+let pullResponse: "success" | "error";
+const receivedRequests: Array<{ method: string; url: string; body: unknown }> = [];
 
 beforeEach(async () => {
   tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-docker-client-"));
   socketPath = path.join(tempDir, "docker.sock");
-  server = http.createServer((request, response) => {
+  daemonApiVersion = "1.55";
+  daemonMinimumApiVersion = "1.24";
+  pullResponse = "success";
+  receivedRequests.length = 0;
+  server = http.createServer(async (request, response) => {
     const url = request.url ?? "";
     if (url === "/version") {
-      sendJson(response, { Version: "27.1.0", ApiVersion: "1.55", Os: "linux", Arch: "amd64" });
+      sendJson(response, {
+        Version: "27.1.0",
+        ApiVersion: daemonApiVersion,
+        MinAPIVersion: daemonMinimumApiVersion,
+        Os: "linux",
+        Arch: "amd64"
+      });
       return;
     }
-    if (url === "/v1.55/info") {
+    const negotiatedApiVersion = Number(daemonApiVersion.split(".")[1]) > 56 ? "1.56" : daemonApiVersion;
+    if (url === `/v${negotiatedApiVersion}/info`) {
       sendJson(response, {
         ServerVersion: "27.1.0",
         OperatingSystem: "Debian",
         Architecture: "x86_64",
         DockerRootDir: "/var/lib/docker"
       });
+      return;
+    }
+    if (url === "/v1.55/images/library%2Falpine%3Alatest/json") {
+      sendJson(response, { Id: "sha256:alpine" });
+      return;
+    }
+    if (url === "/v1.55/images/library%2Fmissing%3Alatest/json") {
+      sendJson(response, { message: "No such image" }, 404);
+      return;
+    }
+    if (url === "/v1.55/images/library%2Fbroken%3Alatest/json") {
+      sendJson(response, { message: "daemon unavailable" }, 503);
+      return;
+    }
+    if (url.startsWith("/v1.55/images/create?")) {
+      receivedRequests.push({ method: request.method ?? "", url, body: null });
+      response.setHeader("Content-Type", "application/json");
+      if (pullResponse === "error") {
+        response.write('{"status":"Pulling fs layer"}\n{"errorDetail":{"message":"registry denied"');
+        response.end('},"error":"registry denied"}\n');
+        return;
+      }
+      response.write('{"status":"Pulling fs layer"}\n{"status":"Download');
+      response.end(' complete"}\n');
+      return;
+    }
+    if (url.startsWith("/v1.55/containers/create?")) {
+      const body = await readJson(request);
+      receivedRequests.push({ method: request.method ?? "", url, body });
+      sendJson(response, { Id: "container-created", Warnings: ["host setting adjusted"] }, 201);
+      return;
+    }
+    if (url === "/v1.55/volumes/create") {
+      const body = await readJson(request);
+      receivedRequests.push({ method: request.method ?? "", url, body });
+      if ((body as { Name?: string }).Name === "conflict") {
+        sendJson(response, { message: "volume already exists" }, 409);
+        return;
+      }
+      sendJson(response, { Name: "archive", Labels: { role: "backup" } }, 201);
+      return;
+    }
+    if (url === "/v1.55/networks/create") {
+      const body = await readJson(request);
+      receivedRequests.push({ method: request.method ?? "", url, body });
+      sendJson(response, { Id: "network-created", Warning: "IPv6 is experimental" }, 201);
       return;
     }
     if (url === "/v1.55/containers/json?all=1") {
@@ -122,6 +183,7 @@ describe("DockerSocketClient", () => {
     await expect(client.getInfo()).resolves.toMatchObject({
       version: "27.1.0",
       apiVersion: "1.55",
+      negotiatedApiVersion: "1.55",
       operatingSystem: "Debian",
       dockerRootDir: "/var/lib/docker"
     });
@@ -164,9 +226,242 @@ describe("DockerSocketClient", () => {
       labels: { "app.role": "media" }
     });
   });
+
+  it("caps negotiated API versions and rejects daemons whose minimum is too new", async () => {
+    daemonApiVersion = "1.60";
+    daemonMinimumApiVersion = "1.40";
+    const client = new DockerSocketClient({ socketPath, timeoutMs: 1000 });
+
+    await expect(client.getInfo()).resolves.toMatchObject({
+      apiVersion: "1.60",
+      negotiatedApiVersion: "1.56"
+    });
+
+    daemonMinimumApiVersion = "1.57";
+    const incompatibleClient = new DockerSocketClient({ socketPath, timeoutMs: 1000 });
+    await expect(incompatibleClient.getInfo()).rejects.toThrow(
+      "Docker daemon requires API version 1.57, but SigmaOS supports up to 1.56"
+    );
+  });
+
+  it("maps complete normalized container input to the Engine create payload", async () => {
+    const client = new DockerSocketClient({ socketPath, timeoutMs: 1000 });
+
+    await expect(client.createContainer({
+      name: "media server",
+      image: "registry.local:5000/media/server:2.1",
+      platform: "linux/amd64",
+      hostname: "media",
+      user: "1000:1000",
+      workingDir: "/app",
+      entrypoint: ["/usr/bin/tini", "--"],
+      command: ["server", "--foreground"],
+      environment: { TZ: "UTC", TOKEN: "secret" },
+      labels: { role: "media" },
+      tty: true,
+      openStdin: true,
+      init: true,
+      stopSignal: "SIGTERM",
+      stopTimeout: 20,
+      nanoCpus: 2_000_000_000,
+      cpuShares: 512,
+      cpusetCpus: "0-1",
+      memory: 2_147_483_648,
+      memoryReservation: 1_073_741_824,
+      memorySwap: 3_221_225_472,
+      pidsLimit: 256,
+      shmSize: 67_108_864,
+      readOnlyRootfs: true,
+      privileged: false,
+      mounts: [
+        { type: "bind", source: "/srv/media", target: "/media", readOnly: true },
+        { type: "volume", source: "config", target: "/config", readOnly: false, noCopy: true },
+        { type: "tmpfs", target: "/tmp", readOnly: false, sizeBytes: 16_777_216, mode: 0o1777 }
+      ],
+      networkMode: "bridge",
+      networkName: "media-net",
+      networkAliases: ["server"],
+      ipv4Address: "172.20.0.10",
+      ipv6Address: "fd00::10",
+      macAddress: "02:42:ac:14:00:0a",
+      ports: [
+        { containerPort: 8096, protocol: "tcp", hostIp: "127.0.0.1", hostPort: 18096 },
+        { containerPort: 1900, protocol: "udp" }
+      ],
+      publishAllPorts: false,
+      dns: ["1.1.1.1"],
+      dnsSearch: ["lan"],
+      extraHosts: ["host.docker.internal:host-gateway"],
+      restartPolicy: "on-failure",
+      restartMaximumRetryCount: 5,
+      autoRemove: false
+    })).resolves.toEqual({ id: "container-created", warnings: ["host setting adjusted"] });
+
+    expect(receivedRequests).toEqual([{
+      method: "POST",
+      url: "/v1.55/containers/create?name=media+server&platform=linux%2Famd64",
+      body: {
+        Image: "registry.local:5000/media/server:2.1",
+        Hostname: "media",
+        User: "1000:1000",
+        WorkingDir: "/app",
+        Entrypoint: ["/usr/bin/tini", "--"],
+        Cmd: ["server", "--foreground"],
+        Env: ["TZ=UTC", "TOKEN=secret"],
+        Labels: { role: "media" },
+        Tty: true,
+        OpenStdin: true,
+        StopSignal: "SIGTERM",
+        StopTimeout: 20,
+        ExposedPorts: { "8096/tcp": {}, "1900/udp": {} },
+        HostConfig: {
+          Init: true,
+          NanoCpus: 2_000_000_000,
+          CpuShares: 512,
+          CpusetCpus: "0-1",
+          Memory: 2_147_483_648,
+          MemoryReservation: 1_073_741_824,
+          MemorySwap: 3_221_225_472,
+          PidsLimit: 256,
+          ShmSize: 67_108_864,
+          ReadonlyRootfs: true,
+          Privileged: false,
+          Mounts: [
+            { Type: "bind", Source: "/srv/media", Target: "/media", ReadOnly: true },
+            { Type: "volume", Source: "config", Target: "/config", ReadOnly: false, VolumeOptions: { NoCopy: true } },
+            { Type: "tmpfs", Target: "/tmp", ReadOnly: false, TmpfsOptions: { SizeBytes: 16_777_216, Mode: 0o1777 } }
+          ],
+          NetworkMode: "media-net",
+          PortBindings: {
+            "8096/tcp": [{ HostIp: "127.0.0.1", HostPort: "18096" }]
+          },
+          PublishAllPorts: false,
+          Dns: ["1.1.1.1"],
+          DnsSearch: ["lan"],
+          ExtraHosts: ["host.docker.internal:host-gateway"],
+          RestartPolicy: { Name: "on-failure", MaximumRetryCount: 5 },
+          AutoRemove: false
+        },
+        NetworkingConfig: {
+          EndpointsConfig: {
+            "media-net": {
+              Aliases: ["server"],
+              IPAMConfig: { IPv4Address: "172.20.0.10", IPv6Address: "fd00::10" },
+              MacAddress: "02:42:ac:14:00:0a"
+            }
+          }
+        }
+      }
+    }]);
+  });
+
+  it("omits empty port bindings from minimal container payloads", async () => {
+    const client = new DockerSocketClient({ socketPath, timeoutMs: 1000 });
+
+    await client.createContainer({ name: "minimal", image: "alpine:latest", ports: [] });
+
+    expect(receivedRequests[0]?.body).toEqual({ Image: "alpine:latest", HostConfig: {} });
+    expect(receivedRequests[0]?.body).not.toHaveProperty("HostConfig.PortBindings");
+  });
+
+  it("checks image existence while preserving non-404 errors", async () => {
+    const client = new DockerSocketClient({ socketPath, timeoutMs: 1000 });
+
+    await expect(client.imageExists("library/alpine:latest")).resolves.toBe(true);
+    await expect(client.imageExists("library/missing:latest")).resolves.toBe(false);
+    await expect(client.imageExists("library/broken:latest")).rejects.toMatchObject({
+      name: "DockerRequestError",
+      statusCode: 503,
+      message: "daemon unavailable"
+    });
+  });
+
+  it("splits pull tags correctly, omits tags for digests, and surfaces NDJSON errors", async () => {
+    const client = new DockerSocketClient({ socketPath, timeoutMs: 1000 });
+
+    await client.pullImage({ image: "registry.local:5000/media/server:2.1" });
+    await client.pullImage({ image: "registry.local:5000/media/server@sha256:abcdef" });
+    expect(receivedRequests.map((request) => request.url)).toEqual([
+      "/v1.55/images/create?fromImage=registry.local%3A5000%2Fmedia%2Fserver&tag=2.1",
+      "/v1.55/images/create?fromImage=registry.local%3A5000%2Fmedia%2Fserver%40sha256%3Aabcdef"
+    ]);
+
+    pullResponse = "error";
+    await expect(client.pullImage({ image: "library/private:latest" })).rejects.toThrow("registry denied");
+  });
+
+  it("creates local volumes and configured networks and preserves Engine errors", async () => {
+    const client = new DockerSocketClient({ socketPath, timeoutMs: 1000 });
+
+    await expect(client.createVolume({ name: "archive", labels: { role: "backup" } })).resolves.toEqual({
+      name: "archive",
+      labels: { role: "backup" }
+    });
+    await expect(client.createNetwork({
+      name: "storage-net",
+      driver: "macvlan",
+      options: { parent: "eth0", macvlan_mode: "bridge" },
+      internal: true,
+      enableIPv4: true,
+      enableIPv6: true,
+      ipam: {
+        driver: "default",
+        configs: [{
+          subnet: "192.168.20.0/24",
+          ipRange: "192.168.20.128/25",
+          gateway: "192.168.20.1",
+          auxiliaryAddresses: { router: "192.168.20.2" }
+        }]
+      },
+      labels: { zone: "storage" }
+    })).resolves.toEqual({ id: "network-created", warning: "IPv6 is experimental" });
+
+    expect(receivedRequests).toEqual([
+      {
+        method: "POST",
+        url: "/v1.55/volumes/create",
+        body: { Name: "archive", Driver: "local", Labels: { role: "backup" } }
+      },
+      {
+        method: "POST",
+        url: "/v1.55/networks/create",
+        body: {
+          Name: "storage-net",
+          Driver: "macvlan",
+          Options: { parent: "eth0", macvlan_mode: "bridge" },
+          Internal: true,
+          EnableIPv4: true,
+          EnableIPv6: true,
+          IPAM: {
+            Driver: "default",
+            Config: [{
+              Subnet: "192.168.20.0/24",
+              IPRange: "192.168.20.128/25",
+              Gateway: "192.168.20.1",
+            AuxAddress: { router: "192.168.20.2" }
+            }]
+          },
+          Labels: { zone: "storage" }
+        }
+      }
+    ]);
+
+    await expect(client.createVolume({ name: "conflict" })).rejects.toEqual(
+      expect.objectContaining<Partial<DockerRequestError>>({ statusCode: 409, message: "volume already exists" })
+    );
+  });
 });
 
-function sendJson(response: http.ServerResponse, body: unknown): void {
+function sendJson(response: http.ServerResponse, body: unknown, statusCode = 200): void {
+  response.statusCode = statusCode;
   response.setHeader("Content-Type", "application/json");
   response.end(JSON.stringify(body));
+}
+
+async function readJson(request: http.IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
 }

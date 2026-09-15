@@ -144,5 +144,39 @@ export const productionMigrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_storage_operations_created_at
         ON storage_operations(created_at);
     `
+  },
+  {
+    id: "012_docker_resource_create",
+    disableForeignKeys: true,
+    sql: `
+      PRAGMA legacy_alter_table = ON;
+
+      ALTER TABLE docker_operations RENAME TO docker_operations_old;
+
+      CREATE TABLE docker_operations (
+        id TEXT PRIMARY KEY,
+        approval_id TEXT REFERENCES pending_approvals(id) ON DELETE SET NULL,
+        action TEXT NOT NULL CHECK (action IN ('create', 'start', 'stop', 'restart', 'remove', 'compose_up', 'compose_down', 'compose_pull', 'compose_restart', 'console')),
+        target_type TEXT NOT NULL CHECK (target_type IN ('container', 'compose_project', 'console', 'volume', 'network')),
+        target_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('proposed', 'approved', 'applied', 'failed')),
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      INSERT INTO docker_operations (
+        id, approval_id, action, target_type, target_id, status, metadata_json, created_at, updated_at
+      )
+      SELECT id, approval_id, action, target_type, target_id, status, metadata_json, created_at, updated_at
+      FROM docker_operations_old;
+
+      DROP TABLE docker_operations_old;
+
+      PRAGMA legacy_alter_table = OFF;
+
+      CREATE INDEX IF NOT EXISTS idx_docker_operations_created_at
+        ON docker_operations(created_at);
+    `
   }
 ];

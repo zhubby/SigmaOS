@@ -122,6 +122,28 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .docker-create-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  }
+
+  .docker-create-port-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  }
+
+  .docker-create-row input:first-child,
+  .docker-create-row select:first-child {
+    grid-column: span 2;
+  }
+
+  .docker-create-ipam-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  }
+
+  .docker-create-ipam-row input:nth-child(3),
+  .docker-create-ipam-row input:nth-child(4) {
+    grid-column: span 2;
+  }
+
   .vm-create-stepper {
     gap: 3px;
   }

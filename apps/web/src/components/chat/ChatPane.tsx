@@ -902,6 +902,8 @@ function dockerActionLabel(
   t: Translate
 ): string {
   switch (action) {
+    case "create":
+      return t("workspace.management.docker.create.actions.create");
     case "start":
       return t("workspace.management.actions.start");
     case "stop":
@@ -934,6 +936,10 @@ function dockerTargetTypeLabel(
       return t("chat.approvalCards.composeTarget");
     case "console":
       return t("chat.approvalCards.consoleTarget");
+    case "volume":
+      return t("chat.approvalCards.volumeTarget");
+    case "network":
+      return t("chat.approvalCards.networkTarget");
     default:
       return targetType;
   }

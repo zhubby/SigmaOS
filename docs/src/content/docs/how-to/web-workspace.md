@@ -45,7 +45,7 @@ sidebar:
 
 ## 审批与可逆操作
 
-创建目录、移动、复制、重命名、trash、tag、Docker/VM/share/storage 操作以及危险 Pi tool call 会显示 approval 卡片。卡片至少包含操作类型、目标路径、风险和可逆性。
+创建目录、移动、复制、重命名、trash、tag、Docker 生命周期/Compose、VM/share/storage 操作以及危险 Pi tool call 会显示 approval 卡片。卡片至少包含操作类型、目标路径、风险和可逆性。Docker 面板中的容器、卷、网络创建在最终确认后直接执行，并写入 operation/job 历史；容器启动失败时会保留已创建容器并显示部分成功警告。
 
 - 点击 **Approve** 后 API 才会执行对应操作；
 - 点击 **Reject** 不改变文件系统；
@@ -57,7 +57,7 @@ sidebar:
 
 ## 终端与管理面板
 
-Workspace 的 Terminal 使用 terminal-helper 和 tmux 承载受限 PTY。切换面板、刷新页面或 API/helper 重启都会复用同一个 terminal session；点击重启按钮才会销毁旧 shell。断开期间的输出会短暂缓存在 API 中，超过缓冲上限会显示丢失提示；默认空闲 30 分钟后由 helper 回收 tmux session。连接失败时检查 `tmux`、`sigmaos-terminal-helper.service` 和终端用户 drop-in。Docker、VM、Shares、Storage 面板只在配置和宿主机能力可用时展示完整操作；管理类变更仍通过 approval。
+Workspace 的 Terminal 使用 terminal-helper 和 tmux 承载受限 PTY。切换面板、刷新页面或 API/helper 重启都会复用同一个 terminal session；点击重启按钮才会销毁旧 shell。断开期间的输出会短暂缓存在 API 中，超过缓冲上限会显示丢失提示；默认空闲 30 分钟后由 helper 回收 tmux session。连接失败时检查 `tmux`、`sigmaos-terminal-helper.service` 和终端用户 drop-in。Docker、VM、Shares、Storage 面板只在配置和宿主机能力可用时展示完整操作；Docker 资源创建是直接执行的管理流程，生命周期和 Compose 变更仍通过 approval。
 
 设置面板可以修改 model provider、Pi tool policy、Docker 配置、语言、主题、预览大小和编辑器字体。保存 provider secret 后 UI 只显示是否已配置，不会回显密钥。
 

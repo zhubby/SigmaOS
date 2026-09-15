@@ -140,6 +140,8 @@ export const en = {
       protocols: "Protocols",
       account: "Account",
       containerTarget: "Container",
+      volumeTarget: "Volume",
+      networkTarget: "Network",
       composeTarget: "Compose project",
       consoleTarget: "Console",
       composeFile: "Compose file",
@@ -455,7 +457,29 @@ export const en = {
         inventoryContainers: "Containers",
         inventoryUnavailable: "Inventory details are not available from this engine.",
         noNetworks: "No Docker networks were returned.",
-        noVolumes: "No Docker volumes were returned."
+        noVolumes: "No Docker volumes were returned.",
+        create: {
+          eyebrow: "Docker resources",
+          titles: { container: "Create container", volume: "Create volume", network: "Create network" },
+          descriptions: {
+            container: "Configure a container across six focused stages.",
+            volume: "Create a local named volume with audit labels.",
+            network: "Create a bridge, macvlan, or ipvlan network."
+          },
+          partialStartFailure: "Container created but did not start.",
+          stages: { aria: "Creation stages", basics: "Basics", process: "Process", resources: "Resources", storage: "Storage", network: "Network", review: "Review" },
+          actions: { openMenu: "Create Docker resource", create: "Create", close: "Close", cancel: "Cancel", back: "Back", next: "Next", creating: "Creating", createNow: "Create now", directCreate: "Direct create", unnamed: "Unnamed resource", addRow: "Add row", remove: "Remove" },
+          kinds: { container: "Container", volume: "Volume", network: "Network" },
+          basics: { detail: "Identity, image policy, and initial state.", name: "Name", image: "Image", imageHint: "Bare references use :latest.", platform: "Platform", pullPolicy: "Pull policy", onlyMissing: "Only if missing", alwaysPull: "Always pull", neverPull: "Never pull", start: "Start after create" },
+          process: { detail: "Runtime identity, arguments, environment, and labels.", hostname: "Hostname", user: "User", workingDir: "Working directory", stopSignal: "Stop signal", stopTimeout: "Stop timeout (seconds)", entrypoint: "Entrypoint", command: "Command", environment: "Environment", labels: "Labels", tty: "TTY", openStdin: "Keep stdin open", init: "Init process" },
+          resources: { detail: "CPU, memory, process, restart, and filesystem limits.", cpuLimit: "CPU limit", cpuShares: "CPU shares", cpuset: "CPU set", memoryLimit: "Memory limit (bytes)", memoryReservation: "Memory reservation (bytes)", memorySwap: "Memory swap (bytes)", pidsLimit: "PID limit", shmSize: "Shared memory (bytes)", restartPolicy: "Restart policy", restartRetries: "Restart retries", readOnlyRootfs: "Read-only root filesystem", autoRemove: "Auto-remove after exit", privileged: "Privileged mode", privilegedAck: "I understand the risk" },
+          storage: { detail: "Named volumes, NAS-safe binds, and tmpfs mounts.", volume: "Volume", bind: "NAS bind", tmpfs: "tmpfs", selectVolume: "Select volume", addMount: "Add mount", relativePath: "relative path", sizeBytes: "size bytes", tmpfsMode: "mode e.g. 1777", containerPath: "/container/path", noCopy: "No copy", readOnly: "RO" },
+          network: { detail: "One network endpoint, ports, DNS, and extra hosts.", mode: "Mode", existingNetwork: "Existing network", selectNetwork: "Select network", aliases: "Aliases", staticIpv4: "Static IPv4", staticIpv6: "Static IPv6", endpointMac: "Endpoint MAC", dns: "DNS", dnsSearch: "DNS search", addPort: "Add port", containerPort: "container", hostIp: "host IP (optional)", hostPort: "host port (optional)", extraHosts: "Extra hosts", publishAll: "Publish all exposed ports", hostname: "hostname", hostAddress: "IP or host-gateway" },
+          review: { detail: "Final checks and direct execution.", image: "Image", network: "Network", mountsPorts: "Mounts / ports", start: "Start", yes: "yes", no: "no", restart: "Restart", immediate: "Creation runs immediately", failureDetail: "Failures keep the form. If start fails after container creation, the container is kept and marked as partial success." },
+          volume: { detail: "Named local volumes stay managed by Docker." },
+          networkCreate: { detail: "Driver, address families, IPAM, and labels are validated before Docker is called.", name: "Name", driver: "Driver", parent: "Parent interface", selectInterface: "Select interface", mode: "Mode", internal: "Internal", enableIpv4: "Enable IPv4", enableIpv6: "Enable IPv6", ipam: "IPAM configuration", addSubnet: "Add subnet", subnet: "subnet CIDR", ipRange: "IP range CIDR", gateway: "gateway", auxAddresses: "name=address, ..." },
+          common: { key: "key", value: "value" }
+        }
       },
       shares: {
         eyebrow: "Sharing",
@@ -1592,6 +1616,8 @@ export const zhCN = {
       protocols: "协议",
       account: "账号",
       containerTarget: "容器",
+      volumeTarget: "卷",
+      networkTarget: "网络",
       composeTarget: "Compose 项目",
       consoleTarget: "控制台",
       composeFile: "Compose 文件",
@@ -1907,7 +1933,29 @@ export const zhCN = {
         inventoryContainers: "容器",
         inventoryUnavailable: "此 Engine 未返回可用的清单详情。",
         noNetworks: "Docker 未返回网络。",
-        noVolumes: "Docker 未返回存储卷。"
+        noVolumes: "Docker 未返回存储卷。",
+        create: {
+          eyebrow: "Docker 资源",
+          titles: { container: "创建容器", volume: "创建卷", network: "创建网络" },
+          descriptions: {
+            container: "通过六个清晰阶段配置容器。",
+            volume: "创建带审计标签的本地命名卷。",
+            network: "创建 bridge、macvlan 或 ipvlan 网络。"
+          },
+          partialStartFailure: "容器已创建，但未能启动。",
+          stages: { aria: "创建阶段", basics: "基础", process: "进程", resources: "资源", storage: "存储", network: "网络", review: "确认" },
+          actions: { openMenu: "创建 Docker 资源", create: "创建", close: "关闭", cancel: "取消", back: "返回", next: "下一步", creating: "创建中", createNow: "立即创建", directCreate: "直接创建", unnamed: "未命名资源", addRow: "添加行", remove: "移除" },
+          kinds: { container: "容器", volume: "卷", network: "网络" },
+          basics: { detail: "身份、镜像策略和初始状态。", name: "名称", image: "镜像", imageHint: "未指定标签的镜像会使用 :latest。", platform: "平台", pullPolicy: "拉取策略", onlyMissing: "仅在缺失时", alwaysPull: "始终拉取", neverPull: "从不拉取", start: "创建后启动" },
+          process: { detail: "运行时身份、参数、环境变量和标签。", hostname: "主机名", user: "用户", workingDir: "工作目录", stopSignal: "停止信号", stopTimeout: "停止超时（秒）", entrypoint: "入口点", command: "命令", environment: "环境变量", labels: "标签", tty: "TTY", openStdin: "保持 stdin 打开", init: "Init 进程" },
+          resources: { detail: "CPU、内存、进程、重启和文件系统限制。", cpuLimit: "CPU 限制", cpuShares: "CPU 权重", cpuset: "CPU 集", memoryLimit: "内存限制（字节）", memoryReservation: "内存预留（字节）", memorySwap: "内存交换（字节）", pidsLimit: "PID 限制", shmSize: "共享内存（字节）", restartPolicy: "重启策略", restartRetries: "重启次数", readOnlyRootfs: "只读根文件系统", autoRemove: "退出后自动移除", privileged: "特权模式", privilegedAck: "我了解此风险" },
+          storage: { detail: "命名卷、NAS 安全绑定和 tmpfs 挂载。", volume: "卷", bind: "NAS 绑定", tmpfs: "tmpfs", selectVolume: "选择卷", addMount: "添加挂载", relativePath: "相对路径", sizeBytes: "大小（字节）", tmpfsMode: "模式，例如 1777", containerPath: "/容器路径", noCopy: "不复制", readOnly: "只读" },
+          network: { detail: "网络端点、端口、DNS 和额外主机。", mode: "模式", existingNetwork: "现有网络", selectNetwork: "选择网络", aliases: "别名", staticIpv4: "静态 IPv4", staticIpv6: "静态 IPv6", endpointMac: "端点 MAC", dns: "DNS", dnsSearch: "DNS 搜索域", addPort: "添加端口", containerPort: "容器端口", hostIp: "宿主 IP（可选）", hostPort: "宿主端口（可选）", extraHosts: "额外主机", publishAll: "发布所有暴露端口", hostname: "主机名", hostAddress: "IP 或 host-gateway" },
+          review: { detail: "最后检查并直接执行。", image: "镜像", network: "网络", mountsPorts: "挂载 / 端口", start: "启动", yes: "是", no: "否", restart: "重启", immediate: "创建会立即执行", failureDetail: "失败时会保留表单。如果容器已创建但启动失败，容器会保留并标记为部分成功。" },
+          volume: { detail: "命名本地卷由 Docker 管理。" },
+          networkCreate: { detail: "调用 Docker 前会校验驱动、地址族、IPAM 和标签。", name: "名称", driver: "驱动", parent: "父接口", selectInterface: "选择接口", mode: "模式", internal: "内部网络", enableIpv4: "启用 IPv4", enableIpv6: "启用 IPv6", ipam: "IPAM 配置", addSubnet: "添加子网", subnet: "子网 CIDR", ipRange: "IP 范围 CIDR", gateway: "网关", auxAddresses: "名称=地址，..." },
+          common: { key: "键", value: "值" }
+        }
       },
       shares: {
         eyebrow: "共享",

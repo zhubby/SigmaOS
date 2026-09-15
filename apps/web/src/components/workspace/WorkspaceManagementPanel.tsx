@@ -21,6 +21,7 @@ import {
   Network,
   Pause,
   Play,
+  Plus,
   Power,
   RefreshCw,
   RotateCw,
@@ -56,6 +57,7 @@ import {
   type DockerContainerDetails,
   type DockerOperation,
   type DockerSummary,
+  type DockerLifecycleProposalInput,
   type NasRoot,
   type PendingApproval
   , type VmSummary
@@ -67,6 +69,7 @@ import { SystemNetworkManagementPanel, SystemStorageManagementPanel } from "./Sy
 import { ShareManagementPanel } from "./ShareManagementPanel.js";
 import { applyTerminalOptions, terminalOptions } from "../../lib/terminal-theme.js";
 import { initialVmCreateForm, validateVmCreateStep, type VmCreateForm } from "../../lib/vm-create-form.js";
+import { DockerCreateDialogs } from "./DockerCreateDialogs.js";
 import { ManagementSkeletonBody, SkeletonBlock } from "./ManagementSkeleton.js";
 import {
   StorageFilePickerDialog,
@@ -343,6 +346,7 @@ export function WorkspaceManagementPanel({
   if (panel === "docker") {
     return (
       <DockerManagementPanel
+        roots={roots}
         sessionId={sessionId}
         pendingApprovals={pendingApprovals}
         dockerOperations={dockerOperations}
@@ -350,6 +354,7 @@ export function WorkspaceManagementPanel({
         onWorkQueuesChanged={onWorkQueuesChanged}
         onNotifyError={onNotifyError}
         onNotifySuccess={onNotifySuccess}
+        onNotifyWarning={onNotifyWarning}
       />
     );
   }
@@ -929,6 +934,7 @@ function VmInstanceActions({
 }
 
 function DockerManagementPanel({
+  roots,
   sessionId,
   pendingApprovals,
   dockerOperations,
@@ -936,7 +942,9 @@ function DockerManagementPanel({
   onWorkQueuesChanged,
   onNotifyError,
   onNotifySuccess
+  , onNotifyWarning
 }: {
+  roots: NasRoot[];
   sessionId: string | null;
   pendingApprovals: PendingApproval[];
   dockerOperations: DockerOperation[];
@@ -944,6 +952,7 @@ function DockerManagementPanel({
   onWorkQueuesChanged: () => void | Promise<void>;
   onNotifyError: (message: string | null) => void;
   onNotifySuccess: (message: string | null) => void;
+  onNotifyWarning: (message: string | null) => void;
 }) {
   const { t } = useTranslation();
   const [summary, setSummary] = useState<DockerSummary | null>(null);
@@ -951,6 +960,9 @@ function DockerManagementPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [createKind, setCreateKind] = useState<"container" | "volume" | "network" | null>(null);
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
+  const createMenuRef = useRef<HTMLDivElement>(null);
   const [detailsState, setDetailsState] = useState<{
     container: DockerContainer;
     details: DockerContainerDetails | null;
@@ -969,6 +981,28 @@ function DockerManagementPanel({
   const composeProjects = summary?.composeProjects ?? [];
   const dockerEnabled = Boolean(summary?.enabled);
   const canUseDocker = dockerEnabled && summary?.engine.status === "ready" && !error;
+
+  useEffect(() => {
+    if (!createMenuOpen) {
+      return;
+    }
+    const closeOnPointerDown = (event: PointerEvent) => {
+      if (createMenuRef.current && !createMenuRef.current.contains(event.target as Node)) {
+        setCreateMenuOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setCreateMenuOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", closeOnPointerDown);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointerDown);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [createMenuOpen]);
 
   useEffect(() => {
     let active = true;
@@ -1137,7 +1171,7 @@ function DockerManagementPanel({
 
   async function requestDockerProposal(
     actionId: string,
-    input: Omit<Parameters<typeof proposeDockerOperation>[0], "sessionId">
+    input: Omit<DockerLifecycleProposalInput, "sessionId">
   ): Promise<Awaited<ReturnType<typeof proposeDockerOperation>> | null> {
     if (!sessionId) {
       const message = t("workspace.management.docker.errors.noSession");
@@ -1190,6 +1224,14 @@ function DockerManagementPanel({
             {loading ? <LoaderCircle aria-hidden="true" size={15} /> : <RefreshCw aria-hidden="true" size={15} />}
             <span>{t("common.actions.refresh")}</span>
           </button>
+          <div className={`docker-create-menu${createMenuOpen ? " is-open" : ""}`} ref={createMenuRef}>
+            <button type="button" aria-haspopup="menu" aria-expanded={createMenuOpen} aria-controls="docker-create-menu-items" onClick={() => setCreateMenuOpen((open) => !open)} disabled={!canUseDocker || Boolean(pendingAction) || !sessionId} title={t("workspace.management.docker.create.actions.openMenu")}><Plus size={15} /><span>{t("workspace.management.docker.create.actions.create")}</span></button>
+            <div className="docker-create-menu-items" id="docker-create-menu-items" role="menu">
+              <button type="button" role="menuitem" onClick={() => { setCreateMenuOpen(false); setCreateKind("container"); }} disabled={!canUseDocker || Boolean(pendingAction) || !sessionId}>{t("workspace.management.docker.create.kinds.container")}</button>
+              <button type="button" role="menuitem" onClick={() => { setCreateMenuOpen(false); setCreateKind("volume"); }} disabled={!canUseDocker || Boolean(pendingAction) || !sessionId}>{t("workspace.management.docker.create.kinds.volume")}</button>
+              <button type="button" role="menuitem" onClick={() => { setCreateMenuOpen(false); setCreateKind("network"); }} disabled={!canUseDocker || Boolean(pendingAction) || !sessionId}>{t("workspace.management.docker.create.kinds.network")}</button>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -1344,6 +1386,25 @@ function DockerManagementPanel({
           onConsole={() => void requestConsole(detailsState.container)}
         />
       ) : null}
+      {createKind && sessionId && summary ? <DockerCreateDialogs kind={createKind} sessionId={sessionId} summary={summary} roots={roots} onClose={() => setCreateKind(null)} onError={(message) => onNotifyError(message)} onComplete={async (result) => {
+        setCreateKind(null);
+        if (result.partialSuccess) {
+          onNotifyWarning(result.error ?? t("workspace.management.docker.create.partialStartFailure"));
+        } else {
+          onNotifySuccess(t("workspace.management.docker.actionCompleted"));
+        }
+        try {
+          await refreshSummary();
+        } catch (nextError) {
+          // Resource creation already completed; a failed refresh must not turn it into a false create error.
+          onNotifyError(errorMessage(nextError));
+        }
+        try {
+          await onWorkQueuesChanged();
+        } catch (nextError) {
+          onNotifyError(errorMessage(nextError));
+        }
+      }} /> : null}
     </section>
   );
 

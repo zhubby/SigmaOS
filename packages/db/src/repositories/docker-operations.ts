@@ -68,6 +68,44 @@ export function createDockerOperationApproval(
   return { approval, operation };
 }
 
+export function createDockerOperationRecord(
+  db: SigmaDatabase,
+  input: { jobId: string; proposal: DockerOperationProposal }
+): DockerOperationRecord {
+  const job = getJob(db, input.jobId);
+  if (!job) {
+    throw new Error("Job not found");
+  }
+
+  const now = new Date().toISOString();
+  const operation: DockerOperationRecord = {
+    id: randomUUID(),
+    approvalId: null,
+    action: input.proposal.action,
+    targetType: input.proposal.targetType,
+    targetId: dockerProposalTargetId(input.proposal),
+    status: "proposed",
+    metadata: {
+      proposal: input.proposal,
+      jobId: job.id
+    },
+    createdAt: now,
+    updatedAt: now
+  };
+
+  db.prepare(`
+    INSERT INTO docker_operations (
+      id, approval_id, action, target_type, target_id, status, metadata_json, created_at, updated_at
+    )
+    VALUES (@id, NULL, @action, @targetType, @targetId, @status, @metadataJson, @createdAt, @updatedAt)
+  `).run({
+    ...operation,
+    metadataJson: JSON.stringify(operation.metadata)
+  });
+
+  return operation;
+}
+
 export function getDockerOperation(db: SigmaDatabase, operationId: string): DockerOperationRecord | null {
   const row = db
     .prepare(`
@@ -104,7 +142,7 @@ export function listDockerOperations(
       SELECT o.id, o.approval_id, o.action, o.target_type, o.target_id, o.status, o.metadata_json, o.created_at, o.updated_at
       FROM docker_operations o
       LEFT JOIN pending_approvals a ON a.id = o.approval_id
-      LEFT JOIN jobs j ON j.id = a.job_id
+      LEFT JOIN jobs j ON j.id = COALESCE(a.job_id, json_extract(o.metadata_json, '$.jobId'))
       WHERE (? IS NULL OR j.session_id = ?)
       ORDER BY o.created_at DESC
       LIMIT ?

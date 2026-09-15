@@ -168,6 +168,9 @@ export function mapOperation(row: DbOperationRow): FileOperationRecord {
 export function dockerProposalTargetId(proposal: DockerOperationProposal): string {
   return (
     proposal.containerId ??
+    proposal.containerName ??
+    proposal.volumeName ??
+    proposal.networkName ??
     proposal.composeProjectId ??
     proposal.composeProjectName ??
     proposal.composeFilePath ??

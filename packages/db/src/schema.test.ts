@@ -4,10 +4,17 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  createDockerConsoleAuthorization,
   createDockerOperationApproval,
+  createSession,
+  createUserMessageAndJob,
+  ensureNasRoots,
   getApproval,
+  getDockerOperation,
   migrations,
-  openSigmaDb
+  openSigmaDb,
+  updateApprovalStatus,
+  updateDockerOperationStatus
 } from "./index.js";
 
 let tempDir: string;
@@ -35,8 +42,85 @@ describe("SQLite schema migrations", () => {
       "008_index_failure_root_guard",
       "009_p0_operations",
       "010_index_run_history_archive",
-      "011_storage_pool_delete"
+      "011_storage_pool_delete",
+      "012_docker_resource_create"
     ]);
+  });
+
+  it("preserves Docker operations and console foreign keys when adding resource creation", () => {
+    const databasePath = path.join(tempDir, "docker-resource-create.sqlite");
+    const current = openSigmaDb(databasePath);
+    ensureNasRoots(current, [{ id: "local", name: "Local", path: tempDir }]);
+    const session = createSession(current, { rootId: "local" });
+    const { job } = createUserMessageAndJob(current, {
+      sessionId: session.id,
+      content: "Open container console",
+      status: "waiting_approval"
+    });
+    const { approval, operation } = createDockerOperationApproval(current, {
+      jobId: job.id,
+      proposal: {
+        action: "console",
+        targetType: "console",
+        containerId: "container-1",
+        shell: "/bin/sh",
+        risk: "high",
+        summary: "Open Docker console"
+      }
+    });
+    updateApprovalStatus(current, approval.id, "approved");
+    updateDockerOperationStatus(current, operation.id, "approved");
+    const authorization = createDockerConsoleAuthorization(current, {
+      operationId: operation.id,
+      approvalId: approval.id,
+      containerId: "container-1",
+      shell: "/bin/sh"
+    });
+
+    current.pragma("foreign_keys = OFF");
+    current.exec(`
+      PRAGMA legacy_alter_table = ON;
+      ALTER TABLE docker_operations RENAME TO docker_operations_new;
+      CREATE TABLE docker_operations (
+        id TEXT PRIMARY KEY,
+        approval_id TEXT REFERENCES pending_approvals(id) ON DELETE SET NULL,
+        action TEXT NOT NULL CHECK (action IN ('start', 'stop', 'restart', 'remove', 'compose_up', 'compose_down', 'compose_pull', 'compose_restart', 'console')),
+        target_type TEXT NOT NULL CHECK (target_type IN ('container', 'compose_project', 'console')),
+        target_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('proposed', 'approved', 'applied', 'failed')),
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO docker_operations
+      SELECT * FROM docker_operations_new;
+      DROP TABLE docker_operations_new;
+      DELETE FROM schema_migrations WHERE id = '012_docker_resource_create';
+      PRAGMA legacy_alter_table = OFF;
+    `);
+    current.close();
+
+    const migrated = openSigmaDb(databasePath);
+    try {
+      expect(getDockerOperation(migrated, operation.id)).toMatchObject({
+        id: operation.id,
+        action: "console",
+        targetType: "console",
+        targetId: "container-1",
+        status: "approved"
+      });
+      expect(
+        migrated
+          .prepare("SELECT operation_id FROM docker_console_authorizations WHERE id = ?")
+          .get(authorization.id)
+      ).toEqual({ operation_id: operation.id });
+      expect(migrated.pragma("foreign_key_list('docker_console_authorizations')")).toEqual(
+        expect.arrayContaining([expect.objectContaining({ table: "docker_operations" })])
+      );
+      expect(migrated.pragma("foreign_key_check")).toEqual([]);
+    } finally {
+      migrated.close();
+    }
   });
 
   it("migrates legacy approvals through the Docker migration with valid foreign keys", () => {

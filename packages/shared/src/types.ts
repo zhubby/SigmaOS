@@ -873,9 +873,10 @@ export type DockerContainerState = "created" | "running" | "paused" | "restartin
 
 export type DockerEngineStatus = "disabled" | "ready" | "unavailable";
 
-export type DockerOperationTargetType = "container" | "compose_project" | "console";
+export type DockerOperationTargetType = "container" | "compose_project" | "console" | "volume" | "network";
 
 export type DockerOperationAction =
+  | "create"
   | "start"
   | "stop"
   | "restart"
@@ -892,6 +893,7 @@ export interface DockerEngineSummary {
   status: DockerEngineStatus;
   version: string | null;
   apiVersion: string | null;
+  negotiatedApiVersion: string | null;
   operatingSystem: string | null;
   architecture: string | null;
   dockerRootDir: string | null;
@@ -985,11 +987,156 @@ export interface DockerSummary {
   composeProjects: DockerComposeProjectSummary[];
 }
 
+export type DockerPullPolicy = "missing" | "always" | "never";
+export type DockerPortProtocol = "tcp" | "udp" | "sctp";
+export type DockerRestartPolicy = "no" | "always" | "unless-stopped" | "on-failure";
+
+export type DockerContainerMount =
+  | {
+      type: "bind";
+      rootId: string;
+      sourcePath: string;
+      target: string;
+      readOnly?: boolean;
+    }
+  | {
+      type: "volume";
+      source: string;
+      target: string;
+      readOnly?: boolean;
+      noCopy?: boolean;
+    }
+  | {
+      type: "tmpfs";
+      target: string;
+      readOnly?: boolean;
+      sizeBytes?: number;
+      mode?: number;
+    };
+
+export interface DockerContainerNetwork {
+  mode: "bridge" | "host" | "none" | "custom";
+  networkName?: string;
+  aliases?: string[];
+  ipv4Address?: string;
+  ipv6Address?: string;
+  macAddress?: string;
+}
+
+export interface DockerPortBinding {
+  containerPort: number;
+  protocol?: DockerPortProtocol;
+  hostIp?: string;
+  hostPort?: number;
+}
+
+export interface DockerExtraHost {
+  hostname: string;
+  address: string;
+}
+
+export interface DockerContainerCreateInput {
+  name: string;
+  image: string;
+  platform?: string;
+  pullPolicy?: DockerPullPolicy;
+  start?: boolean;
+  hostname?: string;
+  user?: string;
+  workingDir?: string;
+  entrypoint?: string[];
+  command?: string[];
+  environment?: Record<string, string>;
+  labels?: Record<string, string>;
+  tty?: boolean;
+  openStdin?: boolean;
+  init?: boolean;
+  stopSignal?: string;
+  stopTimeoutSeconds?: number;
+  cpuLimit?: number;
+  cpuShares?: number;
+  cpusetCpus?: string;
+  memoryLimitBytes?: number;
+  memoryReservationBytes?: number;
+  memorySwapBytes?: number;
+  pidsLimit?: number;
+  shmSizeBytes?: number;
+  readonlyRootfs?: boolean;
+  privileged?: boolean;
+  privilegedAcknowledged?: boolean;
+  mounts?: DockerContainerMount[];
+  network?: DockerContainerNetwork;
+  ports?: DockerPortBinding[];
+  publishAllPorts?: boolean;
+  dns?: string[];
+  dnsSearch?: string[];
+  extraHosts?: DockerExtraHost[];
+  restartPolicy?: DockerRestartPolicy;
+  restartMaxRetries?: number;
+  autoRemove?: boolean;
+}
+
+export interface DockerVolumeCreateInput {
+  name: string;
+  labels?: Record<string, string>;
+}
+
+export interface DockerNetworkIpamConfig {
+  subnet?: string;
+  ipRange?: string;
+  gateway?: string;
+  auxAddresses?: Record<string, string>;
+}
+
+interface DockerNetworkCreateBase {
+  name: string;
+  internal?: boolean;
+  enableIpv4?: boolean;
+  enableIpv6?: boolean;
+  ipam?: DockerNetworkIpamConfig[];
+  labels?: Record<string, string>;
+}
+
+export type DockerNetworkCreateInput =
+  | (DockerNetworkCreateBase & {
+      driver: "bridge";
+    })
+  | (DockerNetworkCreateBase & {
+      driver: "macvlan";
+      parent?: string;
+      mode?: "bridge" | "private" | "vepa" | "passthru";
+    })
+  | (DockerNetworkCreateBase & {
+      driver: "ipvlan";
+      parent?: string;
+      mode?: "l2" | "l3" | "l3s";
+    });
+
+export type DockerCreateInput =
+  | ({ targetType: "container" } & DockerContainerCreateInput)
+  | ({ targetType: "volume" } & DockerVolumeCreateInput)
+  | ({ targetType: "network" } & DockerNetworkCreateInput);
+
+export interface DockerCreateResult {
+  kind: "container" | "volume" | "network";
+  id: string;
+  name: string;
+  created: boolean;
+  pulled?: boolean;
+  started?: boolean;
+  warnings: string[];
+  partialSuccess: boolean;
+  phase?: "pull" | "create" | "start";
+  error?: string;
+}
+
 export interface DockerOperationProposal {
   action: DockerOperationAction;
   targetType: DockerOperationTargetType;
   containerId?: string;
   containerName?: string;
+  volumeName?: string;
+  networkName?: string;
   composeProjectId?: string;
   composeProjectName?: string;
   composeRootId?: string;

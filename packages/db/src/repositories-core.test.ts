@@ -6,6 +6,7 @@ import {
   appendEvent,
   claimNextJob,
   createDockerOperationApproval,
+  createDockerOperationRecord,
   createPiToolCallApproval,
   createSession,
   createUserMessageAndJob,
@@ -17,6 +18,7 @@ import {
   getModelProviderSettings,
   getPiToolPolicySettings,
   listEvents,
+  listDockerOperations,
   listNasRoots,
   openSigmaDb,
   saveAgentProviderSession,
@@ -260,5 +262,62 @@ describe("core repositories", () => {
       targetId: "container-1",
       status: "proposed"
     });
+  });
+
+  it("creates direct Docker resource operations and filters them by session", () => {
+    const session = createSession(db, { rootId: "local" });
+    const otherSession = createSession(db, { rootId: "local" });
+    const { job } = createUserMessageAndJob(db, {
+      sessionId: session.id,
+      content: "Create Docker resources",
+      status: "running"
+    });
+    const { job: otherJob } = createUserMessageAndJob(db, {
+      sessionId: otherSession.id,
+      content: "Create another Docker resource",
+      status: "running"
+    });
+
+    const container = createDockerOperationRecord(db, {
+      jobId: job.id,
+      proposal: {
+        action: "create",
+        targetType: "container",
+        containerName: "media",
+        risk: "medium",
+        summary: "Create Docker container media"
+      }
+    });
+    const volume = createDockerOperationRecord(db, {
+      jobId: job.id,
+      proposal: {
+        action: "create",
+        targetType: "volume",
+        volumeName: "media-data",
+        risk: "medium",
+        summary: "Create Docker volume media-data"
+      }
+    });
+    const network = createDockerOperationRecord(db, {
+      jobId: otherJob.id,
+      proposal: {
+        action: "create",
+        targetType: "network",
+        networkName: "backend",
+        risk: "medium",
+        summary: "Create Docker network backend"
+      }
+    });
+
+    expect(container).toMatchObject({
+      approvalId: null,
+      targetId: "media",
+      metadata: { jobId: job.id }
+    });
+    expect(volume).toMatchObject({ approvalId: null, targetId: "media-data" });
+    expect(network).toMatchObject({ approvalId: null, targetId: "backend" });
+    expect(listDockerOperations(db, { sessionId: session.id }).map((item) => item.id).sort()).toEqual(
+      [container.id, volume.id].sort()
+    );
   });
 });

@@ -31,6 +31,7 @@ import {
   listPendingApprovals,
   openSigmaDb,
   recordIndexFailure,
+  saveDockerSettings,
   startIndexRun,
   upsertIndexedFile,
   upsertHealthAlert,
@@ -1962,6 +1963,132 @@ describe("API server", () => {
     await server.close();
   });
 
+  it("creates Docker resources directly and redacts sensitive audit values", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const engine = new FakeDockerEngine();
+    const server = await buildServer({ config: dockerEnabledConfig(tempDir), db, docker: { engine, compose: new FakeDockerCompose() } });
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/docker/proposals",
+      payload: {
+        sessionId: session.id,
+        action: "create",
+        targetType: "container",
+        name: "new-container",
+        image: "nginx",
+        environment: { SECRET_TOKEN: "hidden" },
+        labels: { purpose: "test" },
+        start: false
+      }
+    });
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({ approval: null, result: { kind: "container", created: true, started: false } });
+    const operation = response.json().operation;
+    expect(JSON.stringify(operation.metadata)).not.toContain("hidden");
+    expect(engine.calls).toContain("create-container");
+    await server.close();
+  });
+
+  it("creates Docker volumes and networks directly with applied operation records", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const engine = new FakeDockerEngine();
+    const server = await buildServer({ config: dockerEnabledConfig(tempDir), db, docker: { engine, compose: new FakeDockerCompose() } });
+
+    const volume = await server.inject({ method: "POST", url: "/api/docker/proposals", payload: {
+      sessionId: session.id, action: "create", targetType: "volume", name: "archive", labels: { purpose: "backup" }
+    } });
+    const network = await server.inject({ method: "POST", url: "/api/docker/proposals", payload: {
+      sessionId: session.id,
+      action: "create",
+      targetType: "network",
+      name: "services",
+      driver: "bridge",
+      enableIpv4: true,
+      enableIpv6: false,
+      ipam: [{ subnet: "172.30.0.0/24", gateway: "172.30.0.1" }],
+      labels: { zone: "services" }
+    } });
+
+    expect(volume.statusCode).toBe(202);
+    expect(volume.json()).toMatchObject({ approval: null, operation: { status: "applied", targetType: "volume" }, result: { kind: "volume", name: "archive", created: true } });
+    expect(network.statusCode).toBe(202);
+    expect(network.json()).toMatchObject({ approval: null, operation: { status: "applied", targetType: "network" }, result: { kind: "network", name: "services", created: true } });
+    expect(engine.calls).toEqual(["create-volume:archive", "create-network"]);
+    await server.close();
+  });
+
+  it("always pulls images without requiring an image inspect first", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const engine = new FakeDockerEngine();
+    const server = await buildServer({ config: dockerEnabledConfig(tempDir), db, docker: { engine, compose: new FakeDockerCompose() } });
+    const response = await server.inject({ method: "POST", url: "/api/docker/proposals", payload: {
+      sessionId: session.id, action: "create", targetType: "container", name: "always-pull", image: "nginx", pullPolicy: "always", start: false
+    } });
+
+    expect(response.statusCode).toBe(202);
+    expect(engine.calls).toEqual(["pull", "create-container"]);
+    await server.close();
+  });
+
+  it("keeps a created container when automatic start fails", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const engine = new FakeDockerEngine();
+    engine.failStart = true;
+    const server = await buildServer({ config: dockerEnabledConfig(tempDir), db, docker: { engine, compose: new FakeDockerCompose() } });
+    const response = await server.inject({ method: "POST", url: "/api/docker/proposals", payload: {
+      sessionId: session.id, action: "create", targetType: "container", name: "partial-container", image: "nginx"
+    } });
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({ approval: null, result: { partialSuccess: true, started: false, id: "created-container" }, operation: { status: "failed" } });
+    await server.close();
+  });
+
+  it("rejects duplicate Docker resource names and unknown create fields", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const engine = new FakeDockerEngine();
+    const server = await buildServer({ config: dockerEnabledConfig(tempDir), db, docker: { engine, compose: new FakeDockerCompose() } });
+    const duplicate = await server.inject({ method: "POST", url: "/api/docker/proposals", payload: {
+      sessionId: session.id, action: "create", targetType: "container", name: "media", image: "nginx"
+    } });
+    expect(duplicate.statusCode).toBe(409);
+    const unknown = await server.inject({ method: "POST", url: "/api/docker/proposals", payload: {
+      sessionId: session.id, action: "create", targetType: "volume", name: "other", driverOpts: {}
+    } });
+    expect(unknown.statusCode).toBe(400);
+    const invalidRestart = await server.inject({ method: "POST", url: "/api/docker/proposals", payload: {
+      sessionId: session.id, action: "create", targetType: "container", name: "other", image: "nginx",
+      restartPolicy: "always", restartMaxRetries: 3
+    } });
+    expect(invalidRestart.statusCode).toBe(400);
+    await server.close();
+  });
+
+  it("rejects bind mounts that expose the configured Docker socket through a parent directory", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const engine = new FakeDockerEngine();
+    const config = dockerEnabledConfig(tempDir, { socketPath: path.join(rootDir, "docker.sock") });
+    saveDockerSettings(db, config.docker);
+    const server = await buildServer({
+      config,
+      db,
+      docker: { engine, compose: new FakeDockerCompose() }
+    });
+    const response = await server.inject({ method: "POST", url: "/api/docker/proposals", payload: {
+      sessionId: session.id,
+      action: "create",
+      targetType: "container",
+      name: "unsafe-bind",
+      image: "nginx",
+      start: false,
+      mounts: [{ type: "bind", rootId: "local", sourcePath: ".", target: "/host", readOnly: true }]
+    } });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: expect.stringContaining("Docker socket") });
+    expect(engine.calls).not.toContain("create-container");
+    await server.close();
+  });
+
   it("marks Docker approvals and jobs failed when execution fails", async () => {
     const session = createSession(db, { rootId: "local" });
     const engine = new FakeDockerEngine();
@@ -3837,6 +3964,7 @@ class FakeDockerEngine implements DockerEngineRuntime {
     return {
       version: "27.1.0",
       apiVersion: "1.55",
+      negotiatedApiVersion: "1.55",
       operatingSystem: "Test Linux",
       architecture: "amd64",
       dockerRootDir: "/var/lib/docker"
@@ -3870,6 +3998,30 @@ class FakeDockerEngine implements DockerEngineRuntime {
         createdAt: new Date(0).toISOString()
       }
     ];
+  }
+
+  async imageExists(): Promise<boolean> {
+    this.calls.push("image-exists");
+    return true;
+  }
+
+  async pullImage(): Promise<void> {
+    this.calls.push("pull");
+  }
+
+  async createContainer(): Promise<{ id: string; warnings: string[] }> {
+    this.calls.push("create-container");
+    return { id: "created-container", warnings: [] };
+  }
+
+  async createVolume(input: { name: string }): Promise<{ name: string; labels: Record<string, string> }> {
+    this.calls.push(`create-volume:${input.name}`);
+    return { name: input.name, labels: {} };
+  }
+
+  async createNetwork(): Promise<{ id: string; warning: string | null }> {
+    this.calls.push("create-network");
+    return { id: "created-network", warning: null };
   }
 
   async getContainerLogs(containerId: string): Promise<string> {

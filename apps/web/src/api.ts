@@ -1,7 +1,9 @@
 import type {
+  DockerCreateInput,
   DockerOperationAction,
   DockerOperationRecord,
   DockerOperationTargetType,
+  DockerCreateResult,
   DockerContainerDetails as SharedDockerContainerDetails,
   DockerSettingsRecord,
   GitDirectoryStatus,
@@ -155,6 +157,8 @@ export interface DockerOperationProposal {
   targetType: DockerOperationTargetType;
   containerId?: string;
   containerName?: string;
+  volumeName?: string;
+  networkName?: string;
   composeProjectId?: string;
   composeProjectName?: string;
   composeRootId?: string;
@@ -323,9 +327,22 @@ export interface ExtractFileResult {
 export interface DockerProposalResult {
   message: AgentMessage;
   job: Job;
-  approval: PendingApproval;
+  approval: PendingApproval | null;
   operation: DockerOperation;
+  result?: DockerCreateResult;
 }
+
+export type DockerCreateProposalInput = ({ sessionId: string; action: "create" } & DockerCreateInput);
+export type DockerLifecycleProposalInput = {
+  sessionId: string;
+  action: Exclude<DockerOperationAction, "create">;
+  targetType?: DockerOperationTargetType;
+  containerId?: string;
+  composeProjectId?: string;
+  service?: string;
+  shell?: string;
+};
+export type DockerProposalInput = DockerCreateProposalInput | DockerLifecycleProposalInput;
 
 export interface DockerConsoleSession {
   id: string;
@@ -512,15 +529,7 @@ export async function getDockerOperations(sessionId?: string | null): Promise<Do
   return body.operations;
 }
 
-export async function proposeDockerOperation(input: {
-  sessionId: string;
-  action: DockerOperationAction;
-  targetType?: DockerOperationTargetType;
-  containerId?: string;
-  composeProjectId?: string;
-  service?: string;
-  shell?: string;
-}): Promise<DockerProposalResult> {
+export async function proposeDockerOperation(input: DockerProposalInput): Promise<DockerProposalResult> {
   const response = await fetch("/api/docker/proposals", {
     method: "POST",
     headers: {

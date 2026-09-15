@@ -3,11 +3,13 @@ import {
   appendEvent,
   createDockerConsoleAuthorization,
   createDockerOperationApproval,
+  createDockerOperationRecord,
   createUserMessageAndJob,
   consumeDockerConsoleAuthorization,
   getDockerSettings,
   getApproval,
   getDockerOperation,
+  getJob,
   getSession,
   listDockerOperations,
   markDockerConsoleAuthorizationFailed,
@@ -18,23 +20,36 @@ import {
 import type {
   DockerConsoleAuthorizationRecord,
   DockerContainerSummary,
+  DockerCreateInput,
+  DockerCreateResult,
   DockerOperationAction,
   DockerOperationProposal,
   DockerOperationTargetType
 } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
 import { effectiveDockerConfig } from "../lib/settings.js";
+import {
+  DockerCreateExecutionError,
+  DockerCreateValidationError,
+  executeDockerCreate,
+  prepareDockerCreate
+} from "../lib/docker-create.js";
+import { DockerRequestError } from "../lib/docker-client.js";
 import { dockerCompose, dockerEngine, collectDockerSummary, safeDockerMessage } from "../lib/docker-service.js";
 
-type DockerProposalBody = {
+type DockerActionProposalBody = {
   sessionId?: string;
-  action?: DockerOperationAction;
+  action?: Exclude<DockerOperationAction, "create">;
   targetType?: DockerOperationTargetType;
   containerId?: string;
   composeProjectId?: string;
   service?: string;
   shell?: string;
 };
+
+type DockerProposalBody = DockerActionProposalBody | ({ sessionId?: string; action: "create" } & DockerCreateInput);
+
+const MAX_DOCKER_CREATE_BODY_BYTES = 256 * 1024;
 
 export function registerDockerRoutes(server: FastifyInstance, context: ApiRouteContext): void {
   const { config, db, docker } = context;
@@ -149,7 +164,7 @@ export function registerDockerRoutes(server: FastifyInstance, context: ApiRouteC
 
   server.post<{
     Body: DockerProposalBody;
-  }>("/api/docker/proposals", async (request, reply) => {
+  }>("/api/docker/proposals", { bodyLimit: MAX_DOCKER_CREATE_BODY_BYTES }, async (request, reply) => {
     const nextConfig = currentConfig();
     if (!nextConfig.docker.enabled) {
       reply.status(503).send({ error: "Docker management is disabled" });
@@ -163,6 +178,106 @@ export function registerDockerRoutes(server: FastifyInstance, context: ApiRouteC
     }
 
     try {
+      if (request.body?.action === "create") {
+        const summary = await collectDockerSummary(nextConfig, docker);
+        if (summary.engine.status !== "ready") {
+          throw new DockerCreateValidationError(summary.engine.error ?? "Docker engine is not ready", 503);
+        }
+        const prepared = await prepareDockerCreate(request.body, { ...context, config: nextConfig }, summary);
+        const { message, job } = createUserMessageAndJob(db, {
+          sessionId: session.id,
+          content: prepared.proposal.summary,
+          status: "running"
+        });
+        const operation = createDockerOperationRecord(db, { jobId: job.id, proposal: prepared.proposal });
+        const running = updateDockerOperationStatus(db, operation.id, "proposed", {
+          request: prepared.audit,
+          phase: "create",
+          startedAt: new Date().toISOString()
+        }) ?? operation;
+        appendEvent(db, {
+          sessionId: session.id,
+          jobId: job.id,
+          type: "job.running",
+          payload: { jobId: job.id, dockerOperation: running }
+        });
+
+        let result: DockerCreateResult;
+        try {
+          result = await executeDockerCreate(prepared, dockerEngine(nextConfig.docker, docker), operation.id);
+        } catch (error) {
+          const phase = error instanceof DockerCreateExecutionError ? error.phase : "pull";
+          const responseError = safeDockerMessage(error);
+          const auditError = phase === "pull" ? "Docker image preparation failed" : "Docker resource creation failed";
+          try {
+            const failed = updateDockerOperationStatus(db, operation.id, "failed", {
+              phase,
+              partialSuccess: false,
+              failedAt: new Date().toISOString()
+            });
+            updateJobStatus(db, job.id, "failed", auditError, ["running"]);
+            appendEvent(db, {
+              sessionId: session.id,
+              jobId: job.id,
+              type: "job.failed",
+              payload: { jobId: job.id, error: auditError, dockerOperation: failed }
+            });
+          } catch (persistenceError) {
+            request.log.error({ err: persistenceError, operationId: operation.id }, "Failed to persist Docker create failure");
+          }
+          reply.status(dockerCreateErrorStatus(error)).send({ error: responseError });
+          return;
+        }
+
+        const publicResult = { ...result, ...(result.error ? { error: safeDockerMessage(result.error) } : {}) };
+        const auditResult = dockerCreateAuditResult(result);
+        try {
+          if (result.partialSuccess) {
+            const failed = updateDockerOperationStatus(db, operation.id, "failed", {
+              result: auditResult,
+              phase: result.phase ?? "start",
+              partialSuccess: true,
+              failedAt: new Date().toISOString()
+            });
+            const auditError = "Docker container was created but could not be started";
+            updateJobStatus(db, job.id, "failed", auditError, ["running"]);
+            appendEvent(db, {
+              sessionId: session.id,
+              jobId: job.id,
+              type: "job.failed",
+              payload: { jobId: job.id, error: auditError, dockerOperation: failed }
+            });
+            reply.status(202).send({ message, job: getJob(db, job.id) ?? job, approval: null, operation: failed, result: publicResult });
+            return;
+          }
+
+          const applied = updateDockerOperationStatus(db, operation.id, "applied", {
+            result: auditResult,
+            phase: "create",
+            appliedAt: new Date().toISOString()
+          });
+          updateJobStatus(db, job.id, "completed", null, ["running"]);
+          appendEvent(db, {
+            sessionId: session.id,
+            jobId: job.id,
+            type: "job.completed",
+            payload: { jobId: job.id, dockerOperation: applied }
+          });
+          reply.status(202).send({ message, job: getJob(db, job.id) ?? job, approval: null, operation: applied, result: publicResult });
+        } catch (persistenceError) {
+          request.log.error({ err: persistenceError, operationId: operation.id }, "Docker resource created but operation history could not be finalized");
+          reply.status(202).send({
+            message,
+            job: getJob(db, job.id) ?? job,
+            approval: null,
+            operation: getDockerOperation(db, operation.id) ?? running,
+            result: publicResult,
+            warning: "Docker resource was created, but operation history could not be finalized"
+          });
+        }
+        return;
+      }
+
       const proposal = await buildDockerProposal(request.body ?? {}, { ...context, config: nextConfig });
       const { message, job } = createUserMessageAndJob(db, {
         sessionId: session.id,
@@ -191,7 +306,7 @@ export function registerDockerRoutes(server: FastifyInstance, context: ApiRouteC
         operation
       });
     } catch (error) {
-      reply.status(400).send({ error: safeDockerMessage(error) });
+      reply.status(dockerCreateErrorStatus(error)).send({ error: safeDockerMessage(error) });
     }
   });
 
@@ -305,7 +420,7 @@ export function registerDockerRoutes(server: FastifyInstance, context: ApiRouteC
 }
 
 async function buildDockerProposal(
-  body: DockerProposalBody,
+  body: DockerActionProposalBody,
   { config, docker }: ApiRouteContext
 ): Promise<DockerOperationProposal> {
   const action = body.action;
@@ -358,6 +473,25 @@ async function buildDockerProposal(
   }
 
   throw new Error("Unsupported Docker action");
+}
+
+function dockerCreateAuditResult(result: DockerCreateResult): Omit<DockerCreateResult, "error"> {
+  const { error: _error, ...audit } = result;
+  return audit;
+}
+
+function dockerCreateErrorStatus(error: unknown): number {
+  if (error instanceof DockerCreateValidationError) {
+    return error.statusCode;
+  }
+  const cause = error instanceof DockerCreateExecutionError ? error.cause : error;
+  if (cause instanceof DockerRequestError && cause.statusCode === 409) {
+    return 409;
+  }
+  if (error instanceof DockerCreateExecutionError) {
+    return 502;
+  }
+  return 400;
 }
 
 function dockerProposalFromOperation(operation: { metadata: Record<string, unknown> }): DockerOperationProposal | null {

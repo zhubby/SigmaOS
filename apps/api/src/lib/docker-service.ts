@@ -140,6 +140,7 @@ export function dockerUnavailableSummary(
       status,
       version: null,
       apiVersion: null,
+      negotiatedApiVersion: null,
       operatingSystem: null,
       architecture: null,
       dockerRootDir: null,

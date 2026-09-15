@@ -53,7 +53,7 @@ The following surfaces are intentionally limited today:
 
 - Read-only CPU, memory, process, runtime, storage, SMART, RAID, mount, and network reporting.
 - A local PTY terminal over WebSocket using a separately configured non-root host user (the API remains `sigmaos`).
-- Optional Docker Engine and Compose discovery, metrics, logs, lifecycle actions, and one-time approved console sessions.
+- Optional Docker Engine and Compose discovery, metrics, logs, lifecycle actions, direct container/volume/network creation, and one-time approved console sessions.
 - Approval-gated SMB, WebDAV, FTP, NFS, and DLNA share configuration through a separate privileged helper.
 - English and Simplified Chinese UI, light/dark themes, preview limits, and editor font settings.
 
@@ -124,7 +124,7 @@ The main runtime components are:
 5. A policy-gated tool call or proposed mutation creates a pending approval and pauses execution.
 6. The API applies or rejects the operation after the user acts, then records the outcome for audit and rollback.
 
-File operations proposed through the workspace or agent, Pi tool calls, Docker operations, and share-service changes use this approval path. Direct UI uploads, text saves, and archive extraction are applied immediately but are still path-checked and recorded in operation history.
+File operations proposed through the workspace or agent, Pi tool calls, Docker lifecycle/Compose operations, and share-service changes use this approval path. Docker resource creation from the management panel executes after final confirmation and is recorded in operation history; direct UI uploads, text saves, and archive extraction are also path-checked and recorded.
 
 ## Security model
 

@@ -1,5 +1,6 @@
 import http from "node:http";
 import net from "node:net";
+import { StringDecoder } from "node:string_decoder";
 import { URLSearchParams } from "node:url";
 import type {
   DockerContainerDetails,
@@ -12,6 +13,7 @@ import type {
 export interface DockerEngineInfo {
   version: string | null;
   apiVersion: string | null;
+  negotiatedApiVersion: string | null;
   operatingSystem: string | null;
   architecture: string | null;
   dockerRootDir: string | null;
@@ -36,10 +38,134 @@ export interface DockerExecStream {
   socket: net.Socket;
 }
 
+export type DockerPortProtocol = "tcp" | "udp" | "sctp";
+
+export type DockerContainerMount =
+  | {
+      type: "bind";
+      source: string;
+      target: string;
+      readOnly: boolean;
+    }
+  | {
+      type: "volume";
+      source: string;
+      target: string;
+      readOnly: boolean;
+      noCopy: boolean;
+    }
+  | {
+      type: "tmpfs";
+      target: string;
+      readOnly: boolean;
+      sizeBytes?: number;
+      mode?: number;
+    };
+
+export interface DockerContainerPort {
+  containerPort: number;
+  protocol: DockerPortProtocol;
+  hostIp?: string;
+  hostPort?: number;
+}
+
+export interface DockerCreateContainerInput {
+  name: string;
+  image: string;
+  platform?: string;
+  hostname?: string;
+  user?: string;
+  workingDir?: string;
+  entrypoint?: string[];
+  command?: string[];
+  environment?: Record<string, string>;
+  labels?: Record<string, string>;
+  tty?: boolean;
+  openStdin?: boolean;
+  init?: boolean;
+  stopSignal?: string;
+  stopTimeout?: number;
+  nanoCpus?: number;
+  cpuShares?: number;
+  cpusetCpus?: string;
+  memory?: number;
+  memoryReservation?: number;
+  memorySwap?: number;
+  pidsLimit?: number;
+  shmSize?: number;
+  readOnlyRootfs?: boolean;
+  privileged?: boolean;
+  mounts?: DockerContainerMount[];
+  networkMode?: string;
+  networkName?: string;
+  networkAliases?: string[];
+  ipv4Address?: string;
+  ipv6Address?: string;
+  macAddress?: string;
+  ports?: DockerContainerPort[];
+  publishAllPorts?: boolean;
+  dns?: string[];
+  dnsSearch?: string[];
+  extraHosts?: string[];
+  restartPolicy?: "no" | "always" | "unless-stopped" | "on-failure";
+  restartMaximumRetryCount?: number;
+  autoRemove?: boolean;
+}
+
+export interface DockerCreateContainerResult {
+  id: string;
+  warnings: string[];
+}
+
+export interface DockerPullImageInput {
+  image: string;
+}
+
+export interface DockerCreateVolumeInput {
+  name: string;
+  labels?: Record<string, string>;
+}
+
+export interface DockerCreateVolumeResult {
+  name: string;
+  labels: Record<string, string>;
+}
+
+export interface DockerNetworkIpamConfig {
+  subnet?: string;
+  ipRange?: string;
+  gateway?: string;
+  auxiliaryAddresses?: Record<string, string>;
+}
+
+export interface DockerCreateNetworkInput {
+  name: string;
+  driver: "bridge" | "macvlan" | "ipvlan";
+  options?: Record<string, string>;
+  internal?: boolean;
+  enableIPv4?: boolean;
+  enableIPv6?: boolean;
+  ipam?: {
+    driver: "default";
+    configs: DockerNetworkIpamConfig[];
+  };
+  labels?: Record<string, string>;
+}
+
+export interface DockerCreateNetworkResult {
+  id: string;
+  warning: string | null;
+}
+
 export interface DockerEngineRuntime {
   getInfo(): Promise<DockerEngineInfo>;
   getCounts(): Promise<DockerEngineCounts>;
   listContainers(): Promise<DockerContainerSummary[]>;
+  imageExists(image: string): Promise<boolean>;
+  pullImage(input: DockerPullImageInput): Promise<void>;
+  createContainer(input: DockerCreateContainerInput): Promise<DockerCreateContainerResult>;
+  createVolume(input: DockerCreateVolumeInput): Promise<DockerCreateVolumeResult>;
+  createNetwork(input: DockerCreateNetworkInput): Promise<DockerCreateNetworkResult>;
   getContainerDetails?(containerId: string, baseSummary?: DockerContainerSummary): Promise<DockerContainerDetails>;
   getContainerLogs(containerId: string, tail: number): Promise<string>;
   startContainer(containerId: string): Promise<void>;
@@ -59,6 +185,7 @@ interface DockerSocketClientOptions {
 type DockerVersionResponse = {
   Version?: string;
   ApiVersion?: string;
+  MinAPIVersion?: string;
   Os?: string;
   Arch?: string;
 };
@@ -160,6 +287,23 @@ type DockerStatsResponse = {
   };
 };
 
+type DockerContainerCreateResponse = {
+  Id?: string;
+  Warnings?: string[] | null;
+};
+
+type DockerVolumeCreateResponse = {
+  Name?: string;
+  Labels?: Record<string, string> | null;
+};
+
+type DockerNetworkCreateResponse = {
+  Id?: string;
+  Warning?: string;
+};
+
+const MAX_DOCKER_API_VERSION = "1.56";
+
 export class DockerRequestError extends Error {
   constructor(
     message: string,
@@ -171,18 +315,19 @@ export class DockerRequestError extends Error {
 }
 
 export class DockerSocketClient implements DockerEngineRuntime {
-  private apiVersion: string | null = null;
+  private versionResponse: Promise<DockerVersionResponse> | null = null;
+  private negotiatedApiVersion: string | null | undefined;
 
   constructor(private readonly options: DockerSocketClientOptions) {}
 
   async getInfo(): Promise<DockerEngineInfo> {
-    const [version, info] = await Promise.all([
-      this.requestJson<DockerVersionResponse>("GET", "/version", {}, undefined, false),
-      this.requestJson<DockerInfoResponse>("GET", "/info")
-    ]);
+    const version = await this.getVersionResponse();
+    const negotiatedApiVersion = await this.ensureApiVersion();
+    const info = await this.requestJson<DockerInfoResponse>("GET", "/info");
     return {
       version: info.ServerVersion ?? version.Version ?? null,
-      apiVersion: version.ApiVersion ?? this.apiVersion,
+      apiVersion: version.ApiVersion ?? null,
+      negotiatedApiVersion,
       operatingSystem: info.OperatingSystem ?? null,
       architecture: info.Architecture ?? version.Arch ?? null,
       dockerRootDir: info.DockerRootDir ?? null
@@ -222,6 +367,88 @@ export class DockerSocketClient implements DockerEngineRuntime {
       ...container,
       ...stats[index]
     }));
+  }
+
+  async imageExists(image: string): Promise<boolean> {
+    try {
+      await this.requestJson<unknown>("GET", `/images/${encodeURIComponent(image)}/json`);
+      return true;
+    } catch (error) {
+      if (error instanceof DockerRequestError && error.statusCode === 404) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  async pullImage(input: DockerPullImageInput): Promise<void> {
+    const reference = splitImageReference(input.image);
+    await this.requestNdjson("POST", "/images/create", {
+      fromImage: reference.fromImage,
+      ...(reference.tag ? { tag: reference.tag } : {})
+    });
+  }
+
+  async createContainer(input: DockerCreateContainerInput): Promise<DockerCreateContainerResult> {
+    const response = await this.requestJson<DockerContainerCreateResponse>(
+      "POST",
+      "/containers/create",
+      {
+        name: input.name,
+        ...(input.platform ? { platform: input.platform } : {})
+      },
+      containerCreatePayload(input)
+    );
+    if (!response.Id) {
+      throw new DockerRequestError("Docker did not return a container id");
+    }
+    return {
+      id: response.Id,
+      warnings: response.Warnings ?? []
+    };
+  }
+
+  async createVolume(input: DockerCreateVolumeInput): Promise<DockerCreateVolumeResult> {
+    const response = await this.requestJson<DockerVolumeCreateResponse>("POST", "/volumes/create", {}, {
+      Name: input.name,
+      Driver: "local",
+      Labels: input.labels ?? {}
+    });
+    if (!response.Name) {
+      throw new DockerRequestError("Docker did not return a volume name");
+    }
+    return {
+      name: response.Name,
+      labels: response.Labels ?? {}
+    };
+  }
+
+  async createNetwork(input: DockerCreateNetworkInput): Promise<DockerCreateNetworkResult> {
+    const response = await this.requestJson<DockerNetworkCreateResponse>("POST", "/networks/create", {}, {
+      Name: input.name,
+      Driver: input.driver,
+      Options: input.options ?? {},
+      Internal: input.internal ?? false,
+      EnableIPv4: input.enableIPv4 ?? true,
+      EnableIPv6: input.enableIPv6 ?? false,
+      IPAM: {
+        Driver: input.ipam?.driver ?? "default",
+        Config: (input.ipam?.configs ?? []).map((config) => ({
+          ...(config.subnet ? { Subnet: config.subnet } : {}),
+          ...(config.ipRange ? { IPRange: config.ipRange } : {}),
+          ...(config.gateway ? { Gateway: config.gateway } : {}),
+          ...(config.auxiliaryAddresses ? { AuxAddress: config.auxiliaryAddresses } : {})
+        }))
+      },
+      Labels: input.labels ?? {}
+    });
+    if (!response.Id) {
+      throw new DockerRequestError("Docker did not return a network id");
+    }
+    return {
+      id: response.Id,
+      warning: response.Warning ?? null
+    };
   }
 
   async getContainerLogs(containerId: string, tail: number): Promise<string> {
@@ -441,19 +668,291 @@ export class DockerSocketClient implements DockerEngineRuntime {
     });
   }
 
+  private async requestNdjson(
+    method: string,
+    requestPath: string,
+    query: Record<string, string> = {}
+  ): Promise<void> {
+    const fullPath = `${await this.pathFor(requestPath)}${queryString(query)}`;
+
+    return new Promise((resolve, reject) => {
+      const request = http.request(
+        {
+          socketPath: this.options.socketPath,
+          method,
+          path: fullPath,
+          timeout: this.options.timeoutMs
+        },
+        (response) => {
+          const statusCode = response.statusCode ?? 500;
+          if (statusCode < 200 || statusCode >= 300) {
+            const chunks: Buffer[] = [];
+            response.on("data", (chunk: Buffer) => chunks.push(chunk));
+            response.on("end", () => reject(new DockerRequestError(errorMessage(Buffer.concat(chunks), statusCode), statusCode)));
+            response.on("error", reject);
+            return;
+          }
+
+          const decoder = new StringDecoder("utf8");
+          let pending = "";
+          let settled = false;
+          const fail = (error: unknown) => {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            response.destroy();
+            reject(error);
+          };
+          const parseLine = (line: string) => {
+            if (!line.trim()) {
+              return;
+            }
+            const progress = JSON.parse(line) as { error?: string; errorDetail?: { message?: string } };
+            const message = progress.errorDetail?.message ?? progress.error;
+            if (message) {
+              throw new DockerRequestError(message);
+            }
+          };
+          const consume = (text: string, complete: boolean) => {
+            pending += text;
+            const lines = pending.split(/\r?\n/u);
+            pending = complete ? "" : (lines.pop() ?? "");
+            for (const line of lines) {
+              parseLine(line);
+            }
+            if (complete && pending.trim()) {
+              parseLine(pending);
+              pending = "";
+            }
+          };
+
+          response.on("data", (chunk: Buffer) => {
+            if (settled) {
+              return;
+            }
+            try {
+              consume(decoder.write(chunk), false);
+            } catch (error) {
+              fail(error);
+            }
+          });
+          response.on("end", () => {
+            if (settled) {
+              return;
+            }
+            try {
+              consume(decoder.end(), true);
+              settled = true;
+              resolve();
+            } catch (error) {
+              fail(error);
+            }
+          });
+          response.on("error", fail);
+        }
+      );
+
+      request.on("timeout", () => {
+        request.destroy(new DockerRequestError("Docker request timed out"));
+      });
+      request.on("error", reject);
+      request.end();
+    });
+  }
+
   private async pathFor(requestPath: string): Promise<string> {
     const version = await this.ensureApiVersion();
     return version ? `/v${version}${requestPath}` : requestPath;
   }
 
   private async ensureApiVersion(): Promise<string | null> {
-    if (this.apiVersion) {
-      return this.apiVersion;
+    if (this.negotiatedApiVersion !== undefined) {
+      return this.negotiatedApiVersion;
     }
-    const version = await this.requestJson<DockerVersionResponse>("GET", "/version", {}, undefined, false);
-    this.apiVersion = version.ApiVersion ?? null;
-    return this.apiVersion;
+    const version = await this.getVersionResponse();
+    this.negotiatedApiVersion = negotiateApiVersion(version);
+    return this.negotiatedApiVersion;
   }
+
+  private getVersionResponse(): Promise<DockerVersionResponse> {
+    this.versionResponse ??= this.requestJson<DockerVersionResponse>("GET", "/version", {}, undefined, false);
+    return this.versionResponse;
+  }
+}
+
+function containerCreatePayload(input: DockerCreateContainerInput): Record<string, unknown> {
+  const ports = input.ports ?? [];
+  const exposedPorts: Record<string, Record<string, never>> = {};
+  const portBindings: Record<string, Array<{ HostIp: string; HostPort: string }>> = {};
+  for (const port of ports) {
+    const key = `${port.containerPort}/${port.protocol}`;
+    exposedPorts[key] = {};
+    if (port.hostPort !== undefined) {
+      (portBindings[key] ??= []).push({
+        HostIp: port.hostIp ?? "",
+        HostPort: String(port.hostPort)
+      });
+    }
+  }
+
+  const networkMode = input.networkName ?? input.networkMode;
+  const endpointIpam = {
+    ...(input.ipv4Address ? { IPv4Address: input.ipv4Address } : {}),
+    ...(input.ipv6Address ? { IPv6Address: input.ipv6Address } : {})
+  };
+  const endpoint = {
+    ...(input.networkAliases?.length ? { Aliases: input.networkAliases } : {}),
+    ...(Object.keys(endpointIpam).length ? { IPAMConfig: endpointIpam } : {}),
+    ...(input.macAddress ? { MacAddress: input.macAddress } : {})
+  };
+
+  return {
+    Image: input.image,
+    ...(input.hostname !== undefined ? { Hostname: input.hostname } : {}),
+    ...(input.user !== undefined ? { User: input.user } : {}),
+    ...(input.workingDir !== undefined ? { WorkingDir: input.workingDir } : {}),
+    ...(input.entrypoint !== undefined ? { Entrypoint: input.entrypoint } : {}),
+    ...(input.command !== undefined ? { Cmd: input.command } : {}),
+    ...(input.environment !== undefined
+      ? { Env: Object.entries(input.environment).map(([name, value]) => `${name}=${value}`) }
+      : {}),
+    ...(input.labels !== undefined ? { Labels: input.labels } : {}),
+    ...(input.tty !== undefined ? { Tty: input.tty } : {}),
+    ...(input.openStdin !== undefined ? { OpenStdin: input.openStdin } : {}),
+    ...(input.stopSignal !== undefined ? { StopSignal: input.stopSignal } : {}),
+    ...(input.stopTimeout !== undefined ? { StopTimeout: input.stopTimeout } : {}),
+    ...(ports.length ? { ExposedPorts: exposedPorts } : {}),
+    HostConfig: {
+      ...(input.init !== undefined ? { Init: input.init } : {}),
+      ...(input.nanoCpus !== undefined ? { NanoCpus: input.nanoCpus } : {}),
+      ...(input.cpuShares !== undefined ? { CpuShares: input.cpuShares } : {}),
+      ...(input.cpusetCpus !== undefined ? { CpusetCpus: input.cpusetCpus } : {}),
+      ...(input.memory !== undefined ? { Memory: input.memory } : {}),
+      ...(input.memoryReservation !== undefined ? { MemoryReservation: input.memoryReservation } : {}),
+      ...(input.memorySwap !== undefined ? { MemorySwap: input.memorySwap } : {}),
+      ...(input.pidsLimit !== undefined ? { PidsLimit: input.pidsLimit } : {}),
+      ...(input.shmSize !== undefined ? { ShmSize: input.shmSize } : {}),
+      ...(input.readOnlyRootfs !== undefined ? { ReadonlyRootfs: input.readOnlyRootfs } : {}),
+      ...(input.privileged !== undefined ? { Privileged: input.privileged } : {}),
+      ...(input.mounts !== undefined ? { Mounts: input.mounts.map(mapContainerMount) } : {}),
+      ...(networkMode !== undefined ? { NetworkMode: networkMode } : {}),
+      ...(Object.keys(portBindings).length ? { PortBindings: portBindings } : {}),
+      ...(input.publishAllPorts !== undefined ? { PublishAllPorts: input.publishAllPorts } : {}),
+      ...(input.dns !== undefined ? { Dns: input.dns } : {}),
+      ...(input.dnsSearch !== undefined ? { DnsSearch: input.dnsSearch } : {}),
+      ...(input.extraHosts !== undefined ? { ExtraHosts: input.extraHosts } : {}),
+      ...(input.restartPolicy !== undefined
+        ? {
+            RestartPolicy: {
+              Name: input.restartPolicy,
+              MaximumRetryCount: input.restartMaximumRetryCount ?? 0
+            }
+          }
+        : {}),
+      ...(input.autoRemove !== undefined ? { AutoRemove: input.autoRemove } : {})
+    },
+    ...(input.networkName
+      ? {
+          NetworkingConfig: {
+            EndpointsConfig: {
+              [input.networkName]: endpoint
+            }
+          }
+        }
+      : {})
+  };
+}
+
+function mapContainerMount(mount: DockerContainerMount): Record<string, unknown> {
+  if (mount.type === "bind") {
+    return {
+      Type: "bind",
+      Source: mount.source,
+      Target: mount.target,
+      ReadOnly: mount.readOnly
+    };
+  }
+  if (mount.type === "volume") {
+    return {
+      Type: "volume",
+      Source: mount.source,
+      Target: mount.target,
+      ReadOnly: mount.readOnly,
+      VolumeOptions: { NoCopy: mount.noCopy }
+    };
+  }
+  return {
+    Type: "tmpfs",
+    Target: mount.target,
+    ReadOnly: mount.readOnly,
+    TmpfsOptions: {
+      ...(mount.sizeBytes !== undefined ? { SizeBytes: mount.sizeBytes } : {}),
+      ...(mount.mode !== undefined ? { Mode: mount.mode } : {})
+    }
+  };
+}
+
+function splitImageReference(image: string): { fromImage: string; tag?: string } {
+  if (image.includes("@")) {
+    return { fromImage: image };
+  }
+  const lastSlash = image.lastIndexOf("/");
+  const lastColon = image.lastIndexOf(":");
+  if (lastColon > lastSlash && lastColon < image.length - 1) {
+    return {
+      fromImage: image.slice(0, lastColon),
+      tag: image.slice(lastColon + 1)
+    };
+  }
+  return { fromImage: image };
+}
+
+function negotiateApiVersion(version: DockerVersionResponse): string | null {
+  const daemonVersion = version.ApiVersion?.trim();
+  if (!daemonVersion) {
+    const minimumVersion = version.MinAPIVersion?.trim();
+    if (minimumVersion) {
+      parseApiVersion(minimumVersion, "daemon minimum API version");
+      throw new DockerRequestError(
+        `Docker daemon requires API version ${minimumVersion}, but did not report a compatible API version`
+      );
+    }
+    return null;
+  }
+  parseApiVersion(daemonVersion, "daemon API version");
+  const negotiated = compareApiVersions(daemonVersion, MAX_DOCKER_API_VERSION) <= 0
+    ? daemonVersion
+    : MAX_DOCKER_API_VERSION;
+  const minimumVersion = version.MinAPIVersion?.trim();
+  if (minimumVersion) {
+    parseApiVersion(minimumVersion, "daemon minimum API version");
+    if (compareApiVersions(daemonVersion, minimumVersion) < 0) {
+      throw new DockerRequestError(
+        `Docker daemon reported API version ${daemonVersion}, below its minimum ${minimumVersion}`
+      );
+    }
+    if (compareApiVersions(negotiated, minimumVersion) < 0) {
+      throw new DockerRequestError(
+        `Docker daemon requires API version ${minimumVersion}, but SigmaOS supports up to ${MAX_DOCKER_API_VERSION}`
+      );
+    }
+  }
+  return negotiated;
+}
+
+function compareApiVersions(left: string, right: string): number {
+  const [leftMajor, leftMinor] = parseApiVersion(left, "API version");
+  const [rightMajor, rightMinor] = parseApiVersion(right, "API version");
+  return leftMajor - rightMajor || leftMinor - rightMinor;
+}
+
+function parseApiVersion(version: string, label: string): [number, number] {
+  const match = /^(\d+)\.(\d+)$/u.exec(version);
+  if (!match) {
+    throw new DockerRequestError(`Docker returned an invalid ${label}: ${version}`);
+  }
+  return [Number(match[1]), Number(match[2])];
 }
 
 function inspectSummary(inspected: DockerContainerInspect, containerId: string): DockerContainerSummary {
@@ -621,9 +1120,32 @@ function errorMessage(payload: Buffer, statusCode: number): string {
     return `Docker request failed with status ${statusCode}`;
   }
   try {
-    const parsed = JSON.parse(payload.toString("utf8")) as { message?: string };
-    return parsed.message ?? `Docker request failed with status ${statusCode}`;
+    const parsed = JSON.parse(payload.toString("utf8")) as {
+      message?: string;
+      error?: string;
+      errorDetail?: { message?: string };
+    };
+    return parsed.errorDetail?.message ?? parsed.message ?? parsed.error ?? `Docker request failed with status ${statusCode}`;
   } catch {
+    const lines = payload.toString("utf8").split(/\r?\n/u).reverse();
+    for (const line of lines) {
+      if (!line.trim()) {
+        continue;
+      }
+      try {
+        const parsed = JSON.parse(line) as {
+          message?: string;
+          error?: string;
+          errorDetail?: { message?: string };
+        };
+        const message = parsed.errorDetail?.message ?? parsed.message ?? parsed.error;
+        if (message) {
+          return message;
+        }
+      } catch {
+        // Continue looking for a structured error in later NDJSON lines.
+      }
+    }
     return payload.toString("utf8").trim() || `Docker request failed with status ${statusCode}`;
   }
 }
