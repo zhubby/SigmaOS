@@ -1,76 +1,248 @@
 # Agent Instructions
 
-These instructions apply to the whole repository.
+These instructions apply to the whole repository. `CLAUDE.md` contains the
+short Claude-specific handoff; this file is the project source of truth.
 
-## Project
+## Project And Runtime
 
-SigmaOS is a TypeScript monorepo for a personal Linux NAS appliance. It includes a React/Vite web UI, Fastify API, worker/indexer/scheduler apps, shared packages, and Debian/systemd packaging assets.
+SigmaOS is a TypeScript npm-workspaces monorepo for a single-user Linux NAS
+appliance. It is deployed as native Node.js processes and systemd units, not as
+a Docker container.
 
-## Repository Layout
+- `apps/web`: React/Vite web UI.
+- `apps/api`: Fastify API, WebSocket/SSE endpoints, and production static files.
+- `apps/worker`: agent job worker.
+- `apps/indexer`: SQLite/FTS NAS indexer.
+- `apps/scheduler`: scheduled maintenance, backup, and health jobs.
+- `apps/backup`, `apps/share-helper`, `apps/terminal-helper`: backup and host
+  integration processes.
+- `packages/db`, `packages/nas-tools`, `packages/agent`, `packages/shared`:
+  persistence, path-safe filesystem operations, agent routing, and shared
+  configuration/types.
+- `docs`: Astro/Starlight documentation site and Playwright smoke tests.
+- `scripts`: build metadata, version policy, and release preparation.
+- `packaging`: Debian rules, systemd units, Nginx config, host installer, and
+  appliance rootfs builder.
+- `.github/workflows/package-release.yml`: CI quality, package, browser smoke,
+  and tagged release workflow.
 
-- `apps/web`: React + Vite frontend.
-- `apps/api`: Fastify HTTP API.
-- `apps/worker`: agent worker process.
-- `apps/indexer`: filesystem indexer.
-- `apps/scheduler`: maintenance and scheduled jobs.
-- `packages/db`: SQLite schema and repositories.
-- `packages/nas-tools`: path-safe NAS read/write helpers.
-- `packages/agent`: agent routing and prompts.
-- `packages/shared`: shared config and types.
-- `packaging`: Debian, systemd, and appliance packaging.
+Node.js 22 (the documented minimum is 22.12+) and npm are required for local
+development and CI. Production packages support Debian-family `amd64` and
+`arm64`; native modules such as `better-sqlite3` and `node-pty` must be built on
+the target architecture.
 
-## Commands
+## Working Tree And Scope
 
-Use the root workspace commands unless a narrower workspace command is clearly enough.
+- Run `git status --short` before editing. Preserve existing user changes,
+  including changes in files that are not part of the request.
+- Keep edits scoped to the requested behavior and follow local patterns before
+  introducing abstractions or dependencies.
+- Do not rewrite history, reset files, or run destructive commands unless the
+  user explicitly asks.
+- Do not commit or push unless asked. Never add generated output such as
+  `node_modules`, `dist`, coverage, logs, `.sigmaos` build artifacts, or
+  `docs/.astro`/`docs/test-results`.
+- Keep TypeScript strict; do not weaken compiler settings or use `any` to hide
+  type errors.
+
+## Install And Development
+
+Install both workspace and documentation dependencies from the repository root:
 
 ```bash
-npm run typecheck
-npm run lint
-npm test
-npm run build
+npm ci
+npm --prefix docs ci
+# convenience target (root npm install + docs npm ci):
+make install
 ```
 
-Useful development commands:
+Use an isolated development data directory so local processes cannot read or
+mutate production NAS paths:
 
 ```bash
+mkdir -p .sigmaos/dev-data/nas
+SIGMAOS_ENVIRONMENT=development \
+SIGMAOS_DATA_DIR="$PWD/.sigmaos/dev-data" \
+SIGMAOS_NAS_ROOTS="dev:Development NAS:$PWD/.sigmaos/dev-data/nas" \
+SIGMAOS_ENABLE_LOCAL_AGENT_FALLBACK=1 \
 npm run dev
-npm run index
-npm run schedule
-npm run maintenance
 ```
 
-## Coding Standards
+`npm run dev` starts the API, worker, and web Vite server. The indexer and
+scheduler are intentionally separate processes:
 
-- Keep TypeScript strict and avoid weakening types.
-- Prefer existing local patterns over new abstractions.
-- Keep changes scoped to the requested behavior.
-- Do not commit generated output such as `node_modules`, `dist`, coverage, logs, or `.sigmaos`.
-- Keep user-facing UI copy short and operational.
-- Use existing dependencies before adding new ones.
+```bash
+npm run index                 # one index pass
+npm run schedule              # scheduler process
+npm run maintenance           # one maintenance pass
+npm run docs:dev              # documentation site on 127.0.0.1:4321
+```
 
-## Frontend
+The default development endpoints are Web `127.0.0.1:5173`, API
+`127.0.0.1:3010`, and docs `127.0.0.1:4321/docs/`.
 
-- Match the existing dark, dense, utility-focused UI.
-- Use `lucide-react` icons for controls and file/type indicators.
-- Keep layout stable across desktop and mobile; avoid text overlap.
-- For preview/file-browser work, verify with a browser when practical.
+## Verification And Tests
 
-## API, Filesystem, And Data Safety
+Run the narrowest useful check while iterating, then the full gate before
+handing off substantive changes:
 
-- All filesystem access must stay inside configured NAS roots.
-- Preserve traversal and unsafe symlink protections.
-- Mutating file operations must remain approval-gated.
-- Keep `/api/files/meta` and `/api/files/text` wire shapes stable unless an API change is explicitly requested.
-- For SQLite changes, update schema/repository tests and consider migration/backfill safety.
+```bash
+npm run typecheck             # tsc plus Astro docs check
+npm run lint                  # ESLint over the repository
+npm test                      # Vitest plus docs metadata/content tests
+npm run build                 # build metadata, all workspaces, and docs
 
-## Testing Expectations
+make check                    # typecheck + lint + test
+make ci                       # make check + build
+```
 
-- Add or update focused tests for behavior changes.
-- Run `npm run typecheck`, `npm run lint`, and `npm test` before handing off substantive code changes.
-- Run `npm run build` when frontend, packaging, or build configuration changes.
+The root Vitest config runs tests under `packages/**`, `apps/**`,
+`packaging/**`, and `scripts/**` in a Node environment with a threaded pool.
+The test suite includes API contracts, path/traversal safety, database/schema,
+worker/indexer/scheduler behavior, web components, packaging declarations, and
+build/version scripts. Add focused tests for behavior changes; preserve the
+wire shapes of `/api/files/meta` and `/api/files/text` with tests when touching
+file routes.
+
+Documentation browser smoke is a separate check and is not included in
+`npm test` or `make ci`:
+
+```bash
+npm run docs:build
+npm --prefix docs exec -- playwright install --with-deps chromium  # once per host/CI image
+npm run docs:browser
+```
+
+The smoke suite serves the built `docs/dist` and checks navigation/search,
+Mermaid rendering, and a 404 for unknown documentation routes. Frontend,
+packaging, or build-configuration changes require `npm run build`; UI changes
+should also receive a browser check when practical.
+
+Before a release or package build, run `npm run version:check`. The GitHub
+workflow runs on pull requests, pushes to `main`, and `v*` tags. Its quality
+job uses Node 22 and runs version check, typecheck, lint, test, and build. The
+package job then builds and validates one `.deb`, `.changes`, and `.buildinfo`
+artifact for each of `amd64` and `arm64`. The docs-browser job separately
+installs Chromium and runs the Playwright smoke suite. Tagged releases also
+require the tag to be reachable from `main` and to match the Debian changelog.
+
+## Deployment And Packaging
+
+### Debian package
+
+Build on the target architecture when possible. `build-deb.sh` copies the
+checkout to `.sigmaos/deb-build`, runs the Debian rules (fresh root/docs npm
+installs, full build, and `npm test`), and writes package artifacts under
+`.sigmaos/`:
+
+```bash
+SIGMAOS_NPM_REGISTRY=https://registry.npmmirror.com \
+  ./packaging/scripts/build-deb.sh
+# or: make deb
+```
+
+The package contains compiled app/docs assets, bundled workspace `node_modules`,
+build metadata, `/etc/sigmaos` defaults, and systemd units. It does not start
+services during `dpkg` installation; the host installer performs first boot
+and service activation.
+
+### Host installer
+
+`packaging/scripts/install.sh` is a host-mutating operation. It must run as
+root on Debian-family `amd64`/`arm64`, with an existing non-root terminal user:
+
+```bash
+sudo SIGMAOS_TERMINAL_USER=<user> \
+  SIGMAOS_NAS_ROOT_PATH=/srv/nas \
+  ./packaging/scripts/install.sh
+```
+
+The script can install/verify Node.js 22, configure and back up known APT
+sources under `/var/backups/sigmaos-apt`, build/install the current checkout,
+initialize `/etc/sigmaos/config.toml` and `/var/lib/sigmaos`, and configure
+Nginx. `SIGMAOS_ENABLE_NGINX` defaults to `1`; Docker and VM support default to
+`0` and can be enabled explicitly with `SIGMAOS_ENABLE_DOCKER=1` and
+`SIGMAOS_ENABLE_VM=1`. Review `SIGMAOS_APT_*`, `SIGMAOS_NODE_*`, and
+`SIGMAOS_NPM_REGISTRY` before using internal or domestic mirrors.
+
+After installation, core services are enabled and started; indexer,
+scheduler, maintenance, health, and backup timers are enabled but do not all
+run immediately. Nginx proxies the loopback API (`127.0.0.1:3010`) and serves
+the LAN entrypoint (default port 80).
+
+### Appliance rootfs
+
+`packaging/appliance/build-image.sh` creates a systemd rootfs tarball, not a
+flashable SD/eMMC image. It requires `node`, `mmdebstrap`, `systemd-nspawn`,
+`tar`, `curl`, and `sha256sum`, and consumes a previously built `.deb`:
+
+```bash
+SIGMAOS_DEB="$PWD/.sigmaos/sigmaos_<version>_arm64.deb" \
+SIGMAOS_IMAGE_OUT="$PWD/.sigmaos/appliance" \
+SIGMAOS_TARGET_ARCH=arm64 \
+  ./packaging/appliance/build-image.sh
+# or: make appliance (when the default .deb path is present)
+```
+
+Defaults are Debian bookworm, `arm64`, and `.sigmaos/appliance`. The output is
+`.sigmaos/appliance/sigmaos-rootfs-<arch>.tar`; board-specific boot, network,
+mount, and first-boot configuration remain outside this script. Docker, VM,
+and backup are disabled by the generated first-boot defaults and must be
+enabled/configured deliberately.
+
+### Post-deploy checks and operations
+
+Use service status and journald, not only a single liveness request:
+
+```bash
+sudo systemctl --failed
+sudo systemctl is-active sigmaos-api.service sigmaos-worker@1.service \
+  sigmaos-terminal-helper.service sigmaos-share-helper.service
+sudo systemctl list-timers 'sigmaos-*'
+sudo journalctl -u sigmaos-api.service -u sigmaos-worker@1.service -n 100 --no-pager
+curl -fsS http://127.0.0.1:3010/health
+curl -fsS http://127.0.0.1:3010/api/roots/readiness
+curl -fsS http://127.0.0.1:3010/api/system/health
+```
+
+`/health` is API liveness only; it does not prove NAS mounts, indexing, or
+backup readiness. Oneshot units normally return to `inactive (dead)` after
+success, so inspect their exit code and journal. Manually run a task with its
+service, for example `sudo systemctl start sigmaos-indexer.service`, rather
+than invoking a timer directly. After changing units or configuration, run
+`sudo systemctl daemon-reload` and restart affected resident services.
+
+For upgrades, stop all indexer/scheduler/maintenance/health/backup timers,
+save the current `.deb`, `/etc/sigmaos`, `/var/lib/sigmaos` and SQLite state,
+install the new package, and re-run the API, readiness, index, health, and
+backup acceptance checks before re-enabling timers. Database migrations have no
+general reverse migration; a downgrade may require restoring a matching state
+backup as well as the old package.
+
+## Safety Boundaries
+
+- Keep all NAS reads/writes inside configured NAS roots. Preserve traversal,
+  symlink, mount-readiness, and path normalization protections.
+- Mutating file operations and agent actions remain approval-gated. Do not add
+  a bypass or broaden the local fallback without explicit product direction.
+- Keep API response contracts stable unless an API change is explicitly
+  requested and tested.
+- SQLite is shared by API, worker, indexer, scheduler, and backup; avoid
+  concurrent ad-hoc writers and consider migration/backfill safety for schema
+  changes.
+- Production API binds to loopback. Use the packaged Nginx proxy for LAN access;
+  do not expose the unauthenticated local-only API directly to the internet.
+- Keep systemd hardening and service identities intact. `share-helper` is the
+  constrained root helper; other runtime services should remain non-root.
+
+## Frontend And UI
+
+Match the existing dark, dense, utility-focused UI. Reuse local components,
+CSS variables, and `lucide-react` icons. Keep layouts stable across desktop and
+mobile, avoid text overlap, keep user-facing copy short and operational, and
+verify preview/file-browser changes in a browser when practical.
 
 ## Git
 
-- Do not rewrite history or discard user changes unless explicitly asked.
-- Stage specific files rather than broad `git add .` when possible.
-- Commit and push only when the user asks.
+Stage only files relevant to the request. Do not commit generated output.
+Commit, tag, push, or create a release only when the user explicitly asks.
