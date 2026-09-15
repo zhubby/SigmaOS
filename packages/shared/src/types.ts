@@ -295,6 +295,9 @@ export interface ShareConfig {
 export interface TerminalConfig {
   user: string | null;
   helperSocketPath: string;
+  sessionIdleTimeoutMs?: number;
+  connectTimeoutMs?: number;
+  maxSessions?: number;
 }
 
 export interface ShareSettingsRecord extends ShareConfig {

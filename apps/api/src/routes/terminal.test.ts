@@ -51,7 +51,7 @@ describe("terminal WebSocket", () => {
     await socketEvent(socket, "close");
     expect(runtime.terminal.killed).toBe(false);
     await server.close();
-    expect(runtime.terminal.killed).toBe(true);
+    expect(runtime.terminal.disconnected).toBe(true);
   });
 
   it("reuses detached sessions and replays output after reconnecting", async () => {
@@ -75,6 +75,26 @@ describe("terminal WebSocket", () => {
     reconnect.send(JSON.stringify({ type: "close" }));
     await socketEvent(reconnect, "close");
     expect(runtime.terminal.killed).toBe(true);
+    await server.close();
+  });
+
+  it("resets the previous session when a new session id is requested", async () => {
+    const runtime = new FakeTerminalRuntime();
+    const server = await buildServer({ config: testConfig(), db, terminal: runtime });
+    const firstSocket = await connect(server);
+    const previousSessionId = String((await nextMessage(firstSocket)).sessionId);
+    const nextSessionId = "22222222-2222-4222-8222-222222222222";
+
+    const resetSocket = await connect(server, "local", nextSessionId, [
+      `sigmaos-reset.${previousSessionId}`,
+      `sigmaos-next.${nextSessionId}`
+    ]);
+    expect(await nextMessage(resetSocket)).toMatchObject({ type: "ready", sessionId: nextSessionId });
+    expect(runtime.spawnCount).toBe(2);
+    expect(runtime.terminals[0]!.killed).toBe(true);
+
+    resetSocket.close();
+    await socketEvent(resetSocket, "close");
     await server.close();
   });
 
@@ -105,6 +125,7 @@ describe("terminal WebSocket", () => {
 
 class FakeTerminalRuntime implements TerminalRuntime {
   terminal = new FakeTerminal();
+  terminals: FakeTerminal[] = [this.terminal];
   spawned = false;
   spawnCount = 0;
   shell = "";
@@ -115,6 +136,10 @@ class FakeTerminalRuntime implements TerminalRuntime {
     this.spawnCount += 1;
     this.shell = shell;
     this.options = options;
+    if (this.spawnCount > 1) {
+      this.terminal = new FakeTerminal();
+      this.terminals.push(this.terminal);
+    }
     return this.terminal;
   }
 }
@@ -125,6 +150,7 @@ class FakeTerminal implements TerminalPty {
   writes: string[] = [];
   resizes: Array<[number, number]> = [];
   killed = false;
+  disconnected = false;
   private readonly dataListeners = new Set<(data: string) => void>();
   private readonly exitListeners = new Set<(event: { exitCode: number; signal?: number }) => void>();
   private readonly pendingData: string[] = [];
@@ -152,6 +178,10 @@ class FakeTerminal implements TerminalPty {
 
   kill(): void {
     this.killed = true;
+  }
+
+  disconnect(): void {
+    this.disconnected = true;
   }
 
   emitData(data: string): void {
@@ -201,7 +231,8 @@ function testConfig(): SigmaConfig {
 async function connect(
   server: Awaited<ReturnType<typeof buildServer>>,
   rootId = "local",
-  sessionId?: string
+  sessionId?: string,
+  extraProtocols: string[] = []
 ): Promise<WebSocket> {
   if (!server.server.listening) {
     await server.listen({ host: "127.0.0.1", port: 0 });
@@ -211,7 +242,10 @@ async function connect(
     throw new Error("Test server did not expose a TCP address");
   }
   const query = new URLSearchParams({ rootId, ...(sessionId ? { sessionId } : {}) });
-  const socket = new WebSocket(`ws://127.0.0.1:${address.port}/api/terminal?${query.toString()}`);
+  const protocols = sessionId
+    ? ["sigmaos-terminal-v1", `sigmaos-session.${sessionId}`, ...extraProtocols]
+    : ["sigmaos-terminal-v1", ...extraProtocols];
+  const socket = new WebSocket(`ws://127.0.0.1:${address.port}/api/terminal?${query.toString()}`, protocols);
   messageQueues.set(socket, { queue: [], waiter: null });
   socket.addEventListener("message", (event) => {
     const state = messageQueues.get(socket);

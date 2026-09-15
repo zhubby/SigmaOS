@@ -13,6 +13,7 @@ export interface TerminalPty {
   write(data: string): void;
   resize(columns: number, rows: number): void;
   kill(signal?: string): void;
+  disconnect(): void;
 }
 
 export interface TerminalRuntime {
@@ -25,6 +26,7 @@ export interface TerminalRuntime {
       rows: number;
       cwd?: string;
       env: NodeJS.ProcessEnv;
+      sessionName?: string;
     }
   ): TerminalPty | Promise<TerminalPty>;
 }

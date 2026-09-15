@@ -49,7 +49,10 @@ describe("loadConfig", () => {
     });
     expect(config.terminal).toEqual({
       user: null,
-      helperSocketPath: "/run/sigmaos/terminal-helper.sock"
+      helperSocketPath: "/run/sigmaos/terminal-helper.sock",
+      sessionIdleTimeoutMs: 1_800_000,
+      connectTimeoutMs: 10_000,
+      maxSessions: 32
     });
   });
 
@@ -105,7 +108,10 @@ describe("loadConfig", () => {
 
     expect(loadConfig({ SIGMAOS_CONFIG: configPath } as NodeJS.ProcessEnv, tempDir).terminal).toEqual({
       user: "zhubby",
-      helperSocketPath: "/tmp/terminal.sock"
+      helperSocketPath: "/tmp/terminal.sock",
+      sessionIdleTimeoutMs: 1_800_000,
+      connectTimeoutMs: 10_000,
+      maxSessions: 32
     });
     expect(loadConfig({
       SIGMAOS_CONFIG: configPath,
@@ -113,7 +119,10 @@ describe("loadConfig", () => {
       SIGMAOS_TERMINAL_HELPER_SOCKET_PATH: "/run/operator-terminal.sock"
     } as NodeJS.ProcessEnv, tempDir).terminal).toEqual({
       user: "operator",
-      helperSocketPath: "/run/operator-terminal.sock"
+      helperSocketPath: "/run/operator-terminal.sock",
+      sessionIdleTimeoutMs: 1_800_000,
+      connectTimeoutMs: 10_000,
+      maxSessions: 32
     });
   });
 

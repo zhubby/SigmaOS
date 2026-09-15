@@ -23,6 +23,14 @@ describe("terminal broker protocol", () => {
       rows: 24
     });
     expect(parseTerminalBrokerMessage('{"type":"close"}')).toEqual({ type: "close" });
+    expect(parseTerminalBrokerMessage('{"type":"close","destroy":true}')).toEqual({ type: "close", destroy: true });
+    expect(parseTerminalBrokerMessage('{"type":"open","user":"zhubby","cols":120,"rows":32,"sessionName":"sigmaos-demo"}')).toEqual({
+      type: "open",
+      user: "zhubby",
+      cols: 120,
+      rows: 32,
+      sessionName: "sigmaos-demo"
+    });
   });
 
   it("rejects malformed and out-of-range requests", () => {
@@ -30,6 +38,12 @@ describe("terminal broker protocol", () => {
     expect(parseTerminalBrokerMessage('{"type":"open","user":"root","cols":1,"rows":32}')).toBeNull();
     expect(parseTerminalBrokerMessage('{"type":"input","data":null}')).toBeNull();
     expect(parseTerminalBrokerMessage('{"type":"resize","cols":120,"rows":201}')).toBeNull();
+    expect(parseTerminalBrokerMessage('{"type":"open","user":"zhubby","cols":120,"rows":32,"sessionName":"bad name"}')).toEqual({
+      type: "open",
+      user: "zhubby",
+      cols: 120,
+      rows: 32
+    });
   });
 
   it("parses broker events and encodes newline-delimited messages", () => {

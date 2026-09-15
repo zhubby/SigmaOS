@@ -3,6 +3,7 @@ import { access, mkdir, rm, stat } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import net from "node:net";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import * as nodePty from "node-pty";
 import {
@@ -11,12 +12,15 @@ import {
   TERMINAL_BROKER_MAX_FRAME_BYTES,
   TERMINAL_BROKER_MAX_OUTPUT_BYTES,
   TERMINAL_BROKER_MAX_SESSIONS,
+  TERMINAL_SESSION_DEFAULT_IDLE_TIMEOUT_MS,
   type TerminalBrokerRequest
 } from "@sigmaos/shared";
 
 const execFileAsync = promisify(execFile);
 const socketPath = process.env.SIGMAOS_TERMINAL_HELPER_SOCKET_PATH ?? "/run/sigmaos/terminal-helper.sock";
 const configuredUser = process.env.SIGMAOS_TERMINAL_USER?.trim();
+const sessionIdleTimeoutMs = positiveEnv("SIGMAOS_TERMINAL_SESSION_IDLE_TIMEOUT_MS", TERMINAL_SESSION_DEFAULT_IDLE_TIMEOUT_MS);
+const maxSessions = positiveEnv("SIGMAOS_TERMINAL_MAX_SESSIONS", TERMINAL_BROKER_MAX_SESSIONS);
 const activeSessions = new Set<BrokerConnection>();
 
 if (!configuredUser) {
@@ -25,11 +29,14 @@ if (!configuredUser) {
 
 const account = await resolveAccount(configuredUser);
 await verifyRuntimeIdentity(account);
+await ensureTmuxAvailable();
+const tmuxSocketPath = process.env.SIGMAOS_TERMINAL_TMUX_SOCKET_PATH?.trim() || path.join(account.home, ".sigmaos", "tmux.sock");
+await mkdir(path.dirname(tmuxSocketPath), { recursive: true, mode: 0o700 });
 await mkdir(path.dirname(socketPath), { recursive: true });
 await rm(socketPath, { force: true });
 
 const server = net.createServer((socket) => {
-  if (activeSessions.size >= TERMINAL_BROKER_MAX_SESSIONS) {
+  if (activeSessions.size >= maxSessions) {
     writeError(socket, "Terminal session limit reached");
     socket.end();
     return;
@@ -52,12 +59,18 @@ await new Promise<void>((resolve, reject) => {
   });
 });
 
+const reaper = setInterval(() => {
+  void reapDetachedTmuxSessions();
+}, 60_000);
+reaper.unref();
+
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 
 async function shutdown(): Promise<void> {
+  clearInterval(reaper);
   for (const session of activeSessions) {
-    session.close();
+    session.close(false);
   }
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await rm(socketPath, { force: true });
@@ -76,6 +89,7 @@ class BrokerConnection {
   private frameBuffer = "";
   private frameChain = Promise.resolve();
   private pty: nodePty.IPty | null = null;
+  private tmuxSessionName: string | null = null;
   private readySent = false;
   private pendingOutput: string[] = [];
   private closed = false;
@@ -92,17 +106,29 @@ class BrokerConnection {
     socket.on("error", () => this.close());
   }
 
-  close(): void {
+  close(destroyTmuxSession = false): void {
     if (this.closed) {
       return;
     }
     this.closed = true;
+    const sessionName = this.tmuxSessionName;
+    this.tmuxSessionName = null;
+    if (sessionName) {
+      if (destroyTmuxSession) {
+        void destroyTmuxSessionByName(sessionName);
+      } else {
+        void markTmuxSessionDetached(sessionName);
+      }
+    }
     try {
       this.pty?.kill();
     } catch {
       // The PTY may already have exited.
     }
     this.pty = null;
+    if (!this.socket.destroyed) {
+      this.socket.end();
+    }
     this.onClosed();
   }
 
@@ -160,7 +186,7 @@ class BrokerConnection {
         this.pty.resize(request.cols, request.rows);
         break;
       case "close":
-        this.close();
+        this.close(request.destroy === true);
         this.socket.end();
         break;
       case "open":
@@ -175,7 +201,10 @@ class BrokerConnection {
       return;
     }
     try {
-      this.pty = nodePty.spawn(this.account.shell, ["-il"], {
+      const sessionName = request.sessionName ?? `sigmaos-${randomUUID().replaceAll("-", "")}`;
+      await ensureTmuxSession(sessionName);
+      this.tmuxSessionName = sessionName;
+      this.pty = nodePty.spawn("tmux", ["-S", tmuxSocketPath, "attach-session", "-t", sessionName], {
         name: "xterm-256color",
         cols: request.cols,
         rows: request.rows,
@@ -190,11 +219,12 @@ class BrokerConnection {
           TERM: "xterm-256color"
         }
       });
+      await markTmuxSessionAttached(sessionName);
       this.pty.onData((data) => this.writeOutput(data));
       this.pty.onExit(({ exitCode, signal }) => {
         if (!this.closed) {
           this.send({ type: "exit", exitCode, ...(signal ? { signal } : {}) });
-          this.close();
+          this.close(true);
           this.socket.end();
         }
       });
@@ -240,9 +270,123 @@ class BrokerConnection {
       return;
     }
     this.send({ type: "error", error: message });
-    this.close();
+    this.close(Boolean(this.tmuxSessionName));
     this.socket.end();
   }
+}
+
+async function ensureTmuxAvailable(): Promise<void> {
+  try {
+    await execFileAsync("tmux", ["-V"], { timeout: 5_000 });
+  } catch {
+    throw new Error("tmux is required for persistent terminal sessions");
+  }
+}
+
+async function ensureTmuxSession(sessionName: string): Promise<void> {
+  if (await hasTmuxSession(sessionName)) {
+    await markTmuxSessionAttached(sessionName);
+    return;
+  }
+  const sessions = await listManagedTmuxSessions();
+  if (sessions.length >= maxSessions) {
+    const oldestDetached = sessions
+      .filter((session) => session.attached === 0 && session.detachedAt > 0)
+      .sort((left, right) => left.detachedAt - right.detachedAt)[0];
+    if (!oldestDetached) {
+      throw new Error("Terminal session limit reached");
+    }
+    await destroyTmuxSessionByName(oldestDetached.name);
+  }
+  try {
+    await tmux(["new-session", "-d", "-s", sessionName, "-c", account.home]);
+  } catch (error) {
+    // Another broker connection may have created the deterministic session first.
+    if (await hasTmuxSession(sessionName)) {
+      await markTmuxSessionAttached(sessionName);
+      return;
+    }
+    throw error;
+  }
+  await tmux(["set-option", "-t", sessionName, "@sigmaos_managed", "1"]);
+  await tmux(["set-option", "-t", sessionName, "@sigmaos_detached_at", "0"]);
+}
+
+async function markTmuxSessionAttached(sessionName: string): Promise<void> {
+  await tmux(["set-option", "-t", sessionName, "@sigmaos_detached_at", "0"]);
+}
+
+async function markTmuxSessionDetached(sessionName: string): Promise<void> {
+  try {
+    await tmux(["set-option", "-t", sessionName, "@sigmaos_detached_at", String(Date.now())]);
+  } catch {
+    // The tmux session may have exited at the same time as the broker client.
+  }
+}
+
+async function destroyTmuxSessionByName(sessionName: string): Promise<void> {
+  try {
+    await tmux(["kill-session", "-t", sessionName]);
+  } catch {
+    // The tmux session may already have exited.
+  }
+}
+
+async function hasTmuxSession(sessionName: string): Promise<boolean> {
+  try {
+    await tmux(["has-session", "-t", sessionName]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+interface ManagedTmuxSession {
+  name: string;
+  attached: number;
+  detachedAt: number;
+}
+
+async function listManagedTmuxSessions(): Promise<ManagedTmuxSession[]> {
+  try {
+    const { stdout } = await tmux(["list-sessions", "-F", "#{session_name}\t#{session_attached}\t#{@sigmaos_managed}\t#{@sigmaos_detached_at}"]);
+    return stdout
+      .trim()
+      .split("\n")
+      .map((line) => {
+        const [name, attached, managed, detachedAt] = line.split("\t");
+        return {
+          name: name ?? "",
+          attached: Number(attached),
+          detachedAt: Number(detachedAt),
+          managed: managed === "1"
+        };
+      })
+      .filter((session): session is ManagedTmuxSession & { managed: true } =>
+        session.managed && /^sigmaos-[a-z0-9_-]+$/u.test(session.name)
+      );
+  } catch {
+    return [];
+  }
+}
+
+async function reapDetachedTmuxSessions(): Promise<void> {
+  const now = Date.now();
+  const sessions = await listManagedTmuxSessions();
+  for (const session of sessions) {
+    if (session.attached === 0 && session.detachedAt > 0 && now - session.detachedAt >= sessionIdleTimeoutMs) {
+      await destroyTmuxSessionByName(session.name);
+    }
+  }
+}
+
+function tmux(args: string[]): Promise<{ stdout: string; stderr: string }> {
+  return execFileAsync("tmux", ["-S", tmuxSocketPath, ...args], { timeout: 5_000 });
+}
+
+function positiveEnv(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
 function writeError(socket: net.Socket, message: string): void {

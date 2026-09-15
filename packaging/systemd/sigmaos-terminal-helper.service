@@ -10,8 +10,11 @@ Type=simple
 User=sigmaos
 Group=sigmaos
 Environment=SIGMAOS_TERMINAL_HELPER_SOCKET_PATH=/run/sigmaos/terminal-helper.sock
+Environment=SIGMAOS_TERMINAL_SESSION_IDLE_TIMEOUT_MS=1800000
+Environment=SIGMAOS_TERMINAL_MAX_SESSIONS=32
 Environment=HOME=/var/lib/sigmaos
 WorkingDirectory=/var/lib/sigmaos
+KillMode=process
 ExecStart=/usr/local/bin/node /usr/lib/sigmaos/apps/terminal-helper/dist/index.js
 Restart=on-failure
 RestartSec=3

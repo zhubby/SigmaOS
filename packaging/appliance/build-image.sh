@@ -41,7 +41,7 @@ install -d "$OUT_DIR"
 mmdebstrap \
   --architectures="$ARCH" \
   --variant=minbase \
-  --include=systemd-sysv,ca-certificates,curl,nodejs,npm,sqlite3,nginx,restic,git,rsync,docker.io,docker-cli,docker-compose,libvirt-daemon-system,libvirt-clients,qemu-system-arm,qemu-utils,virtinst,gzip,unzip,libarchive-tools,unrar-free,mdadm,btrfs-progs,tesseract-ocr,poppler-utils,ffmpeg,imagemagick,smartmontools,samba,apache2,apache2-utils,vsftpd,libpam-pwdfile,nfs-kernel-server,minidlna \
+  --include=systemd-sysv,ca-certificates,curl,nodejs,npm,sqlite3,tmux,nginx,restic,git,rsync,docker.io,docker-cli,docker-compose,libvirt-daemon-system,libvirt-clients,qemu-system-arm,qemu-utils,virtinst,gzip,unzip,libarchive-tools,unrar-free,mdadm,btrfs-progs,tesseract-ocr,poppler-utils,ffmpeg,imagemagick,smartmontools,samba,apache2,apache2-utils,vsftpd,libpam-pwdfile,nfs-kernel-server,minidlna \
   "$SUITE" "$ROOTFS" "$MIRROR"
 
 case "$ARCH" in

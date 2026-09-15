@@ -87,7 +87,7 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("tmpfiles.d/sigmaos.conf");
     expect(tmpfiles).toContain("/run/sigmaos");
     expect(tmpfiles).toContain("/run/mdadm");
-    expect(control).toContain("Depends: nodejs (>= 20), sqlite3, adduser");
+    expect(control).toContain("Depends: nodejs (>= 20), sqlite3, tmux, adduser");
     expect(control).toContain("Suggests:");
     expect(control).toContain("git");
     expect(control).toContain("ffmpeg");
@@ -116,6 +116,7 @@ describe("native packaging artifacts", () => {
     expect(firstBoot).toContain("[shares]");
     expect(manifest).toContain("nodejs");
     expect(manifest).toContain("sqlite3");
+    expect(manifest).toContain("tmux");
     expect(manifest).toContain("nginx");
     expect(manifest).toContain("docker-cli");
     expect(manifest).toContain("nginx.service");

@@ -12,6 +12,8 @@ DROPIN_PATH="$DROPIN_DIR/identity.conf"
 
 terminal_user=${SIGMAOS_TERMINAL_USER:-}
 helper_socket_path=${SIGMAOS_TERMINAL_HELPER_SOCKET_PATH:-/run/sigmaos/terminal-helper.sock}
+session_idle_timeout_ms=${SIGMAOS_TERMINAL_SESSION_IDLE_TIMEOUT_MS:-1800000}
+max_sessions=${SIGMAOS_TERMINAL_MAX_SESSIONS:-32}
 if [ -z "$terminal_user" ] && [ -f "$CONFIG_PATH" ]; then
   terminal_user=$(awk '
     $0 == "[terminal]" { in_terminal = 1; next }
@@ -41,6 +43,36 @@ if [ -f "$CONFIG_PATH" ] && [ -z "${SIGMAOS_TERMINAL_HELPER_SOCKET_PATH:-}" ]; t
   ' "$CONFIG_PATH")
   helper_socket_path=${helper_socket_path:-/run/sigmaos/terminal-helper.sock}
 fi
+if [ -f "$CONFIG_PATH" ] && [ -z "${SIGMAOS_TERMINAL_SESSION_IDLE_TIMEOUT_MS:-}" ]; then
+  session_idle_timeout_ms=$(awk '
+    $0 == "[terminal]" { in_terminal = 1; next }
+    in_terminal && /^\[/ { in_terminal = 0 }
+    in_terminal && $0 ~ /^[[:space:]]*session_idle_timeout_ms[[:space:]]*=/ {
+      value = $0
+      sub(/^[[:space:]]*session_idle_timeout_ms[[:space:]]*=[[:space:]]*/, "", value)
+      sub(/[[:space:]]+#.*$/, "", value)
+      gsub(/^"|"[[:space:]]*$/, "", value)
+      print value
+      exit
+    }
+  ' "$CONFIG_PATH")
+  session_idle_timeout_ms=${session_idle_timeout_ms:-1800000}
+fi
+if [ -f "$CONFIG_PATH" ] && [ -z "${SIGMAOS_TERMINAL_MAX_SESSIONS:-}" ]; then
+  max_sessions=$(awk '
+    $0 == "[terminal]" { in_terminal = 1; next }
+    in_terminal && /^\[/ { in_terminal = 0 }
+    in_terminal && $0 ~ /^[[:space:]]*max_sessions[[:space:]]*=/ {
+      value = $0
+      sub(/^[[:space:]]*max_sessions[[:space:]]*=[[:space:]]*/, "", value)
+      sub(/[[:space:]]+#.*$/, "", value)
+      gsub(/^"|"[[:space:]]*$/, "", value)
+      print value
+      exit
+    }
+  ' "$CONFIG_PATH")
+  max_sessions=${max_sessions:-32}
+fi
 
 if [ -z "$terminal_user" ]; then
   rm -f "$DROPIN_PATH"
@@ -59,6 +91,10 @@ esac
 case "$terminal_user" in
   *[!a-zA-Z0-9._-]*|root|sigmaos) printf 'sigmaos-terminal: invalid terminal user\n' >&2; exit 1 ;;
 esac
+case "$session_idle_timeout_ms" in ''|*[!0-9]*) printf 'sigmaos-terminal: invalid session idle timeout\n' >&2; exit 1 ;; esac
+[ "$session_idle_timeout_ms" -gt 0 ] || { printf 'sigmaos-terminal: session idle timeout must be positive\n' >&2; exit 1; }
+case "$max_sessions" in ''|*[!0-9]*) printf 'sigmaos-terminal: invalid maximum session count\n' >&2; exit 1 ;; esac
+[ "$max_sessions" -gt 0 ] || { printf 'sigmaos-terminal: maximum session count must be positive\n' >&2; exit 1; }
 
 passwd_entry=$(getent passwd "$terminal_user") || {
   printf 'sigmaos-terminal: user %s does not exist\n' "$terminal_user" >&2
@@ -97,6 +133,8 @@ trap 'rm -f "$tmp_path"' EXIT HUP INT TERM
   printf 'Group=sigmaos\n'
   printf 'Environment=SIGMAOS_TERMINAL_USER=%s\n' "$terminal_user"
   printf 'Environment=SIGMAOS_TERMINAL_HELPER_SOCKET_PATH=%s\n' "$helper_socket_path"
+  printf 'Environment=SIGMAOS_TERMINAL_SESSION_IDLE_TIMEOUT_MS=%s\n' "$session_idle_timeout_ms"
+  printf 'Environment=SIGMAOS_TERMINAL_MAX_SESSIONS=%s\n' "$max_sessions"
   printf 'Environment=HOME=%s\n' "$home"
   printf 'WorkingDirectory=%s\n' "$home"
   printf 'BindPaths=%s\n' "$home"

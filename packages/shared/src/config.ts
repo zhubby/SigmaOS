@@ -1,6 +1,10 @@
 import { accessSync, existsSync, readFileSync, constants as fsConstants } from "node:fs";
 import path from "node:path";
 import { parse } from "smol-toml";
+import {
+  TERMINAL_SESSION_DEFAULT_CONNECT_TIMEOUT_MS,
+  TERMINAL_SESSION_DEFAULT_IDLE_TIMEOUT_MS
+} from "./terminal-protocol.js";
 import type {
   DlnaMediaType,
   DockerComposeRootConfig,
@@ -103,6 +107,9 @@ interface TomlConfig {
   terminal?: {
     user?: string;
     helper_socket_path?: string;
+    session_idle_timeout_ms?: number;
+    connect_timeout_ms?: number;
+    max_sessions?: number;
   };
   nas_roots?: Array<{
     id?: string;
@@ -409,7 +416,19 @@ function loadTerminalConfig(env: NodeJS.ProcessEnv, fileConfig: TomlConfig): Ter
     helperSocketPath:
       normalizeText(env.SIGMAOS_TERMINAL_HELPER_SOCKET_PATH) ??
       normalizeText(fileConfig.terminal?.helper_socket_path) ??
-      "/run/sigmaos/terminal-helper.sock"
+      "/run/sigmaos/terminal-helper.sock",
+    sessionIdleTimeoutMs: toPositiveInteger(
+      env.SIGMAOS_TERMINAL_SESSION_IDLE_TIMEOUT_MS,
+      fileConfig.terminal?.session_idle_timeout_ms ?? TERMINAL_SESSION_DEFAULT_IDLE_TIMEOUT_MS
+    ),
+    connectTimeoutMs: toPositiveInteger(
+      env.SIGMAOS_TERMINAL_CONNECT_TIMEOUT_MS,
+      fileConfig.terminal?.connect_timeout_ms ?? TERMINAL_SESSION_DEFAULT_CONNECT_TIMEOUT_MS
+    ),
+    maxSessions: toPositiveInteger(
+      env.SIGMAOS_TERMINAL_MAX_SESSIONS,
+      fileConfig.terminal?.max_sessions ?? 32
+    )
   };
 }
 

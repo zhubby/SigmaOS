@@ -3,6 +3,7 @@ import {
   encodeTerminalBrokerMessage,
   parseTerminalBrokerEvent,
   TERMINAL_BROKER_MAX_FRAME_BYTES,
+  TERMINAL_SESSION_DEFAULT_CONNECT_TIMEOUT_MS,
   type TerminalBrokerEvent,
   type TerminalConfig
 } from "@sigmaos/shared";
@@ -19,7 +20,14 @@ export function createTerminalRuntime(config: TerminalConfig): TerminalRuntime {
       if (!config.user) {
         throw new Error("Terminal user is not configured");
       }
-      return BrokerTerminalPty.connect(config.helperSocketPath, config.user, options.cols, options.rows);
+      return BrokerTerminalPty.connect(
+        config.helperSocketPath,
+        config.user,
+        options.cols,
+        options.rows,
+        options.sessionName,
+        config.connectTimeoutMs ?? TERMINAL_SESSION_DEFAULT_CONNECT_TIMEOUT_MS
+      );
     }
   };
 }
@@ -49,9 +57,16 @@ class BrokerTerminalPty implements TerminalPty {
     socket.on("close", () => this.finish(-1));
   }
 
-  static async connect(socketPath: string, user: string, cols = DEFAULT_TERMINAL_COLS, rows = DEFAULT_TERMINAL_ROWS): Promise<BrokerTerminalPty> {
-    const socket = await connectSocket(socketPath);
-    const handshake = await waitForReady(socket, user, cols, rows);
+  static async connect(
+    socketPath: string,
+    user: string,
+    cols = DEFAULT_TERMINAL_COLS,
+    rows = DEFAULT_TERMINAL_ROWS,
+    sessionName?: string,
+    timeoutMs = TERMINAL_SESSION_DEFAULT_CONNECT_TIMEOUT_MS
+  ): Promise<BrokerTerminalPty> {
+    const socket = await connectSocket(socketPath, timeoutMs);
+    const handshake = await waitForReady(socket, user, cols, rows, sessionName, timeoutMs);
     const terminal = new BrokerTerminalPty(socket, handshake.ready, handshake.pendingBuffer);
     for (const event of handshake.pendingEvents) {
       terminal.handleEvent(event);
@@ -84,8 +99,17 @@ class BrokerTerminalPty implements TerminalPty {
     if (this.closed) {
       return;
     }
-    this.send({ type: "close" });
+    this.send({ type: "close", destroy: true });
     this.closed = true;
+    this.socket.end();
+  }
+
+  disconnect(): void {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    this.exited = true;
     this.socket.end();
   }
 
@@ -163,7 +187,9 @@ async function waitForReady(
   socket: net.Socket,
   user: string,
   cols: number,
-  rows: number
+  rows: number,
+  sessionName: string | undefined,
+  timeoutMs: number
 ): Promise<{
   ready: Extract<TerminalBrokerEvent, { type: "ready" }>;
   pendingEvents: TerminalBrokerEvent[];
@@ -174,10 +200,12 @@ async function waitForReady(
     let ready: Extract<TerminalBrokerEvent, { type: "ready" }> | null = null;
     const pendingEvents: TerminalBrokerEvent[] = [];
     let settled = false;
+    const timeout = setTimeout(() => fail(new Error("Timed out connecting to terminal broker")), timeoutMs);
     const cleanup = () => {
       socket.off("data", onData);
       socket.off("error", onError);
       socket.off("close", onClose);
+      clearTimeout(timeout);
     };
     const fail = (error: Error) => {
       if (settled) return;
@@ -231,20 +259,36 @@ async function waitForReady(
     socket.on("data", onData);
     socket.once("error", onError);
     socket.once("close", onClose);
-    socket.write(encodeTerminalBrokerMessage({ type: "open", user, cols, rows }));
+    try {
+      socket.write(encodeTerminalBrokerMessage({
+        type: "open",
+        user,
+        cols,
+        rows,
+        ...(sessionName ? { sessionName } : {})
+      }));
+    } catch (error) {
+      fail(error instanceof Error ? error : new Error("Unable to contact terminal broker"));
+    }
   });
 }
 
-function connectSocket(socketPath: string): Promise<net.Socket> {
+function connectSocket(socketPath: string, timeoutMs: number): Promise<net.Socket> {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection({ path: socketPath });
     socket.setEncoding("utf8");
+    const timeout = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("Timed out connecting to terminal broker"));
+    }, timeoutMs);
     const onError = (error: Error) => {
+      clearTimeout(timeout);
       socket.destroy();
       reject(error);
     };
     socket.once("error", onError);
     socket.once("connect", () => {
+      clearTimeout(timeout);
       socket.off("error", onError);
       resolve(socket);
     });

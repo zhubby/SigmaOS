@@ -7,6 +7,7 @@ import "@xterm/xterm/css/xterm.css";
 import type { NasRoot } from "../../api.js";
 import type { CodeFontSettings } from "../../lib/editor-settings.js";
 import {
+  createTerminalSessionId,
   clearStoredTerminalSessionId,
   readStoredTerminalSessionId,
   writeStoredTerminalSessionId
@@ -22,6 +23,7 @@ interface TerminalMessage {
   cwd?: string;
   sessionId?: string;
   data?: string;
+  truncated?: boolean;
   exitCode?: number;
   error?: string;
 }
@@ -47,6 +49,9 @@ export function LocalTerminalPanel({
   const sessionIdsRef = useRef(new Map<string, string>());
   const resetSessionRef = useRef(false);
   const resetSessionIdRef = useRef<string | null>(null);
+  const resetNextSessionIdRef = useRef<string | null>(null);
+  const connectRef = useRef<(() => void) | null>(null);
+  const suspendRef = useRef<(() => void) | null>(null);
   const activeRef = useRef(active);
   const [connectionKey, setConnectionKey] = useState(0);
   const [status, setStatus] = useState<TerminalStatus>("connecting");
@@ -60,6 +65,12 @@ export function LocalTerminalPanel({
     }
 
     let disposed = false;
+    let suspended = !activeRef.current;
+    let exited = false;
+    let socket: WebSocket | null = null;
+    let retryTimer: number | null = null;
+    let retryAttempt = 0;
+    let disconnectNotified = false;
     let resizeObserver: ResizeObserver | null = null;
     let dataDisposable: { dispose(): void } | null = null;
     const host = terminalHostRef.current;
@@ -74,7 +85,6 @@ export function LocalTerminalPanel({
     terminal.open(host);
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
-    setStatus("connecting");
 
     const fitAndResize = () => {
       if (disposed || !activeRef.current || host.clientWidth === 0 || host.clientHeight === 0) {
@@ -86,77 +96,171 @@ export function LocalTerminalPanel({
       }
     };
 
+    const scheduleReconnect = () => {
+      if (disposed || suspended || exited || retryTimer !== null) {
+        return;
+      }
+      const delay = Math.min(5_000, 250 * 2 ** Math.min(retryAttempt, 5));
+      retryAttempt += 1;
+      retryTimer = window.setTimeout(() => {
+        retryTimer = null;
+        connect();
+      }, delay);
+    };
+
+    const connect = () => {
+      if (disposed || suspended || exited || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) {
+        return;
+      }
+      const isReset = resetSessionRef.current;
+      const previousSessionId = isReset ? resetSessionIdRef.current : null;
+      const sessionId = isReset
+        ? resetNextSessionIdRef.current ?? createTerminalSessionId()
+        : readStoredTerminalSessionId(rootId) ?? sessionIdsRef.current.get(rootId) ?? createTerminalSessionId();
+      writeStoredTerminalSessionId(rootId, sessionId);
+
+      const currentSocket = new WebSocket(
+        terminalWebSocketUrl(rootId),
+        terminalWebSocketProtocols(sessionId, isReset ? previousSessionId : null, isReset ? sessionId : null)
+      );
+      socket = currentSocket;
+      socketRef.current = currentSocket;
+      setStatus("connecting");
+
+      currentSocket.addEventListener("open", () => {
+        if (disposed || socketRef.current !== currentSocket) {
+          return;
+        }
+        retryAttempt = 0;
+        disconnectNotified = false;
+        fitAndResize();
+      });
+      currentSocket.addEventListener("message", (event) => {
+        if (disposed || socketRef.current !== currentSocket) {
+          return;
+        }
+        const message = parseTerminalMessage(event.data);
+        if (!message) {
+          return;
+        }
+        if (message.type === "ready") {
+          if (message.sessionId) {
+            sessionIdsRef.current.set(rootId, message.sessionId);
+            writeStoredTerminalSessionId(rootId, message.sessionId);
+            if (resetSessionRef.current && resetNextSessionIdRef.current === message.sessionId) {
+              resetSessionRef.current = false;
+              resetSessionIdRef.current = null;
+              resetNextSessionIdRef.current = null;
+            }
+          }
+          setStatus("connected");
+          fitAndResize();
+        }
+        if (message.type === "output" && message.data) {
+          terminal.write(message.data);
+        }
+        if (message.type === "error") {
+          setStatus("error");
+          if (!disconnectNotified) {
+            disconnectNotified = true;
+            onNotifyError(message.error ?? t("workspace.terminal.connectionError"));
+          }
+        }
+        if (message.type === "exit") {
+          exited = true;
+          setStatus("exited");
+        }
+      });
+      currentSocket.addEventListener("error", () => {
+        if (!disposed && socketRef.current === currentSocket) {
+          setStatus("error");
+          if (!disconnectNotified) {
+            disconnectNotified = true;
+            onNotifyError(t("workspace.terminal.connectionError"));
+          }
+        }
+      });
+      currentSocket.addEventListener("close", () => {
+        if (socketRef.current !== currentSocket) {
+          return;
+        }
+        socketRef.current = null;
+        socket = null;
+        if (disposed || suspended || exited) {
+          return;
+        }
+        setStatus((current) => (current === "exited" || current === "error" ? current : "disconnected"));
+        if (!disconnectNotified) {
+          disconnectNotified = true;
+          onNotifyError(t("workspace.terminal.disconnectedError"));
+        }
+        scheduleReconnect();
+      });
+    };
+
+    const suspend = () => {
+      suspended = true;
+      if (retryTimer !== null) {
+        window.clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      const currentSocket = socketRef.current;
+      socketRef.current = null;
+      socket = null;
+      if (currentSocket && currentSocket.readyState < WebSocket.CLOSING) {
+        currentSocket.close();
+      }
+    };
+
+    const resume = () => {
+      suspended = false;
+      if (!exited) {
+        connect();
+      }
+    };
+
+    connectRef.current = resume;
+    suspendRef.current = suspend;
     resizeObserver = new ResizeObserver(fitAndResize);
     resizeObserver.observe(host);
-    fitAndResize();
-
-    const storedSessionId =
-      readStoredTerminalSessionId(rootId) ??
-      sessionIdsRef.current.get(rootId) ??
-      (resetSessionRef.current ? resetSessionIdRef.current : null);
-    const socket = new WebSocket(
-      terminalWebSocketUrl(rootId, storedSessionId, resetSessionRef.current && resetSessionIdRef.current === storedSessionId)
-    );
-    resetSessionRef.current = false;
-    resetSessionIdRef.current = null;
-    socketRef.current = socket;
     dataDisposable = terminal.onData((data) => {
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: "input", data }));
+      if (socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({ type: "input", data }));
       }
     });
-    socket.addEventListener("open", fitAndResize);
-    socket.addEventListener("message", (event) => {
-      if (disposed) {
-        return;
-      }
-      const message = parseTerminalMessage(event.data);
-      if (!message) {
-        return;
-      }
-      if (message.type === "ready") {
-        if (message.sessionId) {
-          sessionIdsRef.current.set(rootId, message.sessionId);
-          writeStoredTerminalSessionId(rootId, message.sessionId);
-        }
-        setStatus("connected");
-        fitAndResize();
-      }
-      if (message.type === "output" && message.data) {
-        terminal.write(message.data);
-      }
-      if (message.type === "error") {
-        setStatus("error");
-        onNotifyError(message.error ?? t("workspace.terminal.connectionError"));
-      }
-      if (message.type === "exit") {
-        setStatus("exited");
-      }
-    });
-    socket.addEventListener("error", () => {
-      if (!disposed) {
-        setStatus("error");
-        onNotifyError(t("workspace.terminal.connectionError"));
-      }
-    });
-    socket.addEventListener("close", () => {
-      if (!disposed) {
-        setStatus((current) => (current === "exited" || current === "error" ? current : "disconnected"));
-        onNotifyError(t("workspace.terminal.disconnectedError"));
-      }
-    });
+    if (activeRef.current) {
+      connect();
+    } else {
+      setStatus("disconnected");
+    }
 
     return () => {
       disposed = true;
       resizeObserver?.disconnect();
       dataDisposable?.dispose();
-      socket.close();
+      if (retryTimer !== null) {
+        window.clearTimeout(retryTimer);
+      }
+      connectRef.current = null;
+      suspendRef.current = null;
+      const currentSocket = socketRef.current;
       socketRef.current = null;
+      if (currentSocket && currentSocket.readyState < WebSocket.CLOSING) {
+        currentSocket.close();
+      }
       fitAddonRef.current = null;
       terminalRef.current = null;
       terminal.dispose();
     };
   }, [connectionKey, onNotifyError, root?.id, t]);
+
+  useEffect(() => {
+    if (active) {
+      connectRef.current?.();
+    } else {
+      suspendRef.current?.();
+    }
+  }, [active]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -180,13 +284,14 @@ export function LocalTerminalPanel({
     if (!root) {
       return;
     }
-    if (socketRef.current?.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify({ type: "close" }));
-    }
+    const previousSessionId = sessionIdsRef.current.get(root.id) ?? readStoredTerminalSessionId(root.id);
+    const nextSessionId = createTerminalSessionId();
     clearStoredTerminalSessionId(root.id);
+    sessionIdsRef.current.set(root.id, nextSessionId);
+    writeStoredTerminalSessionId(root.id, nextSessionId);
     resetSessionRef.current = true;
-    resetSessionIdRef.current = sessionIdsRef.current.get(root.id) ?? readStoredTerminalSessionId(root.id);
-    sessionIdsRef.current.delete(root.id);
+    resetSessionIdRef.current = previousSessionId;
+    resetNextSessionIdRef.current = nextSessionId;
     setConnectionKey((current) => current + 1);
   }
 
@@ -228,16 +333,19 @@ export function LocalTerminalPanel({
   );
 }
 
-function terminalWebSocketUrl(rootId: string, sessionId: string | null, reset = false): string {
+function terminalWebSocketUrl(rootId: string): string {
   const url = new URL(`/api/terminal?rootId=${encodeURIComponent(rootId)}`, window.location.href);
-  if (sessionId) {
-    url.searchParams.set("sessionId", sessionId);
-  }
-  if (reset && sessionId) {
-    url.searchParams.set("reset", "1");
-  }
   url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return url.toString();
+}
+
+function terminalWebSocketProtocols(sessionId: string, resetSessionId: string | null, nextSessionId: string | null): string[] {
+  return [
+    "sigmaos-terminal-v1",
+    `sigmaos-session.${sessionId}`,
+    ...(resetSessionId ? [`sigmaos-reset.${resetSessionId}`] : []),
+    ...(nextSessionId ? [`sigmaos-next.${nextSessionId}`] : [])
+  ];
 }
 
 function parseTerminalMessage(raw: unknown): TerminalMessage | null {

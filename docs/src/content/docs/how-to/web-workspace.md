@@ -57,7 +57,7 @@ sidebar:
 
 ## 终端与管理面板
 
-Workspace 的 Terminal 使用 terminal-helper 创建受限 PTY，连接失败时检查 `sigmaos-terminal-helper.service` 和终端用户 drop-in。Docker、VM、Shares、Storage 面板只在配置和宿主机能力可用时展示完整操作；管理类变更仍通过 approval。
+Workspace 的 Terminal 使用 terminal-helper 和 tmux 承载受限 PTY。切换面板、刷新页面或 API/helper 重启都会复用同一个 terminal session；点击重启按钮才会销毁旧 shell。断开期间的输出会短暂缓存在 API 中，超过缓冲上限会显示丢失提示；默认空闲 30 分钟后由 helper 回收 tmux session。连接失败时检查 `tmux`、`sigmaos-terminal-helper.service` 和终端用户 drop-in。Docker、VM、Shares、Storage 面板只在配置和宿主机能力可用时展示完整操作；管理类变更仍通过 approval。
 
 设置面板可以修改 model provider、Pi tool policy、Docker 配置、语言、主题、预览大小和编辑器字体。保存 provider secret 后 UI 只显示是否已配置，不会回显密钥。
 

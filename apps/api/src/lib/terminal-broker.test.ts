@@ -65,6 +65,7 @@ describe("terminal broker client", () => {
       name: "xterm-256color",
       cols: 120,
       rows: 32,
+      sessionName: "sigmaos-persisted",
       env: {}
     });
     const output: string[] = [];
@@ -74,6 +75,13 @@ describe("terminal broker client", () => {
     expect(output).toEqual(["boot> ", "ready> "]);
     expect(terminal.cwd).toBe("/home/zhubby");
     expect(terminal.shell).toBe("/usr/bin/zsh");
+    expect(requests).toContainEqual({
+      type: "open",
+      user: "zhubby",
+      cols: 120,
+      rows: 32,
+      sessionName: "sigmaos-persisted"
+    });
 
     terminal.write("whoami\r");
     terminal.resize(90, 24);
@@ -82,6 +90,53 @@ describe("terminal broker client", () => {
     expect(requests).toContainEqual({ type: "resize", cols: 90, rows: 24 });
     terminal.kill();
     await waitFor(() => requests.some((request) => request.type === "close"));
+  });
+
+  it("disconnects without sending a destroy request", async () => {
+    const socketPath = await createSocketPath();
+    const requests: TerminalBrokerRequest[] = [];
+    let disconnected = false;
+    const server = net.createServer((socket) => {
+      clientSockets.push(socket);
+      socket.setEncoding("utf8");
+      socket.on("end", () => {
+        disconnected = true;
+      });
+      let frameBuffer = "";
+      socket.on("data", (chunk: string) => {
+        frameBuffer += chunk;
+        const newlineIndex = frameBuffer.indexOf("\n");
+        if (newlineIndex < 0) return;
+        const request = parseTerminalBrokerMessage(frameBuffer.slice(0, newlineIndex));
+        frameBuffer = frameBuffer.slice(newlineIndex + 1);
+        if (!request) return;
+        requests.push(request);
+        if (request.type === "open") {
+          socket.write(encodeTerminalBrokerMessage({
+            type: "ready",
+            user: request.user,
+            cwd: "/home/zhubby",
+            shell: "/usr/bin/zsh"
+          }));
+        }
+      });
+    });
+    sockets.push(server);
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+    const runtime = createTerminalRuntime({ user: "zhubby", helperSocketPath: socketPath });
+    const terminal = await runtime.spawn("", [], {
+      name: "xterm-256color",
+      cols: 120,
+      rows: 32,
+      sessionName: "sigmaos-persisted",
+      env: {}
+    });
+
+    terminal.disconnect();
+    await waitFor(() => disconnected);
+    expect(requests).not.toContainEqual({ type: "close", destroy: true });
+    expect(requests).not.toContainEqual({ type: "close" });
   });
 
   it("rejects when the broker closes before ready", async () => {

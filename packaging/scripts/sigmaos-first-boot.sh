@@ -109,6 +109,9 @@ account_username = "sigma-share"
 [terminal]
 user = "$TERMINAL_USER"
 helper_socket_path = "/run/sigmaos/terminal-helper.sock"
+session_idle_timeout_ms = 1800000
+connect_timeout_ms = 10000
+max_sessions = 32
 
 [[nas_roots]]
 id = "$NAS_ROOT_ID"
