@@ -466,19 +466,28 @@ export const en = {
             volume: "Create a local named volume with audit labels.",
             network: "Create a bridge, macvlan, or ipvlan network."
           },
+          runtime: {
+            ready: "Engine ready",
+            disabled: "Engine disabled",
+            unavailable: "Engine unavailable",
+            engine: "Docker {{version}}",
+            api: "API {{version}}",
+            inventory: "{{containers}} containers · {{volumes}} volumes · {{networks}} networks",
+            unknownVersion: "unknown"
+          },
           partialStartFailure: "Container created but did not start.",
           stages: { aria: "Creation stages", basics: "Basics", process: "Process", resources: "Resources", storage: "Storage", network: "Network", review: "Review" },
           actions: { openMenu: "Create Docker resource", create: "Create", close: "Close", cancel: "Cancel", back: "Back", next: "Next", creating: "Creating", createNow: "Create now", directCreate: "Direct create", unnamed: "Unnamed resource", addRow: "Add row", remove: "Remove" },
           kinds: { container: "Container", volume: "Volume", network: "Network" },
           basics: { detail: "Identity, image policy, and initial state.", name: "Name", image: "Image", imageHint: "Bare references use :latest.", platform: "Platform", pullPolicy: "Pull policy", onlyMissing: "Only if missing", alwaysPull: "Always pull", neverPull: "Never pull", start: "Start after create" },
-          process: { detail: "Runtime identity, arguments, environment, and labels.", hostname: "Hostname", user: "User", workingDir: "Working directory", stopSignal: "Stop signal", stopTimeout: "Stop timeout (seconds)", entrypoint: "Entrypoint", command: "Command", environment: "Environment", labels: "Labels", tty: "TTY", openStdin: "Keep stdin open", init: "Init process" },
+          process: { detail: "Runtime identity, arguments, environment, and labels.", hostname: "Hostname", user: "User", workingDir: "Working directory", stopSignal: "Stop signal", stopTimeout: "Stop timeout (seconds)", entrypoint: "Entrypoint", command: "Command", environment: "Environment", environmentDetail: "Variables passed to the container process.", labels: "Labels", labelsDetail: "Metadata attached to the container.", tty: "TTY", openStdin: "Keep stdin open", init: "Init process" },
           resources: { detail: "CPU, memory, process, restart, and filesystem limits.", cpuLimit: "CPU limit", cpuShares: "CPU shares", cpuset: "CPU set", memoryLimit: "Memory limit (bytes)", memoryReservation: "Memory reservation (bytes)", memorySwap: "Memory swap (bytes)", pidsLimit: "PID limit", shmSize: "Shared memory (bytes)", restartPolicy: "Restart policy", restartRetries: "Restart retries", readOnlyRootfs: "Read-only root filesystem", autoRemove: "Auto-remove after exit", privileged: "Privileged mode", privilegedAck: "I understand the risk" },
-          storage: { detail: "Named volumes, NAS-safe binds, and tmpfs mounts.", volume: "Volume", bind: "NAS bind", tmpfs: "tmpfs", selectVolume: "Select volume", addMount: "Add mount", relativePath: "relative path", sizeBytes: "size bytes", tmpfsMode: "mode e.g. 1777", containerPath: "/container/path", noCopy: "No copy", readOnly: "RO" },
-          network: { detail: "One network endpoint, ports, DNS, and extra hosts.", mode: "Mode", existingNetwork: "Existing network", selectNetwork: "Select network", aliases: "Aliases", staticIpv4: "Static IPv4", staticIpv6: "Static IPv6", endpointMac: "Endpoint MAC", dns: "DNS", dnsSearch: "DNS search", addPort: "Add port", containerPort: "container", hostIp: "host IP (optional)", hostPort: "host port (optional)", extraHosts: "Extra hosts", publishAll: "Publish all exposed ports", hostname: "hostname", hostAddress: "IP or host-gateway" },
+          storage: { detail: "Named volumes, NAS-safe binds, and tmpfs mounts.", volume: "Volume", bind: "NAS bind", tmpfs: "tmpfs", type: "Type", source: "Source", nasRoot: "NAS root", target: "Container target", options: "Options", selectVolume: "Select volume", addMount: "Add mount", noMounts: "No mounts configured.", relativePath: "relative path", sizeBytes: "size bytes", tmpfsMode: "mode e.g. 1777", containerPath: "/container/path", noCopy: "No copy", readOnly: "RO" },
+          network: { detail: "One network endpoint, ports, DNS, and extra hosts.", mode: "Mode", existingNetwork: "Existing network", selectNetwork: "Select network", aliases: "Aliases", staticIpv4: "Static IPv4", staticIpv6: "Static IPv6", endpointMac: "Endpoint MAC", dns: "DNS", dnsSearch: "DNS search", addPort: "Add port", noPorts: "No published ports.", protocol: "Protocol", containerPort: "container", hostIp: "host IP (optional)", hostPort: "host port (optional)", extraHosts: "Extra hosts", extraHostsDetail: "Add host-to-address entries for the container.", noExtraHosts: "No extra hosts.", publishAll: "Publish all exposed ports", hostname: "hostname", hostAddress: "IP or host-gateway" },
           review: { detail: "Final checks and direct execution.", image: "Image", network: "Network", mountsPorts: "Mounts / ports", start: "Start", yes: "yes", no: "no", restart: "Restart", immediate: "Creation runs immediately", failureDetail: "Failures keep the form. If start fails after container creation, the container is kept and marked as partial success." },
-          volume: { detail: "Named local volumes stay managed by Docker." },
-          networkCreate: { detail: "Driver, address families, IPAM, and labels are validated before Docker is called.", name: "Name", driver: "Driver", parent: "Parent interface", selectInterface: "Select interface", mode: "Mode", internal: "Internal", enableIpv4: "Enable IPv4", enableIpv6: "Enable IPv6", ipam: "IPAM configuration", addSubnet: "Add subnet", subnet: "subnet CIDR", ipRange: "IP range CIDR", gateway: "gateway", auxAddresses: "name=address, ..." },
-          common: { key: "key", value: "value" }
+          volume: { detail: "Named local volumes stay managed by Docker.", nameHint: "Use letters, numbers, dots, dashes, and underscores.", driver: "Driver", driverHint: "Docker manages this volume with the local driver.", noticeTitle: "Docker-managed persistent storage", noticeDetail: "The volume is created immediately and can be attached to containers from the storage stage.", labelsTitle: "Labels", labelsDetail: "Optional metadata is stored with the volume." },
+          networkCreate: { detail: "Driver, address families, IPAM, and labels are validated before Docker is called.", name: "Name", driver: "Driver", parent: "Parent interface", selectInterface: "Select interface", mode: "Mode", internal: "Internal", enableIpv4: "Enable IPv4", enableIpv6: "Enable IPv6", ipam: "IPAM configuration", ipamDetail: "Optional subnets control address allocation on this network.", noIpam: "No IPAM ranges configured.", addSubnet: "Add subnet", subnet: "subnet CIDR", ipRange: "IP range CIDR", gateway: "gateway", auxAddresses: "name=address, ..." },
+          common: { key: "key", value: "value", noRows: "No entries yet. Add one when this resource needs metadata." }
         }
       },
       shares: {
@@ -1977,19 +1986,28 @@ export const zhCN = {
             volume: "创建带审计标签的本地命名卷。",
             network: "创建 bridge、macvlan 或 ipvlan 网络。"
           },
+          runtime: {
+            ready: "Engine 已就绪",
+            disabled: "Engine 已禁用",
+            unavailable: "Engine 不可用",
+            engine: "Docker {{version}}",
+            api: "API {{version}}",
+            inventory: "{{containers}} 个容器 · {{volumes}} 个卷 · {{networks}} 个网络",
+            unknownVersion: "未知"
+          },
           partialStartFailure: "容器已创建，但未能启动。",
           stages: { aria: "创建阶段", basics: "基础", process: "进程", resources: "资源", storage: "存储", network: "网络", review: "确认" },
           actions: { openMenu: "创建 Docker 资源", create: "创建", close: "关闭", cancel: "取消", back: "返回", next: "下一步", creating: "创建中", createNow: "立即创建", directCreate: "直接创建", unnamed: "未命名资源", addRow: "添加行", remove: "移除" },
           kinds: { container: "容器", volume: "卷", network: "网络" },
           basics: { detail: "身份、镜像策略和初始状态。", name: "名称", image: "镜像", imageHint: "未指定标签的镜像会使用 :latest。", platform: "平台", pullPolicy: "拉取策略", onlyMissing: "仅在缺失时", alwaysPull: "始终拉取", neverPull: "从不拉取", start: "创建后启动" },
-          process: { detail: "运行时身份、参数、环境变量和标签。", hostname: "主机名", user: "用户", workingDir: "工作目录", stopSignal: "停止信号", stopTimeout: "停止超时（秒）", entrypoint: "入口点", command: "命令", environment: "环境变量", labels: "标签", tty: "TTY", openStdin: "保持 stdin 打开", init: "Init 进程" },
+          process: { detail: "运行时身份、参数、环境变量和标签。", hostname: "主机名", user: "用户", workingDir: "工作目录", stopSignal: "停止信号", stopTimeout: "停止超时（秒）", entrypoint: "入口点", command: "命令", environment: "环境变量", environmentDetail: "传递给容器进程的变量。", labels: "标签", labelsDetail: "附加到容器的元数据。", tty: "TTY", openStdin: "保持 stdin 打开", init: "Init 进程" },
           resources: { detail: "CPU、内存、进程、重启和文件系统限制。", cpuLimit: "CPU 限制", cpuShares: "CPU 权重", cpuset: "CPU 集", memoryLimit: "内存限制（字节）", memoryReservation: "内存预留（字节）", memorySwap: "内存交换（字节）", pidsLimit: "PID 限制", shmSize: "共享内存（字节）", restartPolicy: "重启策略", restartRetries: "重启次数", readOnlyRootfs: "只读根文件系统", autoRemove: "退出后自动移除", privileged: "特权模式", privilegedAck: "我了解此风险" },
-          storage: { detail: "命名卷、NAS 安全绑定和 tmpfs 挂载。", volume: "卷", bind: "NAS 绑定", tmpfs: "tmpfs", selectVolume: "选择卷", addMount: "添加挂载", relativePath: "相对路径", sizeBytes: "大小（字节）", tmpfsMode: "模式，例如 1777", containerPath: "/容器路径", noCopy: "不复制", readOnly: "只读" },
-          network: { detail: "网络端点、端口、DNS 和额外主机。", mode: "模式", existingNetwork: "现有网络", selectNetwork: "选择网络", aliases: "别名", staticIpv4: "静态 IPv4", staticIpv6: "静态 IPv6", endpointMac: "端点 MAC", dns: "DNS", dnsSearch: "DNS 搜索域", addPort: "添加端口", containerPort: "容器端口", hostIp: "宿主 IP（可选）", hostPort: "宿主端口（可选）", extraHosts: "额外主机", publishAll: "发布所有暴露端口", hostname: "主机名", hostAddress: "IP 或 host-gateway" },
+          storage: { detail: "命名卷、NAS 安全绑定和 tmpfs 挂载。", volume: "卷", bind: "NAS 绑定", tmpfs: "tmpfs", type: "类型", source: "来源", nasRoot: "NAS root", target: "容器目标", options: "选项", selectVolume: "选择卷", addMount: "添加挂载", noMounts: "尚未配置挂载。", relativePath: "相对路径", sizeBytes: "大小（字节）", tmpfsMode: "模式，例如 1777", containerPath: "/容器路径", noCopy: "不复制", readOnly: "只读" },
+          network: { detail: "网络端点、端口、DNS 和额外主机。", mode: "模式", existingNetwork: "现有网络", selectNetwork: "选择网络", aliases: "别名", staticIpv4: "静态 IPv4", staticIpv6: "静态 IPv6", endpointMac: "端点 MAC", dns: "DNS", dnsSearch: "DNS 搜索域", addPort: "添加端口", noPorts: "尚未发布端口。", protocol: "协议", containerPort: "容器端口", hostIp: "宿主 IP（可选）", hostPort: "宿主端口（可选）", extraHosts: "额外主机", extraHostsDetail: "为容器添加主机到地址的映射。", noExtraHosts: "没有额外主机。", publishAll: "发布所有暴露端口", hostname: "主机名", hostAddress: "IP 或 host-gateway" },
           review: { detail: "最后检查并直接执行。", image: "镜像", network: "网络", mountsPorts: "挂载 / 端口", start: "启动", yes: "是", no: "否", restart: "重启", immediate: "创建会立即执行", failureDetail: "失败时会保留表单。如果容器已创建但启动失败，容器会保留并标记为部分成功。" },
-          volume: { detail: "命名本地卷由 Docker 管理。" },
-          networkCreate: { detail: "调用 Docker 前会校验驱动、地址族、IPAM 和标签。", name: "名称", driver: "驱动", parent: "父接口", selectInterface: "选择接口", mode: "模式", internal: "内部网络", enableIpv4: "启用 IPv4", enableIpv6: "启用 IPv6", ipam: "IPAM 配置", addSubnet: "添加子网", subnet: "子网 CIDR", ipRange: "IP 范围 CIDR", gateway: "网关", auxAddresses: "名称=地址，..." },
-          common: { key: "键", value: "值" }
+          volume: { detail: "命名本地卷由 Docker 管理。", nameHint: "使用字母、数字、点、短横线和下划线。", driver: "驱动", driverHint: "Docker 使用 local 驱动管理此卷。", noticeTitle: "Docker 管理的持久化存储", noticeDetail: "卷会立即创建，并可在容器的存储阶段挂载。", labelsTitle: "标签", labelsDetail: "可选的元数据会随卷一起保存。" },
+          networkCreate: { detail: "调用 Docker 前会校验驱动、地址族、IPAM 和标签。", name: "名称", driver: "驱动", parent: "父接口", selectInterface: "选择接口", mode: "模式", internal: "内部网络", enableIpv4: "启用 IPv4", enableIpv6: "启用 IPv6", ipam: "IPAM 配置", ipamDetail: "可选子网用于控制此网络的地址分配。", noIpam: "尚未配置 IPAM 范围。", addSubnet: "添加子网", subnet: "子网 CIDR", ipRange: "IP 范围 CIDR", gateway: "网关", auxAddresses: "名称=地址，..." },
+          common: { key: "键", value: "值", noRows: "暂时没有条目，需要元数据时可以添加。" }
         }
       },
       shares: {

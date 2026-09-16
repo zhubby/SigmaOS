@@ -126,6 +126,65 @@
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
   }
 
+  .vm-create-dialog.docker-create-dialog {
+    height: min(840px, calc(100dvh - 20px));
+    max-height: calc(100dvh - 20px);
+  }
+
+  .vm-create-dialog .docker-create-stepper {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    row-gap: 5px;
+  }
+
+  .docker-create-column-head {
+    display: none;
+  }
+
+  .docker-create-map .docker-create-row,
+  .docker-create-port-row,
+  .docker-create-ipam-row,
+  .docker-create-map-grid,
+  .docker-create-port-grid,
+  .docker-create-ipam-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  }
+
+  .docker-create-port-row > input:first-child,
+  .docker-create-port-row > select:first-child,
+  .docker-create-ipam-row > input:first-child {
+    grid-column: span 2;
+  }
+
+  .docker-create-port-row > input:nth-child(3),
+  .docker-create-port-row > input:nth-child(4),
+  .docker-create-ipam-row > input:nth-child(3),
+  .docker-create-ipam-row > input:nth-child(4) {
+    grid-column: span 2;
+  }
+
+  .docker-create-rows > .docker-create-row:not(.docker-create-port-row) {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .docker-create-rows > .docker-create-row:not(.docker-create-port-row) > input,
+  .docker-create-rows > .docker-create-row:not(.docker-create-port-row) > select {
+    flex: 1 1 calc(50% - 4px);
+  }
+
+  .docker-create-rows > .docker-create-row:not(.docker-create-port-row) > .docker-create-inline-check {
+    flex: 0 0 auto;
+  }
+
+  .docker-create-rows > .docker-create-row:not(.docker-create-port-row) > .docker-create-remove {
+    flex: 0 0 28px;
+  }
+
+  .docker-create-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .docker-create-port-row {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
   }
@@ -137,6 +196,35 @@
 
   .docker-create-ipam-row {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  }
+
+  .docker-create-mount-row,
+  .docker-create-mount-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  }
+
+  .docker-create-mount-row > .docker-create-mount-source,
+  .docker-create-mount-row > .docker-create-mount-target,
+  .docker-create-mount-row > .docker-create-mount-options {
+    grid-column: span 2;
+  }
+
+  .docker-create-row-remove {
+    grid-column: 3;
+    justify-self: end;
+  }
+
+  .docker-create-mount-source {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .docker-create-mount-source > input:first-child,
+  .docker-create-mount-source > select:first-child {
+    grid-column: auto;
+  }
+
+  .docker-create-mount-table .docker-create-column-head {
+    display: none;
   }
 
   .docker-create-ipam-row input:nth-child(3),
