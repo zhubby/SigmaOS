@@ -1,8 +1,10 @@
 {
   "name": "@sigmaos/backup",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
-  "exports": { ".": "./src/backup.ts" },
+  "exports": {
+    ".": "./src/backup.ts"
+  },
   "types": "./src/backup.ts",
   "scripts": {
     "dev": "tsx src/index.ts",
@@ -11,8 +13,8 @@
     "build": "cd ../.. && tsup apps/backup/src/index.ts --format esm --platform node --target node22 --external=better-sqlite3 --out-dir apps/backup/dist"
   },
   "dependencies": {
-    "@sigmaos/db": "0.2.0",
-    "@sigmaos/nas-tools": "0.2.0",
-    "@sigmaos/shared": "0.2.0"
+    "@sigmaos/db": "0.3.0",
+    "@sigmaos/nas-tools": "0.3.0",
+    "@sigmaos/shared": "0.3.0"
   }
 }

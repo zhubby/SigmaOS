@@ -1,6 +1,6 @@
 {
   "name": "@sigmaos/share-helper",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "exports": {
     ".": "./src/helper.ts"
@@ -12,6 +12,6 @@
     "build": "tsup src/index.ts --format esm --platform node --target node22 --out-dir dist"
   },
   "dependencies": {
-    "@sigmaos/shared": "0.2.0"
+    "@sigmaos/shared": "0.3.0"
   }
 }

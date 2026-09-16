@@ -1,3 +1,9 @@
+sigmaos (0.3.0) unstable; urgency=medium
+
+  * Add Docker daemon configuration and image management with multiple registry credentials.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Wed, 16 Sep 2026 08:31:23 +0000
+
 sigmaos (0.2.0) unstable; urgency=medium
 
   * Add unified version governance and deployed build traceability.
