@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -7,12 +7,16 @@ import {
   applyStoragePoolOperation,
   applyHostShareSettings,
   cleanupOrphanMdDevices,
+  DockerDaemonHelperError,
+  readDockerDaemonConfig,
   renderDlnaConfig,
   renderNfsExports,
   renderSambaConfig,
   renderWebDavConfig,
   validateStorageOperationRequest,
   servicesForSettings,
+  updateDockerDaemonConfig,
+  validateDockerDaemonUpdateInput,
   validateStorageHelperRequest,
   type HelperCommandRunner,
   type ShareHelperPaths
@@ -390,6 +394,200 @@ describe("share helper", () => {
     expect(runner.calls).toContain(`umount ${path.join(mountRoot, "archive")}`);
     expect(runner.calls).toContain("systemctl daemon-reload");
   });
+
+  describe("Docker daemon configuration", () => {
+    function daemonOptions(runner = new DockerDaemonCommandRunner()) {
+      return {
+        configPath: path.join(tempDir, "etc/docker/daemon.json"),
+        stateDir: path.join(tempDir, "var/lib/sigmaos/docker-daemon"),
+        commandRunner: runner
+      };
+    }
+
+    it("rejects malformed, non-object, and oversized JSON before changing the file", async () => {
+      const options = daemonOptions();
+      await mkdir(path.dirname(options.configPath), { recursive: true });
+      await writeFile(options.configPath, "{\"log-level\":\"info\"}\n", "utf8");
+      const snapshot = await readDockerDaemonConfig(options);
+
+      for (const content of ["{", "[]", "null", `{"value":"${"x".repeat(256 * 1024)}"}`]) {
+        await expect(
+          updateDockerDaemonConfig(
+            { content, expectedRevision: snapshot.revision, restart: false, confirmed: false },
+            options
+          )
+        ).rejects.toBeInstanceOf(DockerDaemonHelperError);
+      }
+      await expect(readFile(options.configPath, "utf8")).resolves.toBe("{\"log-level\":\"info\"}\n");
+    });
+
+    it("rejects dockerd validation failures, symlinks, and revision conflicts", async () => {
+      const runner = new DockerDaemonCommandRunner();
+      const options = daemonOptions(runner);
+      await mkdir(path.dirname(options.configPath), { recursive: true });
+      await writeFile(options.configPath, "{}\n", "utf8");
+      const snapshot = await readDockerDaemonConfig(options);
+      runner.failValidation = true;
+      await expect(
+        updateDockerDaemonConfig(
+          { content: "{\"unknown-option\":true}\n", expectedRevision: snapshot.revision, restart: false, confirmed: false },
+          options
+        )
+      ).rejects.toMatchObject({ code: "validation" });
+      runner.failValidation = false;
+      await expect(
+        updateDockerDaemonConfig(
+          { content: "{}\n", expectedRevision: "0".repeat(64), restart: false, confirmed: false },
+          options
+        )
+      ).rejects.toMatchObject({ code: "conflict" });
+
+      await rm(options.configPath);
+      const target = path.join(tempDir, "daemon-target.json");
+      await writeFile(target, "{}\n", "utf8");
+      await symlink(target, options.configPath);
+      await expect(readDockerDaemonConfig(options)).rejects.toMatchObject({ code: "validation" });
+    });
+
+    it("does not overwrite an external edit made while dockerd validates", async () => {
+      const runner = new DockerDaemonCommandRunner();
+      const options = daemonOptions(runner);
+      await mkdir(path.dirname(options.configPath), { recursive: true });
+      await writeFile(options.configPath, "{\"log-level\":\"info\"}\n", "utf8");
+      const snapshot = await readDockerDaemonConfig(options);
+      runner.afterValidation = async () => {
+        await writeFile(options.configPath, "{\"log-level\":\"warn\"}\n", "utf8");
+      };
+
+      await expect(
+        updateDockerDaemonConfig(
+          { content: "{\"log-level\":\"debug\"}\n", expectedRevision: snapshot.revision, restart: false, confirmed: false },
+          options
+        )
+      ).rejects.toMatchObject({ code: "conflict" });
+      await expect(readFile(options.configPath, "utf8")).resolves.toBe("{\"log-level\":\"warn\"}\n");
+    });
+
+    it("keeps the first applied baseline across repeated saves", async () => {
+      const options = daemonOptions();
+      await mkdir(path.dirname(options.configPath), { recursive: true });
+      await writeFile(options.configPath, "{\"log-level\":\"info\"}\n", "utf8");
+      const first = await readDockerDaemonConfig(options);
+      await updateDockerDaemonConfig(
+        { content: "{\"log-level\":\"debug\"}\n", expectedRevision: first.revision, restart: false, confirmed: false },
+        options
+      );
+      const second = await readDockerDaemonConfig(options);
+      await updateDockerDaemonConfig(
+        { content: "{\"log-level\":\"warn\"}\n", expectedRevision: second.revision, restart: false, confirmed: false },
+        options
+      );
+
+      await expect(readFile(path.join(options.stateDir, "baseline.json"), "utf8")).resolves.toBe(
+        "{\"log-level\":\"info\"}\n"
+      );
+      await expect(readDockerDaemonConfig(options)).resolves.toMatchObject({ restartPending: true });
+    });
+
+    it("clears transaction state after a successful restart", async () => {
+      const options = daemonOptions();
+      const initial = await readDockerDaemonConfig(options);
+      const result = await updateDockerDaemonConfig(
+        { content: "{\"live-restore\":true}\n", expectedRevision: initial.revision, restart: true, confirmed: true },
+        options
+      );
+
+      expect(result).toMatchObject({ restarted: true, rollback: "not_required" });
+      await expect(readDockerDaemonConfig(options)).resolves.toMatchObject({ restartPending: false });
+    });
+
+    it("restores the applied baseline when restart fails", async () => {
+      const runner = new DockerDaemonCommandRunner();
+      runner.restartFailures = 1;
+      const options = daemonOptions(runner);
+      await mkdir(path.dirname(options.configPath), { recursive: true });
+      await writeFile(options.configPath, "{\"log-level\":\"info\"}\n", "utf8");
+      const initial = await readDockerDaemonConfig(options);
+
+      await expect(
+        updateDockerDaemonConfig(
+          { content: "{\"log-level\":\"debug\"}\n", expectedRevision: initial.revision, restart: true, confirmed: true },
+          options
+        )
+      ).rejects.toMatchObject({ code: "restart_failed", result: { rollback: "succeeded" } });
+      await expect(readFile(options.configPath, "utf8")).resolves.toBe("{\"log-level\":\"info\"}\n");
+    });
+
+    it("does not overwrite an external edit made while Docker is restarting", async () => {
+      const runner = new DockerDaemonCommandRunner();
+      runner.restartFailures = 1;
+      const options = daemonOptions(runner);
+      await mkdir(path.dirname(options.configPath), { recursive: true });
+      await writeFile(options.configPath, "{\"log-level\":\"info\"}\n", "utf8");
+      const initial = await readDockerDaemonConfig(options);
+      runner.beforeRestartFailure = async () => {
+        await writeFile(options.configPath, "{\"log-level\":\"warn\"}\n", "utf8");
+      };
+
+      await expect(
+        updateDockerDaemonConfig(
+          { content: "{\"log-level\":\"debug\"}\n", expectedRevision: initial.revision, restart: true, confirmed: true },
+          options
+        )
+      ).rejects.toMatchObject({ code: "restart_failed", result: { rollback: "failed" } });
+      await expect(readFile(options.configPath, "utf8")).resolves.toBe("{\"log-level\":\"warn\"}\n");
+      await expect(readFile(path.join(options.stateDir, "baseline.json"), "utf8")).resolves.toBe(
+        "{\"log-level\":\"info\"}\n"
+      );
+    });
+
+    it("preserves recovery material when both restart and rollback fail", async () => {
+      const runner = new DockerDaemonCommandRunner();
+      runner.restartFailures = 2;
+      const options = daemonOptions(runner);
+      await mkdir(path.dirname(options.configPath), { recursive: true });
+      await writeFile(options.configPath, "{}\n", "utf8");
+      const initial = await readDockerDaemonConfig(options);
+
+      await expect(
+        updateDockerDaemonConfig(
+          { content: "{\"debug\":true}\n", expectedRevision: initial.revision, restart: true, confirmed: true },
+          options
+        )
+      ).rejects.toMatchObject({ result: { rollback: "failed" } });
+      await expect(readFile(path.join(options.stateDir, "baseline.json"), "utf8")).resolves.toBe("{}\n");
+    });
+
+    it("serializes concurrent updates so one stale revision loses", async () => {
+      const options = daemonOptions();
+      const initial = await readDockerDaemonConfig(options);
+      const results = await Promise.allSettled([
+        updateDockerDaemonConfig(
+          { content: "{\"debug\":true}\n", expectedRevision: initial.revision, restart: false, confirmed: false },
+          options
+        ),
+        updateDockerDaemonConfig(
+          { content: "{\"debug\":false}\n", expectedRevision: initial.revision, restart: false, confirmed: false },
+          options
+        )
+      ]);
+
+      expect(results.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"]);
+      const rejected = results.find((result) => result.status === "rejected");
+      expect(rejected).toMatchObject({ reason: { code: "conflict" } });
+    });
+
+    it("requires explicit confirmation for restart", () => {
+      expect(() =>
+        validateDockerDaemonUpdateInput({
+          content: "{}",
+          expectedRevision: "0".repeat(64),
+          restart: true,
+          confirmed: false
+        })
+      ).toThrow("confirmation");
+    });
+  });
 });
 
 function storagePoolProposal() {
@@ -449,6 +647,36 @@ class StorageCommandRunner implements HelperCommandRunner {
       return "11111111-2222-3333-4444-555555555555\n";
     }
     return "";
+  }
+}
+
+class DockerDaemonCommandRunner implements HelperCommandRunner {
+  calls: string[] = [];
+  failValidation = false;
+  restartFailures = 0;
+  afterValidation: (() => Promise<void>) | null = null;
+  beforeRestartFailure: (() => Promise<void>) | null = null;
+
+  async run(command: string, args: string[]): Promise<string> {
+    this.calls.push([command, ...args].join(" "));
+    if (command === "dockerd" && args[0] === "--validate" && this.failValidation) {
+      throw new Error("unknown option");
+    }
+    if (command === "dockerd" && args[0] === "--validate" && this.afterValidation) {
+      const callback = this.afterValidation;
+      this.afterValidation = null;
+      await callback();
+    }
+    if (command === "systemctl" && args[0] === "restart" && this.restartFailures > 0) {
+      this.restartFailures -= 1;
+      if (this.beforeRestartFailure) {
+        const callback = this.beforeRestartFailure;
+        this.beforeRestartFailure = null;
+        await callback();
+      }
+      throw new Error("restart failed");
+    }
+    return command === "dockerd" && args[0] === "--version" ? "Docker version test\n" : "";
   }
 }
 

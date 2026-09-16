@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import path from "node:path";
 import { getNasRoot, getRootReadiness } from "@sigmaos/db";
 import { resolveSafeExistingPath } from "@sigmaos/nas-tools";
+import { parseDockerImageReference } from "@sigmaos/shared";
 import type {
   DockerContainerCreateInput,
   DockerCreateResult,
@@ -102,7 +103,8 @@ export async function prepareDockerCreate(
 export async function executeDockerCreate(
   prepared: PreparedDockerCreate,
   engine: DockerEngineRuntime,
-  operationId: string
+  operationId: string,
+  getRegistryAuth?: () => string | undefined
 ): Promise<DockerCreateResult> {
   const managedLabels = {
     ...prepared.engineInput.labels,
@@ -136,8 +138,12 @@ export async function executeDockerCreate(
 
   const policy = prepared.input.pullPolicy ?? "missing";
   let pulled = false;
+  const pullImage = () => {
+    const registryAuth = getRegistryAuth?.();
+    return engine.pullImage({ image: prepared.engineInput.image, ...(registryAuth ? { registryAuth } : {}) });
+  };
   if (policy === "always") {
-    await pullPhase(() => engine.pullImage({ image: prepared.engineInput.image }));
+    await pullPhase(pullImage);
     pulled = true;
   } else {
     const exists = await pullPhase(() => engine.imageExists(prepared.engineInput.image));
@@ -145,7 +151,7 @@ export async function executeDockerCreate(
       throw new DockerCreateValidationError("Docker image is not available locally");
     }
     if (policy === "missing" && !exists) {
-      await pullPhase(() => engine.pullImage({ image: prepared.engineInput.image }));
+      await pullPhase(pullImage);
       pulled = true;
     }
   }
@@ -846,6 +852,9 @@ function compareVersions(left: string, right: string) {
 }
 
 function imageReference(value: string) {
+  if (!parseDockerImageReference(value)) {
+    throw new DockerCreateValidationError("Docker image reference is invalid");
+  }
   if (value.includes("@")) {
     return value;
   }

@@ -18,8 +18,8 @@
       "@sigmaos/agent": ["packages/agent/src/index.ts"],
       "@sigmaos/db": ["packages/db/src/index.ts"],
       "@sigmaos/nas-tools": ["packages/nas-tools/src/index.ts"],
-      "@sigmaos/shared": ["packages/shared/src/index.ts"]
+      "@sigmaos/shared": ["packages/shared/src/index.ts"],
+      "@sigmaos/shared/docker-images": ["packages/shared/src/docker-images.ts"]
     }
   }
 }
-

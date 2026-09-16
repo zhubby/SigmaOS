@@ -2,6 +2,7 @@ import type { SigmaDatabase } from "@sigmaos/db";
 import type { PublicBuildInfo, SigmaConfig } from "@sigmaos/shared";
 import type { DockerComposeRuntime } from "./lib/docker-compose.js";
 import type { DockerEngineRuntime } from "./lib/docker-client.js";
+import type { DockerDaemonRuntime } from "./lib/docker-daemon.js";
 import type { ShareManagementDependencies } from "./lib/share-service.js";
 import type { SystemManagementDependencies } from "./lib/system-management.js";
 import type { TerminalRuntime } from "./lib/terminal.js";
@@ -16,6 +17,7 @@ export interface ApiRouteContext {
   docker?: {
     engine?: DockerEngineRuntime;
     compose?: DockerComposeRuntime;
+    daemon?: DockerDaemonRuntime;
   };
   vm?: VmRuntimeDependencies;
   shares?: ShareManagementDependencies;

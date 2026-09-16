@@ -10,6 +10,7 @@ import {
   getStorageOperationByApproval,
   getVmOperationByApproval,
   getNasRoot,
+  listDockerRegistryCredentials,
   listPendingApprovals,
   recordAppliedOperation,
   saveShareSettings,
@@ -26,12 +27,13 @@ import type {
   FileOperationProposal,
   PendingApprovalRecord,
   ShareOperationProposal,
-  StorageOperationProposal
-  , VmOperationProposal
+  StorageOperationProposal,
+  VmOperationProposal
 } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
 import { effectiveDockerConfig } from "../lib/settings.js";
-import { applyDockerOperation, safeDockerMessage } from "../lib/docker-service.js";
+import { redactDockerRegistrySecrets } from "../lib/docker-registry.js";
+import { applyDockerOperation } from "../lib/docker-service.js";
 import {
   applyShareOperation,
   safeShareMessage,
@@ -95,8 +97,15 @@ export function registerApprovalRoutes(server: FastifyInstance, context: ApiRout
         return;
       }
 
+      const registryCredentials = listDockerRegistryCredentials(db);
       try {
-        const metadata = await applyDockerOperation(currentConfig(), operation, proposal, context.docker);
+        const metadata = await applyDockerOperation(
+          currentConfig(),
+          operation,
+          proposal,
+          context.docker,
+          registryCredentials
+        );
         const applied = updateDockerOperationStatus(db, operation.id, "applied", {
           ...metadata,
           appliedAt: new Date().toISOString()
@@ -120,7 +129,7 @@ export function registerApprovalRoutes(server: FastifyInstance, context: ApiRout
         });
         return;
       } catch (error) {
-        const message = safeDockerMessage(error);
+        const message = redactDockerRegistrySecrets(error, registryCredentials);
         updateDockerOperationStatus(db, operation.id, "failed", {
           error: message,
           failedAt: new Date().toISOString()

@@ -6,12 +6,16 @@ import type {
   DockerSummary,
   SigmaConfig
 } from "@sigmaos/shared";
+import type { DockerRegistryCredentialRecord } from "@sigmaos/db";
 import { DockerComposeService, type DockerComposeRuntime } from "./docker-compose.js";
 import { DockerSocketClient, type DockerEngineRuntime } from "./docker-client.js";
+import { SystemDockerDaemonRuntime, type DockerDaemonRuntime } from "./docker-daemon.js";
+import { redactDockerRegistrySecrets } from "./docker-registry.js";
 
 export interface DockerRuntimeDependencies {
   engine?: DockerEngineRuntime;
   compose?: DockerComposeRuntime;
+  daemon?: DockerDaemonRuntime;
 }
 
 export function dockerEngine(config: DockerConfig, dependencies?: DockerRuntimeDependencies): DockerEngineRuntime {
@@ -32,8 +36,10 @@ export async function collectDockerSummary(
   config: SigmaConfig,
   dependencies?: DockerRuntimeDependencies
 ): Promise<DockerSummary> {
+  const daemon = dependencies?.daemon ?? new SystemDockerDaemonRuntime({ helperSocketPath: config.shares.helperSocketPath });
+  const daemonStatus = await daemon.getStatus();
   if (!config.docker.enabled) {
-    return dockerUnavailableSummary(config.docker, "disabled", null);
+    return dockerUnavailableSummary(config.docker, "disabled", null, daemonStatus);
   }
 
   const engine = dockerEngine(config.docker, dependencies);
@@ -48,6 +54,7 @@ export async function collectDockerSummary(
     return {
       collectedAt: new Date().toISOString(),
       enabled: true,
+      daemon: daemonStatus,
       engine: {
         status: "ready",
         ...info,
@@ -65,6 +72,7 @@ export async function collectDockerSummary(
         volumes: counts.volumes,
         ...aggregateContainerStats(containers)
       },
+      images: counts.imageDetails ?? [],
       networks: counts.networkDetails ?? [],
       volumes: counts.volumeDetails ?? [],
       containers,
@@ -73,7 +81,7 @@ export async function collectDockerSummary(
   } catch (error) {
     const composeProjects = await compose.listProjects([]).catch(() => []);
     return {
-      ...dockerUnavailableSummary(config.docker, "unavailable", safeDockerMessage(error)),
+      ...dockerUnavailableSummary(config.docker, "unavailable", safeDockerMessage(error), daemonStatus),
       composeProjects
     };
   }
@@ -83,7 +91,8 @@ export async function applyDockerOperation(
   config: SigmaConfig,
   operation: DockerOperationRecord,
   proposal: DockerOperationProposal,
-  dependencies?: DockerRuntimeDependencies
+  dependencies?: DockerRuntimeDependencies,
+  registryCredentials: DockerRegistryCredentialRecord[] = []
 ): Promise<Record<string, unknown>> {
   if (!config.docker.enabled) {
     throw new Error("Docker management is disabled");
@@ -108,12 +117,12 @@ export async function applyDockerOperation(
     case "compose_down":
     case "compose_pull":
     case "compose_restart": {
-      const result = await compose.runProjectAction(proposal);
+      const result = await compose.runProjectAction(proposal, registryCredentials);
       return {
         action: proposal.action,
         composeProjectId: proposal.composeProjectId,
         service: proposal.service ?? null,
-        output: result.output
+        output: redactDockerRegistrySecrets(result.output, registryCredentials, 16_000)
       };
     }
     case "console":
@@ -131,11 +140,20 @@ export async function applyDockerOperation(
 export function dockerUnavailableSummary(
   config: DockerConfig,
   status: DockerSummary["engine"]["status"],
-  error: string | null
+  error: string | null,
+  daemon: DockerSummary["daemon"] = {
+    state: "failed",
+    loadState: null,
+    activeState: null,
+    subState: null,
+    result: "collection-error",
+    collectedAt: new Date().toISOString()
+  }
 ): DockerSummary {
   return {
     collectedAt: new Date().toISOString(),
     enabled: config.enabled,
+    daemon,
     engine: {
       status,
       version: null,
@@ -161,6 +179,7 @@ export function dockerUnavailableSummary(
       memoryLimitBytes: null,
       memoryPercent: null
     },
+    images: [],
     networks: [],
     volumes: [],
     containers: [],

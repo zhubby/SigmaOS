@@ -2,11 +2,16 @@ import { execFile } from "node:child_process";
 import { chmod, chown, mkdir, rm } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
-import type { ShareApplyRequest } from "@sigmaos/shared";
+import type { DockerDaemonConfigUpdateInput, ShareApplyRequest } from "@sigmaos/shared";
 import {
   applyHostShareSettings,
   applyStoragePoolOperation,
+  dockerDaemonHelperStatus,
+  DockerDaemonHelperError,
+  readDockerDaemonConfig,
   safeShareHelperMessage,
+  updateDockerDaemonConfig,
+  validateDockerDaemonUpdateInput,
   validateStorageOperationRequest,
   validateStorageHelperRequest,
   type StorageHelperRequest
@@ -21,7 +26,10 @@ const COMMAND_MAX_BUFFER = 4 * 1024 * 1024;
 const server = http.createServer(async (request, response) => {
   if (
     request.method !== "POST" ||
-    (request.url !== "/apply" && request.url !== "/storage-command" && request.url !== "/storage-operation")
+    (request.url !== "/apply" &&
+      request.url !== "/storage-command" &&
+      request.url !== "/storage-operation" &&
+      request.url !== "/docker-daemon")
   ) {
     sendJson(response, 404, { error: "Not found" });
     return;
@@ -29,16 +37,23 @@ const server = http.createServer(async (request, response) => {
 
   try {
     const body = await readJsonBody(request);
-    const result =
-      request.url === "/apply"
-        ? await applyHostShareSettings(body as ShareApplyRequest)
-        : request.url === "/storage-command"
-          ? { stdout: await runStorageCommand(validateStorageHelperRequest(body)) }
-          : await applyStoragePoolOperation(validateStorageOperationRequest(body));
+    let result: unknown;
+    if (request.url === "/apply") {
+      result = await applyHostShareSettings(body as ShareApplyRequest);
+    } else if (request.url === "/storage-command") {
+      result = { stdout: await runStorageCommand(validateStorageHelperRequest(body)) };
+    } else if (request.url === "/storage-operation") {
+      result = await applyStoragePoolOperation(validateStorageOperationRequest(body));
+    } else {
+      result = await handleDockerDaemonRequest(body);
+    }
     sendJson(response, 200, result);
   } catch (error) {
-    sendJson(response, 400, {
-      error: safeShareHelperMessage(error)
+    sendJson(response, dockerDaemonHelperStatus(error), {
+      error: safeShareHelperMessage(error),
+      ...(error instanceof DockerDaemonHelperError
+        ? { code: error.code, ...(error.result ? { result: error.result } : {}) }
+        : {})
     });
   }
 });
@@ -64,6 +79,20 @@ async function listenOnSocket(instance: http.Server, socketPath: string, group: 
   } catch {
     // Package installs create the sigmaos group. Dev shells can run without it.
   }
+}
+
+async function handleDockerDaemonRequest(body: unknown): Promise<unknown> {
+  if (!isRecord(body) || (body.action !== "read" && body.action !== "update")) {
+    throw new DockerDaemonHelperError("Invalid Docker daemon helper request", "validation");
+  }
+  if (body.action === "read") {
+    return readDockerDaemonConfig();
+  }
+  return updateDockerDaemonConfig(validateDockerDaemonUpdateInput(body.input) as DockerDaemonConfigUpdateInput);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function readJsonBody(request: http.IncomingMessage): Promise<unknown> {

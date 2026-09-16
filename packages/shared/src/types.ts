@@ -885,6 +885,48 @@ export type DockerContainerState = "created" | "running" | "paused" | "restartin
 
 export type DockerEngineStatus = "disabled" | "ready" | "unavailable";
 
+export type DockerDaemonState =
+  | "running"
+  | "starting"
+  | "stopping"
+  | "stopped"
+  | "failed"
+  | "not_installed"
+  | "reconnecting";
+
+export interface DockerDaemonStatus {
+  state: DockerDaemonState;
+  loadState: string | null;
+  activeState: string | null;
+  subState: string | null;
+  result: string | null;
+  collectedAt: string;
+}
+
+export interface DockerDaemonConfigSnapshot {
+  path: "/etc/docker/daemon.json";
+  content: string;
+  revision: string;
+  exists: boolean;
+  restartPending: boolean;
+}
+
+export interface DockerDaemonConfigUpdateInput {
+  content: string;
+  expectedRevision: string;
+  restart: boolean;
+  confirmed: boolean;
+}
+
+export type DockerDaemonRollbackStatus = "not_required" | "succeeded" | "failed";
+
+export interface DockerDaemonConfigUpdateResult {
+  snapshot: DockerDaemonConfigSnapshot;
+  restarted: boolean;
+  rollback: DockerDaemonRollbackStatus;
+  error: string | null;
+}
+
 export type DockerOperationTargetType = "container" | "compose_project" | "console" | "volume" | "network";
 
 export type DockerOperationAction =
@@ -910,6 +952,59 @@ export interface DockerEngineSummary {
   architecture: string | null;
   dockerRootDir: string | null;
   error: string | null;
+}
+
+export interface DockerImageSummary {
+  id: string;
+  shortId: string;
+  tags: string[];
+  digests: string[];
+  createdAt: string | null;
+  sizeBytes: number;
+  sharedSizeBytes: number | null;
+  containerCount: number | null;
+}
+
+export interface DockerRegistryCredentialSummary {
+  id: string;
+  name: string;
+  serverAddress: string;
+  username: string;
+  credentialConfigured: boolean;
+  updatedAt: string;
+}
+
+export interface DockerRegistryCredentialCreateInput {
+  name: string;
+  serverAddress: string;
+  username: string;
+  password: string;
+}
+
+export interface DockerRegistryCredentialUpdateInput {
+  name?: string;
+  serverAddress?: string;
+  username?: string;
+  password?: string;
+}
+
+export interface DockerImagePullInput {
+  reference: string;
+}
+
+export interface DockerImagePullResult {
+  reference: string;
+}
+
+export interface DockerImageRemoveInput {
+  reference: string;
+  confirmed: boolean;
+}
+
+export interface DockerImageRemoveResult {
+  reference: string;
+  deleted: string[];
+  untagged: string[];
 }
 
 export interface DockerContainerSummary {
@@ -977,6 +1072,7 @@ export interface DockerComposeProjectSummary {
 export interface DockerSummary {
   collectedAt: string;
   enabled: boolean;
+  daemon: DockerDaemonStatus;
   engine: DockerEngineSummary;
   metrics: {
     containers: {
@@ -993,6 +1089,7 @@ export interface DockerSummary {
     memoryLimitBytes: number | null;
     memoryPercent: number | null;
   };
+  images: DockerImageSummary[];
   networks: DockerNetworkSummary[];
   volumes: DockerVolumeSummary[];
   containers: DockerContainerSummary[];

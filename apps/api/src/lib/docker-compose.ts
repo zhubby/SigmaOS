@@ -1,6 +1,8 @@
-import { lstat, readdir, realpath } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import type { DockerRegistryCredentialRecord } from "@sigmaos/db";
 import type {
   DockerComposeProjectSummary,
   DockerConfig,
@@ -8,6 +10,7 @@ import type {
   DockerOperationProposal
 } from "@sigmaos/shared";
 import { isPathInside } from "@sigmaos/nas-tools";
+import { dockerConfigAuths, redactDockerRegistrySecrets } from "./docker-registry.js";
 
 export interface DockerComposeRuntime {
   listProjects(containers: DockerContainerSummary[]): Promise<DockerComposeProjectSummary[]>;
@@ -15,7 +18,10 @@ export interface DockerComposeRuntime {
     projectId: string,
     containers?: DockerContainerSummary[]
   ): Promise<DockerComposeProjectSummary | null>;
-  runProjectAction(proposal: DockerOperationProposal): Promise<{ output: string }>;
+  runProjectAction(
+    proposal: DockerOperationProposal,
+    registryCredentials?: DockerRegistryCredentialRecord[]
+  ): Promise<{ output: string }>;
 }
 
 const COMPOSE_FILE_NAMES = new Set([
@@ -81,7 +87,10 @@ export class DockerComposeService implements DockerComposeRuntime {
     return projects.find((project) => project.id === projectId) ?? null;
   }
 
-  async runProjectAction(proposal: DockerOperationProposal): Promise<{ output: string }> {
+  async runProjectAction(
+    proposal: DockerOperationProposal,
+    registryCredentials: DockerRegistryCredentialRecord[] = []
+  ): Promise<{ output: string }> {
     if (!proposal.composeProjectId) {
       throw new Error("Compose project id is required");
     }
@@ -92,13 +101,27 @@ export class DockerComposeService implements DockerComposeRuntime {
     const runnableProject = await validateRunnableProject(project, this.config);
 
     const actionArgs = composeActionArgs(proposal);
-    const output = await runCommand(
-      this.config.composeCommand,
-      ["compose", "-f", runnableProject.filePath, ...actionArgs],
-      runnableProject.workingDir,
-      this.config.operationTimeoutMs
-    );
-    return { output };
+    const dockerConfigDirectory = composeNeedsRegistryAuth(proposal)
+      ? await createDockerConfig(registryCredentials)
+      : null;
+    try {
+      const output = await runCommand(
+        this.config.composeCommand,
+        ["compose", "-f", runnableProject.filePath, ...actionArgs],
+        runnableProject.workingDir,
+        this.config.operationTimeoutMs,
+        dockerConfigDirectory
+          ? { ...process.env, DOCKER_CONFIG: dockerConfigDirectory }
+          : process.env
+      );
+      return { output: redactDockerRegistrySecrets(output, registryCredentials, 16_000) };
+    } catch (error) {
+      throw new Error(redactDockerRegistrySecrets(error, registryCredentials));
+    } finally {
+      if (dockerConfigDirectory) {
+        await rm(dockerConfigDirectory, { recursive: true, force: true });
+      }
+    }
   }
 
   private async listServices(filePath: string, workingDir: string): Promise<string[]> {
@@ -219,12 +242,38 @@ async function validateComposeFile(
   };
 }
 
-function runCommand(command: string, args: string[], cwd: string, timeoutMs: number): Promise<string> {
+async function createDockerConfig(registryCredentials: DockerRegistryCredentialRecord[]): Promise<string> {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "sigmaos-docker-config-"));
+  try {
+    await chmod(directory, 0o700);
+    await writeFile(
+      path.join(directory, "config.json"),
+      `${JSON.stringify({ auths: dockerConfigAuths(registryCredentials) })}\n`,
+      { encoding: "utf8", mode: 0o600 }
+    );
+    return directory;
+  } catch (error) {
+    await rm(directory, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function composeNeedsRegistryAuth(proposal: DockerOperationProposal): boolean {
+  return proposal.action === "compose_pull" || proposal.action === "compose_up";
+}
+
+function runCommand(
+  command: string,
+  args: string[],
+  cwd: string,
+  timeoutMs: number,
+  env: NodeJS.ProcessEnv = process.env
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
       shell: false,
-      env: process.env,
+      env,
       stdio: ["ignore", "pipe", "pipe"]
     });
     let output = "";

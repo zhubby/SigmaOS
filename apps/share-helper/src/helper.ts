@@ -1,7 +1,11 @@
 import { execFile } from "node:child_process";
-import { access, chmod, chown, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { access, chmod, chown, lstat, mkdir, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
+  DockerDaemonConfigSnapshot,
+  DockerDaemonConfigUpdateInput,
+  DockerDaemonConfigUpdateResult,
   NasRootConfig,
   ShareApplyRequest,
   ShareApplyResult,
@@ -34,6 +38,25 @@ export interface ShareHelperOptions {
   managedRoots?: string[];
 }
 
+export interface DockerDaemonHelperOptions {
+  configPath?: string;
+  stateDir?: string;
+  commandRunner?: HelperCommandRunner;
+}
+
+export type DockerDaemonHelperErrorCode = "validation" | "conflict" | "unavailable" | "restart_failed";
+
+export class DockerDaemonHelperError extends Error {
+  constructor(
+    message: string,
+    readonly code: DockerDaemonHelperErrorCode,
+    readonly result?: DockerDaemonConfigUpdateResult
+  ) {
+    super(message);
+    this.name = "DockerDaemonHelperError";
+  }
+}
+
 export interface StorageHelperRequest {
   command: "mdadm" | "smartctl";
   args: string[];
@@ -63,6 +86,17 @@ const SERVICES_BY_PROTOCOL = {
 } as const satisfies Record<ShareProtocol, readonly string[]>;
 
 const ALL_SERVICES: string[] = [...new Set(Object.values(SERVICES_BY_PROTOCOL).flat())];
+const DOCKER_DAEMON_CONFIG_PATH = "/etc/docker/daemon.json" as const;
+const DOCKER_DAEMON_STATE_DIR = "/var/lib/sigmaos/docker-daemon";
+const DOCKER_DAEMON_MAX_BYTES = 256 * 1024;
+
+interface DockerDaemonTransaction {
+  baselineExists: boolean;
+  baselineRevision: string;
+  pendingRevision: string;
+}
+
+let dockerDaemonOperationQueue = Promise.resolve();
 
 export class NodeHelperCommandRunner implements HelperCommandRunner {
   run(command: string, args: string[], input?: string): Promise<string> {
@@ -282,6 +316,347 @@ export function safeShareHelperMessage(error: unknown): string {
     .replace(/password["']?\s*[:=]\s*["'][^"']+["']/giu, "password: [redacted]")
     .replace(/Authorization:\s*\S+/giu, "Authorization: [redacted]")
     .slice(0, 500);
+}
+
+export async function readDockerDaemonConfig(
+  options: DockerDaemonHelperOptions = {}
+): Promise<DockerDaemonConfigSnapshot> {
+  const configPath = options.configPath ?? DOCKER_DAEMON_CONFIG_PATH;
+  const stateDir = options.stateDir ?? DOCKER_DAEMON_STATE_DIR;
+  const current = await readDockerDaemonConfigFile(configPath);
+  const transaction = await readDockerDaemonTransaction(stateDir);
+  return dockerDaemonSnapshot(current, Boolean(transaction));
+}
+
+export function updateDockerDaemonConfig(
+  input: DockerDaemonConfigUpdateInput,
+  options: DockerDaemonHelperOptions = {}
+): Promise<DockerDaemonConfigUpdateResult> {
+  const operation = dockerDaemonOperationQueue.then(() => updateDockerDaemonConfigNow(input, options));
+  dockerDaemonOperationQueue = operation.then(
+    () => undefined,
+    () => undefined
+  );
+  return operation;
+}
+
+export function validateDockerDaemonUpdateInput(value: unknown): DockerDaemonConfigUpdateInput {
+  if (
+    !isRecord(value) ||
+    typeof value.content !== "string" ||
+    typeof value.expectedRevision !== "string" ||
+    typeof value.restart !== "boolean" ||
+    typeof value.confirmed !== "boolean"
+  ) {
+    throw new DockerDaemonHelperError("Invalid Docker daemon update request", "validation");
+  }
+  if (Buffer.byteLength(value.content, "utf8") > DOCKER_DAEMON_MAX_BYTES) {
+    throw new DockerDaemonHelperError("Docker daemon configuration exceeds 256 KiB", "validation");
+  }
+  if (!/^[a-f0-9]{64}$/u.test(value.expectedRevision)) {
+    throw new DockerDaemonHelperError("Docker daemon configuration revision is invalid", "validation");
+  }
+  if (value.restart && !value.confirmed) {
+    throw new DockerDaemonHelperError("Docker restart confirmation is required", "validation");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value.content) as unknown;
+  } catch {
+    throw new DockerDaemonHelperError("Docker daemon configuration is not valid JSON", "validation");
+  }
+  if (!isRecord(parsed)) {
+    throw new DockerDaemonHelperError("Docker daemon configuration must be a JSON object", "validation");
+  }
+  return {
+    content: value.content,
+    expectedRevision: value.expectedRevision,
+    restart: value.restart,
+    confirmed: value.confirmed
+  };
+}
+
+export function dockerDaemonHelperStatus(error: unknown): number {
+  if (!(error instanceof DockerDaemonHelperError)) {
+    return 400;
+  }
+  switch (error.code) {
+    case "conflict":
+      return 409;
+    case "unavailable":
+      return 503;
+    case "restart_failed":
+      return 502;
+    default:
+      return 400;
+  }
+}
+
+async function updateDockerDaemonConfigNow(
+  value: DockerDaemonConfigUpdateInput,
+  options: DockerDaemonHelperOptions
+): Promise<DockerDaemonConfigUpdateResult> {
+  const input = validateDockerDaemonUpdateInput(value);
+  const configPath = options.configPath ?? DOCKER_DAEMON_CONFIG_PATH;
+  const stateDir = options.stateDir ?? DOCKER_DAEMON_STATE_DIR;
+  const runner = options.commandRunner ?? new NodeHelperCommandRunner();
+  let current = await readDockerDaemonConfigFile(configPath);
+  if (current.revision !== input.expectedRevision) {
+    throw new DockerDaemonHelperError("Docker daemon configuration changed; reload before saving", "conflict");
+  }
+
+  await assertDockerdAvailable(runner);
+  await validateDockerDaemonContent(input.content, configPath, runner);
+  current = await readDockerDaemonConfigFile(configPath);
+  if (current.revision !== input.expectedRevision) {
+    throw new DockerDaemonHelperError("Docker daemon configuration changed; reload before saving", "conflict");
+  }
+  let transaction = await readDockerDaemonTransaction(stateDir);
+  const nextRevision = dockerDaemonRevision(true, input.content);
+  const contentChanged = current.revision !== nextRevision;
+
+  if (contentChanged || input.restart) {
+    transaction ??= await createDockerDaemonBaseline(stateDir, current);
+  }
+  if (contentChanged) {
+    await atomicWriteFile(configPath, input.content, 0o644, async () => {
+      const latest = await readDockerDaemonConfigFile(configPath);
+      if (latest.revision !== input.expectedRevision) {
+        throw new DockerDaemonHelperError("Docker daemon configuration changed; reload before saving", "conflict");
+      }
+    });
+    transaction = { ...transaction!, pendingRevision: nextRevision };
+    await writeDockerDaemonTransaction(stateDir, transaction);
+  } else if (input.restart && transaction?.pendingRevision !== nextRevision) {
+    transaction = { ...transaction!, pendingRevision: nextRevision };
+    await writeDockerDaemonTransaction(stateDir, transaction);
+  }
+
+  if (!input.restart) {
+    const snapshot = await readDockerDaemonConfig(options);
+    if (snapshot.revision !== nextRevision) {
+      throw new DockerDaemonHelperError("Docker daemon configuration changed; reload before saving", "conflict");
+    }
+    return {
+      snapshot,
+      restarted: false,
+      rollback: "not_required",
+      error: null
+    };
+  }
+
+  const restartCandidate = await readDockerDaemonConfigFile(configPath);
+  if (restartCandidate.revision !== nextRevision) {
+    throw new DockerDaemonHelperError("Docker daemon configuration changed; reload before restarting", "conflict");
+  }
+
+  try {
+    await runner.run("systemctl", ["restart", "docker.service"]);
+    await clearDockerDaemonTransaction(stateDir);
+    return {
+      snapshot: await readDockerDaemonConfig(options),
+      restarted: true,
+      rollback: "not_required",
+      error: null
+    };
+  } catch {
+    const rollback = await rollbackDockerDaemonConfig(configPath, stateDir, transaction!, runner);
+    const result: DockerDaemonConfigUpdateResult = {
+      snapshot: await readDockerDaemonConfig(options),
+      restarted: false,
+      rollback,
+      error:
+        rollback === "succeeded"
+          ? "Docker restart failed; the last applied configuration was restored"
+          : "Docker restart and automatic rollback failed; manual recovery is required"
+    };
+    throw new DockerDaemonHelperError(result.error ?? "Docker restart failed", "restart_failed", result);
+  }
+}
+
+async function assertDockerdAvailable(runner: HelperCommandRunner): Promise<void> {
+  try {
+    await runner.run("dockerd", ["--version"]);
+  } catch {
+    throw new DockerDaemonHelperError("Docker daemon is not installed or unavailable", "unavailable");
+  }
+}
+
+async function validateDockerDaemonContent(
+  content: string,
+  configPath: string,
+  runner: HelperCommandRunner
+): Promise<void> {
+  await mkdir(path.dirname(configPath), { recursive: true });
+  const validationPath = path.join(path.dirname(configPath), `.sigmaos-daemon-${randomUUID()}.json`);
+  try {
+    await atomicWriteFile(validationPath, content, 0o600);
+    await runner.run("dockerd", ["--validate", "--config-file", validationPath]);
+  } catch {
+    throw new DockerDaemonHelperError("Docker daemon rejected the configuration", "validation");
+  } finally {
+    await rm(validationPath, { force: true });
+  }
+}
+
+async function createDockerDaemonBaseline(
+  stateDir: string,
+  current: DockerDaemonConfigFile
+): Promise<DockerDaemonTransaction> {
+  await mkdir(stateDir, { recursive: true, mode: 0o700 });
+  if (current.exists) {
+    await atomicWriteFile(path.join(stateDir, "baseline.json"), current.content, 0o600);
+  } else {
+    await rm(path.join(stateDir, "baseline.json"), { force: true });
+  }
+  const transaction = {
+    baselineExists: current.exists,
+    baselineRevision: current.revision,
+    pendingRevision: current.revision
+  };
+  await writeDockerDaemonTransaction(stateDir, transaction);
+  return transaction;
+}
+
+async function rollbackDockerDaemonConfig(
+  configPath: string,
+  stateDir: string,
+  transaction: DockerDaemonTransaction,
+  runner: HelperCommandRunner
+): Promise<"succeeded" | "failed"> {
+  try {
+    if (transaction.baselineExists) {
+      const baseline = await readFile(path.join(stateDir, "baseline.json"), "utf8");
+      if (dockerDaemonRevision(true, baseline) !== transaction.baselineRevision) {
+        return "failed";
+      }
+      await atomicWriteFile(configPath, baseline, 0o644, async () => {
+        const current = await readDockerDaemonConfigFile(configPath);
+        if (current.revision !== transaction.pendingRevision) {
+          throw new DockerDaemonHelperError("Docker daemon configuration changed during restart", "conflict");
+        }
+      });
+    } else {
+      const current = await readDockerDaemonConfigFile(configPath);
+      if (current.revision !== transaction.pendingRevision) {
+        return "failed";
+      }
+      await rm(configPath, { force: true });
+    }
+    await runner.run("systemctl", ["restart", "docker.service"]);
+    await clearDockerDaemonTransaction(stateDir);
+    return "succeeded";
+  } catch {
+    return "failed";
+  }
+}
+
+interface DockerDaemonConfigFile {
+  content: string;
+  revision: string;
+  exists: boolean;
+}
+
+async function readDockerDaemonConfigFile(configPath: string): Promise<DockerDaemonConfigFile> {
+  try {
+    const fileStat = await lstat(configPath);
+    if (fileStat.isSymbolicLink() || !fileStat.isFile()) {
+      throw new DockerDaemonHelperError("Docker daemon configuration must be a regular file", "validation");
+    }
+    const content = await readFile(configPath, "utf8");
+    return { content, revision: dockerDaemonRevision(true, content), exists: true };
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return {
+        content: "{\n}\n",
+        revision: dockerDaemonRevision(false, ""),
+        exists: false
+      };
+    }
+    throw error;
+  }
+}
+
+function dockerDaemonSnapshot(
+  file: DockerDaemonConfigFile,
+  restartPending: boolean
+): DockerDaemonConfigSnapshot {
+  return {
+    path: DOCKER_DAEMON_CONFIG_PATH,
+    content: file.content,
+    revision: file.revision,
+    exists: file.exists,
+    restartPending
+  };
+}
+
+function dockerDaemonRevision(exists: boolean, content: string): string {
+  return createHash("sha256")
+    .update(exists ? "file\0" : "missing\0")
+    .update(content)
+    .digest("hex");
+}
+
+async function readDockerDaemonTransaction(stateDir: string): Promise<DockerDaemonTransaction | null> {
+  try {
+    const parsed = JSON.parse(await readFile(path.join(stateDir, "transaction.json"), "utf8")) as unknown;
+    if (
+      !isRecord(parsed) ||
+      typeof parsed.baselineExists !== "boolean" ||
+      typeof parsed.baselineRevision !== "string" ||
+      typeof parsed.pendingRevision !== "string"
+    ) {
+      throw new Error("Docker daemon transaction state is invalid");
+    }
+    return {
+      baselineExists: parsed.baselineExists,
+      baselineRevision: parsed.baselineRevision,
+      pendingRevision: parsed.pendingRevision
+    };
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function writeDockerDaemonTransaction(stateDir: string, transaction: DockerDaemonTransaction): Promise<void> {
+  await mkdir(stateDir, { recursive: true, mode: 0o700 });
+  await atomicWriteFile(path.join(stateDir, "transaction.json"), `${JSON.stringify(transaction)}\n`, 0o600);
+}
+
+async function clearDockerDaemonTransaction(stateDir: string): Promise<void> {
+  await rm(path.join(stateDir, "transaction.json"), { force: true });
+  await rm(path.join(stateDir, "baseline.json"), { force: true });
+}
+
+async function atomicWriteFile(
+  filePath: string,
+  content: string,
+  mode: number,
+  beforeRename?: () => Promise<void>
+): Promise<void> {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    const handle = await open(tempPath, "wx", mode);
+    try {
+      await handle.writeFile(content, "utf8");
+      await handle.sync();
+      await handle.chmod(mode);
+      if (typeof process.getuid === "function" && process.getuid() === 0) {
+        await handle.chown(0, 0);
+      }
+    } finally {
+      await handle.close();
+    }
+    await beforeRename?.();
+    await rename(tempPath, filePath);
+  } catch (error) {
+    await rm(tempPath, { force: true });
+    throw error;
+  }
 }
 
 export function servicesForSettings(settings: ShareSettingsRecord): string[] {

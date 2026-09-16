@@ -58,6 +58,7 @@ import {
   type DockerOperation,
   type DockerSummary,
   type DockerLifecycleProposalInput,
+  type DockerDaemonStatus,
   type NasRoot,
   type PendingApproval
   , type VmSummary
@@ -70,7 +71,14 @@ import { ShareManagementPanel } from "./ShareManagementPanel.js";
 import { applyTerminalOptions, terminalOptions } from "../../lib/terminal-theme.js";
 import { initialVmCreateForm, validateVmCreateStep, type VmCreateForm } from "../../lib/vm-create-form.js";
 import { DockerCreateDialogs } from "./DockerCreateDialogs.js";
+import { DockerDaemonSettingsDialog } from "./DockerDaemonSettingsDialog.js";
+import { DockerImageManagement } from "./DockerImageManagement.js";
 import { ManagementSkeletonBody, SkeletonBlock } from "./ManagementSkeleton.js";
+import {
+  dockerDaemonTone,
+  parseDockerDaemonEvent,
+  reconnectingDockerDaemonStatus
+} from "../../lib/docker-daemon.js";
 import {
   StorageFilePickerDialog,
   type StorageFilePickerPool,
@@ -956,6 +964,8 @@ function DockerManagementPanel({
 }) {
   const { t } = useTranslation();
   const [summary, setSummary] = useState<DockerSummary | null>(null);
+  const [daemonStatus, setDaemonStatus] = useState<DockerDaemonStatus | null>(null);
+  const [daemonSettingsOpen, setDaemonSettingsOpen] = useState(false);
   const [pressureHistory, setPressureHistory] = useState<DockerPressurePoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -976,7 +986,6 @@ function DockerManagementPanel({
     error: string | null;
   } | null>(null);
   const [consoleSession, setConsoleSession] = useState<DockerConsoleSession | null>(null);
-  const dockerState = error ? "unavailable" : (summary?.engine.status ?? (loading ? "unavailable" : "disabled"));
   const containers = summary?.containers ?? [];
   const composeProjects = summary?.composeProjects ?? [];
   const dockerEnabled = Boolean(summary?.enabled);
@@ -1020,6 +1029,7 @@ function DockerManagementPanel({
           return;
         }
         setSummary(nextSummary);
+        setDaemonStatus((current) => current ?? nextSummary.daemon);
         recordPressureSample(nextSummary);
         if (nextSummary.engine.error) {
           onNotifyError(nextSummary.engine.error);
@@ -1036,6 +1046,23 @@ function DockerManagementPanel({
         }
       }
     }
+  }, []);
+
+  useEffect(() => {
+    if (typeof EventSource === "undefined") {
+      return;
+    }
+    const source = new EventSource("/api/docker/daemon/events");
+    const handleStatus = (event: MessageEvent<string>) => {
+      const nextStatus = parseDockerDaemonEvent(event.data);
+      if (nextStatus) setDaemonStatus(nextStatus);
+    };
+    source.addEventListener("docker.daemon.status", handleStatus as EventListener);
+    source.onerror = () => setDaemonStatus(reconnectingDockerDaemonStatus());
+    return () => {
+      source.removeEventListener("docker.daemon.status", handleStatus as EventListener);
+      source.close();
+    };
   }, []);
 
   useEffect(() => {
@@ -1213,11 +1240,11 @@ function DockerManagementPanel({
           </div>
         </div>
         <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
-          {loading ? (
+          {loading && !daemonStatus ? (
             <SkeletonBlock className="management-skeleton-status" width="66px" />
           ) : (
-            <span className="management-status-pill" data-state={dockerStatusTone(dockerState)}>
-              {dockerStatusLabel(summary, false, error, t)}
+            <span className="management-status-pill" data-state={daemonStatus ? dockerDaemonTone(daemonStatus.state) : "neutral"}>
+              {dockerStatusLabel(daemonStatus, loading, t)}
             </span>
           )}
           <button type="button" onClick={refreshSummary} disabled={loading}>
@@ -1225,7 +1252,7 @@ function DockerManagementPanel({
             <span>{t("common.actions.refresh")}</span>
           </button>
           <div className={`docker-create-menu${createMenuOpen ? " is-open" : ""}`} ref={createMenuRef}>
-            <button type="button" aria-haspopup="menu" aria-expanded={createMenuOpen} aria-controls="docker-create-menu-items" onClick={() => setCreateMenuOpen((open) => !open)} disabled={!canUseDocker || Boolean(pendingAction) || !sessionId} title={t("workspace.management.docker.create.actions.openMenu")}><Plus size={15} /><span>{t("workspace.management.docker.create.actions.create")}</span></button>
+            <button type="button" aria-haspopup="menu" aria-expanded={createMenuOpen} aria-controls="docker-create-menu-items" onClick={() => setCreateMenuOpen((open) => !open)} disabled={!canUseDocker || Boolean(pendingAction) || !sessionId} title={t("workspace.management.docker.create.actions.openMenu")}><Plus aria-hidden="true" size={15} /><span>{t("workspace.management.docker.create.actions.create")}</span></button>
             <div className="docker-create-menu-items" id="docker-create-menu-items" role="menu">
               <button type="button" role="menuitem" onClick={() => { setCreateMenuOpen(false); setCreateKind("container"); }} disabled={!canUseDocker || Boolean(pendingAction) || !sessionId}>{t("workspace.management.docker.create.kinds.container")}</button>
               <button type="button" role="menuitem" onClick={() => { setCreateMenuOpen(false); setCreateKind("volume"); }} disabled={!canUseDocker || Boolean(pendingAction) || !sessionId}>{t("workspace.management.docker.create.kinds.volume")}</button>
@@ -1243,10 +1270,21 @@ function DockerManagementPanel({
           </div>
           <div className="management-command-copy">
             <div>
-              <span className="management-status-pill" data-state={dockerStatusTone(dockerState)}>
-                {dockerStatusLabel(summary, loading, error, t)}
+              <span className="management-status-pill" data-state={daemonStatus ? dockerDaemonTone(daemonStatus.state) : "neutral"}>
+                {dockerStatusLabel(daemonStatus, loading, t)}
               </span>
-              <h3>{t("workspace.management.docker.title")}</h3>
+              <div className="docker-command-title-row">
+                <h3>{t("workspace.management.docker.title")}</h3>
+                <button
+                  type="button"
+                  className="management-icon-action docker-daemon-settings-trigger"
+                  onClick={() => setDaemonSettingsOpen(true)}
+                  aria-label={t("workspace.management.docker.daemon.openSettings")}
+                  title={t("workspace.management.docker.daemon.openSettings")}
+                >
+                  <Settings2 aria-hidden="true" size={15} />
+                </button>
+              </div>
               <p>{dockerStatusDetail(summary, loading, error, t)}</p>
             </div>
             <dl className="management-fact-list">
@@ -1334,6 +1372,16 @@ function DockerManagementPanel({
           )}
         </section>
 
+        <DockerImageManagement
+          images={summary?.images ?? []}
+          engineReady={canUseDocker}
+          engineError={summary?.engine.error ?? error}
+          locale={locale}
+          onRefreshSummary={refreshSummary}
+          onNotifySuccess={(message) => onNotifySuccess(message)}
+          onNotifyError={(message) => onNotifyError(message)}
+        />
+
         <div className="docker-runtime-layout">
           <DockerRuntimePressure summary={summary} history={pressureHistory} locale={locale} t={t} />
           <DockerNetworkInventory summary={summary} locale={locale} t={t} />
@@ -1384,6 +1432,14 @@ function DockerManagementPanel({
           onAction={(action) => void executeContainerAction(detailsState.container, action)}
           onLogs={() => void openLogs(detailsState.container)}
           onConsole={() => void requestConsole(detailsState.container)}
+        />
+      ) : null}
+      {daemonSettingsOpen ? (
+        <DockerDaemonSettingsDialog
+          status={daemonStatus}
+          onClose={() => setDaemonSettingsOpen(false)}
+          onRefreshSummary={refreshSummary}
+          onNotifySuccess={(message) => onNotifySuccess(message)}
         />
       ) : null}
       {createKind && sessionId && summary ? <DockerCreateDialogs kind={createKind} sessionId={sessionId} summary={summary} roots={roots} onClose={() => setCreateKind(null)} onError={(message) => onNotifyError(message)} onComplete={async (result) => {
@@ -2026,16 +2082,6 @@ function DockerStorageInventory({ summary, t }: { summary: DockerSummary | null;
   );
 }
 
-function dockerStatusTone(status: DockerSummary["engine"]["status"]): StatusTone {
-  if (status === "ready") {
-    return "ready";
-  }
-  if (status === "unavailable") {
-    return "warning";
-  }
-  return "offline";
-}
-
 function vmHostStatusLabel(status: VmSummary["host"]["status"] | undefined, loading: boolean, t: Translate): string {
   if (loading) {
     return String(t("common.states.loading"));
@@ -2061,24 +2107,14 @@ function vmStateLabel(state: VmSummary["instances"][number]["state"], t: Transla
 }
 
 function dockerStatusLabel(
-  summary: DockerSummary | null,
+  status: DockerDaemonStatus | null,
   loading: boolean,
-  error: string | null,
   t: Translate
 ): string {
-  if (loading) {
+  if (!status && loading) {
     return String(t("common.states.loading"));
   }
-  if (error) {
-    return String(t("common.states.unavailable"));
-  }
-  if (!summary?.enabled) {
-    return String(t("workspace.management.docker.states.disabled"));
-  }
-  if (summary.engine.status === "ready") {
-    return String(t("workspace.management.states.ready"));
-  }
-  return String(t("common.states.unavailable"));
+  return String(t(`workspace.management.docker.daemon.states.${status?.state ?? "reconnecting"}`));
 }
 
 function dockerStatusDetail(
@@ -2094,10 +2130,12 @@ function dockerStatusDetail(
     return String(t("common.states.unavailable"));
   }
   if (!summary?.enabled) {
-    return String(t("workspace.management.docker.disabledDetail"));
+    return summary?.engine.error
+      ? String(t("workspace.management.docker.daemon.engineUnavailable"))
+      : String(t("workspace.management.docker.disabledDetail"));
   }
   return summary.engine.error
-    ? String(t("common.states.unavailable"))
+    ? String(t("workspace.management.docker.daemon.engineUnavailable"))
     : String(t("workspace.management.docker.engineDetail"));
 }
 

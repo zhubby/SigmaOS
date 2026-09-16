@@ -234,10 +234,18 @@ describe("native packaging artifacts", () => {
     expect(unit).toContain("/run/mdadm");
     expect(unit).toContain("ProtectSystem=strict");
     expect(unit).toContain("ReadWritePaths=/etc/sigmaos");
+    expect(unit).toContain("/etc/fstab -/etc/docker -/etc/mdadm");
     expect(unit).toContain("CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER");
     expect(unit).toContain("CAP_MKNOD");
     expect(unit).toContain("CAP_SYS_ADMIN");
     expect(unit).toContain("CAP_SYS_RAWIO");
+    const apiUnit = await readPackagingFile("systemd", "sigmaos-api.service");
+    expect(apiUnit).toContain("User=sigmaos");
+    expect(apiUnit).toContain("CapabilityBoundingSet=");
+    expect(apiUnit).not.toContain("/etc/docker");
+    const postinst = await readPackagingFile("debian", "postinst");
+    expect(postinst).toContain("install -d -o root -g root -m 0700 /var/lib/sigmaos/docker-daemon");
+    expect(postinst).toContain("chown -R root:root /var/lib/sigmaos/docker-daemon");
   });
 
   it("ships an isolated user terminal broker", async () => {

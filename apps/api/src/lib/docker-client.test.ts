@@ -11,7 +11,8 @@ let server: http.Server;
 let daemonApiVersion: string;
 let daemonMinimumApiVersion: string;
 let pullResponse: "success" | "error";
-const receivedRequests: Array<{ method: string; url: string; body: unknown }> = [];
+let imageInUse: boolean;
+const receivedRequests: Array<{ method: string; url: string; body: unknown; registryAuth?: string }> = [];
 
 beforeEach(async () => {
   tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-docker-client-"));
@@ -19,6 +20,7 @@ beforeEach(async () => {
   daemonApiVersion = "1.55";
   daemonMinimumApiVersion = "1.24";
   pullResponse = "success";
+  imageInUse = false;
   receivedRequests.length = 0;
   server = http.createServer(async (request, response) => {
     const url = request.url ?? "";
@@ -55,7 +57,14 @@ beforeEach(async () => {
       return;
     }
     if (url.startsWith("/v1.55/images/create?")) {
-      receivedRequests.push({ method: request.method ?? "", url, body: null });
+      receivedRequests.push({
+        method: request.method ?? "",
+        url,
+        body: null,
+        ...(typeof request.headers["x-registry-auth"] === "string"
+          ? { registryAuth: request.headers["x-registry-auth"] }
+          : {})
+      });
       response.setHeader("Content-Type", "application/json");
       if (pullResponse === "error") {
         response.write('{"status":"Pulling fs layer"}\n{"errorDetail":{"message":"registry denied"');
@@ -94,6 +103,7 @@ beforeEach(async () => {
           Id: "abcdef1234567890",
           Names: ["/media"],
           Image: "jellyfin:latest",
+          ImageID: imageInUse ? "sha256:1111111111112222" : "sha256:jellyfin",
           State: "running",
           Status: "Up 2 minutes",
           Created: 1,
@@ -149,8 +159,28 @@ beforeEach(async () => {
       });
       return;
     }
-    if (url === "/v1.55/images/json") {
-      sendJson(response, [{ Id: "image-1" }, { Id: "image-2" }]);
+    if (url === "/v1.55/images/json?shared-size=true&containers=true") {
+      sendJson(response, [
+        {
+          Id: "sha256:1111111111112222",
+          RepoTags: ["alpine:latest", "<none>:<none>"],
+          RepoDigests: ["alpine@sha256:abc"],
+          Created: 1_700_000_000,
+          Size: 7_000_000,
+          SharedSize: 1024,
+          Containers: 2
+        },
+        { Id: "sha256:2222222222223333", RepoTags: null, RepoDigests: null, Containers: -1 }
+      ]);
+      return;
+    }
+    if (url === "/v1.55/images/alpine%3Alatest/json") {
+      sendJson(response, { Id: "sha256:1111111111112222" });
+      return;
+    }
+    if (url === "/v1.55/images/alpine%3Alatest?force=false&noprune=true" && request.method === "DELETE") {
+      receivedRequests.push({ method: request.method, url, body: null });
+      sendJson(response, [{ Untagged: "alpine:latest" }, { Deleted: "sha256:1111111111112222" }]);
       return;
     }
     if (url === "/v1.55/networks") {
@@ -189,6 +219,28 @@ describe("DockerSocketClient", () => {
     });
     await expect(client.getCounts()).resolves.toEqual({
       images: 2,
+      imageDetails: [
+        {
+          id: "sha256:1111111111112222",
+          shortId: "111111111111",
+          tags: ["alpine:latest"],
+          digests: ["alpine@sha256:abc"],
+          createdAt: "2023-11-14T22:13:20.000Z",
+          sizeBytes: 7_000_000,
+          sharedSizeBytes: 1024,
+          containerCount: 2
+        },
+        {
+          id: "sha256:2222222222223333",
+          shortId: "222222222222",
+          tags: [],
+          digests: [],
+          createdAt: null,
+          sizeBytes: 0,
+          sharedSizeBytes: null,
+          containerCount: null
+        }
+      ],
       networks: 1,
       volumes: 3,
       networkDetails: [{ id: "network-1", name: "bridge", driver: "bridge", scope: "local", containerCount: 1 }],
@@ -376,18 +428,50 @@ describe("DockerSocketClient", () => {
     });
   });
 
-  it("splits pull tags correctly, omits tags for digests, and surfaces NDJSON errors", async () => {
+  it("splits pull tags, sends registry authentication, and surfaces NDJSON errors", async () => {
     const client = new DockerSocketClient({ socketPath, timeoutMs: 1000 });
 
-    await client.pullImage({ image: "registry.local:5000/media/server:2.1" });
+    await client.pullImage({ image: "registry.local:5000/media/server:2.1", registryAuth: "encoded-auth" });
     await client.pullImage({ image: "registry.local:5000/media/server@sha256:abcdef" });
-    expect(receivedRequests.map((request) => request.url)).toEqual([
-      "/v1.55/images/create?fromImage=registry.local%3A5000%2Fmedia%2Fserver&tag=2.1",
-      "/v1.55/images/create?fromImage=registry.local%3A5000%2Fmedia%2Fserver%40sha256%3Aabcdef"
+    expect(receivedRequests).toEqual([
+      {
+        method: "POST",
+        url: "/v1.55/images/create?fromImage=registry.local%3A5000%2Fmedia%2Fserver&tag=2.1",
+        body: null,
+        registryAuth: "encoded-auth"
+      },
+      {
+        method: "POST",
+        url: "/v1.55/images/create?fromImage=registry.local%3A5000%2Fmedia%2Fserver%40sha256%3Aabcdef",
+        body: null
+      }
     ]);
 
     pullResponse = "error";
     await expect(client.pullImage({ image: "library/private:latest" })).rejects.toThrow("registry denied");
+  });
+
+  it("removes images without force or parent pruning", async () => {
+    const client = new DockerSocketClient({ socketPath, timeoutMs: 1000 });
+
+    await expect(client.removeImage("alpine:latest")).resolves.toEqual({
+      reference: "alpine:latest",
+      deleted: ["sha256:1111111111112222"],
+      untagged: ["alpine:latest"]
+    });
+    expect(receivedRequests).toEqual([{
+      method: "DELETE",
+      url: "/v1.55/images/alpine%3Alatest?force=false&noprune=true",
+      body: null
+    }]);
+  });
+
+  it("rejects referenced image tags before sending a deletion request", async () => {
+    const client = new DockerSocketClient({ socketPath, timeoutMs: 1000 });
+    imageInUse = true;
+    await expect(client.removeImage("alpine:latest")).rejects.toMatchObject({ statusCode: 409 });
+    expect(receivedRequests).toEqual([]);
+    await expect(client.removeImage("library/missing:latest")).rejects.toMatchObject({ statusCode: 404 });
   });
 
   it("creates local volumes and configured networks and preserves Engine errors", async () => {

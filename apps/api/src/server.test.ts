@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { EventEmitter } from "node:events";
 import http from "node:http";
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -10,6 +11,7 @@ import {
   createPendingApproval,
   createStorageOperationApproval,
   createPiToolCallApproval,
+  createDockerRegistryCredential,
   createSession,
   createUserMessageAndJob,
   ensureNasRoots,
@@ -26,6 +28,7 @@ import {
   getTrashEntry,
   listEvents,
   listDockerOperations,
+  listDockerRegistryCredentials,
   listFileOperations,
   listMessages,
   listPendingApprovals,
@@ -36,11 +39,18 @@ import {
   upsertIndexedFile,
   upsertHealthAlert,
   updateJobStatus,
+  updateDockerRegistryCredential,
+  type DockerRegistryCredentialRecord,
   type SigmaDatabase
 } from "@sigmaos/db";
 import type {
   DockerComposeProjectSummary,
   DockerContainerSummary,
+  DockerDaemonConfigSnapshot,
+  DockerDaemonConfigUpdateInput,
+  DockerDaemonConfigUpdateResult,
+  DockerDaemonStatus,
+  DockerImageSummary,
   DockerOperationProposal,
   ShareApplyRequest,
   ShareApplyResult,
@@ -48,7 +58,9 @@ import type {
   StorageOperationProposal
 } from "@sigmaos/shared";
 import type { DockerComposeRuntime } from "./lib/docker-compose.js";
-import type { DockerEngineRuntime, DockerExecStream } from "./lib/docker-client.js";
+import { DockerRequestError, type DockerEngineRuntime, type DockerExecStream } from "./lib/docker-client.js";
+import { DockerDaemonRequestError, type DockerDaemonRuntime } from "./lib/docker-daemon.js";
+import { streamDockerDaemonEvents } from "./routes/docker.js";
 import type { SystemCommandRunner } from "./lib/system-management.js";
 import { buildServer as buildApiServer, type ServerDependencies } from "./server.js";
 
@@ -1834,7 +1846,8 @@ describe("API server", () => {
   });
 
   it("returns a stable disabled Docker summary", async () => {
-    const server = await buildServer({ config: testConfig(tempDir), db });
+    const daemon = new FakeDockerDaemon();
+    const server = await buildServer({ config: testConfig(tempDir), db, docker: { daemon } });
     const response = await server.inject({
       method: "GET",
       url: "/api/docker/summary"
@@ -1844,6 +1857,7 @@ describe("API server", () => {
     expect(response.json()).toMatchObject({
       summary: {
         enabled: false,
+        daemon: { state: "running", activeState: "active" },
         engine: {
           status: "disabled",
           error: null
@@ -1858,6 +1872,142 @@ describe("API server", () => {
       }
     });
     await server.close();
+  });
+
+  it("reads and updates Docker daemon configuration through the privileged runtime", async () => {
+    const daemon = new FakeDockerDaemon();
+    const server = await buildServer({ config: testConfig(tempDir), db, docker: { daemon } });
+    const loaded = await server.inject({ method: "GET", url: "/api/docker/daemon/config" });
+    expect(loaded.statusCode).toBe(200);
+    expect(loaded.json()).toMatchObject({ config: { path: "/etc/docker/daemon.json", exists: true } });
+
+    const updated = await server.inject({
+      method: "PUT",
+      url: "/api/docker/daemon/config",
+      payload: {
+        content: '{"live-restore":true}\n',
+        expectedRevision: "a".repeat(64),
+        restart: true,
+        confirmed: true
+      }
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(daemon.updates).toHaveLength(1);
+    expect(updated.json()).toMatchObject({ result: { restarted: true, rollback: "not_required" } });
+
+    const missingConfirmation = await server.inject({
+      method: "PUT",
+      url: "/api/docker/daemon/config",
+      payload: {
+        content: "{}",
+        expectedRevision: "a".repeat(64),
+        restart: true,
+        confirmed: false
+      }
+    });
+    expect(missingConfirmation.statusCode).toBe(400);
+    expect(daemon.updates).toHaveLength(1);
+
+    const nonObjectJson = await server.inject({
+      method: "PUT",
+      url: "/api/docker/daemon/config",
+      payload: {
+        content: "[]",
+        expectedRevision: "a".repeat(64),
+        restart: false,
+        confirmed: false
+      }
+    });
+    expect(nonObjectJson.statusCode).toBe(400);
+    expect(daemon.updates).toHaveLength(1);
+    await server.close();
+  });
+
+  it("returns 503 without exposing helper details when daemon configuration is unavailable", async () => {
+    const daemon = new FakeDockerDaemon();
+    daemon.getError = new DockerDaemonRequestError("helper token=private", 503);
+    const server = await buildServer({ config: testConfig(tempDir), db, docker: { daemon } });
+
+    const response = await server.inject({ method: "GET", url: "/api/docker/daemon/config" });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: "helper token: [redacted]" });
+    await server.close();
+  });
+
+  it("preserves helper conflict and rollback failure status codes", async () => {
+    const daemon = new FakeDockerDaemon();
+    daemon.updateError = new DockerDaemonRequestError("changed", 409);
+    const server = await buildServer({ config: testConfig(tempDir), db, docker: { daemon } });
+    const conflict = await server.inject({
+      method: "PUT",
+      url: "/api/docker/daemon/config",
+      payload: {
+        content: "{}",
+        expectedRevision: "a".repeat(64),
+        restart: false,
+        confirmed: false
+      }
+    });
+    expect(conflict.statusCode).toBe(409);
+
+    daemon.updateError = new DockerDaemonRequestError("restart failed", 502, {
+      snapshot: daemon.snapshot,
+      restarted: false,
+      rollback: "failed",
+      error: "manual recovery required"
+    });
+    const restartFailure = await server.inject({
+      method: "PUT",
+      url: "/api/docker/daemon/config",
+      payload: {
+        content: "{}",
+        expectedRevision: "a".repeat(64),
+        restart: true,
+        confirmed: true
+      }
+    });
+    expect(restartFailure.statusCode).toBe(502);
+    expect(restartFailure.json()).toMatchObject({ result: { rollback: "failed" } });
+    await server.close();
+  });
+
+  it("streams initial and changed daemon states, heartbeats, and stops on close", async () => {
+    vi.useFakeTimers();
+    try {
+      const daemon = new FakeDockerDaemon();
+      const closeSignal = new EventEmitter();
+      const chunks: string[] = [];
+      await streamDockerDaemonEvents(
+        closeSignal,
+        { write: (chunk) => chunks.push(chunk) },
+        daemon,
+        { sampleMs: 100, heartbeatMs: 250 }
+      );
+
+      expect(chunks.join("")).toContain("retry: 2000");
+      expect(chunks.join("")).toContain('"state":"running"');
+      expect(chunks.filter((chunk) => chunk === "event: docker.daemon.status\n")).toHaveLength(1);
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(chunks.filter((chunk) => chunk === "event: docker.daemon.status\n")).toHaveLength(1);
+
+      daemon.status.state = "stopped";
+      daemon.status.activeState = "inactive";
+      daemon.status.subState = "dead";
+      await vi.advanceTimersByTimeAsync(100);
+      expect(chunks.filter((chunk) => chunk === "event: docker.daemon.status\n")).toHaveLength(2);
+
+      await vi.advanceTimersByTimeAsync(50);
+      expect(chunks).toContain(": heartbeat\n\n");
+
+      const callsAtClose = daemon.statusCalls;
+      closeSignal.emit("close");
+      await vi.advanceTimersByTimeAsync(500);
+      expect(daemon.statusCalls).toBe(callsAtClose);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("reports unavailable Docker sockets without failing the route", async () => {
@@ -1880,6 +2030,165 @@ describe("API server", () => {
         }
       }
     });
+    await server.close();
+  });
+
+  it("manages Docker registry credentials while Docker is disabled without exposing secrets", async () => {
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    const created = await server.inject({
+      method: "POST",
+      url: "/api/docker/registries",
+      payload: {
+        name: "Private Registry",
+        serverAddress: "REGISTRY.EXAMPLE.COM:5000",
+        username: "builder",
+        password: "registry-secret"
+      }
+    });
+
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({
+      registry: {
+        name: "Private Registry",
+        serverAddress: "registry.example.com:5000",
+        username: "builder",
+        credentialConfigured: true
+      }
+    });
+    expect(created.body).not.toContain("registry-secret");
+
+    const duplicate = await server.inject({
+      method: "POST",
+      url: "/api/docker/registries",
+      payload: {
+        name: "Duplicate",
+        serverAddress: "registry.example.com:5000",
+        username: "other",
+        password: "other-secret"
+      }
+    });
+    expect(duplicate.statusCode).toBe(409);
+
+    const id = created.json().registry.id as string;
+    const updated = await server.inject({
+      method: "PATCH",
+      url: `/api/docker/registries/${id}`,
+      payload: { name: "Primary Registry", password: "" }
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.body).not.toContain("registry-secret");
+    expect(listDockerRegistryCredentials(db)).toMatchObject([
+      { id, name: "Primary Registry", password: "registry-secret" }
+    ]);
+
+    const listed = await server.inject({ method: "GET", url: "/api/docker/registries" });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.body).not.toContain("registry-secret");
+    expect(listed.json().registries).toHaveLength(1);
+
+    const deleted = await server.inject({ method: "DELETE", url: `/api/docker/registries/${id}` });
+    expect(deleted.statusCode).toBe(200);
+    expect((await server.inject({ method: "GET", url: "/api/docker/registries" })).json().registries).toEqual([]);
+    await server.close();
+  });
+
+  it("lists, pulls, and removes Docker images with matched Registry credentials", async () => {
+    const engine = new FakeDockerEngine();
+    const server = await buildServer({
+      config: dockerEnabledConfig(tempDir),
+      db,
+      docker: { engine, compose: new FakeDockerCompose(), daemon: new FakeDockerDaemon() }
+    });
+    await server.inject({
+      method: "POST",
+      url: "/api/docker/registries",
+      payload: {
+        name: "Private",
+        serverAddress: "registry.example.com",
+        username: "builder",
+        password: "pull-secret"
+      }
+    });
+
+    const summary = await server.inject({ method: "GET", url: "/api/docker/summary" });
+    expect(summary.statusCode).toBe(200);
+    expect(summary.json().summary.images).toEqual(engine.images);
+
+    const pulled = await server.inject({
+      method: "POST",
+      url: "/api/docker/images/pull",
+      payload: { reference: "registry.example.com/team/app:latest" }
+    });
+    expect(pulled.statusCode).toBe(200);
+    expect(pulled.json()).toEqual({ result: { reference: "registry.example.com/team/app:latest" } });
+    const auth = JSON.parse(Buffer.from(engine.pullInputs[0]!.registryAuth!, "base64url").toString("utf8")) as Record<string, string>;
+    expect(auth).toEqual({
+      username: "builder",
+      password: "pull-secret",
+      serveraddress: "registry.example.com"
+    });
+
+    await server.inject({
+      method: "POST",
+      url: "/api/docker/images/pull",
+      payload: { reference: "nginx:latest" }
+    });
+    expect(engine.pullInputs[1]).toEqual({ image: "nginx:latest" });
+
+    const unconfirmed = await server.inject({
+      method: "POST",
+      url: "/api/docker/images/remove",
+      payload: { reference: "jellyfin:latest", confirmed: false }
+    });
+    expect(unconfirmed.statusCode).toBe(400);
+    const removed = await server.inject({
+      method: "POST",
+      url: "/api/docker/images/remove",
+      payload: { reference: "jellyfin:latest", confirmed: true }
+    });
+    expect(removed.statusCode).toBe(200);
+    expect(removed.json()).toMatchObject({ result: { reference: "jellyfin:latest" } });
+
+    engine.removeError = new DockerRequestError("image is being used", 409);
+    const conflict = await server.inject({
+      method: "POST",
+      url: "/api/docker/images/remove",
+      payload: { reference: "jellyfin:latest", confirmed: true }
+    });
+    expect(conflict.statusCode).toBe(409);
+    await server.close();
+  });
+
+  it("rejects invalid image input before Engine calls and redacts pull errors", async () => {
+    const engine = new FakeDockerEngine();
+    const server = await buildServer({ config: dockerEnabledConfig(tempDir), db, docker: { engine, compose: new FakeDockerCompose(), daemon: new FakeDockerDaemon() } });
+    const registry = createDockerRegistryCredential(db, { name: "Private", serverAddress: "registry.example.com:80", username: "builder", password: "pull-secret" });
+    for (const reference of ["team//app", "app:", "app@sha256:abc"]) {
+      const response = await server.inject({ method: "POST", url: "/api/docker/images/pull", payload: { reference } });
+      expect(response.statusCode).toBe(400);
+    }
+    expect(engine.pullInputs).toEqual([]);
+    const emptyPassword = await server.inject({ method: "PATCH", url: `/api/docker/registries/${registry.id}`, payload: { password: "" } });
+    expect(emptyPassword.statusCode).toBe(200);
+    expect(listDockerRegistryCredentials(db)[0]?.password).toBe("pull-secret");
+    const duplicate = await server.inject({ method: "POST", url: "/api/docker/registries", payload: { name: "Duplicate", serverAddress: "REGISTRY.EXAMPLE.COM:080", username: "builder", password: "other-secret" } });
+    expect(duplicate.statusCode).toBe(409);
+    const invalidUsername = await server.inject({ method: "POST", url: "/api/docker/registries", payload: { name: "Invalid", serverAddress: "docker.io", username: "user:name", password: "secret" } });
+    expect(invalidUsername.statusCode).toBe(400);
+    engine.pullImage = async () => { throw new DockerRequestError("denied pull-secret", 500); };
+    const failed = await server.inject({ method: "POST", url: "/api/docker/images/pull", payload: { reference: "registry.example.com:80/team/app" } });
+    expect(failed.statusCode).toBe(502);
+    expect(failed.json()).toEqual({ error: "denied [redacted]" });
+    await server.close();
+  });
+
+  it("keeps image operations disabled while Registry management remains available", async () => {
+    const server = await buildServer({ config: testConfig(tempDir), db, docker: { engine: new FakeDockerEngine(), daemon: new FakeDockerDaemon() } });
+    for (const action of ["pull", "remove"]) {
+      const response = await server.inject({ method: "POST", url: `/api/docker/images/${action}`, payload: { reference: "alpine:latest", confirmed: true } });
+      expect(response.statusCode).toBe(503);
+    }
+    expect((await server.inject({ method: "GET", url: "/api/docker/registries" })).statusCode).toBe(200);
     await server.close();
   });
 
@@ -2021,12 +2330,37 @@ describe("API server", () => {
     const session = createSession(db, { rootId: "local" });
     const engine = new FakeDockerEngine();
     const server = await buildServer({ config: dockerEnabledConfig(tempDir), db, docker: { engine, compose: new FakeDockerCompose() } });
+    await server.inject({ method: "POST", url: "/api/docker/registries", payload: {
+      name: "Private", serverAddress: "registry.example.com", username: "builder", password: "create-secret"
+    } });
     const response = await server.inject({ method: "POST", url: "/api/docker/proposals", payload: {
-      sessionId: session.id, action: "create", targetType: "container", name: "always-pull", image: "nginx", pullPolicy: "always", start: false
+      sessionId: session.id, action: "create", targetType: "container", name: "always-pull",
+      image: "registry.example.com/team/nginx", pullPolicy: "always", start: false
     } });
 
     expect(response.statusCode).toBe(202);
     expect(engine.calls).toEqual(["pull", "create-container"]);
+    expect(engine.pullInputs[0]?.registryAuth).toBeTruthy();
+    expect(JSON.stringify(response.json())).not.toContain("create-secret");
+    await server.close();
+  });
+
+  it("reads rotated credentials after the missing-image check and before pulling", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const engine = new FakeDockerEngine();
+    const credential = createDockerRegistryCredential(db, { name: "Private", serverAddress: "registry.example.com", username: "builder", password: "old-secret" });
+    engine.imageExists = async () => {
+      updateDockerRegistryCredential(db, credential.id, { password: "rotated-secret" });
+      return false;
+    };
+    const server = await buildServer({ config: dockerEnabledConfig(tempDir), db, docker: { engine, compose: new FakeDockerCompose(), daemon: new FakeDockerDaemon() } });
+    const response = await server.inject({ method: "POST", url: "/api/docker/proposals", payload: { sessionId: session.id, action: "create", targetType: "container", name: "rotated-pull", image: "registry.example.com/team/app", pullPolicy: "missing", start: false } });
+    expect(response.statusCode).toBe(202);
+    expect(JSON.parse(Buffer.from(engine.pullInputs[0]!.registryAuth!, "base64url").toString("utf8"))).toMatchObject({ password: "rotated-secret" });
+    expect(response.body).not.toContain("rotated-secret");
+    const invalid = await server.inject({ method: "POST", url: "/api/docker/proposals", payload: { sessionId: session.id, action: "create", targetType: "container", name: "invalid-pull", image: "team//app", pullPolicy: "always" } });
+    expect(invalid.statusCode).toBe(400);
+    expect(listDockerOperations(db, { sessionId: session.id })).toHaveLength(1);
     await server.close();
   });
 
@@ -2151,6 +2485,41 @@ describe("API server", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: "Compose project is not configured" });
+    await server.close();
+  });
+
+  it("loads current Registry credentials when an approved Compose pull executes", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const compose = new FakeDockerCompose();
+    const server = await buildServer({
+      config: dockerEnabledConfig(tempDir),
+      db,
+      docker: { engine: new FakeDockerEngine(), compose }
+    });
+    const proposed = await server.inject({
+      method: "POST",
+      url: "/api/docker/proposals",
+      payload: {
+        sessionId: session.id,
+        action: "compose_pull",
+        composeProjectId: "compose-root:compose.yml"
+      }
+    });
+    expect(proposed.statusCode).toBe(202);
+
+    await server.inject({ method: "POST", url: "/api/docker/registries", payload: {
+      name: "Private", serverAddress: "registry.example.com", username: "builder", password: "compose-secret"
+    } });
+    const approved = await server.inject({
+      method: "POST",
+      url: `/api/approvals/${proposed.json().approval.id}/approve`
+    });
+
+    expect(approved.statusCode).toBe(202);
+    expect(compose.registryCredentials).toMatchObject([[
+      { serverAddress: "registry.example.com", password: "compose-secret" }
+    ]]);
+    expect(approved.body).not.toContain("compose-secret");
     await server.close();
   });
 
@@ -3966,9 +4335,67 @@ function dockerEnabledConfig(dataDir: string, overrides: Partial<SigmaConfig["do
   };
 }
 
+class FakeDockerDaemon implements DockerDaemonRuntime {
+  readonly status: DockerDaemonStatus = {
+    state: "running",
+    loadState: "loaded",
+    activeState: "active",
+    subState: "running",
+    result: "success",
+    collectedAt: "2026-09-16T00:00:00.000Z"
+  };
+  readonly snapshot: DockerDaemonConfigSnapshot = {
+    path: "/etc/docker/daemon.json",
+    content: "{}\n",
+    revision: "a".repeat(64),
+    exists: true,
+    restartPending: false
+  };
+  updates: DockerDaemonConfigUpdateInput[] = [];
+  statusCalls = 0;
+  getError: Error | null = null;
+  updateError: Error | null = null;
+
+  async getStatus(): Promise<DockerDaemonStatus> {
+    this.statusCalls += 1;
+    return this.status;
+  }
+
+  async getConfig(): Promise<DockerDaemonConfigSnapshot> {
+    if (this.getError) throw this.getError;
+    return this.snapshot;
+  }
+
+  async updateConfig(input: DockerDaemonConfigUpdateInput): Promise<DockerDaemonConfigUpdateResult> {
+    this.updates.push(input);
+    if (this.updateError) throw this.updateError;
+    return {
+      snapshot: { ...this.snapshot, content: input.content, restartPending: !input.restart },
+      restarted: input.restart,
+      rollback: "not_required",
+      error: null
+    };
+  }
+}
+
 class FakeDockerEngine implements DockerEngineRuntime {
   calls: string[] = [];
+  pullInputs: Array<{ image: string; registryAuth?: string }> = [];
+  removedImages: string[] = [];
   failStart = false;
+  removeError: Error | null = null;
+  readonly images: DockerImageSummary[] = [
+    {
+      id: "sha256:image-1",
+      shortId: "image-1",
+      tags: ["jellyfin:latest"],
+      digests: ["jellyfin@sha256:digest-1"],
+      createdAt: new Date(0).toISOString(),
+      sizeBytes: 4096,
+      sharedSizeBytes: 1024,
+      containerCount: 1
+    }
+  ];
 
   async getInfo() {
     return {
@@ -3983,10 +4410,15 @@ class FakeDockerEngine implements DockerEngineRuntime {
 
   async getCounts() {
     return {
-      images: 2,
+      images: this.images.length,
+      imageDetails: this.images,
       networks: 1,
       volumes: 3
     };
+  }
+
+  async listImages(): Promise<DockerImageSummary[]> {
+    return this.images;
   }
 
   async listContainers(): Promise<DockerContainerSummary[]> {
@@ -4015,8 +4447,18 @@ class FakeDockerEngine implements DockerEngineRuntime {
     return true;
   }
 
-  async pullImage(): Promise<void> {
+  async pullImage(input: { image: string; registryAuth?: string }): Promise<void> {
     this.calls.push("pull");
+    this.pullInputs.push(input);
+  }
+
+  async removeImage(image: string) {
+    this.calls.push(`remove-image:${image}`);
+    this.removedImages.push(image);
+    if (this.removeError) {
+      throw this.removeError;
+    }
+    return { reference: image, deleted: ["sha256:image-1"], untagged: [image] };
   }
 
   async createContainer(): Promise<{ id: string; warnings: string[] }> {
@@ -4091,6 +4533,7 @@ class FakeShareHelper {
 
 class FakeDockerCompose implements DockerComposeRuntime {
   calls: string[] = [];
+  registryCredentials: DockerRegistryCredentialRecord[][] = [];
 
   constructor(
     private readonly projects: DockerComposeProjectSummary[] = [
@@ -4117,8 +4560,12 @@ class FakeDockerCompose implements DockerComposeRuntime {
     return this.projects.find((project) => project.id === projectId) ?? null;
   }
 
-  async runProjectAction(proposal: DockerOperationProposal): Promise<{ output: string }> {
+  async runProjectAction(
+    proposal: DockerOperationProposal,
+    registryCredentials: DockerRegistryCredentialRecord[] = []
+  ): Promise<{ output: string }> {
     this.calls.push(`${proposal.action}:${proposal.composeProjectId}`);
+    this.registryCredentials.push(registryCredentials);
     return { output: "done" };
   }
 }

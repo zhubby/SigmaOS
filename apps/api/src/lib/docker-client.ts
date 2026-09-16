@@ -6,6 +6,8 @@ import type {
   DockerContainerDetails,
   DockerContainerState,
   DockerContainerSummary,
+  DockerImageRemoveResult,
+  DockerImageSummary,
   DockerNetworkSummary,
   DockerVolumeSummary
 } from "@sigmaos/shared";
@@ -21,6 +23,7 @@ export interface DockerEngineInfo {
 
 export interface DockerEngineCounts {
   images: number;
+  imageDetails?: DockerImageSummary[];
   networks: number;
   volumes: number;
   networkDetails?: DockerNetworkSummary[];
@@ -119,6 +122,7 @@ export interface DockerCreateContainerResult {
 
 export interface DockerPullImageInput {
   image: string;
+  registryAuth?: string;
 }
 
 export interface DockerCreateVolumeInput {
@@ -161,8 +165,10 @@ export interface DockerEngineRuntime {
   getInfo(): Promise<DockerEngineInfo>;
   getCounts(): Promise<DockerEngineCounts>;
   listContainers(): Promise<DockerContainerSummary[]>;
+  listImages(): Promise<DockerImageSummary[]>;
   imageExists(image: string): Promise<boolean>;
   pullImage(input: DockerPullImageInput): Promise<void>;
+  removeImage(image: string): Promise<DockerImageRemoveResult>;
   createContainer(input: DockerCreateContainerInput): Promise<DockerCreateContainerResult>;
   createVolume(input: DockerCreateVolumeInput): Promise<DockerCreateVolumeResult>;
   createNetwork(input: DockerCreateNetworkInput): Promise<DockerCreateNetworkResult>;
@@ -212,8 +218,19 @@ type DockerVolumeRow = {
   Mountpoint?: string;
 };
 
+type DockerImageRow = {
+  Id?: string;
+  RepoTags?: string[] | null;
+  RepoDigests?: string[] | null;
+  Created?: number;
+  Size?: number;
+  SharedSize?: number;
+  Containers?: number;
+};
+
 type DockerContainerRow = {
   Id?: string;
+  ImageID?: string;
   Names?: string[];
   Image?: string;
   State?: string;
@@ -336,14 +353,15 @@ export class DockerSocketClient implements DockerEngineRuntime {
 
   async getCounts(): Promise<DockerEngineCounts> {
     const [images, networks, volumes] = await Promise.all([
-      this.requestJson<unknown[]>("GET", "/images/json"),
+      this.listImages(),
       this.requestJson<DockerNetworkRow[]>("GET", "/networks"),
       this.requestJson<{ Volumes?: DockerVolumeRow[] | null }>("GET", "/volumes")
     ]);
     const networkDetails = Array.isArray(networks) ? networks.map(mapNetwork).filter((network): network is DockerNetworkSummary => network !== null) : [];
     const volumeDetails = Array.isArray(volumes.Volumes) ? volumes.Volumes.map(mapVolume).filter((volume): volume is DockerVolumeSummary => volume !== null) : [];
     return {
-      images: Array.isArray(images) ? images.length : 0,
+      images: images.length,
+      imageDetails: images,
       networks: Array.isArray(networks) ? networks.length : 0,
       volumes: Array.isArray(volumes.Volumes) ? volumes.Volumes.length : 0,
       networkDetails,
@@ -369,6 +387,11 @@ export class DockerSocketClient implements DockerEngineRuntime {
     }));
   }
 
+  async listImages(): Promise<DockerImageSummary[]> {
+    const images = await this.requestJson<DockerImageRow[]>("GET", "/images/json", { "shared-size": "true", containers: "true" });
+    return images.map(mapImage).filter((image): image is DockerImageSummary => image !== null);
+  }
+
   async imageExists(image: string): Promise<boolean> {
     try {
       await this.requestJson<unknown>("GET", `/images/${encodeURIComponent(image)}/json`);
@@ -386,7 +409,28 @@ export class DockerSocketClient implements DockerEngineRuntime {
     await this.requestNdjson("POST", "/images/create", {
       fromImage: reference.fromImage,
       ...(reference.tag ? { tag: reference.tag } : {})
-    });
+    }, input.registryAuth ? { "X-Registry-Auth": input.registryAuth } : {});
+  }
+
+  async removeImage(image: string): Promise<DockerImageRemoveResult> {
+    const inspected = await this.requestJson<{ Id?: string }>("GET", `/images/${encodeURIComponent(image)}/json`);
+    if (!inspected.Id) {
+      throw new DockerRequestError("Docker returned invalid image metadata");
+    }
+    const containers = await this.requestJson<DockerContainerRow[]>("GET", "/containers/json", { all: "1" });
+    if (containers.some((container) => container.ImageID === inspected.Id)) {
+      throw new DockerRequestError("Docker image is referenced by a container", 409);
+    }
+    const response = await this.requestJson<Array<{ Deleted?: string; Untagged?: string }>>(
+      "DELETE",
+      `/images/${encodeURIComponent(image)}`,
+      { force: "false", noprune: "true" }
+    );
+    return {
+      reference: image,
+      deleted: response.flatMap((item) => item.Deleted ? [item.Deleted] : []),
+      untagged: response.flatMap((item) => item.Untagged ? [item.Untagged] : [])
+    };
   }
 
   async createContainer(input: DockerCreateContainerInput): Promise<DockerCreateContainerResult> {
@@ -609,9 +653,10 @@ export class DockerSocketClient implements DockerEngineRuntime {
     requestPath: string,
     query: Record<string, string> = {},
     body?: unknown,
-    versioned = true
+    versioned = true,
+    headers: Record<string, string> = {}
   ): Promise<T> {
-    const buffer = await this.requestBuffer(method, requestPath, query, body, versioned);
+    const buffer = await this.requestBuffer(method, requestPath, query, body, versioned, headers);
     if (!buffer.length) {
       return undefined as T;
     }
@@ -623,7 +668,8 @@ export class DockerSocketClient implements DockerEngineRuntime {
     requestPath: string,
     query: Record<string, string> = {},
     body?: unknown,
-    versioned = true
+    versioned = true,
+    headers: Record<string, string> = {}
   ): Promise<Buffer> {
     const fullPath = `${versioned ? await this.pathFor(requestPath) : requestPath}${queryString(query)}`;
     const bodyBuffer = body === undefined ? null : Buffer.from(JSON.stringify(body), "utf8");
@@ -637,10 +683,11 @@ export class DockerSocketClient implements DockerEngineRuntime {
           timeout: this.options.timeoutMs,
           headers: bodyBuffer
             ? {
+                ...headers,
                 "Content-Type": "application/json",
                 "Content-Length": String(bodyBuffer.length)
               }
-            : undefined
+            : headers
         },
         (response) => {
           const chunks: Buffer[] = [];
@@ -671,7 +718,8 @@ export class DockerSocketClient implements DockerEngineRuntime {
   private async requestNdjson(
     method: string,
     requestPath: string,
-    query: Record<string, string> = {}
+    query: Record<string, string> = {},
+    headers: Record<string, string> = {}
   ): Promise<void> {
     const fullPath = `${await this.pathFor(requestPath)}${queryString(query)}`;
 
@@ -681,7 +729,8 @@ export class DockerSocketClient implements DockerEngineRuntime {
           socketPath: this.options.socketPath,
           method,
           path: fullPath,
-          timeout: this.options.timeoutMs
+          timeout: this.options.timeoutMs,
+          headers
         },
         (response) => {
           const statusCode = response.statusCode ?? 500;
@@ -906,6 +955,38 @@ function splitImageReference(image: string): { fromImage: string; tag?: string }
     };
   }
   return { fromImage: image };
+}
+
+function mapImage(row: DockerImageRow): DockerImageSummary | null {
+  const id = row.Id?.trim();
+  if (!id) {
+    return null;
+  }
+  return {
+    id,
+    shortId: id.replace(/^sha256:/u, "").slice(0, 12),
+    tags: imageReferences(row.RepoTags),
+    digests: imageReferences(row.RepoDigests),
+    createdAt: typeof row.Created === "number" && row.Created > 0
+      ? new Date(row.Created * 1000).toISOString()
+      : null,
+    sizeBytes: nonNegativeNumber(row.Size),
+    sharedSizeBytes: typeof row.SharedSize === "number" && Number.isFinite(row.SharedSize) && row.SharedSize >= 0
+      ? row.SharedSize
+      : null,
+    containerCount: typeof row.Containers === "number" && row.Containers >= 0 ? row.Containers : null
+  };
+}
+
+function imageReferences(values: string[] | null | undefined): string[] {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return values.filter((value) => value && !value.includes("<none>"));
+}
+
+function nonNegativeNumber(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function negotiateApiVersion(version: DockerVersionResponse): string | null {

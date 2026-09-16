@@ -1,11 +1,23 @@
 import type {
   DockerCreateInput,
+  DockerDaemonConfigSnapshot,
+  DockerDaemonConfigUpdateInput,
+  DockerDaemonConfigUpdateResult,
+  DockerDaemonStatus,
+  DockerImagePullInput,
+  DockerImagePullResult,
+  DockerImageRemoveInput,
+  DockerImageRemoveResult,
+  DockerImageSummary as SharedDockerImageSummary,
   DockerOperationAction,
   DockerOperationRecord,
   DockerOperationTargetType,
   DockerCreateResult,
   DockerContainerDetails as SharedDockerContainerDetails,
   DockerSettingsRecord,
+  DockerRegistryCredentialCreateInput,
+  DockerRegistryCredentialSummary as SharedDockerRegistryCredentialSummary,
+  DockerRegistryCredentialUpdateInput,
   GitDirectoryStatus,
   GitFileStatus,
   IndexRootStatus,
@@ -260,6 +272,17 @@ export type NetworkSummary = SystemNetworkSummary;
 export type NetworkTrafficSummary = SystemNetworkTrafficSummary;
 export type StorageSummary = SystemStorageSummary;
 export type DockerSummary = PublicDockerSummary;
+export type DockerImageSummary = SharedDockerImageSummary;
+export type DockerRegistryCredential = SharedDockerRegistryCredentialSummary;
+export type {
+  DockerImagePullInput,
+  DockerImagePullResult,
+  DockerImageRemoveInput,
+  DockerImageRemoveResult,
+  DockerRegistryCredentialCreateInput,
+  DockerRegistryCredentialUpdateInput
+};
+export type { DockerDaemonConfigSnapshot, DockerDaemonConfigUpdateInput, DockerDaemonConfigUpdateResult, DockerDaemonStatus };
 export type ShareSettings = PublicShareSettings;
 export type ShareSummary = PublicShareSummary;
 export type ShareSettingsInput = Omit<ShareSettings, "account" | "updatedAt"> & {
@@ -418,6 +441,100 @@ export async function getDockerSummary(): Promise<DockerSummary> {
   await ensureOk(response);
   const body = (await response.json()) as { summary: DockerSummary };
   return body.summary;
+}
+
+export async function getDockerRegistries(): Promise<DockerRegistryCredential[]> {
+  const response = await fetch("/api/docker/registries");
+  await ensureOk(response);
+  return ((await response.json()) as { registries: DockerRegistryCredential[] }).registries;
+}
+
+export async function createDockerRegistry(
+  input: DockerRegistryCredentialCreateInput
+): Promise<DockerRegistryCredential> {
+  const response = await fetch("/api/docker/registries", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  await ensureOk(response);
+  return ((await response.json()) as { registry: DockerRegistryCredential }).registry;
+}
+
+export async function updateDockerRegistry(
+  id: string,
+  input: DockerRegistryCredentialUpdateInput
+): Promise<DockerRegistryCredential> {
+  const response = await fetch(`/api/docker/registries/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  await ensureOk(response);
+  return ((await response.json()) as { registry: DockerRegistryCredential }).registry;
+}
+
+export async function deleteDockerRegistry(id: string): Promise<void> {
+  const response = await fetch(`/api/docker/registries/${encodeURIComponent(id)}`, { method: "DELETE" });
+  await ensureOk(response);
+}
+
+export async function pullDockerImage(input: DockerImagePullInput): Promise<DockerImagePullResult> {
+  const response = await fetch("/api/docker/images/pull", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  await ensureOk(response);
+  return ((await response.json()) as { result: DockerImagePullResult }).result;
+}
+
+export async function removeDockerImage(input: DockerImageRemoveInput): Promise<DockerImageRemoveResult> {
+  const response = await fetch("/api/docker/images/remove", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  await ensureOk(response);
+  return ((await response.json()) as { result: DockerImageRemoveResult }).result;
+}
+
+export async function getDockerDaemonConfig(): Promise<DockerDaemonConfigSnapshot> {
+  const response = await fetch("/api/docker/daemon/config");
+  await ensureOk(response);
+  return ((await response.json()) as { config: DockerDaemonConfigSnapshot }).config;
+}
+
+export class DockerDaemonApiError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode: number,
+    readonly result?: DockerDaemonConfigUpdateResult
+  ) {
+    super(message);
+    this.name = "DockerDaemonApiError";
+  }
+}
+
+export async function updateDockerDaemonConfig(
+  input: DockerDaemonConfigUpdateInput
+): Promise<DockerDaemonConfigUpdateResult> {
+  const response = await fetch("/api/docker/daemon/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  const body = (await response.json().catch(() => ({}))) as {
+    result?: DockerDaemonConfigUpdateResult;
+    error?: string;
+  };
+  if (!response.ok) {
+    throw new DockerDaemonApiError(body.error ?? response.statusText, response.status, body.result);
+  }
+  if (!body.result) {
+    throw new DockerDaemonApiError("Docker daemon update returned no result", 502);
+  }
+  return body.result;
 }
 
 export async function getVmSummary(): Promise<VmSummary> {

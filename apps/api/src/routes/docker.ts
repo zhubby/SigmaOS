@@ -1,30 +1,42 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import {
   appendEvent,
+  createDockerRegistryCredential,
   createDockerConsoleAuthorization,
   createDockerOperationApproval,
   createDockerOperationRecord,
   createUserMessageAndJob,
   consumeDockerConsoleAuthorization,
+  deleteDockerRegistryCredential,
+  DockerRegistryCredentialConflictError,
   getDockerSettings,
   getApproval,
   getDockerOperation,
   getJob,
   getSession,
+  listDockerRegistryCredentials,
   listDockerOperations,
   markDockerConsoleAuthorizationFailed,
+  updateDockerRegistryCredential,
   updateApprovalStatus,
   updateDockerOperationStatus,
-  updateJobStatus
+  updateJobStatus,
+  type DockerRegistryCredentialRecord
 } from "@sigmaos/db";
 import type {
+  DockerDaemonConfigUpdateInput,
+  DockerDaemonStatus,
   DockerConsoleAuthorizationRecord,
   DockerContainerSummary,
   DockerCreateInput,
   DockerCreateResult,
+  DockerImagePullInput,
+  DockerImageRemoveInput,
   DockerOperationAction,
   DockerOperationProposal,
-  DockerOperationTargetType
+  DockerOperationTargetType,
+  DockerRegistryCredentialCreateInput,
+  DockerRegistryCredentialUpdateInput
 } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
 import { effectiveDockerConfig } from "../lib/settings.js";
@@ -35,6 +47,22 @@ import {
   prepareDockerCreate
 } from "../lib/docker-create.js";
 import { DockerRequestError } from "../lib/docker-client.js";
+import {
+  DockerDaemonRequestError,
+  safeDockerDaemonMessage,
+  SystemDockerDaemonRuntime,
+  validateDockerDaemonConfigUpdate
+} from "../lib/docker-daemon.js";
+import {
+  dockerRegistryAuthHeader,
+  DockerRegistryValidationError,
+  findDockerRegistryCredential,
+  normalizeDockerImageReference,
+  normalizeDockerRegistryAddress,
+  redactDockerRegistrySecrets,
+  requiredRegistryText,
+  toPublicDockerRegistryCredential
+} from "../lib/docker-registry.js";
 import { dockerCompose, dockerEngine, collectDockerSummary, safeDockerMessage } from "../lib/docker-service.js";
 
 type DockerActionProposalBody = {
@@ -50,14 +78,133 @@ type DockerActionProposalBody = {
 type DockerProposalBody = DockerActionProposalBody | ({ sessionId?: string; action: "create" } & DockerCreateInput);
 
 const MAX_DOCKER_CREATE_BODY_BYTES = 256 * 1024;
+const MAX_DOCKER_DAEMON_BODY_BYTES = 256 * 1024 + 4096;
+const MAX_DOCKER_REGISTRY_BODY_BYTES = 64 * 1024;
+const DOCKER_DAEMON_SAMPLE_MS = 1000;
+const DOCKER_DAEMON_HEARTBEAT_MS = 15_000;
 
 export function registerDockerRoutes(server: FastifyInstance, context: ApiRouteContext): void {
   const { config, db, docker } = context;
   const currentConfig = () => effectiveDockerConfig(config, getDockerSettings(db));
+  const daemon = docker?.daemon ?? new SystemDockerDaemonRuntime({ helperSocketPath: config.shares.helperSocketPath });
 
   server.get("/api/docker/summary", async () => ({
     summary: await collectDockerSummary(currentConfig(), docker)
   }));
+
+  server.get("/api/docker/registries", async () => ({
+    registries: listDockerRegistryCredentials(db).map(toPublicDockerRegistryCredential)
+  }));
+
+  server.post<{
+    Body: DockerRegistryCredentialCreateInput;
+  }>("/api/docker/registries", { bodyLimit: MAX_DOCKER_REGISTRY_BODY_BYTES }, async (request, reply) => {
+    try {
+      const credential = createDockerRegistryCredential(db, validateRegistryCreateInput(request.body));
+      reply.status(201).send({ registry: toPublicDockerRegistryCredential(credential) });
+    } catch (error) {
+      sendDockerRegistryMutationError(reply, error);
+    }
+  });
+
+  server.patch<{
+    Params: { id: string };
+    Body: DockerRegistryCredentialUpdateInput;
+  }>("/api/docker/registries/:id", { bodyLimit: MAX_DOCKER_REGISTRY_BODY_BYTES }, async (request, reply) => {
+    try {
+      const credential = updateDockerRegistryCredential(db, request.params.id, validateRegistryUpdateInput(request.body));
+      if (!credential) {
+        reply.status(404).send({ error: "Docker registry credential not found" });
+        return;
+      }
+      reply.send({ registry: toPublicDockerRegistryCredential(credential) });
+    } catch (error) {
+      sendDockerRegistryMutationError(reply, error);
+    }
+  });
+
+  server.delete<{
+    Params: { id: string };
+  }>("/api/docker/registries/:id", async (request, reply) => {
+    if (!deleteDockerRegistryCredential(db, request.params.id)) {
+      reply.status(404).send({ error: "Docker registry credential not found" });
+      return;
+    }
+    reply.send({ deleted: true });
+  });
+
+  server.post<{
+    Body: DockerImagePullInput;
+  }>("/api/docker/images/pull", { bodyLimit: MAX_DOCKER_REGISTRY_BODY_BYTES }, async (request, reply) => {
+    const nextConfig = currentConfig();
+    if (!nextConfig.docker.enabled) {
+      reply.status(503).send({ error: "Docker management is disabled" });
+      return;
+    }
+    const credentials = listDockerRegistryCredentials(db);
+    try {
+      const reference = normalizeDockerImageReference(request.body?.reference);
+      const credential = findDockerRegistryCredential(credentials, reference);
+      await dockerEngine(nextConfig.docker, docker).pullImage({
+        image: reference,
+        ...(credential ? { registryAuth: dockerRegistryAuthHeader(credential) } : {})
+      });
+      reply.send({ result: { reference } });
+    } catch (error) {
+      sendDockerImageError(reply, error, credentials);
+    }
+  });
+
+  server.post<{
+    Body: DockerImageRemoveInput;
+  }>("/api/docker/images/remove", { bodyLimit: MAX_DOCKER_REGISTRY_BODY_BYTES }, async (request, reply) => {
+    const nextConfig = currentConfig();
+    if (!nextConfig.docker.enabled) {
+      reply.status(503).send({ error: "Docker management is disabled" });
+      return;
+    }
+    if (request.body?.confirmed !== true) {
+      reply.status(400).send({ error: "Docker image removal requires confirmation" });
+      return;
+    }
+    try {
+      const reference = normalizeDockerImageReference(request.body.reference);
+      reply.send({ result: await dockerEngine(nextConfig.docker, docker).removeImage(reference) });
+    } catch (error) {
+      sendDockerImageError(reply, error);
+    }
+  });
+
+  server.get("/api/docker/daemon/config", async (_request, reply) => {
+    try {
+      reply.send({ config: await daemon.getConfig() });
+    } catch (error) {
+      sendDockerDaemonError(reply, error);
+    }
+  });
+
+  server.put<{
+    Body: DockerDaemonConfigUpdateInput;
+  }>("/api/docker/daemon/config", { bodyLimit: MAX_DOCKER_DAEMON_BODY_BYTES }, async (request, reply) => {
+    try {
+      const input = validateDockerDaemonConfigUpdate(request.body);
+      reply.send({ result: await daemon.updateConfig(input) });
+    } catch (error) {
+      sendDockerDaemonError(reply, error);
+    }
+  });
+
+  server.get("/api/docker/daemon/events", async (request, reply) => {
+    reply.hijack();
+    const raw = reply.raw;
+    raw.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no"
+    });
+    await streamDockerDaemonEvents(request.raw, raw, daemon);
+  });
 
   server.get<{
     Querystring: { sessionId?: string };
@@ -202,12 +349,24 @@ export function registerDockerRoutes(server: FastifyInstance, context: ApiRouteC
           payload: { jobId: job.id, dockerOperation: running }
         });
 
+        let registryCredentials: DockerRegistryCredentialRecord[] = [];
         let result: DockerCreateResult;
         try {
-          result = await executeDockerCreate(prepared, dockerEngine(nextConfig.docker, docker), operation.id);
+          result = await executeDockerCreate(
+            prepared,
+            dockerEngine(nextConfig.docker, docker),
+            operation.id,
+            () => {
+              registryCredentials = listDockerRegistryCredentials(db);
+              const registryCredential = prepared.kind === "container"
+                ? findDockerRegistryCredential(registryCredentials, prepared.engineInput.image)
+                : null;
+              return registryCredential ? dockerRegistryAuthHeader(registryCredential) : undefined;
+            }
+          );
         } catch (error) {
           const phase = error instanceof DockerCreateExecutionError ? error.phase : "pull";
-          const responseError = safeDockerMessage(error);
+          const responseError = redactDockerRegistrySecrets(error, registryCredentials);
           const auditError = phase === "pull" ? "Docker image preparation failed" : "Docker resource creation failed";
           try {
             const failed = updateDockerOperationStatus(db, operation.id, "failed", {
@@ -494,6 +653,103 @@ function dockerCreateErrorStatus(error: unknown): number {
   return 400;
 }
 
+function validateRegistryCreateInput(body: unknown): DockerRegistryCredentialCreateInput {
+  const source = registryRequestRecord(body);
+  assertRegistryKeys(source, ["name", "serverAddress", "username", "password"]);
+  return {
+    name: requiredRegistryText(source.name, "Registry name", 128),
+    serverAddress: normalizeDockerRegistryAddress(source.serverAddress),
+    username: requiredRegistryUsername(source.username),
+    password: requiredRegistryPassword(source.password)
+  };
+}
+
+function validateRegistryUpdateInput(body: unknown): DockerRegistryCredentialUpdateInput {
+  const source = registryRequestRecord(body);
+  assertRegistryKeys(source, ["name", "serverAddress", "username", "password"]);
+  const update: DockerRegistryCredentialUpdateInput = {};
+  if (source.name !== undefined) {
+    update.name = requiredRegistryText(source.name, "Registry name", 128);
+  }
+  if (source.serverAddress !== undefined) {
+    update.serverAddress = normalizeDockerRegistryAddress(source.serverAddress);
+  }
+  if (source.username !== undefined) {
+    update.username = requiredRegistryUsername(source.username);
+  }
+  if (source.password !== undefined) {
+    if (typeof source.password !== "string") {
+      throw new DockerRegistryValidationError("Registry password must be a string");
+    }
+    if (source.password.trim()) {
+      update.password = requiredRegistryPassword(source.password);
+    }
+  }
+  if (!Object.keys(update).length && source.password === undefined) {
+    throw new DockerRegistryValidationError("At least one Registry field is required");
+  }
+  return update;
+}
+
+function registryRequestRecord(body: unknown): Record<string, unknown> {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new DockerRegistryValidationError("Docker registry request must be an object");
+  }
+  return body as Record<string, unknown>;
+}
+
+function assertRegistryKeys(source: Record<string, unknown>, allowed: readonly string[]): void {
+  const unknownKey = Object.keys(source).find((key) => !allowed.includes(key));
+  if (unknownKey) {
+    throw new DockerRegistryValidationError(`Unknown Docker registry field: ${unknownKey}`);
+  }
+}
+
+function requiredRegistryPassword(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new DockerRegistryValidationError("Registry password is required");
+  }
+  if (value.length > 4096) {
+    throw new DockerRegistryValidationError("Registry password is too long");
+  }
+  return value;
+}
+
+function requiredRegistryUsername(value: unknown): string {
+  const username = requiredRegistryText(value, "Registry username", 255);
+  if (username.includes(":") || Array.from(username).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) {
+    throw new DockerRegistryValidationError("Registry username contains an invalid character");
+  }
+  return username;
+}
+
+function sendDockerRegistryMutationError(reply: FastifyReply, error: unknown): void {
+  if (error instanceof DockerRegistryValidationError) {
+    reply.status(400).send({ error: error.message });
+    return;
+  }
+  if (error instanceof DockerRegistryCredentialConflictError) {
+    reply.status(409).send({ error: error.message });
+    return;
+  }
+  reply.status(500).send({ error: "Unable to update Docker registry credentials" });
+}
+
+function sendDockerImageError(
+  reply: FastifyReply,
+  error: unknown,
+  credentials: DockerRegistryCredentialRecord[] = []
+): void {
+  if (error instanceof DockerRegistryValidationError) {
+    reply.status(400).send({ error: error.message });
+    return;
+  }
+  const statusCode = error instanceof DockerRequestError && (error.statusCode === 404 || error.statusCode === 409)
+    ? error.statusCode
+    : 502;
+  reply.status(statusCode).send({ error: redactDockerRegistrySecrets(error, credentials) });
+}
+
 function dockerProposalFromOperation(operation: { metadata: Record<string, unknown> }): DockerOperationProposal | null {
   const proposal = operation.metadata.proposal;
   if (!proposal || typeof proposal !== "object" || !("action" in proposal)) {
@@ -604,6 +860,97 @@ function markConsoleStartupFailed(
 
 function isContainerAction(action: DockerOperationAction): boolean {
   return action === "start" || action === "stop" || action === "restart" || action === "remove";
+}
+
+function dockerDaemonStatusSignature(status: DockerDaemonStatus): string {
+  return JSON.stringify({
+    state: status.state,
+    loadState: status.loadState,
+    activeState: status.activeState,
+    subState: status.subState,
+    result: status.result
+  });
+}
+
+interface DockerDaemonEventCloseSignal {
+  on(event: "close", listener: () => void): unknown;
+}
+
+interface DockerDaemonEventOutput {
+  write(chunk: string): unknown;
+}
+
+interface DockerDaemonEventStreamOptions {
+  sampleMs?: number;
+  heartbeatMs?: number;
+}
+
+export async function streamDockerDaemonEvents(
+  closeSignal: DockerDaemonEventCloseSignal,
+  output: DockerDaemonEventOutput,
+  daemon: Pick<SystemDockerDaemonRuntime, "getStatus">,
+  options: DockerDaemonEventStreamOptions = {}
+): Promise<void> {
+  const sampleMs = options.sampleMs ?? DOCKER_DAEMON_SAMPLE_MS;
+  const heartbeatMs = options.heartbeatMs ?? DOCKER_DAEMON_HEARTBEAT_MS;
+  let closed = false;
+  let sampling = false;
+  let lastSignature: string | null = null;
+  let statusTimer: ReturnType<typeof setInterval> | null = null;
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+  closeSignal.on("close", () => {
+    closed = true;
+    if (statusTimer) clearInterval(statusTimer);
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+  });
+  output.write("retry: 2000\n\n");
+
+  const sample = async () => {
+    if (closed || sampling) return;
+    sampling = true;
+    try {
+      const status = await daemon.getStatus();
+      const signature = dockerDaemonStatusSignature(status);
+      if (!closed && signature !== lastSignature) {
+        lastSignature = signature;
+        output.write("event: docker.daemon.status\n");
+        output.write(`data: ${JSON.stringify(status)}\n\n`);
+      }
+    } catch {
+      const status: DockerDaemonStatus = {
+        state: "failed",
+        loadState: null,
+        activeState: null,
+        subState: null,
+        result: "collection-error",
+        collectedAt: new Date().toISOString()
+      };
+      const signature = dockerDaemonStatusSignature(status);
+      if (!closed && signature !== lastSignature) {
+        lastSignature = signature;
+        output.write("event: docker.daemon.status\n");
+        output.write(`data: ${JSON.stringify(status)}\n\n`);
+      }
+    } finally {
+      sampling = false;
+    }
+  };
+
+  await sample();
+  if (closed) return;
+  statusTimer = setInterval(() => void sample(), sampleMs);
+  heartbeatTimer = setInterval(() => {
+    if (!closed) output.write(": heartbeat\n\n");
+  }, heartbeatMs);
+}
+
+function sendDockerDaemonError(reply: FastifyReply, error: unknown): void {
+  const statusCode = error instanceof DockerDaemonRequestError ? error.statusCode : 503;
+  reply.status(statusCode).send({
+    error: safeDockerDaemonMessage(error),
+    ...(error instanceof DockerDaemonRequestError && error.result ? { result: error.result } : {})
+  });
 }
 
 function isComposeAction(action: DockerOperationAction): boolean {

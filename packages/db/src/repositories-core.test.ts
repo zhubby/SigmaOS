@@ -7,6 +7,7 @@ import {
   claimNextJob,
   createDockerOperationApproval,
   createDockerOperationRecord,
+  createDockerRegistryCredential,
   createPiToolCallApproval,
   createSession,
   createUserMessageAndJob,
@@ -19,10 +20,13 @@ import {
   getPiToolPolicySettings,
   listEvents,
   listDockerOperations,
+  listDockerRegistryCredentials,
   listNasRoots,
   openSigmaDb,
   saveAgentProviderSession,
   savePiToolPolicySettings,
+  deleteDockerRegistryCredential,
+  updateDockerRegistryCredential,
   updateJobStatus,
   type SigmaDatabase
 } from "./index.js";
@@ -319,5 +323,85 @@ describe("core repositories", () => {
     expect(listDockerOperations(db, { sessionId: session.id }).map((item) => item.id).sort()).toEqual(
       [container.id, volume.id].sort()
     );
+  });
+
+  it("stores multiple Docker registry credentials and preserves secrets on partial updates", () => {
+    const dockerHub = createDockerRegistryCredential(db, {
+      name: "Docker Hub",
+      serverAddress: "docker.io",
+      username: "zhubby",
+      password: "hub-token"
+    });
+    const privateRegistry = createDockerRegistryCredential(db, {
+      name: "Private",
+      serverAddress: "registry.example.com:5000",
+      username: "builder",
+      password: "private-token"
+    });
+
+    const updated = updateDockerRegistryCredential(db, privateRegistry.id, {
+      name: "Private Registry",
+      password: ""
+    });
+
+    expect(updated).toMatchObject({
+      id: privateRegistry.id,
+      name: "Private Registry",
+      password: "private-token"
+    });
+    expect(listDockerRegistryCredentials(db)).toHaveLength(2);
+    expect(updateDockerRegistryCredential(db, privateRegistry.id, { password: "   " })?.password).toBe("private-token");
+    const latest = listDockerRegistryCredentials(db)[1];
+    expect(deleteDockerRegistryCredential(db, dockerHub.id)).toBe(true);
+    expect(deleteDockerRegistryCredential(db, dockerHub.id)).toBe(false);
+    expect(listDockerRegistryCredentials(db)).toEqual([latest]);
+  });
+
+  it("rejects duplicate Docker registry servers without overwriting existing credentials", () => {
+    const existing = createDockerRegistryCredential(db, {
+      name: "Docker Hub",
+      serverAddress: "docker.io",
+      username: "first",
+      password: "first-token"
+    });
+
+    expect(() => createDockerRegistryCredential(db, {
+      name: "Duplicate",
+      serverAddress: "docker.io",
+      username: "second",
+      password: "second-token"
+    })).toThrow(/already exist/);
+    expect(listDockerRegistryCredentials(db)).toEqual([existing]);
+  });
+
+  it("ignores malformed and legacy Docker registry setting entries", () => {
+    db.prepare("INSERT INTO system_settings (key, value_json, updated_at) VALUES (?, ?, ?)").run(
+      "docker_registry_credentials",
+      "not-json",
+      "2026-01-01T00:00:00.000Z"
+    );
+    expect(listDockerRegistryCredentials(db)).toEqual([]);
+
+    db.prepare("UPDATE system_settings SET value_json = ? WHERE key = ?").run(
+      JSON.stringify([
+        {
+          id: "valid",
+          name: "Docker Hub",
+          serverAddress: "docker.io",
+          username: "user",
+          password: "secret"
+        },
+        { id: "legacy", name: "Missing password" }
+      ]),
+      "docker_registry_credentials"
+    );
+    expect(listDockerRegistryCredentials(db)).toMatchObject([
+      {
+        id: "valid",
+        password: "secret",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z"
+      }
+    ]);
   });
 });

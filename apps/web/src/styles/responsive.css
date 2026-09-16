@@ -554,6 +554,54 @@
 }
 
 @media (max-width: 560px) {
+  .docker-daemon-settings-backdrop {
+    align-items: stretch;
+    padding: 8px;
+  }
+
+  .docker-daemon-settings-dialog {
+    width: 100%;
+    max-height: calc(100dvh - 16px);
+  }
+
+  .docker-daemon-settings-body,
+  .docker-daemon-confirmation {
+    padding: 13px;
+  }
+
+  .docker-daemon-settings-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .docker-daemon-editor-field textarea {
+    min-height: 280px;
+  }
+
+  .docker-daemon-settings-footer,
+  .docker-daemon-settings-footer > div {
+    align-items: stretch;
+  }
+
+  .docker-daemon-settings-footer {
+    flex-direction: column-reverse;
+  }
+
+  .docker-daemon-settings-footer > div {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .docker-daemon-settings-footer > button,
+  .docker-daemon-settings-footer > div > button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .docker-daemon-confirmation dl > div {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
   .activity-popover {
     position: fixed;
     top: 62px;
@@ -749,12 +797,14 @@
     font-size: 18px;
   }
 
-  .management-actions > button {
+  .management-actions > button,
+  .management-actions > .docker-create-menu > button {
     width: 34px;
     padding: 0;
   }
 
   .management-actions > button span,
+  .management-actions > .docker-create-menu > button span,
   .management-row-action span {
     display: none;
   }
