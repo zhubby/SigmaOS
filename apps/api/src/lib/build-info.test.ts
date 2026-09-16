@@ -1,8 +1,22 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadBuildInfo, parseBuildInfo } from "./build-info.js";
+
+// Package tests also run on installed appliances; never read their live metadata.
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...fs,
+    readFile: (...args: Parameters<typeof fs.readFile>) => {
+      if (String(args[0]) === "/usr/lib/sigmaos/build-info.json") {
+        return Promise.reject(new Error("Host metadata is outside the test fixture"));
+      }
+      return fs.readFile(...args);
+    }
+  };
+});
 
 let tempDir: string;
 
@@ -44,7 +58,7 @@ describe("build information loading", () => {
     await writeFile(path.join(tempDir, "package.json"), JSON.stringify({ version: "0.2.0" }));
     await writeFile(path.join(tempDir, "build-info.json"), "{not-json");
 
-    await expect(loadBuildInfo({ cwd: tempDir })).resolves.toEqual({
+    await expect(loadBuildInfo({ configuredPath: "", cwd: tempDir })).resolves.toEqual({
       version: "0.2.0",
       commitSha: null,
       commitShortSha: null,
