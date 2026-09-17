@@ -13,6 +13,26 @@ sidebar:
 
 `SQLITE_BUSY` 通常表示 oneshot 任务并发；应停止相关 timers，确认任务退出后串行运行。静态页面停在 Loading 时，先确认 API 提供当前 Web asset，且不存在的 `/assets/*` 没有被 SPA fallback 返回。
 
+## 服务目录所有权与启动顺序
+
+root share-helper 只声明 `StateDirectory=sigmaos/docker-daemon`（`0700 root:root`），不声明共享的 `StateDirectory=sigmaos` 或 `LogsDirectory=sigmaos`。否则 systemd 启动 root helper 时可能重设共享父目录及子文件的所有权，导致非 root API/worker 无法打开 SQLite。不要用反复递归 chown 或赋予 API root 权限掩盖问题。
+
+```bash
+sudo systemctl show sigmaos-share-helper.service -p StateDirectory -p StateDirectoryMode -p LogsDirectory
+sudo stat -c '%U:%G %a %n' /var/lib/sigmaos /var/lib/sigmaos/docker-daemon /var/log/sigmaos
+sudo systemctl cat sigmaos-share-helper.service
+```
+
+共享父目录保持 `sigmaos:sigmaos`，Docker 恢复子目录保持 `root:root 700`。升级后检查现有 drop-in 不得重新引入共享父目录声明。CM5 上已有的 `deployment-state.conf` 如设置相同的嵌套目录，可保留；恢复文件无需迁移。修复权限前停止 timers 和所有数据库写入进程，先保存一致备份；仅修复核实错误的目标，不改变 Docker 恢复材料权限。
+
+在维护窗口分别验证 helper→API/worker 和 API/worker→helper 两种启动顺序，以及 helper 单独重启后 API 仍可访问数据库。查看 `Permission denied`、`SQLITE_CANTOPEN` 和重启计数；不能只检查一次 `/health`。设备重启验收须另行安排，不能用服务重启代替。
+
+## Docker 拉取与资源能力
+
+分别检查设备到镜像源的 DNS/TLS、镜像代理 `/v2/` 和实际镜像拉取。`/v2/` 返回 `200` 或认证挑战 `401` 只能证明网络可达，不能证明镜像存在或凭证有效。Registry mirror 在 daemon JSON 中配置，例如 `https://docker.zhubby.com`；SigmaOS Registry 凭证匹配仍按镜像引用，而不是自动改为 mirror 地址。
+
+检查 Engine `/info` 的 `MemoryLimit`、`SwapLimit`、`CpuCfsQuota`、`CpuCfsPeriod` 等属性及内核/cgroup 配置。能力未知或不支持时清空对应限制，不绕过 API 校验。修改 CM5 内核启动参数需备份原配置并有独立维护窗口；本功能不会自动更改宿主机。资源统计 `null` 与资源能力 `false` 是不同信号。
+
 ## Docker daemon 配置恢复
 
 先分别检查 service 与 Engine socket，不要把两者混为一个故障：

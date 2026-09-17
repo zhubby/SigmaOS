@@ -2431,6 +2431,54 @@
   margin-top: 0;
 }
 
+.docker-resource-status {
+  margin: 12px 0;
+  padding: 10px 0;
+  border-block: 1px solid var(--line);
+  font-size: 11px;
+}
+
+.docker-resource-status h5 {
+  margin-bottom: 8px;
+  color: var(--text);
+  font-size: 11px;
+}
+
+.docker-resource-status dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 6px 18px;
+}
+
+.docker-resource-status dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+}
+
+.docker-resource-status dd {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.docker-resource-status [data-state="unsupported"] dd,
+.docker-resource-status [data-state="unknown"] dd,
+.docker-resource-recovery p {
+  color: var(--warning-text);
+}
+
+.docker-resource-recovery {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 .management-section {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);

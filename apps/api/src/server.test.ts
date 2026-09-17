@@ -52,6 +52,7 @@ import type {
   DockerDaemonStatus,
   DockerImageSummary,
   DockerOperationProposal,
+  DockerResourceCapabilities,
   ShareApplyRequest,
   ShareApplyResult,
   SigmaConfig,
@@ -2190,6 +2191,98 @@ describe("API server", () => {
     }
     expect((await server.inject({ method: "GET", url: "/api/docker/registries" })).statusCode).toBe(200);
     await server.close();
+  });
+
+  it("resolves CM5 image occupancy and rejects unavailable limits through the real socket/API chain", async () => {
+    const socketPath = path.join(tempDir, "engine.sock");
+    const mutations: string[] = [];
+    const upstream = http.createServer((request, response) => {
+      const url = request.url ?? "";
+      response.setHeader("Content-Type", "application/json");
+      const replies: Record<string, unknown> = {
+        "/version": { Version: "26.1.5", ApiVersion: "1.45", MinAPIVersion: "1.24", Arch: "arm64" },
+        "/v1.45/info": { MemoryLimit: false, SwapLimit: false, CpuCfsQuota: true, CpuCfsPeriod: true },
+        "/v1.45/containers/json?all=1": [
+          { Id: "running", Image: "rustfs/rustfs:old", ImageID: "sha256:rustfs", State: "running" },
+          { Id: "stopped", Image: "rustfs/rustfs:older", ImageID: "sha256:rustfs", State: "exited" }
+        ],
+        "/v1.45/containers/running/stats?stream=false": { memory_stats: {} },
+        "/v1.45/images/json?shared-size=true&containers=true": [
+          { Id: "sha256:rustfs", RepoTags: ["rustfs/rustfs:latest"], Containers: -1 },
+          { Id: "sha256:unused", RepoTags: null, Containers: -1 }
+        ],
+        "/v1.45/images/rustfs%2Frustfs%3Alatest/json": { Id: "sha256:rustfs" },
+        "/v1.45/networks": [],
+        "/v1.45/volumes": { Volumes: [] }
+      };
+      if (request.method !== "GET") mutations.push(`${request.method} ${url}`);
+      if (!(url in replies)) response.statusCode = 404;
+      response.end(JSON.stringify(replies[url] ?? { message: "Unexpected Engine request" }));
+    });
+    await listenOnUnixSocket(upstream, socketPath);
+    const server = await buildServer({ config: dockerEnabledConfig(tempDir, { socketPath }), db,
+      docker: { daemon: new FakeDockerDaemon(), compose: new FakeDockerCompose() } });
+    try {
+      const summary = await server.inject({ method: "GET", url: "/api/docker/summary" });
+      expect(summary.statusCode).toBe(200);
+      expect(summary.json()).toMatchObject({ summary: {
+        engine: { status: "ready", architecture: "arm64", resourceCapabilities: {
+          memoryLimit: false, swapLimit: false, cpuQuota: true, cpuShares: null, cpuset: null, pidsLimit: null
+        } },
+        images: [{ id: "sha256:rustfs", containerCount: 2 }, { id: "sha256:unused", containerCount: 0 }],
+        metrics: { images: 2, memoryUsageBytes: null }
+      } });
+      const session = createSession(db, { rootId: "local" });
+      for (const limit of [{ memoryLimitBytes: 8_388_608 }, { memoryReservationBytes: 8_388_608 },
+        { memorySwapBytes: -1 }, { cpuShares: 512 }, { cpusetCpus: "0-1" }, { pidsLimit: 128 }]) {
+        const rejected = await server.inject({ method: "POST", url: "/api/docker/proposals", payload: {
+          sessionId: session.id, action: "create", targetType: "container", name: "unsupported", image: "rustfs/rustfs", ...limit
+        } });
+        expect(rejected.statusCode).toBe(400);
+        expect(rejected.json().error).toContain("Host resource control is unsupported or unknown");
+      }
+      const occupied = await server.inject({ method: "POST", url: "/api/docker/images/remove", payload: {
+        reference: "rustfs/rustfs:latest", confirmed: true
+      } });
+      expect(occupied.statusCode).toBe(409);
+      expect(mutations).toEqual([]);
+      expect(listDockerOperations(db)).toEqual([]);
+      expect(listPendingApprovals(db)).toEqual([]);
+      expect(listMessages(db, { sessionId: session.id })).toEqual([]);
+      expect(listEvents(db, { sessionId: session.id })).toEqual([]);
+    } finally {
+      await server.close();
+      await closeHttpServer(upstream);
+    }
+  });
+
+  it("allows supported resource limits and rejects unavailable CPU and swap controls", async () => {
+    const engine = new FakeDockerEngine();
+    const session = createSession(db, { rootId: "local" });
+    const server = await buildServer({ config: dockerEnabledConfig(tempDir), db, docker: {
+      engine, daemon: new FakeDockerDaemon(), compose: new FakeDockerCompose()
+    } });
+    try {
+      for (const flag of [false, null]) {
+        engine.resourceCapabilities = { ...engine.resourceCapabilities, cpuQuota: flag, memoryLimit: flag };
+        for (const limit of [{ cpuLimit: 2 }, { memorySwapBytes: -1 }]) {
+          const rejected = await server.inject({ method: "POST", url: "/api/docker/proposals", payload: {
+            sessionId: session.id, action: "create", targetType: "container", name: "limits", image: "alpine", ...limit
+          } });
+          expect(rejected.statusCode).toBe(400);
+        }
+      }
+      expect(engine.calls).toEqual([]);
+      expect(listDockerOperations(db)).toEqual([]);
+      engine.resourceCapabilities = { memoryLimit: true, swapLimit: true, cpuQuota: true, cpuShares: true, cpuset: true, pidsLimit: true };
+      const accepted = await server.inject({ method: "POST", url: "/api/docker/proposals", payload: {
+        sessionId: session.id, action: "create", targetType: "container", name: "limits", image: "alpine", start: false,
+        cpuLimit: 2, cpuShares: 512, cpusetCpus: "0-1", memoryLimitBytes: 8_388_608,
+        memoryReservationBytes: 4_194_304, memorySwapBytes: -1, pidsLimit: 128
+      } });
+      expect(accepted.statusCode).toBe(202);
+      expect(engine.calls).toEqual(["image-exists", "create-container"]);
+    } finally { await server.close(); }
   });
 
   it("creates Docker container approvals without running the action before approval", async () => {
@@ -4379,6 +4472,9 @@ class FakeDockerDaemon implements DockerDaemonRuntime {
 }
 
 class FakeDockerEngine implements DockerEngineRuntime {
+  resourceCapabilities: DockerResourceCapabilities = {
+    memoryLimit: true, swapLimit: true, cpuQuota: true, cpuShares: true, cpuset: true, pidsLimit: true
+  };
   calls: string[] = [];
   pullInputs: Array<{ image: string; registryAuth?: string }> = [];
   removedImages: string[] = [];
@@ -4404,7 +4500,8 @@ class FakeDockerEngine implements DockerEngineRuntime {
       negotiatedApiVersion: "1.55",
       operatingSystem: "Test Linux",
       architecture: "amd64",
-      dockerRootDir: "/var/lib/docker"
+      dockerRootDir: "/var/lib/docker",
+      resourceCapabilities: this.resourceCapabilities
     };
   }
 

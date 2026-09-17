@@ -23,9 +23,15 @@ Agent 事件通过 session SSE stream 传递；terminal、Docker console 和 VM 
 
 ## Docker 镜像与 Registry
 
-- `GET /api/docker/summary` 的 `images` 来自与镜像计数相同的一次 Engine 查询，包含 ID、tags、digests、创建时间、大小、共享大小和容器引用数。
+- `GET /api/docker/summary` 的 `images` 来自与镜像计数相同的一次 Engine 查询，包含 ID、tags、digests、创建时间、大小、共享大小和容器引用数。容器列表包含 `imageId`；元数据完整时，引用数按 ImageID 汇总全部容器（包括已停止容器），不按可变 tag 匹配。旧 Engine/适配器未提供完整 ImageID 时保留 Engine 计数，未知为 `null`，不是零。
 - `POST /api/docker/images/pull` 接收 `reference`，同步等待 Engine 完成拉取。SigmaOS 按镜像引用选择匹配凭证，没有匹配项时匿名拉取。
 - `POST /api/docker/images/remove` 接收 `reference` 和 `confirmed: true`。删除固定使用 `force=false`、`noprune=true`；被容器引用或存在多引用冲突时返回 `409`，不创建 approval 或 Docker operation。
 - `GET /api/docker/registries` 返回凭证摘要；`POST /api/docker/registries`、`PATCH /api/docker/registries/:id`、`DELETE /api/docker/registries/:id` 管理单条记录。创建/更新正文最多 64 KiB，所有响应只包含 `credentialConfigured`，不会返回密码或 access token。
 
 Registry 地址只接受 hostname/IP 和可选端口；Docker Hub 别名归一化为 `docker.io`。未限定 Registry 的镜像和 Docker Hub 别名匹配 `docker.io`；包含点号、端口、`localhost` 或 IP 的首段按私有 Registry 精确匹配。无效地址/引用返回 `400`，重复 Registry 或镜像占用返回 `409`，不存在返回 `404`，Engine 不可用返回脱敏后的 `502`。Registry CRUD 不依赖 Docker 管理开关或 Engine 状态。
+
+## Docker 资源限制
+
+`summary.engine.resourceCapabilities` 包含可空布尔字段 `memoryLimit`、`swapLimit`、`cpuQuota`、`cpuShares`、`cpuset`、`pidsLimit`，来自 Engine `/info`。CPU quota 要求 `CpuCfsQuota` 和 `CpuCfsPeriod` 同时为真；缺失或非布尔属性作为未知处理。
+
+容器创建只接受宿主机明确支持的非空限制。内存硬限制和 reservation 要求 `memoryLimit`；swap 要求内存与 swap 均可用；CPU、cpuset、PID 限制要求各自能力。显式不支持或未知时返回 `400`，不创建容器、approval 或 operation。留空表示不请求该限制，仍可创建容器；不要把缺失内存统计解释成零使用量。

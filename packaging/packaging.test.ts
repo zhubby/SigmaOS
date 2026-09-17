@@ -228,6 +228,10 @@ describe("native packaging artifacts", () => {
     const unit = await readPackagingFile("systemd", "sigmaos-share-helper.service");
 
     expect(unit).toContain("User=root");
+    expect(unit).toContain("StateDirectory=sigmaos/docker-daemon\n");
+    expect(unit).toContain("StateDirectoryMode=0700");
+    expect(unit).not.toMatch(/^StateDirectory=sigmaos$/mu);
+    expect(unit).not.toMatch(/^LogsDirectory=sigmaos$/mu);
     expect(unit).not.toContain("RuntimeDirectory=sigmaos");
     expect(unit).toContain("systemd-tmpfiles-setup.service");
     expect(unit).toContain("share-helper.sock");

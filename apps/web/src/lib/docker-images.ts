@@ -24,6 +24,10 @@ export function dockerImageDeleteTargets(image: DockerImageSummary): string[] {
   return image.tags.length ? image.tags : [image.id];
 }
 
+export function dockerImageRemovalBlocked(image: DockerImageSummary): boolean {
+  return image.containerCount === null || image.containerCount > 0;
+}
+
 export function dockerRegistryAddressForImage(reference: string): string {
   return parseDockerImageReference(reference)?.serverAddress ?? "docker.io";
 }

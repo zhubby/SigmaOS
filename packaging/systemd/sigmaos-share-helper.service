@@ -10,8 +10,8 @@ User=root
 Group=root
 Environment=SIGMAOS_SHARE_HELPER_SOCKET_PATH=/run/sigmaos/share-helper.sock
 WorkingDirectory=/var/lib/sigmaos
-StateDirectory=sigmaos
-LogsDirectory=sigmaos
+StateDirectory=sigmaos/docker-daemon
+StateDirectoryMode=0700
 ExecStart=/usr/local/bin/node /usr/lib/sigmaos/apps/share-helper/dist/index.js
 Restart=on-failure
 RestartSec=3

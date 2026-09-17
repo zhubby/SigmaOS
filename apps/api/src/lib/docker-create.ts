@@ -3,7 +3,7 @@ import { isIP } from "node:net";
 import path from "node:path";
 import { getNasRoot, getRootReadiness } from "@sigmaos/db";
 import { resolveSafeExistingPath } from "@sigmaos/nas-tools";
-import { parseDockerImageReference } from "@sigmaos/shared";
+import { getUnsupportedDockerResource, parseDockerImageReference } from "@sigmaos/shared";
 import type {
   DockerContainerCreateInput,
   DockerCreateResult,
@@ -310,6 +310,13 @@ async function prepareContainer(
   const pidsLimit = optionalInteger(source.pidsLimit, "PID limit", -1, 1_000_000);
   const shmSizeBytes = optionalInteger(source.shmSizeBytes, "Shared memory size", 65_536, 2 ** 40);
   const restartMaxRetries = optionalInteger(source.restartMaxRetries, "Restart retries", 0, 1_000_000);
+  const unavailable = getUnsupportedDockerResource({
+    cpuLimit, cpuShares, cpusetCpus, memoryLimitBytes,
+    memoryReservationBytes, memorySwapBytes, pidsLimit
+  }, summary.engine.resourceCapabilities);
+  if (unavailable) {
+    throw new DockerCreateValidationError(`Host resource control is unsupported or unknown: ${unavailable[0]}`);
+  }
   if (restartMaxRetries !== undefined && restartPolicy !== "on-failure") {
     throw new DockerCreateValidationError("Restart retries require the on-failure restart policy");
   }

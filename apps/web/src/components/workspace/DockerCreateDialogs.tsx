@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { CircleAlert, CircleCheck, Container, Database, Info, LoaderCircle, Network, Plus, Settings2, Trash2, X } from "lucide-react";
 import type { DockerSummary } from "../../api.js";
+import type { DockerResourceCapabilities } from "@sigmaos/shared";
+import { DOCKER_RESOURCE_FIELDS, getDockerResourceCapability, getUnsupportedDockerResource } from "@sigmaos/shared/docker-resources";
+import { DockerResourceStatus } from "./DockerResourceStatus.js";
 import { getSystemNetwork, proposeDockerOperation, type NasRoot } from "../../api.js";
 import { initialDockerCreateForm, dockerCreateInput, validateDockerCreateStep, type DockerCreateForm, type DockerCreateKind } from "../../lib/docker-create-form.js";
 
@@ -55,8 +58,17 @@ export function DockerCreateDialogs({ kind, sessionId, summary, roots, onClose, 
     setError(null);
     setValidationVisible(false);
   };
-  const canSubmit = Boolean(summary.enabled && summary.engine.status === "ready" && !submitting);
-  const validation = useMemo(() => validateDockerCreateStep(step, form), [step, form]);
+  const canSubmit = Boolean(summary.enabled && summary.engine.status === "ready" && !submitting && !validateStep(6));
+  const validation = validateStep(step);
+
+  function validateStep(nextStep: number): string | null {
+    const issue = validateDockerCreateStep(nextStep, form);
+    if (issue) return issue;
+    const unavailable = form.kind === "container" && nextStep >= 3
+      ? getUnsupportedDockerResource(form, summary.engine.resourceCapabilities)
+      : null;
+    return unavailable ? createT("capabilities.unavailable", { field: createT(`resources.${unavailable[2]}`) }) : null;
+  }
 
   function addRow<K extends "environment" | "labels" | "extraHosts" | "ipam" | "ports" | "mounts">(key: K) {
     if (key === "environment" || key === "labels") update(key, [...(form[key] as Array<{ key: string; value: string }>), { key: "", value: "" }] as DockerCreateForm[K]);
@@ -68,7 +80,7 @@ export function DockerCreateDialogs({ kind, sessionId, summary, roots, onClose, 
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const issue = validateDockerCreateStep(6, form);
+    const issue = validateStep(6);
     if (issue) { setValidationVisible(true); setError(issue); return; }
     setSubmitting(true); setError(null);
     try {
@@ -85,7 +97,7 @@ export function DockerCreateDialogs({ kind, sessionId, summary, roots, onClose, 
   }
 
   function advance() {
-    const issue = validateDockerCreateStep(step, form);
+    const issue = validateStep(step);
     if (issue) { setValidationVisible(true); setError(issue); return; }
     setError(null); setValidationVisible(false); setStep((current) => Math.min(6, current + 1));
   }
@@ -115,11 +127,11 @@ export function DockerCreateDialogs({ kind, sessionId, summary, roots, onClose, 
           {kind === "network" ? <NetworkStage form={form} update={update} interfaces={interfaces} onAdd={() => addRow("ipam")} submitting={submitting} /> : null}
           {kind === "container" && step === 1 ? <ContainerBasics form={form} update={update} /> : null}
           {kind === "container" && step === 2 ? <ContainerProcess form={form} update={update} onAdd={addRow} submitting={submitting} /> : null}
-          {kind === "container" && step === 3 ? <ContainerResources form={form} update={update} /> : null}
+          {kind === "container" && step === 3 ? <ContainerResources form={form} update={update} capabilities={summary.engine.resourceCapabilities} /> : null}
           {kind === "container" && step === 4 ? <ContainerStorage form={form} update={update} roots={roots} summary={summary} onAdd={addRow} submitting={submitting} /> : null}
           {kind === "container" && step === 5 ? <ContainerNetwork form={form} update={update} summary={summary} onAdd={addRow} submitting={submitting} /> : null}
           {kind === "container" && step === 6 ? <ContainerReview form={form} /> : null}
-          {error || (validationVisible && validation) ? <p className="vm-create-error" role="alert"><CircleAlert size={14} />{error ?? validation}</p> : null}
+          {error || ((validationVisible || step === 6) && validation) ? <p className="vm-create-error" role="alert"><CircleAlert size={14} />{error ?? validation}</p> : null}
         </div>
         <footer className="vm-create-dialog-footer"><span>{kind === "container" ? `${step} / 6` : createT("actions.directCreate")} · {form.name || createT("actions.unnamed")}</span><div><button type="button" onClick={onClose} disabled={submitting}>{createT("actions.cancel")}</button>{kind === "container" && step > 1 ? <button type="button" onClick={() => goToStep(step - 1)} disabled={submitting}>{createT("actions.back")}</button> : null}{kind === "container" && step < 6 ? <button type="button" className="vm-create-submit" onClick={advance} disabled={submitting}>{createT("actions.next")}</button> : <button type="submit" className="vm-create-submit" disabled={!canSubmit}>{submitting ? <><LoaderCircle className="spin" size={14} />{createT("actions.creating")}</> : createT("actions.createNow")}</button>}</div></footer>
       </form>
@@ -140,9 +152,32 @@ function ContainerProcess({ form, update, onAdd, submitting }: { form: DockerCre
   const t = useCreateText();
   return <section className="vm-create-section vm-create-stage"><Heading number="02" title={t("stages.process")} detail={t("process.detail")} /><div className="vm-create-field-grid"><Field label={t("process.hostname")}><input value={form.hostname} onChange={(event) => update("hostname", event.target.value)} /></Field><Field label={t("process.user")}><input value={form.user} onChange={(event) => update("user", event.target.value)} placeholder="1000:1000" /></Field><Field label={t("process.workingDir")}><input value={form.workingDir} onChange={(event) => update("workingDir", event.target.value)} placeholder="/app" /></Field><Field label={t("process.stopSignal")}><input value={form.stopSignal} onChange={(event) => update("stopSignal", event.target.value)} placeholder="SIGTERM" /></Field><Field label={t("process.stopTimeout")}><input type="number" min="0" max="86400" value={form.stopTimeoutSeconds} onChange={(event) => update("stopTimeoutSeconds", event.target.value)} /></Field></div><div className="vm-create-field-grid vm-create-field-grid-two"><Field label={t("process.entrypoint")}><input value={form.entrypoint} onChange={(event) => update("entrypoint", event.target.value)} placeholder="/bin/sh -c" /></Field><Field label={t("process.command")}><input value={form.command} onChange={(event) => update("command", event.target.value)} placeholder="npm start" /></Field></div><DynamicMap title={t("process.environment")} detail={t("process.environmentDetail")} rows={form.environment} onChange={(rows) => update("environment", rows)} onAdd={() => onAdd("environment")} disabled={submitting} /><DynamicMap title={t("process.labels")} detail={t("process.labelsDetail")} rows={form.labels} onChange={(rows) => update("labels", rows)} onAdd={() => onAdd("labels")} disabled={submitting} /><div className="vm-create-toggle-grid"><Toggle label={t("process.tty")} checked={form.tty} onChange={(value) => update("tty", value)} disabled={submitting} /><Toggle label={t("process.openStdin")} checked={form.openStdin} onChange={(value) => update("openStdin", value)} disabled={submitting} /><Toggle label={t("process.init")} checked={form.init} onChange={(value) => update("init", value)} disabled={submitting} /></div></section>;
 }
-function ContainerResources({ form, update }: { form: DockerCreateForm; update: <K extends keyof DockerCreateForm>(key: K, value: DockerCreateForm[K]) => void }) {
+export function ContainerResources({ form, update, capabilities }: { form: DockerCreateForm; update: <K extends keyof DockerCreateForm>(key: K, value: DockerCreateForm[K]) => void; capabilities: DockerResourceCapabilities | undefined }) {
   const t = useCreateText();
-  return <section className="vm-create-section vm-create-stage"><Heading number="03" title={t("stages.resources")} detail={t("resources.detail")} /><div className="vm-create-field-grid"><Field label={t("resources.cpuLimit")}><input type="number" min="0.01" step="0.01" value={form.cpuLimit} onChange={(event) => update("cpuLimit", event.target.value)} placeholder="2" /></Field><Field label={t("resources.cpuShares")}><input type="number" min="2" max="262144" value={form.cpuShares} onChange={(event) => update("cpuShares", event.target.value)} /></Field><Field label={t("resources.cpuset")}><input value={form.cpusetCpus} onChange={(event) => update("cpusetCpus", event.target.value)} placeholder="0-3" /></Field><Field label={t("resources.memoryLimit")}><input type="number" min="4194304" value={form.memoryLimitBytes} onChange={(event) => update("memoryLimitBytes", event.target.value)} /></Field><Field label={t("resources.memoryReservation")}><input type="number" min="4194304" value={form.memoryReservationBytes} onChange={(event) => update("memoryReservationBytes", event.target.value)} /></Field><Field label={t("resources.memorySwap")}><input type="number" min="-1" value={form.memorySwapBytes} onChange={(event) => update("memorySwapBytes", event.target.value)} placeholder="-1" /></Field><Field label={t("resources.pidsLimit")}><input type="number" min="-1" max="1000000" value={form.pidsLimit} onChange={(event) => update("pidsLimit", event.target.value)} /></Field><Field label={t("resources.shmSize")}><input type="number" min="65536" value={form.shmSizeBytes} onChange={(event) => update("shmSizeBytes", event.target.value)} /></Field><Field label={t("resources.restartPolicy")}><select value={form.restartPolicy} onChange={(event) => update("restartPolicy", event.target.value as DockerCreateForm["restartPolicy"])}><option value="no">no</option><option value="always">always</option><option value="unless-stopped">unless-stopped</option><option value="on-failure">on-failure</option></select></Field>{form.restartPolicy === "on-failure" ? <Field label={t("resources.restartRetries")}><input type="number" min="0" max="1000000" value={form.restartMaxRetries} onChange={(event) => update("restartMaxRetries", event.target.value)} /></Field> : null}</div><div className="vm-create-toggle-grid"><Toggle label={t("resources.readOnlyRootfs")} checked={form.readonlyRootfs} onChange={(value) => update("readonlyRootfs", value)} /><Toggle label={t("resources.autoRemove")} checked={form.autoRemove} onChange={(value) => update("autoRemove", value)} /><Toggle label={t("resources.privileged")} checked={form.privileged} onChange={(value) => update("privileged", value)} />{form.privileged ? <Toggle label={t("resources.privilegedAck")} checked={form.privilegedAcknowledged} onChange={(value) => update("privilegedAcknowledged", value)} /> : null}</div></section>;
+  const unavailableFields = DOCKER_RESOURCE_FIELDS.filter(([field]) => getUnsupportedDockerResource({ [field]: form[field] }, capabilities));
+  return <section className="vm-create-section vm-create-stage">
+    <Heading number="03" title={t("stages.resources")} detail={t("resources.detail")} />
+    <DockerResourceStatus capabilities={capabilities} />
+    {unavailableFields.length > 0 ? <div className="docker-resource-recovery">
+      <p>{t("capabilities.unavailable", { field: unavailableFields.map(([, , label]) => t(`resources.${label}`)).join(", ") })}</p>
+      <button type="button" className="docker-create-add" onClick={() => unavailableFields.forEach(([field]) => update(field, ""))}>
+        <Trash2 size={13} aria-hidden="true" />{t("capabilities.clearUnavailable")}
+      </button>
+    </div> : null}
+    <div className="vm-create-field-grid">
+      <Field label={t("resources.cpuLimit")}><input type="number" min="0.01" step="0.01" value={form.cpuLimit} disabled={capabilities?.cpuQuota !== true} onChange={(event) => update("cpuLimit", event.target.value)} placeholder="2" /></Field>
+      <Field label={t("resources.cpuShares")}><input type="number" min="2" max="262144" value={form.cpuShares} disabled={capabilities?.cpuShares !== true} onChange={(event) => update("cpuShares", event.target.value)} /></Field>
+      <Field label={t("resources.cpuset")}><input value={form.cpusetCpus} disabled={capabilities?.cpuset !== true} onChange={(event) => update("cpusetCpus", event.target.value)} placeholder="0-3" /></Field>
+      <Field label={t("resources.memoryLimit")}><input type="number" min="4194304" value={form.memoryLimitBytes} disabled={capabilities?.memoryLimit !== true} onChange={(event) => update("memoryLimitBytes", event.target.value)} /></Field>
+      <Field label={t("resources.memoryReservation")}><input type="number" min="4194304" value={form.memoryReservationBytes} disabled={capabilities?.memoryLimit !== true} onChange={(event) => update("memoryReservationBytes", event.target.value)} /></Field>
+      <Field label={t("resources.memorySwap")}><input type="number" min="-1" value={form.memorySwapBytes} disabled={getDockerResourceCapability("swapLimit", capabilities) !== true} onChange={(event) => update("memorySwapBytes", event.target.value)} placeholder="-1" /></Field>
+      <Field label={t("resources.pidsLimit")}><input type="number" min="-1" max="1000000" value={form.pidsLimit} disabled={capabilities?.pidsLimit !== true} onChange={(event) => update("pidsLimit", event.target.value)} /></Field>
+      <Field label={t("resources.shmSize")}><input type="number" min="65536" value={form.shmSizeBytes} onChange={(event) => update("shmSizeBytes", event.target.value)} /></Field>
+      <Field label={t("resources.restartPolicy")}><select value={form.restartPolicy} onChange={(event) => update("restartPolicy", event.target.value as DockerCreateForm["restartPolicy"])}><option value="no">no</option><option value="always">always</option><option value="unless-stopped">unless-stopped</option><option value="on-failure">on-failure</option></select></Field>
+      {form.restartPolicy === "on-failure" ? <Field label={t("resources.restartRetries")}><input type="number" min="0" max="1000000" value={form.restartMaxRetries} onChange={(event) => update("restartMaxRetries", event.target.value)} /></Field> : null}
+    </div>
+    <div className="vm-create-toggle-grid"><Toggle label={t("resources.readOnlyRootfs")} checked={form.readonlyRootfs} onChange={(value) => update("readonlyRootfs", value)} /><Toggle label={t("resources.autoRemove")} checked={form.autoRemove} onChange={(value) => update("autoRemove", value)} /><Toggle label={t("resources.privileged")} checked={form.privileged} onChange={(value) => update("privileged", value)} />{form.privileged ? <Toggle label={t("resources.privilegedAck")} checked={form.privilegedAcknowledged} onChange={(value) => update("privilegedAcknowledged", value)} /> : null}</div>
+  </section>;
 }
 
 function ContainerStorage({ form, update, roots, summary, onAdd, submitting }: { form: DockerCreateForm; update: <K extends keyof DockerCreateForm>(key: K, value: DockerCreateForm[K]) => void; roots: NasRoot[]; summary: DockerSummary; onAdd: (key: "mounts") => void; submitting: boolean }) {

@@ -22,3 +22,9 @@ Docker Engine readiness 独立来自配置的 Unix socket。daemon 可以是 `ru
 镜像列表、拉取和删除同样依赖 Engine readiness；Engine 不可用时界面保留镜像区域的错误状态并禁用这些操作。Registry 凭证是 SigmaOS 本地设置，不依赖 daemon 或 Engine，可在 Docker 管理关闭时继续新增、轮换和删除。镜像删除是直接管理操作，需要 UI 二次确认和服务端 `confirmed: true`，但不进入 approval；容器生命周期与 Compose 动作仍保持原有 approval 规则。
 
 Registry 凭证会自动用于手动拉取、容器创建时的 `always/missing` 拉取，以及 Compose `pull/up`。首期不支持 push、tag、prune、导入导出、credential helper、自定义 CA、客户端证书、identity token 或逐层拉取进度。
+
+## Docker 资源与镜像占用
+
+Engine ready 不代表内核支持全部资源控制。资源区和创建向导显示 CPU quota/shares、cpuset、内存、swap、PID 能力的可用、不支持、未知状态；只有明确可用的限制才能填写和提交。内存统计可能为 `null`，不应推断容器停止或使用量为零。CM5 上的缺失能力需要单独检查内核/cgroup 配置，不能靠填写容器内存值解决，也不会由 SigmaOS 自动修改启动参数或重启设备。
+
+镜像占用按容器 ImageID 统计，包括停止的容器；镜像 tag 变化不解除引用。ImageID 元数据不完整时保留 Engine 的计数，未知计数会禁用 UI 删除。服务端删除仍重新检查实时容器引用，Engine 的最终非强制删除是并发变化时的保护边界。

@@ -30,6 +30,7 @@ import type { SupportedLocale } from "../../i18n/locale.js";
 import {
   dockerImageDeleteTargets,
   dockerImageDisplayName,
+  dockerImageRemovalBlocked,
   filterDockerImages,
   isValidDockerImageReference,
   matchingDockerRegistry
@@ -135,7 +136,7 @@ export function DockerImageManagement({
   }
 
   async function confirmDelete() {
-    if (deleting || !engineReady || !selectedImage || !deleteReference || (selectedImage.containerCount ?? 0) > 0) return;
+    if (deleting || !engineReady || !selectedImage || !deleteReference || dockerImageRemovalBlocked(selectedImage)) return;
     setDeleting(true);
     setImageError(null);
     try {
@@ -317,6 +318,7 @@ function DockerImageDetailsDialog({
   const { t } = useTranslation();
   const targets = dockerImageDeleteTargets(image);
   const occupied = typeof image.containerCount === "number" && image.containerCount > 0;
+  const removalBlocked = dockerImageRemovalBlocked(image);
   return (
     <div className="management-modal-backdrop docker-image-modal-backdrop" onMouseDown={(event) => {
       if (event.target === event.currentTarget && !deleting) onClose();
@@ -364,6 +366,7 @@ function DockerImageDetailsDialog({
             <ImageReferenceList title={String(t("workspace.management.docker.images.tags"))} values={image.tags} empty={String(t("workspace.management.docker.images.noTags"))} />
             <ImageReferenceList title={String(t("workspace.management.docker.images.digests"))} values={image.digests} empty={String(t("workspace.management.docker.images.noDigests"))} />
             {occupied ? <p className="docker-image-engine-note"><AlertTriangle aria-hidden="true" size={15} /><span>{t("workspace.management.docker.images.inUse")}</span></p> : null}
+            {image.containerCount === null ? <p className="docker-image-engine-note"><AlertTriangle aria-hidden="true" size={15} /><span>{t("workspace.management.docker.images.occupancyUnknown")}</span></p> : null}
             {error ? <p className="docker-image-error">{error}</p> : null}
           </div>
         )}
@@ -372,7 +375,7 @@ function DockerImageDetailsDialog({
           {deleteConfirming ? (
             <>
               <button type="button" onClick={onCancelDelete} disabled={deleting}>{t("common.actions.cancel")}</button>
-              <button type="button" className="is-danger" onClick={onConfirmDelete} disabled={!engineReady || occupied || deleting}>
+              <button type="button" className="is-danger" onClick={onConfirmDelete} disabled={!engineReady || removalBlocked || deleting}>
                 {deleting ? <LoaderCircle aria-hidden="true" size={15} /> : <Trash2 aria-hidden="true" size={15} />}
                 <span>{t("workspace.management.docker.images.confirmRemove")}</span>
               </button>
@@ -380,7 +383,7 @@ function DockerImageDetailsDialog({
           ) : (
             <>
               <button type="button" onClick={onClose}>{t("common.actions.close")}</button>
-              <button type="button" className="is-danger" onClick={onBeginDelete} disabled={!engineReady || occupied}>
+              <button type="button" className="is-danger" onClick={onBeginDelete} disabled={!engineReady || removalBlocked}>
                 <Trash2 aria-hidden="true" size={15} />
                 <span>{t("workspace.management.docker.images.remove")}</span>
               </button>

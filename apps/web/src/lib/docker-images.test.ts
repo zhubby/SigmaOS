@@ -3,6 +3,7 @@ import type { DockerImageSummary, DockerRegistryCredential } from "../api.js";
 import {
   dockerImageDeleteTargets,
   dockerImageDisplayName,
+  dockerImageRemovalBlocked,
   dockerRegistryAddressForImage,
   filterDockerImages,
   isValidDockerImageReference,
@@ -30,6 +31,11 @@ const registry: DockerRegistryCredential = {
 };
 
 describe("Docker image UI helpers", () => {
+  it("blocks image removal for occupied or unknown references", () => {
+    expect(dockerImageRemovalBlocked(image)).toBe(false);
+    expect(dockerImageRemovalBlocked({ ...image, containerCount: 1 })).toBe(true);
+    expect(dockerImageRemovalBlocked({ ...image, containerCount: null })).toBe(true);
+  });
   it("searches tags, digests, and ids case-insensitively", () => {
     expect(filterDockerImages([image], "STABLE")).toEqual([image]);
     expect(filterDockerImages([image], "sha256:1234")).toEqual([image]);

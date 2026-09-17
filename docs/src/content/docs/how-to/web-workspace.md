@@ -61,6 +61,10 @@ Workspace 的 Terminal 使用 terminal-helper 和 tmux 承载受限 PTY。切换
 
 Docker 面板的镜像区域可以搜索本地镜像、查看完整 ID/tags/digests/占用信息、拉取镜像和删除未被容器引用的具体 tag。删除需要在详情弹窗中再次确认，不会强制删除，也不进入 agent approval。多标签镜像必须先选择要删除的具体 tag；无标签镜像使用完整 ID。
 
+已停止容器仍占用镜像，tag 改名不改变 ImageID 引用。占用数未知时删除按钮也不可用，应刷新并检查 Engine 元数据，不要将未知当作零。
+
+资源区及创建向导显示宿主机资源控制能力。不支持或未知的 CPU、内存、swap、PID 控制会禁用对应输入；留空仍可继续创建。若编辑期间能力变化，原输入不会被静默删除，点击“清除不可用限制”后再继续。是否支持内存限制与是否收到内存统计是不同判断；统计缺失时显示未知，而不是零。
+
 Registry 凭证入口即使 Engine 离线或 Docker 管理关闭也可使用。每个规范化 Registry 只保存一组用户名与密码/access token；编辑时密码字段始终为空，留空表示保留已有凭证。未限定 Registry 的镜像使用 Docker Hub 凭证，显式私有 Registry 只做精确匹配。手动拉取、容器创建的自动拉取以及 Compose `pull/up` 都在执行时读取当前凭证。
 
 设置面板可以修改 model provider、Pi tool policy、Docker 配置、语言、主题、预览大小和编辑器字体。保存 provider secret 后 UI 只显示是否已配置，不会回显密钥。

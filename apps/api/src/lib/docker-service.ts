@@ -1,6 +1,7 @@
 import type {
   DockerConfig,
   DockerContainerSummary,
+  DockerImageSummary,
   DockerOperationProposal,
   DockerOperationRecord,
   DockerSummary,
@@ -72,7 +73,7 @@ export async function collectDockerSummary(
         volumes: counts.volumes,
         ...aggregateContainerStats(containers)
       },
-      images: counts.imageDetails ?? [],
+      images: resolveDockerImageOccupancy(counts.imageDetails ?? [], containers),
       networks: counts.networkDetails ?? [],
       volumes: counts.volumeDetails ?? [],
       containers,
@@ -85,6 +86,26 @@ export async function collectDockerSummary(
       composeProjects
     };
   }
+}
+
+export function resolveDockerImageOccupancy(
+  images: DockerImageSummary[],
+  containers: DockerContainerSummary[]
+): DockerImageSummary[] {
+  const complete = containers.every((container) => Boolean(container.imageId));
+  const counts = new Map<string, number>();
+  for (const container of containers) {
+    if (container.imageId) {
+      const id = container.imageId.replace(/^sha256:/u, "");
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+  }
+  return images.map((image) => ({
+    ...image,
+    containerCount: complete
+      ? counts.get(image.id.replace(/^sha256:/u, "")) ?? 0
+      : image.containerCount
+  }));
 }
 
 export async function applyDockerOperation(

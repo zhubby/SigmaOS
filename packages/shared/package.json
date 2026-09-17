@@ -4,7 +4,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./docker-images": "./src/docker-images.ts"
+    "./docker-images": "./src/docker-images.ts",
+    "./docker-resources": "./src/docker-resources.ts"
   },
   "types": "./src/index.ts",
   "dependencies": {

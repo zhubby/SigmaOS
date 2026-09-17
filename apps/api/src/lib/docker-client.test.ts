@@ -12,6 +12,7 @@ let daemonApiVersion: string;
 let daemonMinimumApiVersion: string;
 let pullResponse: "success" | "error";
 let imageInUse: boolean;
+let resourceInfo: Record<string, unknown>;
 const receivedRequests: Array<{ method: string; url: string; body: unknown; registryAuth?: string }> = [];
 
 beforeEach(async () => {
@@ -21,6 +22,7 @@ beforeEach(async () => {
   daemonMinimumApiVersion = "1.24";
   pullResponse = "success";
   imageInUse = false;
+  resourceInfo = { MemoryLimit: false, SwapLimit: false, CpuCfsQuota: true, CpuCfsPeriod: true, CPUShares: true, CPUSet: true, PidsLimit: true };
   receivedRequests.length = 0;
   server = http.createServer(async (request, response) => {
     const url = request.url ?? "";
@@ -40,7 +42,8 @@ beforeEach(async () => {
         ServerVersion: "27.1.0",
         OperatingSystem: "Debian",
         Architecture: "x86_64",
-        DockerRootDir: "/var/lib/docker"
+        DockerRootDir: "/var/lib/docker",
+        ...resourceInfo
       });
       return;
     }
@@ -215,7 +218,8 @@ describe("DockerSocketClient", () => {
       apiVersion: "1.55",
       negotiatedApiVersion: "1.55",
       operatingSystem: "Debian",
-      dockerRootDir: "/var/lib/docker"
+      dockerRootDir: "/var/lib/docker",
+      resourceCapabilities: { memoryLimit: false, swapLimit: false, cpuQuota: true, cpuShares: true, cpuset: true, pidsLimit: true }
     });
     await expect(client.getCounts()).resolves.toEqual({
       images: 2,
@@ -256,6 +260,7 @@ describe("DockerSocketClient", () => {
         shortId: "abcdef123456",
         name: "media",
         image: "jellyfin:latest",
+        imageId: "sha256:jellyfin",
         state: "running",
         ports: ["8096->8096/tcp"],
         composeProject: "media",
@@ -294,6 +299,20 @@ describe("DockerSocketClient", () => {
     await expect(incompatibleClient.getInfo()).rejects.toThrow(
       "Docker daemon requires API version 1.57, but SigmaOS supports up to 1.56"
     );
+  });
+
+  it("treats missing and malformed capability flags as unknown", async () => {
+    resourceInfo = { MemoryLimit: "true", SwapLimit: 1, CPUShares: null, CPUSet: [], CpuCfsQuota: true };
+    const client = new DockerSocketClient({ socketPath, timeoutMs: 1000 });
+    await expect(client.getInfo()).resolves.toMatchObject({
+      resourceCapabilities: { memoryLimit: null, swapLimit: null, cpuQuota: null, cpuShares: null, cpuset: null, pidsLimit: null }
+    });
+    resourceInfo.CpuCfsPeriod = false;
+    await expect(client.getInfo()).resolves.toMatchObject({ resourceCapabilities: { cpuQuota: false } });
+    resourceInfo = { MemoryLimit: true, SwapLimit: true, CpuCfsQuota: false, CpuCfsPeriod: true, CPUShares: false, CPUSet: false, PidsLimit: false };
+    await expect(client.getInfo()).resolves.toMatchObject({
+      resourceCapabilities: { memoryLimit: true, swapLimit: true, cpuQuota: false, cpuShares: false, cpuset: false, pidsLimit: false }
+    });
   });
 
   it("maps complete normalized container input to the Engine create payload", async () => {

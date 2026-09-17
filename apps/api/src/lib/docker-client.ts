@@ -9,6 +9,7 @@ import type {
   DockerImageRemoveResult,
   DockerImageSummary,
   DockerNetworkSummary,
+  DockerResourceCapabilities,
   DockerVolumeSummary
 } from "@sigmaos/shared";
 
@@ -19,6 +20,7 @@ export interface DockerEngineInfo {
   operatingSystem: string | null;
   architecture: string | null;
   dockerRootDir: string | null;
+  resourceCapabilities?: DockerResourceCapabilities;
 }
 
 export interface DockerEngineCounts {
@@ -201,6 +203,13 @@ type DockerInfoResponse = {
   OperatingSystem?: string;
   Architecture?: string;
   DockerRootDir?: string;
+  MemoryLimit?: boolean;
+  SwapLimit?: boolean;
+  CpuCfsQuota?: boolean;
+  CpuCfsPeriod?: boolean;
+  CPUShares?: boolean;
+  CPUSet?: boolean;
+  PidsLimit?: boolean;
 };
 
 type DockerNetworkRow = {
@@ -347,7 +356,17 @@ export class DockerSocketClient implements DockerEngineRuntime {
       negotiatedApiVersion,
       operatingSystem: info.OperatingSystem ?? null,
       architecture: info.Architecture ?? version.Arch ?? null,
-      dockerRootDir: info.DockerRootDir ?? null
+      dockerRootDir: info.DockerRootDir ?? null,
+      resourceCapabilities: {
+        memoryLimit: capabilityFlag(info.MemoryLimit),
+        swapLimit: capabilityFlag(info.SwapLimit),
+        cpuQuota: info.CpuCfsQuota === false || info.CpuCfsPeriod === false
+          ? false
+          : info.CpuCfsQuota === true && info.CpuCfsPeriod === true ? true : null,
+        cpuShares: capabilityFlag(info.CPUShares),
+        cpuset: capabilityFlag(info.CPUSet),
+        pidsLimit: capabilityFlag(info.PidsLimit)
+      }
     };
   }
 
@@ -978,6 +997,10 @@ function mapImage(row: DockerImageRow): DockerImageSummary | null {
   };
 }
 
+function capabilityFlag(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
 function imageReferences(values: string[] | null | undefined): string[] {
   if (!Array.isArray(values)) {
     return [];
@@ -1064,6 +1087,7 @@ function mapContainer(row: DockerContainerRow): DockerContainerSummary {
     shortId: id.slice(0, 12),
     name: (row.Names?.[0] ?? id.slice(0, 12)).replace(/^\//u, ""),
     image: row.Image ?? "",
+    imageId: row.ImageID?.trim() || null,
     state: normalizeState(row.State),
     status: row.Status ?? row.State ?? "unknown",
     ports: (row.Ports ?? []).map(formatPort).filter((port): port is string => port !== null),

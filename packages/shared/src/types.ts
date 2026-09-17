@@ -943,6 +943,15 @@ export type DockerOperationAction =
 
 export type DockerOperationStatus = "proposed" | "approved" | "applied" | "failed";
 
+export interface DockerResourceCapabilities {
+  memoryLimit: boolean | null;
+  swapLimit: boolean | null;
+  cpuQuota: boolean | null;
+  cpuShares: boolean | null;
+  cpuset: boolean | null;
+  pidsLimit: boolean | null;
+}
+
 export interface DockerEngineSummary {
   status: DockerEngineStatus;
   version: string | null;
@@ -951,6 +960,7 @@ export interface DockerEngineSummary {
   operatingSystem: string | null;
   architecture: string | null;
   dockerRootDir: string | null;
+  resourceCapabilities?: DockerResourceCapabilities;
   error: string | null;
 }
 
@@ -1012,6 +1022,7 @@ export interface DockerContainerSummary {
   shortId: string;
   name: string;
   image: string;
+  imageId?: string | null;
   state: DockerContainerState;
   status: string;
   ports: string[];

@@ -73,6 +73,7 @@ import { initialVmCreateForm, validateVmCreateStep, type VmCreateForm } from "..
 import { DockerCreateDialogs } from "./DockerCreateDialogs.js";
 import { DockerDaemonSettingsDialog } from "./DockerDaemonSettingsDialog.js";
 import { DockerImageManagement } from "./DockerImageManagement.js";
+import { DockerResourceStatus } from "./DockerResourceStatus.js";
 import { ManagementSkeletonBody, SkeletonBlock } from "./ManagementSkeleton.js";
 import {
   dockerDaemonTone,
@@ -1968,6 +1969,7 @@ function DockerRuntimePressure({
         description={String(t("workspace.management.docker.pressureDescription"))}
       />
       <div className="docker-pressure-body">
+        <DockerResourceStatus capabilities={summary?.engine.resourceCapabilities} />
         <div className="docker-pressure-stat-grid">
           <div className="docker-pressure-stat" data-state={pressureTone(cpu)}>
             <div><Cpu aria-hidden="true" size={15} /><span>{String(t("workspace.management.docker.pressureCpu"))}</span></div>
