@@ -276,6 +276,27 @@
     max-height: calc(100dvh - 20px);
   }
 
+  .storage-file-picker-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .storage-file-picker-pools {
+    max-height: 148px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .storage-file-picker-pool-list {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+  }
+
+  .storage-file-picker-pool {
+    flex: 0 0 min(230px, 72vw);
+  }
+
   .storage-file-picker-header,
   .storage-file-picker-toolbar,
   .storage-file-picker-breadcrumbs,
@@ -304,6 +325,20 @@
   .storage-file-picker-footer > div {
     display: grid;
     grid-template-columns: 1fr 1.3fr;
+  }
+
+  .storage-file-picker-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .storage-file-picker-toolbar-actions {
+    justify-content: flex-end;
+  }
+
+  .storage-file-picker-create-folder {
+    flex: 1 1 auto;
+    grid-template-columns: minmax(0, 1fr) 30px 30px;
   }
 }
 
@@ -535,6 +570,20 @@
     padding-bottom: 2px;
   }
 
+  .downloads-header-actions {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
+  .download-task-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .download-task-actions {
+    justify-content: flex-start;
+  }
+
   .management-body {
     padding: 10px;
   }
@@ -554,6 +603,50 @@
 }
 
 @media (max-width: 560px) {
+  .downloads-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .downloads-filters {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .download-header-stat {
+    min-width: 50px;
+    padding: 0 6px;
+  }
+
+  .download-create-button span {
+    display: none;
+  }
+
+  .download-target-control {
+    grid-template-columns: 1fr;
+  }
+
+  .download-create-dialog-footer {
+    display: grid;
+    grid-template-columns: 1fr 1.3fr;
+  }
+
+  .download-create-dialog-footer button {
+    min-width: 0;
+  }
+
+  .download-create-dialog-heading {
+    gap: 8px;
+  }
+
+  .download-create-dialog-header p {
+    max-width: none;
+  }
+
+  .settings-download-control {
+    grid-template-columns: 1fr;
+  }
+
   .docker-daemon-settings-backdrop {
     align-items: stretch;
     padding: 8px;

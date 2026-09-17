@@ -7,6 +7,7 @@ import {
   Clock3,
   Cpu,
   Database,
+  Download,
   Folder,
   HardDrive,
   Image as ImageIcon,
@@ -26,6 +27,7 @@ import {
 import type {
   BuildInfo,
   DockerSettings,
+  DownloadSettings,
   FileOperation,
   PendingApproval,
   ModelProviderSettings,
@@ -78,6 +80,7 @@ interface SettingsModalProps {
   loading: boolean;
   saving: boolean;
   dockerSettings: DockerSettings | null;
+  downloadSettings: DownloadSettings | null;
   settings: ModelProviderSettings | null;
   systemInfo: SystemInfo | null;
   systemInfoError: string | null;
@@ -98,6 +101,7 @@ interface SettingsModalProps {
   onClose: () => void;
   onFormChange: (form: ModelProviderFormState) => void;
   onDockerFormChange: (form: DockerSettingsFormState) => void;
+  onDownloadConcurrencyChange: (concurrency: number) => Promise<void>;
   onToolPolicyFormChange: (form: ToolPolicyFormState) => void;
   onLanguagePreferenceChange: (preference: LanguagePreference) => void;
   onThemePreferenceChange: (preference: ThemePreference) => void;
@@ -120,6 +124,7 @@ export function SettingsModal({
   loading,
   saving,
   dockerSettings,
+  downloadSettings,
   settings,
   systemInfo,
   systemInfoError,
@@ -140,6 +145,7 @@ export function SettingsModal({
   onClose,
   onFormChange,
   onDockerFormChange,
+  onDownloadConcurrencyChange,
   onToolPolicyFormChange,
   onLanguagePreferenceChange,
   onThemePreferenceChange,
@@ -162,7 +168,7 @@ export function SettingsModal({
       )
     : SETTINGS_SECTIONS;
   const groups = [...new Set(visibleSections.map((section) => section.group))];
-  const currentState = settingsSectionState(currentSection, settings, dockerSettings, buildInfo);
+  const currentState = settingsSectionState(currentSection, settings, dockerSettings, buildInfo, downloadSettings);
   const providerOptions = PROVIDER_OPTIONS.map((provider) => ({
     value: provider,
     label: providerLabel(provider, t)
@@ -205,7 +211,7 @@ export function SettingsModal({
                     {settingsSectionIcon(section.id)}
                     <span>
                       <strong>{settingsSectionTitle(section, t)}</strong>
-                      <small>{settingsSectionLabel(section, settings, loading, t, dockerSettings, buildInfo)}</small>
+                      <small>{settingsSectionLabel(section, settings, loading, t, dockerSettings, buildInfo, downloadSettings)}</small>
                     </span>
                   </button>
                 ))}
@@ -231,7 +237,7 @@ export function SettingsModal({
               <div className="settings-header-meta" aria-label={t("settings.status")}>
                 <span data-state={currentState}>
                   {settingsStateIcon(currentState)}
-                  {settingsSectionLabel(currentSection, settings, loading, t, dockerSettings, buildInfo)}
+                  {settingsSectionLabel(currentSection, settings, loading, t, dockerSettings, buildInfo, downloadSettings)}
                 </span>
                 {activeSection === "version" ? (
                   <span>
@@ -259,6 +265,7 @@ export function SettingsModal({
               systemInfo={systemInfo}
               systemInfoError={systemInfoError}
               buildInfo={buildInfo}
+              downloadSettings={downloadSettings}
               locale={resolvedLocale}
               onSectionChange={onSectionChange}
             />
@@ -484,6 +491,16 @@ export function SettingsModal({
             />
           ) : null}
 
+          {activeSection === "downloads" ? (
+            <SettingsDownloadsPage
+              settings={downloadSettings}
+              loading={loading}
+              locale={resolvedLocale}
+              onConcurrencyChange={onDownloadConcurrencyChange}
+              onClose={onClose}
+            />
+          ) : null}
+
           {activeSection === "security" ? (
             <SettingsSecurityPage
               settings={settings}
@@ -517,6 +534,7 @@ function SettingsOverview({
   systemInfo,
   systemInfoError,
   buildInfo,
+  downloadSettings,
   locale,
   onSectionChange
 }: {
@@ -526,6 +544,7 @@ function SettingsOverview({
   systemInfo: SystemInfo | null;
   systemInfoError: string | null;
   buildInfo: BuildInfo | null;
+  downloadSettings: DownloadSettings | null;
   locale: SupportedLocale;
   onSectionChange: (section: SettingsSectionId) => void;
 }) {
@@ -561,7 +580,7 @@ function SettingsOverview({
         },
         {
           value: formatLocaleNumber(
-            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings, dockerSettings, buildInfo) === "ready")
+            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings, dockerSettings, buildInfo, downloadSettings) === "ready")
               .length,
             locale
           ),
@@ -569,7 +588,7 @@ function SettingsOverview({
         },
         {
           value: formatLocaleNumber(
-            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings, dockerSettings, buildInfo) === "missing")
+            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings, dockerSettings, buildInfo, downloadSettings) === "missing")
               .length,
             locale
           ),
@@ -646,8 +665,8 @@ function SettingsOverview({
                 <strong>{settingsSectionTitle(section, t)}</strong>
                 <small>{settingsSectionDescription(section, t)}</small>
               </span>
-              <em data-state={settingsSectionState(section, settings, dockerSettings, buildInfo)}>
-                {settingsSectionLabel(section, settings, loading, t, dockerSettings, buildInfo)}
+              <em data-state={settingsSectionState(section, settings, dockerSettings, buildInfo, downloadSettings)}>
+                {settingsSectionLabel(section, settings, loading, t, dockerSettings, buildInfo, downloadSettings)}
               </em>
             </button>
           ))}
@@ -1414,6 +1433,155 @@ function SettingsFilesPage({
         </section>
       </div>
     </div>
+  );
+}
+
+function SettingsDownloadsPage({
+  settings,
+  loading,
+  locale,
+  onConcurrencyChange,
+  onClose
+}: {
+  settings: DownloadSettings | null;
+  loading: boolean;
+  locale: SupportedLocale;
+  onConcurrencyChange: (concurrency: number) => Promise<void>;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const [draftConcurrency, setDraftConcurrency] = useState(settings?.concurrency ?? 1);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setDraftConcurrency(settings?.concurrency ?? 1);
+    setSaved(false);
+  }, [settings?.concurrency]);
+
+  const statusState: SettingsState = loading && !settings ? "loading" : settings ? "ready" : "missing";
+  const statusLabel = loading && !settings
+    ? t("common.states.loading")
+    : settings
+      ? t("settings.downloads.connectionCount", { count: settings.concurrency })
+      : t("settings.downloads.notLoaded");
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (saving || loading) return;
+    setSaving(true);
+    setSaved(false);
+    try {
+      await onConcurrencyChange(draftConcurrency);
+      setSaved(true);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className="settings-form" onSubmit={(event) => void submit(event)}>
+      <div className="settings-content-body">
+        <div className="settings-page-grid settings-downloads-grid">
+          <div className="settings-main-stack">
+            <section className="settings-section-card">
+              <header>
+                <div>
+                  <h3>{t("settings.downloads.concurrencyTitle")}</h3>
+                  <p>{t("settings.downloads.concurrencyDescription")}</p>
+                </div>
+                <span data-state={statusState}>{statusLabel}</span>
+              </header>
+
+              <fieldset className="settings-download-control" disabled={loading || saving}>
+                <label className="settings-preference-field">
+                  <span>{t("settings.downloads.concurrencyField")}</span>
+                  <select
+                    value={String(draftConcurrency)}
+                    onChange={(event) => setDraftConcurrency(Number(event.target.value))}
+                  >
+                    {[1, 2, 3].map((value) => (
+                      <option key={value} value={value}>
+                        {t("settings.downloads.connectionCount", { count: value })}
+                      </option>
+                    ))}
+                  </select>
+                  <small>{t("settings.downloads.concurrencyHelp")}</small>
+                </label>
+                <div className="settings-download-visual" aria-hidden="true">
+                  <Download size={22} />
+                  <strong>{draftConcurrency}</strong>
+                  <span>{t("settings.downloads.connectionUnit")}</span>
+                </div>
+              </fieldset>
+            </section>
+
+            <section className="settings-section-card">
+              <header>
+                <div>
+                  <h3>{t("settings.downloads.behaviorTitle")}</h3>
+                  <p>{t("settings.downloads.behaviorDescription")}</p>
+                </div>
+                <span data-state="ready">{t("common.states.configured")}</span>
+              </header>
+              <div className="settings-download-facts">
+                <div>
+                  <strong>{t("settings.downloads.singleConnection")}</strong>
+                  <span>{t("settings.downloads.singleConnectionDetail")}</span>
+                </div>
+                <div>
+                  <strong>{t("settings.downloads.resumeSupport")}</strong>
+                  <span>{t("settings.downloads.resumeSupportDetail")}</span>
+                </div>
+                <div>
+                  <strong>{t("settings.downloads.conflictPolicy")}</strong>
+                  <span>{t("settings.downloads.conflictPolicyDetail")}</span>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <aside className="settings-side-stack" aria-label={t("settings.downloads.summaryTitle")}>
+            <section className="settings-section-card settings-route-card">
+              <header>
+                <div>
+                  <h3>{t("settings.downloads.summaryTitle")}</h3>
+                  <p>{t("settings.downloads.summaryDescription")}</p>
+                </div>
+              </header>
+              <dl className="settings-summary-list">
+                <div>
+                  <dt>{t("settings.downloads.concurrencyField")}</dt>
+                  <dd>{settings ? t("settings.downloads.connectionCount", { count: settings.concurrency }) : t("settings.downloads.notLoaded")}</dd>
+                </div>
+                <div>
+                  <dt>{t("settings.modelProvider.updated")}</dt>
+                  <dd>{settingsUpdatedAtLabel(settings, locale, t)}</dd>
+                </div>
+              </dl>
+            </section>
+          </aside>
+        </div>
+      </div>
+
+      <footer className="settings-actions">
+        <span>
+          {saved
+            ? t("settings.downloads.saved")
+            : settings
+              ? t("settings.downloads.ready")
+              : t("settings.downloads.notLoaded")}
+        </span>
+        <div>
+          <button className="secondary-button" type="button" onClick={onClose} disabled={saving}>
+            {t("common.actions.cancel")}
+          </button>
+          <button className="primary-button" type="submit" disabled={loading || saving || !settings}>
+            {saving ? t("settings.downloads.saving") : saved ? <><Check aria-hidden="true" size={14} />{t("settings.downloads.saved")}</> : t("common.actions.saveChanges")}
+          </button>
+        </div>
+      </footer>
+    </form>
   );
 }
 
@@ -2258,6 +2426,8 @@ function settingsSectionIcon(section: SettingsSectionId) {
       return <Server aria-hidden="true" size={16} />;
     case "files":
       return <Folder aria-hidden="true" size={16} />;
+    case "downloads":
+      return <Download aria-hidden="true" size={16} />;
     case "security":
       return <Lock aria-hidden="true" size={16} />;
     case "appearance":

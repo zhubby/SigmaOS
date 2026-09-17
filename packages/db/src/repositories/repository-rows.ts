@@ -4,6 +4,7 @@ import type {
   ApprovalStatus,
   BackupRunKind,
   BackupRunStatus,
+  DownloadTaskStatus,
   DockerConsoleAuthorizationRecord,
   DockerOperationAction,
   DockerOperationStatus,
@@ -187,6 +188,32 @@ export type DbOperationRow = {
   metadata_json: string;
   created_at: string;
   updated_at: string;
+};
+
+export type DbDownloadTaskRow = {
+  id: string;
+  url: string;
+  root_id: string;
+  storage_pool_id: string;
+  target_directory: string;
+  target_file_name: string;
+  target_path: string;
+  partial_path: string;
+  status: DownloadTaskStatus;
+  received_bytes: number;
+  total_bytes: number | null;
+  speed_bytes_per_second: number;
+  etag: string | null;
+  last_modified: string | null;
+  error: string | null;
+  worker_id: string | null;
+  lease_expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  last_progress_at: string | null;
+  file_operation_id: string | null;
 };
 
 export type DbDockerOperationRow = {

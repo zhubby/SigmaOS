@@ -1,3 +1,9 @@
+sigmaos (0.4.0) unstable; urgency=medium
+
+  * Add persistent HTTP downloader panel and service
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Thu, 17 Sep 2026 05:47:20 +0000
+
 sigmaos (0.3.0) unstable; urgency=medium
 
   * Add Docker daemon configuration and image management with multiple registry credentials.

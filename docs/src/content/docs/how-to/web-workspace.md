@@ -57,7 +57,7 @@ sidebar:
 
 ## 终端与管理面板
 
-Workspace 的 Terminal 使用 terminal-helper 和 tmux 承载受限 PTY。切换面板、刷新页面或 API/helper 重启都会复用同一个 terminal session；点击重启按钮才会销毁旧 shell。断开期间的输出会短暂缓存在 API 中，超过缓冲上限会显示丢失提示；默认空闲 30 分钟后由 helper 回收 tmux session。连接失败时检查 `tmux`、`sigmaos-terminal-helper.service` 和终端用户 drop-in。Docker、VM、Shares、Storage 面板只在配置和宿主机能力可用时展示完整操作；Docker 资源创建是直接执行的管理流程，生命周期和 Compose 变更仍通过 approval。
+Workspace 的 Terminal 使用 terminal-helper 和 tmux 承载受限 PTY。切换面板、刷新页面或 API/helper 重启都会复用同一个 terminal session；点击重启按钮才会销毁旧 shell。断开期间的输出会短暂缓存在 API 中，超过缓冲上限会显示丢失提示；默认空闲 30 分钟后由 helper 回收 tmux session。连接失败时检查 `tmux`、`sigmaos-terminal-helper.service` 和终端用户 drop-in。Downloads 面板使用独立 `sigmaos-downloader.service`，支持公网 HTTP/HTTPS 地址、目录选择、排队、暂停/继续、取消、重试和历史；失败任务保留 `.part` 文件，取消任务清理临时文件，同名目标不会覆盖。Docker、VM、Shares、Storage 面板只在配置和宿主机能力可用时展示完整操作；Docker 资源创建是直接执行的管理流程，生命周期和 Compose 变更仍通过 approval。
 
 Docker 面板的镜像区域可以搜索本地镜像、查看完整 ID/tags/digests/占用信息、拉取镜像和删除未被容器引用的具体 tag。删除需要在详情弹窗中再次确认，不会强制删除，也不进入 agent approval。多标签镜像必须先选择要删除的具体 tag；无标签镜像使用完整 ID。
 

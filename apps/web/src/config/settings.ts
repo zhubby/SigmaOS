@@ -2,6 +2,7 @@ import type { TFunction } from "i18next";
 import type {
   BuildInfo,
   DockerSettings,
+  DownloadSettings,
   ModelProviderSettings,
   ModelProviderName,
   PiDangerousToolPolicyMode,
@@ -18,6 +19,7 @@ export type SettingsSectionId =
   | "agents"
   | "docker"
   | "files"
+  | "downloads"
   | "security"
   | "appearance"
   | "advanced";
@@ -87,6 +89,10 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     group: "workspace"
   },
   {
+    id: "downloads",
+    group: "workspace"
+  },
+  {
     id: "security",
     group: "administration"
   },
@@ -107,6 +113,7 @@ const SECTION_TITLE_KEYS = {
   agents: "settings.sections.agents.title",
   docker: "settings.sections.docker.title",
   files: "settings.sections.files.title",
+  downloads: "settings.sections.downloads.title",
   security: "settings.sections.security.title",
   appearance: "settings.sections.appearance.title",
   advanced: "settings.sections.advanced.title"
@@ -119,6 +126,7 @@ const SECTION_DESCRIPTION_KEYS = {
   agents: "settings.sections.agents.description",
   docker: "settings.sections.docker.description",
   files: "settings.sections.files.description",
+  downloads: "settings.sections.downloads.description",
   security: "settings.sections.security.description",
   appearance: "settings.sections.appearance.description",
   advanced: "settings.sections.advanced.description"
@@ -193,7 +201,8 @@ export function settingsSectionState(
   section: SettingsSection,
   settings: ModelProviderSettings | null,
   dockerSettings: DockerSettings | null,
-  buildInfo: BuildInfo | null = null
+  buildInfo: BuildInfo | null = null,
+  downloadSettings: DownloadSettings | null = null
 ): SettingsState {
   if (section.id === "model-providers") {
     return settings?.apiKeyConfigured ? "ready" : "missing";
@@ -204,6 +213,9 @@ export function settingsSectionState(
   if (section.id === "version") {
     return buildInfo && buildInfo.version !== "unknown" ? "ready" : "missing";
   }
+  if (section.id === "downloads") {
+    return downloadSettings ? "ready" : "missing";
+  }
   return "ready";
 }
 
@@ -213,9 +225,16 @@ export function settingsSectionLabel(
   loading: boolean,
   t: Translate,
   dockerSettings: DockerSettings | null,
-  buildInfo: BuildInfo | null = null
+  buildInfo: BuildInfo | null = null,
+  downloadSettings: DownloadSettings | null = null
 ): string {
-  if (loading && (section.id === "model-providers" || section.id === "docker" || section.id === "version")) {
+  if (
+    loading &&
+    (section.id === "model-providers" ||
+      section.id === "docker" ||
+      section.id === "version" ||
+      section.id === "downloads")
+  ) {
     return t("common.states.loading");
   }
   if (section.id === "version") {
@@ -230,7 +249,12 @@ export function settingsSectionLabel(
     }
     return dockerSettings.enabled ? t("settings.docker.enabled") : t("settings.docker.disabled");
   }
-  const state = settingsSectionState(section, settings, dockerSettings, buildInfo);
+  if (section.id === "downloads") {
+    return downloadSettings
+      ? t("settings.downloads.connectionCount", { count: downloadSettings.concurrency })
+      : t("settings.downloads.notLoaded");
+  }
+  const state = settingsSectionState(section, settings, dockerSettings, buildInfo, downloadSettings);
   if (state === "ready") {
     return t("common.states.configured");
   }

@@ -10,6 +10,7 @@ describe("native packaging artifacts", () => {
     const serviceNames = [
       "sigmaos-api.service",
       "sigmaos-worker@.service",
+      "sigmaos-downloader.service",
       "sigmaos-indexer.service",
       "sigmaos-scheduler.service",
       "sigmaos-maintenance.service",
@@ -32,6 +33,9 @@ describe("native packaging artifacts", () => {
 
     await expect(readPackagingFile("systemd", "sigmaos-api.service")).resolves.toContain(
       "After=network-online.target local-fs.target"
+    );
+    await expect(readPackagingFile("systemd", "sigmaos-downloader.service")).resolves.toContain(
+      "RequiresMountsFor=/srv/nas"
     );
     await expect(readPackagingFile("systemd", "sigmaos-share-helper.service")).resolves.toContain(
       "After=network-online.target local-fs.target systemd-tmpfiles-setup.service"
@@ -72,6 +76,7 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("usr/lib/sigmaos/apps/backup/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/scheduler/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/player-helper/dist/");
+    expect(install).toContain("usr/lib/sigmaos/apps/downloader/dist/");
     expect(install).toContain("node_modules/* usr/lib/sigmaos/node_modules/");
     expect(install).toContain("docs/dist/* usr/lib/sigmaos/docs/dist/");
     expect(install).toContain(".sigmaos/build-info.json usr/lib/sigmaos/");
@@ -129,6 +134,7 @@ describe("native packaging artifacts", () => {
     expect(manifest).toContain("git");
     expect(manifest).toContain("sigmaos-share-helper.service");
     expect(manifest).toContain("sigmaos-terminal-helper.service");
+    expect(manifest).toContain("sigmaos-downloader.service");
     expect(manifest).toContain("sigmaos-player-helper.service");
     expect(manifest).toContain("mpv");
     expect(manifest).toContain("samba");

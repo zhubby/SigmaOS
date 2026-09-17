@@ -4,7 +4,7 @@ description: API 传输面、端点分组和稳定契约。
 type: reference
 status: current
 audience: [developer]
-sourceOfTruth: [apps/api/src/routes/index.ts, apps/api/src/routes/files.ts, apps/api/src/routes/sessions.ts, apps/api/src/routes/docker.ts, apps/api/src/lib/docker-daemon.ts, apps/api/src/lib/docker-registry.ts, apps/web/src/api.ts]
+sourceOfTruth: [apps/api/src/routes/index.ts, apps/api/src/routes/files.ts, apps/api/src/routes/sessions.ts, apps/api/src/routes/downloads.ts, apps/api/src/routes/docker.ts, apps/api/src/lib/docker-daemon.ts, apps/api/src/lib/docker-registry.ts, apps/web/src/api.ts]
 sidebar:
   order: 2
 ---
@@ -12,6 +12,13 @@ sidebar:
 REST 路由按 roots、files/search、sessions/jobs/events、approvals/operations、indexer/readiness/health、backup、settings、system、storage、shares、Docker、VM 和 terminal 分组。
 
 Agent 事件通过 session SSE stream 传递；terminal、Docker console 和 VM console 使用 WebSocket。写操作的 approval 要求以 route 实现和 `packages/shared/src/types.ts` 为准；本页不复制易漂移的完整 JSON schema。
+
+## HTTP 下载
+
+- `POST /api/downloads` 接收 HTTP/HTTPS 地址、`rootId`、`storagePoolId`、目标目录和文件名；只接受无凭据的公网下载地址，目标同名或重复任务返回 `409`。
+- `GET /api/downloads` 返回全局历史；`POST /api/downloads/:id/pause|resume|cancel|retry` 按任务状态执行控制，`DELETE /api/downloads/:id` 只移除非运行任务。
+- `GET /api/downloads/events` 是按变化推送任务快照的 SSE stream。`GET/PATCH /api/settings/downloads` 管理 `1–3` 的并发数，降低并发不会终止已经运行的任务。
+- `sigmaos-downloader.service` 从 SQLite 领取队列任务，使用 NAS 路径安全校验、隐藏 `.part` 文件和无覆盖原子发布；服务重启后过期租约会恢复为队列。
 
 ## Docker daemon
 

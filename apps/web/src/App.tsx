@@ -12,6 +12,7 @@ import {
   getDockerOperations,
   getVmOperations,
   getDockerSettings,
+  getDownloadSettings,
   getFileBlobUrl,
   getFileVideoUrl,
   getPlayerStatus,
@@ -36,6 +37,7 @@ import {
   sendMessage,
   sendPlayerCommand,
   updateSessionPath,
+  updateDownloadSettings,
   uploadFile,
   type AgentEvent,
   type BuildInfo,
@@ -45,6 +47,7 @@ import {
   type DockerOperation,
   type VmOperation,
   type DockerSettings,
+  type DownloadSettings,
   type SaveEditableTextResult,
   type FileListing,
   type ModelProviderSettings,
@@ -190,6 +193,7 @@ export function App() {
   const [modelSettings, setModelSettings] = useState<ModelProviderSettings | null>(null);
   const [toolPolicySettings, setToolPolicySettings] = useState<PiToolPolicySettings | null>(null);
   const [dockerSettings, setDockerSettings] = useState<DockerSettings | null>(null);
+  const [downloadSettings, setDownloadSettings] = useState<DownloadSettings | null>(null);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [systemInfoError, setSystemInfoError] = useState<string | null>(null);
   const [buildInfo, setBuildInfo] = useState<BuildInfo | null>(null);
@@ -222,6 +226,11 @@ export function App() {
   const uploadAbortControllersRef = useRef(new Map<string, Set<AbortController>>());
   const cancelledUploadBatchesRef = useRef(new Set<string>());
   const preferredStoragePoolIdRef = useRef(readStoredStoragePoolId());
+  const pendingDownloadedDirectoryRef = useRef<{
+    rootId: string;
+    storagePoolId: string;
+    path: string;
+  } | null>(null);
 
   const selectedRoot = roots.find((root) => root.id === selectedRootId);
   const storagePoolOptions = useMemo(() => {
@@ -648,6 +657,15 @@ export function App() {
   }, [selectedStoragePoolId]);
 
   useEffect(() => {
+    const pending = pendingDownloadedDirectoryRef.current;
+    if (!pending || pending.rootId !== selectedRootId || pending.storagePoolId !== selectedStoragePoolId) {
+      return;
+    }
+    pendingDownloadedDirectoryRef.current = null;
+    void openDirectory(pending.path);
+  }, [selectedRootId, selectedStoragePoolId]);
+
+  useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function" || themePreference !== "system") {
       return;
     }
@@ -706,10 +724,11 @@ export function App() {
     setSystemInfoError(null);
     setBuildInfoError(null);
     try {
-      const [settingsResult, toolPolicyResult, dockerSettingsResult, systemInfoResult, buildInfoResult] = await Promise.allSettled([
+      const [settingsResult, toolPolicyResult, dockerSettingsResult, downloadSettingsResult, systemInfoResult, buildInfoResult] = await Promise.allSettled([
         getModelProviderSettings(),
         getPiToolPolicySettings(),
         getDockerSettings(),
+        getDownloadSettings(),
         getSystemInfo(),
         getBuildInfo()
       ]);
@@ -734,6 +753,13 @@ export function App() {
         setDockerSettingsForm(dockerSettingsToForm(dockerSettingsResult.value));
       } else {
         errors.push(toErrorMessage(dockerSettingsResult.reason));
+      }
+
+      if (downloadSettingsResult.status === "fulfilled") {
+        setDownloadSettings(downloadSettingsResult.value);
+      } else {
+        setDownloadSettings(null);
+        errors.push(toErrorMessage(downloadSettingsResult.reason));
       }
 
       if (systemInfoResult.status === "fulfilled") {
@@ -810,6 +836,16 @@ export function App() {
       setError(toErrorMessage(nextError));
     } finally {
       setSettingsSaving(false);
+    }
+  }
+
+  async function changeDownloadConcurrency(concurrency: number) {
+    setError(null);
+    try {
+      setDownloadSettings(await updateDownloadSettings(concurrency));
+    } catch (nextError) {
+      setError(toErrorMessage(nextError));
+      throw nextError;
     }
   }
 
@@ -1506,8 +1542,13 @@ export function App() {
     }
   }
 
-  async function requestFolderCreate(folderName: string) {
-    if (!session || !selectedRootId || !selectedStoragePool) {
+  async function requestFolderCreateAt(input: {
+    rootId: string;
+    storagePoolId: string;
+    parentPath: string;
+    name: string;
+  }) {
+    if (!session) {
       throw new Error(t("workspace.actions.noSession"));
     }
 
@@ -1516,10 +1557,10 @@ export function App() {
     try {
       await proposeFileOperation({
         sessionId: session.id,
-        rootId: selectedRootId,
-        storagePoolId: selectedStoragePool.id,
+        rootId: input.rootId,
+        storagePoolId: input.storagePoolId,
         operation: "mkdir",
-        targetPath: joinNasPath(currentPath, folderName)
+        targetPath: joinNasPath(input.parentPath, input.name)
       });
       await Promise.all([refreshWorkQueues(), reloadSessions()]);
       setStatus("ready");
@@ -1528,6 +1569,19 @@ export function App() {
       setError(toErrorMessage(nextError));
       throw nextError;
     }
+  }
+
+  async function requestFolderCreate(folderName: string) {
+    if (!session || !selectedRootId || !selectedStoragePool) {
+      throw new Error(t("workspace.actions.noSession"));
+    }
+
+    await requestFolderCreateAt({
+        rootId: selectedRootId,
+        storagePoolId: selectedStoragePool.id,
+        parentPath: currentPath,
+        name: folderName
+      });
   }
 
   function applyApprovedSelectionChange(approval: PendingApproval | undefined) {
@@ -1595,6 +1649,16 @@ export function App() {
     setSelectedStoragePoolId(pool.id);
     setSelectedRootId(pool.rootId);
     setCurrentPath(pool.path);
+  }
+
+  function openDownloadedDirectory(rootId: string, storagePoolId: string, pathname: string) {
+    setMobileView("workspace");
+    if (selectedRootIdRef.current !== rootId || selectedStoragePoolIdRef.current !== storagePoolId) {
+      pendingDownloadedDirectoryRef.current = { rootId, storagePoolId, path: pathname };
+      selectStoragePool(storagePoolId);
+      return;
+    }
+    void openDirectory(pathname);
   }
 
   function beginFileListingRequest(): number {
@@ -1958,6 +2022,7 @@ export function App() {
         resolvedTheme={resolvedTheme}
         filesPanelActivationId={filesPanelActivationId}
         onSelectStoragePool={selectStoragePool}
+        onOpenDownloadedDirectory={openDownloadedDirectory}
         onGoUp={goUp}
         onRefreshFiles={() => void refreshFiles()}
         onSubmitSearch={(event) => void submitSearch(event)}
@@ -1972,6 +2037,7 @@ export function App() {
         onPlayerCommand={issuePlayerCommand}
         onRetryPlayer={retryHdmiPlay}
         onRequestCreateFolder={(folderName) => requestFolderCreate(folderName)}
+        onRequestCreateFolderAt={(input) => requestFolderCreateAt(input)}
         onRequestRename={(entry, targetName) => requestFileRename(entry, targetName)}
         onRequestTrash={(entry) => requestFileTrash(entry)}
         onRequestTransfer={(entry, operation, targetPath) => requestFileTransfer(entry, operation, targetPath)}
@@ -2009,6 +2075,7 @@ export function App() {
           saving={settingsSaving}
           settings={modelSettings}
           dockerSettings={dockerSettings}
+          downloadSettings={downloadSettings}
           dockerForm={dockerSettingsForm}
           systemInfo={systemInfo}
           systemInfoError={systemInfoError}
@@ -2029,6 +2096,7 @@ export function App() {
           onClose={() => setSettingsOpen(false)}
           onFormChange={setModelSettingsForm}
           onDockerFormChange={setDockerSettingsForm}
+          onDownloadConcurrencyChange={changeDownloadConcurrency}
           onToolPolicyFormChange={setToolPolicyForm}
           onLanguagePreferenceChange={changeLanguagePreference}
           onThemePreferenceChange={changeThemePreference}

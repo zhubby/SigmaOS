@@ -3,11 +3,14 @@ import type { FastifyInstance } from "fastify";
 import {
   DEFAULT_PI_TOOL_POLICY_SETTINGS,
   defaultPiToolPolicySettings,
+  defaultDownloadSettings,
   getDockerSettings,
+  getDownloadSettings,
   getModelProviderSettings,
   getPiToolPolicySettings,
   getShareSettings,
   saveDockerSettings,
+  saveDownloadSettings,
   saveModelProviderSettings,
   savePiToolPolicySettings
 } from "@sigmaos/db";
@@ -28,6 +31,29 @@ import {
 import { collectSystemInfo } from "../lib/system-info.js";
 
 export function registerSettingsRoutes(server: FastifyInstance, { config, db }: ApiRouteContext): void {
+  server.get("/api/settings/downloads", async () => ({
+    settings: getDownloadSettings(db) ?? defaultDownloadSettings()
+  }));
+
+  server.patch<{
+    Body: { concurrency?: number | string };
+  }>("/api/settings/downloads", async (request, reply) => {
+    try {
+      const existing = getDownloadSettings(db);
+      const value = request.body?.concurrency ?? existing?.concurrency ?? 1;
+      const concurrency = Number(value);
+      if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 3) {
+        reply.status(400).send({ error: "Download concurrency must be an integer from 1 to 3" });
+        return;
+      }
+      reply.send({
+        settings: saveDownloadSettings(db, { concurrency })
+      });
+    } catch (error) {
+      reply.status(400).send({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
   server.get("/api/settings/system-info", async () => ({
     info: await collectSystemInfo(effectiveDockerConfig(config, getDockerSettings(db)))
   }));

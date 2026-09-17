@@ -3,6 +3,7 @@ export * from "./repositories/approval-status.js";
 export * from "./repositories/docker-console-authorizations.js";
 export * from "./repositories/docker-operations.js";
 export * from "./repositories/docker-registry-credentials.js";
+export * from "./repositories/downloads.js";
 export * from "./repositories/file-operations.js";
 export * from "./repositories/index-runs.js";
 export * from "./repositories/index-search.js";

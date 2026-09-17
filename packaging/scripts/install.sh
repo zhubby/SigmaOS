@@ -285,7 +285,8 @@ if command -v systemctl >/dev/null 2>&1; then
     sigmaos-share-helper.service \
     sigmaos-terminal-helper.service \
     sigmaos-api.service \
-    sigmaos-worker@1.service
+    sigmaos-worker@1.service \
+    sigmaos-downloader.service
   if [ "$PLAYER_ENABLED" = "1" ]; then
     systemctl enable --now sigmaos-player-helper.service
   fi

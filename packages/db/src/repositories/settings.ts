@@ -1,4 +1,5 @@
 import type {
+  DownloadSettingsRecord,
   DockerSettingsRecord,
   ModelProviderSettingsRecord,
   PiToolPolicySettingsRecord,
@@ -20,6 +21,9 @@ const MODEL_PROVIDER_SETTING_KEY = "model_provider";
 const PI_TOOL_POLICY_SETTING_KEY = "pi_tool_policy";
 const DOCKER_SETTING_KEY = "docker_settings";
 const SHARE_SETTING_KEY = "share_settings";
+const DOWNLOAD_SETTING_KEY = "download_settings";
+
+export const DEFAULT_DOWNLOAD_CONCURRENCY = 1;
 
 export { DEFAULT_PI_TOOL_POLICY_SETTINGS } from "./settings-constants.js";
 
@@ -146,4 +150,51 @@ export function saveShareSettings(
   `).run(SHARE_SETTING_KEY, JSON.stringify(record), updatedAt);
 
   return record;
+}
+
+export function getDownloadSettings(db: SigmaDatabase): DownloadSettingsRecord | null {
+  const row = db
+    .prepare("SELECT key, value_json, updated_at FROM system_settings WHERE key = ?")
+    .get(DOWNLOAD_SETTING_KEY) as DbSystemSettingRow | undefined;
+  if (!row) {
+    return null;
+  }
+  const parsed = JSON.parse(row.value_json) as Partial<DownloadSettingsRecord>;
+  return {
+    concurrency: normalizeDownloadConcurrency(parsed.concurrency),
+    updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : row.updated_at
+  };
+}
+
+export function defaultDownloadSettings(): DownloadSettingsRecord {
+  return {
+    concurrency: DEFAULT_DOWNLOAD_CONCURRENCY,
+    updatedAt: new Date(0).toISOString()
+  };
+}
+
+export function saveDownloadSettings(
+  db: SigmaDatabase,
+  settings: Omit<DownloadSettingsRecord, "updatedAt">
+): DownloadSettingsRecord {
+  const updatedAt = new Date().toISOString();
+  const record: DownloadSettingsRecord = {
+    concurrency: normalizeDownloadConcurrency(settings.concurrency),
+    updatedAt
+  };
+  db.prepare(`
+    INSERT INTO system_settings (key, value_json, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET
+      value_json = excluded.value_json,
+      updated_at = excluded.updated_at
+  `).run(DOWNLOAD_SETTING_KEY, JSON.stringify(record), updatedAt);
+  return record;
+}
+
+function normalizeDownloadConcurrency(value: unknown): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 3) {
+    throw new Error("Download concurrency must be an integer between 1 and 3");
+  }
+  return value;
 }

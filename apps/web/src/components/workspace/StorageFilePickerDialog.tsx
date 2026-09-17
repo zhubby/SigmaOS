@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   ArrowUp,
   Check,
   Disc3,
   Folder,
+  FolderOpen,
+  FolderPlus,
   HardDrive,
   LoaderCircle,
   RefreshCw,
@@ -34,14 +36,23 @@ export function StorageFilePickerDialog({
   pools,
   initialPoolId,
   locale,
+  mode = "iso",
   onCancel,
-  onSelect
+  onSelect,
+  onRequestCreateFolder
 }: {
   pools: StorageFilePickerPool[];
   initialPoolId: string;
   locale: SupportedLocale;
+  mode?: "iso" | "directory";
   onCancel: () => void;
   onSelect: (selection: StorageFileSelection) => void;
+  onRequestCreateFolder?: (input: {
+    rootId: string;
+    storagePoolId: string;
+    parentPath: string;
+    name: string;
+  }) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const availablePools = useMemo(() => pools.filter((pool) => pool.status !== "offline"), [pools]);
@@ -53,6 +64,9 @@ export function StorageFilePickerDialog({
   const [selection, setSelection] = useState<FileEntry | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [createFolderOpen, setCreateFolderOpen] = useState(false);
+  const [createFolderName, setCreateFolderName] = useState("");
+  const [createFolderSubmitting, setCreateFolderSubmitting] = useState(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const loadRequestId = useRef(0);
 
@@ -67,7 +81,7 @@ export function StorageFilePickerDialog({
     try {
       const listing = await getFiles(selectedPool.rootId, currentPath, selectedPool.id);
       if (requestId !== loadRequestId.current) return;
-      setEntries(listing.entries.filter(isIsoPickerEntry));
+      setEntries(listing.entries.filter((entry) => mode === "directory" ? isDirectoryPickerEntry(entry) : isIsoPickerEntry(entry)));
     } catch (nextError) {
       if (requestId !== loadRequestId.current) return;
       setEntries([]);
@@ -75,7 +89,7 @@ export function StorageFilePickerDialog({
     } finally {
       if (requestId === loadRequestId.current) setLoading(false);
     }
-  }, [currentPath, selectedPool]);
+  }, [currentPath, mode, selectedPool]);
 
   useEffect(() => {
     void loadDirectory();
@@ -112,13 +126,58 @@ export function StorageFilePickerDialog({
   }
 
   function confirmSelection() {
-    if (!selectedPool || !selection) return;
+    if (!selectedPool) return;
+    if (mode === "directory") {
+      onSelect({
+        rootId: selectedPool.rootId,
+        storagePoolId: selectedPool.id,
+        path: currentPath,
+        name: currentPath.split(/[\\/]/u).filter(Boolean).at(-1) ?? selectedPool.name
+      });
+      return;
+    }
+    if (!selection) return;
     onSelect({
       rootId: selectedPool.rootId,
       storagePoolId: selectedPool.id,
       path: selection.path,
       name: selection.name
     });
+  }
+
+  async function submitCreateFolder(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = createFolderName.trim();
+    if (
+      !selectedPool ||
+      !onRequestCreateFolder ||
+      !name ||
+      name === "." ||
+      name === ".." ||
+      name.includes("/") ||
+      name.includes("\\") ||
+      createFolderSubmitting
+    ) {
+      return;
+    }
+
+    setCreateFolderSubmitting(true);
+    setError(null);
+    try {
+      await onRequestCreateFolder({
+        rootId: selectedPool.rootId,
+        storagePoolId: selectedPool.id,
+        parentPath: currentPath,
+        name
+      });
+      setCreateFolderOpen(false);
+      setCreateFolderName("");
+      await loadDirectory();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+    } finally {
+      setCreateFolderSubmitting(false);
+    }
   }
 
   return (
@@ -137,98 +196,195 @@ export function StorageFilePickerDialog({
       >
         <header className="storage-file-picker-header">
           <div className="storage-file-picker-heading">
-            <span className="vm-create-icon" aria-hidden="true"><Disc3 size={20} /></span>
+            <span className="vm-create-icon" aria-hidden="true">{mode === "directory" ? <FolderOpen size={20} /> : <Disc3 size={20} />}</span>
             <div>
-              <span className="eyebrow">{t("workspace.management.virtualMachines.createIsoSource")}</span>
-              <h3 id="storage-file-picker-title">{t("workspace.management.virtualMachines.isoPickerTitle")}</h3>
-              <p>{t("workspace.management.virtualMachines.isoPickerDescription")}</p>
+              <span className="eyebrow">
+                {mode === "directory"
+                  ? t("workspace.downloads.targetDirectory")
+                  : t("workspace.management.virtualMachines.createIsoSource")}
+              </span>
+              <h3 id="storage-file-picker-title">
+                {mode === "directory"
+                  ? t("workspace.downloads.directoryPickerTitle")
+                  : t("workspace.management.virtualMachines.isoPickerTitle")}
+              </h3>
+              <p>
+                {mode === "directory"
+                  ? t("workspace.downloads.directoryPickerDescription")
+                  : t("workspace.management.virtualMachines.isoPickerDescription")}
+              </p>
             </div>
           </div>
-          <button type="button" className="management-icon-action" onClick={onCancel} aria-label={t("workspace.management.virtualMachines.isoPickerClose")}>
+          <button
+            type="button"
+            className="management-icon-action"
+            onClick={onCancel}
+            aria-label={mode === "directory"
+              ? t("common.actions.close")
+              : t("workspace.management.virtualMachines.isoPickerClose")}
+          >
             <X aria-hidden="true" size={16} />
           </button>
         </header>
 
-        <div className="storage-file-picker-toolbar">
-          <label>
-            <span>{t("workspace.storagePoolLabel")}</span>
-            <select value={selectedPoolId} onChange={(event) => changePool(event.target.value)}>
-              {availablePools.map((pool) => (
-                <option key={pool.id} value={pool.id}>{pool.name}{pool.filesystem ? ` · ${pool.filesystem}` : ""}</option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            className="storage-file-picker-up"
-            onClick={() => selectedPool && openDirectory(parentPickerPath(selectedPool.path, currentPath))}
-            disabled={!selectedPool || currentPath === selectedPool.path || loading}
-            title={t("common.actions.up")}
-            aria-label={t("common.actions.up")}
-          >
-            <ArrowUp aria-hidden="true" size={15} />
-          </button>
-        </div>
-
-        <nav className="storage-file-picker-breadcrumbs" aria-label={t("workspace.breadcrumbs")}>
-          {selectedPool ? (
-            <button type="button" onClick={() => openDirectory(selectedPool.path)}>
-              <HardDrive aria-hidden="true" size={14} />
-              <span>{selectedPool.name}</span>
-            </button>
-          ) : null}
-          {breadcrumbs.map((crumb) => (
-            <button key={crumb.path} type="button" onClick={() => openDirectory(crumb.path)}>
-              <span>{crumb.name}</span>
-            </button>
-          ))}
-        </nav>
-
-        <div className="storage-file-picker-list" role="listbox" aria-label={t("workspace.management.virtualMachines.isoPickerFiles")}>
-          {loading ? (
-            <div className="storage-file-picker-state"><LoaderCircle className="is-spinning" aria-hidden="true" size={19} /><span>{t("common.states.loading")}</span></div>
-          ) : error ? (
-            <div className="storage-file-picker-state storage-file-picker-error">
-              <span>{error}</span>
-              <button type="button" onClick={() => void loadDirectory()}><RefreshCw aria-hidden="true" size={14} />{t("common.actions.refresh")}</button>
+        <div className="storage-file-picker-layout">
+          <aside className="storage-file-picker-pools">
+            <div className="storage-file-picker-pools-heading">
+              <span>{t("workspace.storagePoolLabel")}</span>
+              <small>{t("workspace.selectStoragePoolBody")}</small>
             </div>
-          ) : !selectedPool ? (
-            <div className="storage-file-picker-state"><HardDrive aria-hidden="true" size={19} /><span>{t("workspace.management.virtualMachines.isoPickerNoPools")}</span></div>
-          ) : entries.length === 0 ? (
-            <div className="storage-file-picker-state"><Disc3 aria-hidden="true" size={19} /><span>{t("workspace.management.virtualMachines.isoPickerEmpty")}</span></div>
-          ) : (
-            entries.map((entry) => {
-              const isDirectory = entry.kind === "directory";
-              const isSelected = selection?.path === entry.path;
-              return (
+            <div className="storage-file-picker-pool-list" role="listbox" aria-label={t("workspace.storagePoolLabel")}>
+              {availablePools.length === 0 ? (
+                <div className="storage-file-picker-pool-empty">
+                  <HardDrive aria-hidden="true" size={18} />
+                  <span>{t("workspace.management.virtualMachines.isoPickerNoPools")}</span>
+                </div>
+              ) : (
+                availablePools.map((pool) => (
+                  <button
+                    key={pool.id}
+                    type="button"
+                    className={`storage-file-picker-pool${selectedPoolId === pool.id ? " is-selected" : ""}`}
+                    role="option"
+                    aria-selected={selectedPoolId === pool.id}
+                    onClick={() => changePool(pool.id)}
+                  >
+                    <span className="storage-file-picker-pool-icon"><HardDrive aria-hidden="true" size={16} /></span>
+                    <span className="storage-file-picker-pool-copy">
+                      <strong>{pool.name}</strong>
+                      <small>{[pool.filesystem, pool.path].filter(Boolean).join(" · ")}</small>
+                    </span>
+                    <span className="storage-file-picker-pool-state" data-state={pool.status}>
+                      {pool.status === "ready" ? t("workspace.storagePoolStates.ready") : pool.status === "warning" ? t("workspace.storagePoolStates.warning") : t("workspace.storagePoolStates.unknown")}
+                    </span>
+                    {selectedPoolId === pool.id ? <Check aria-hidden="true" size={14} /> : null}
+                  </button>
+                ))
+              )}
+            </div>
+          </aside>
+
+          <section className="storage-file-picker-browser">
+            <div className="storage-file-picker-toolbar">
+              <div className="storage-file-picker-location">
+                <span>{mode === "directory" ? t("workspace.downloads.targetDirectory") : t("workspace.management.virtualMachines.isoPickerFiles")}</span>
+                <nav className="storage-file-picker-breadcrumbs" aria-label={t("workspace.breadcrumbs")}>
+                  {selectedPool ? (
+                    <button type="button" onClick={() => openDirectory(selectedPool.path)}>
+                      <HardDrive aria-hidden="true" size={13} />
+                      <span>{selectedPool.name}</span>
+                    </button>
+                  ) : null}
+                  {breadcrumbs.map((crumb) => (
+                    <button key={crumb.path} type="button" onClick={() => openDirectory(crumb.path)}>
+                      <span>{crumb.name}</span>
+                    </button>
+                  ))}
+                </nav>
+              </div>
+              <div className="storage-file-picker-toolbar-actions">
+                {mode === "directory" && onRequestCreateFolder ? (
+                  createFolderOpen ? (
+                    <form className="storage-file-picker-create-folder" onSubmit={(event) => void submitCreateFolder(event)}>
+                      <input
+                        autoFocus
+                        value={createFolderName}
+                        onChange={(event) => setCreateFolderName(event.target.value)}
+                        placeholder={t("workspace.downloads.newFolderPlaceholder")}
+                        aria-label={t("workspace.actions.folderName")}
+                        disabled={createFolderSubmitting}
+                      />
+                      <button type="submit" disabled={createFolderSubmitting || !createFolderName.trim()} title={t("workspace.downloads.requestCreateFolder")} aria-label={t("workspace.downloads.requestCreateFolder")}>
+                        {createFolderSubmitting ? <LoaderCircle className="is-spinning" aria-hidden="true" size={14} /> : <Check aria-hidden="true" size={14} />}
+                      </button>
+                      <button type="button" onClick={() => { setCreateFolderOpen(false); setCreateFolderName(""); }} disabled={createFolderSubmitting} title={t("common.actions.cancel")} aria-label={t("common.actions.cancel")}>
+                        <X aria-hidden="true" size={14} />
+                      </button>
+                    </form>
+                  ) : (
+                    <button type="button" className="storage-file-picker-create-folder-trigger" onClick={() => setCreateFolderOpen(true)} disabled={!selectedPool || loading} title={t("workspace.downloads.newFolder")} aria-label={t("workspace.downloads.newFolder")}>
+                      <FolderPlus aria-hidden="true" size={15} />
+                      <span>{t("workspace.downloads.newFolder")}</span>
+                    </button>
+                  )
+                ) : null}
                 <button
-                  key={entry.path}
                   type="button"
-                  className={`storage-file-picker-row${isSelected ? " is-selected" : ""}`}
-                  role="option"
-                  aria-selected={isSelected}
-                  onClick={() => isDirectory ? openDirectory(entry.path) : setSelection(entry)}
+                  className="storage-file-picker-up"
+                  onClick={() => selectedPool && openDirectory(parentPickerPath(selectedPool.path, currentPath))}
+                  disabled={!selectedPool || currentPath === selectedPool.path || loading}
+                  title={t("common.actions.up")}
+                  aria-label={t("common.actions.up")}
                 >
-                  <span className="storage-file-picker-file-icon" data-kind={isDirectory ? "directory" : "iso"}>
-                    {isDirectory ? <Folder aria-hidden="true" size={17} /> : <Disc3 aria-hidden="true" size={17} />}
-                  </span>
-                  <span className="storage-file-picker-file-name">{entry.name}</span>
-                  <span className="storage-file-picker-file-meta">
-                    {isDirectory ? t("workspace.management.virtualMachines.isoPickerFolder") : formatBytes(entry.sizeBytes, locale)}
-                  </span>
-                  {isSelected ? <Check aria-hidden="true" size={15} /> : null}
+                  <ArrowUp aria-hidden="true" size={15} />
                 </button>
-              );
-            })
-          )}
+              </div>
+            </div>
+
+            <div
+              className="storage-file-picker-list"
+              role="listbox"
+              aria-label={mode === "directory"
+                ? t("workspace.downloads.directoryPickerList")
+                : t("workspace.management.virtualMachines.isoPickerFiles")}
+            >
+              {loading ? (
+                <div className="storage-file-picker-state"><LoaderCircle className="is-spinning" aria-hidden="true" size={19} /><span>{t("common.states.loading")}</span></div>
+              ) : error ? (
+                <div className="storage-file-picker-state storage-file-picker-error">
+                  <span>{error}</span>
+                  <button type="button" onClick={() => void loadDirectory()}><RefreshCw aria-hidden="true" size={14} />{t("common.actions.refresh")}</button>
+                </div>
+              ) : !selectedPool ? (
+                <div className="storage-file-picker-state"><HardDrive aria-hidden="true" size={19} /><span>{t("workspace.management.virtualMachines.isoPickerNoPools")}</span></div>
+              ) : entries.length === 0 ? (
+                <div className="storage-file-picker-state">
+                  {mode === "directory" ? <Folder aria-hidden="true" size={19} /> : <Disc3 aria-hidden="true" size={19} />}
+                  <span>{mode === "directory" ? t("workspace.downloads.directoryPickerEmpty") : t("workspace.management.virtualMachines.isoPickerEmpty")}</span>
+                </div>
+              ) : (
+                entries.map((entry) => {
+                  const isDirectory = entry.kind === "directory";
+                  const isSelected = selection?.path === entry.path;
+                  return (
+                    <button
+                      key={entry.path}
+                      type="button"
+                      className={`storage-file-picker-row${isSelected ? " is-selected" : ""}`}
+                      role="option"
+                      aria-selected={isSelected}
+                      onClick={() => isDirectory ? openDirectory(entry.path) : setSelection(entry)}
+                    >
+                      <span className="storage-file-picker-file-icon" data-kind={isDirectory ? "directory" : "iso"}>
+                        {isDirectory ? <Folder aria-hidden="true" size={17} /> : <Disc3 aria-hidden="true" size={17} />}
+                      </span>
+                      <span className="storage-file-picker-file-name">{entry.name}</span>
+                      <span className="storage-file-picker-file-meta">
+                        {isDirectory
+                          ? mode === "directory"
+                            ? t("workspace.downloads.directoryPickerFolder")
+                            : t("workspace.management.virtualMachines.isoPickerFolder")
+                          : formatBytes(entry.sizeBytes, locale)}
+                      </span>
+                      {isSelected ? <Check aria-hidden="true" size={15} /> : null}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </section>
         </div>
 
         <footer className="storage-file-picker-footer">
-          <span title={selection?.path}>{selection?.name ?? t("workspace.management.virtualMachines.isoPickerNoneSelected")}</span>
+          {mode === "directory" ? (
+            <span title={currentPath}>{currentPath}</span>
+          ) : (
+            <span title={selection?.path}>{selection?.name ?? t("workspace.management.virtualMachines.isoPickerNoneSelected")}</span>
+          )}
           <div>
             <button type="button" onClick={onCancel}>{t("common.actions.cancel")}</button>
-            <button type="button" className="vm-create-submit" onClick={confirmSelection} disabled={!selection}>
-              {t("workspace.management.virtualMachines.isoPickerSelect")}
+            <button type="button" className="vm-create-submit" onClick={confirmSelection} disabled={mode === "iso" && !selection}>
+              {mode === "directory" ? t("workspace.downloads.selectCurrentDirectory") : t("workspace.management.virtualMachines.isoPickerSelect")}
             </button>
           </div>
         </footer>
@@ -239,6 +395,10 @@ export function StorageFilePickerDialog({
 
 export function isIsoPickerEntry(entry: FileEntry): boolean {
   return entry.isSafe && (entry.kind === "directory" || (entry.kind === "file" && entry.name.toLowerCase().endsWith(".iso")));
+}
+
+export function isDirectoryPickerEntry(entry: FileEntry): boolean {
+  return entry.isSafe && entry.kind === "directory";
 }
 
 export function parentPickerPath(poolPath: string, currentPath: string): string {

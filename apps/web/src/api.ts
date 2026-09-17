@@ -41,6 +41,8 @@ import type {
   RootReadiness,
   IndexerAlert,
   SystemHealthSummary,
+  DownloadTaskRecord as SharedDownloadTask,
+  PublicDownloadSettings,
   VmSummary as PublicVmSummary,
   VmOperationRecord,
   VmOperationAction,
@@ -100,6 +102,8 @@ export interface BackupStatus {
 
 export interface ReadinessResponse { roots: RootReadiness[]; }
 export type SystemHealth = SystemHealthSummary;
+export type DownloadTask = SharedDownloadTask;
+export type DownloadSettings = PublicDownloadSettings;
 export type VmSummary = PublicVmSummary;
 export type VmOperation = VmOperationRecord;
 export type VmAction = VmOperationAction;
@@ -873,6 +877,67 @@ export async function getFiles(rootId: string, currentPath: string, storagePoolI
   const response = await fetch(`/api/files?${params.toString()}`);
   await ensureOk(response);
   return (await response.json()) as FileListing;
+}
+
+export async function getDownloads(): Promise<DownloadTask[]> {
+  const response = await fetch("/api/downloads");
+  await ensureOk(response);
+  const body = (await response.json()) as { tasks: DownloadTask[] };
+  return body.tasks;
+}
+
+export async function createDownload(input: {
+  url: string;
+  rootId: string;
+  storagePoolId: string;
+  targetDirectory: string;
+  fileName: string;
+}): Promise<DownloadTask> {
+  const response = await fetch("/api/downloads", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  await ensureOk(response);
+  const body = (await response.json()) as { task: DownloadTask };
+  return body.task;
+}
+
+export async function actOnDownload(
+  id: string,
+  action: "pause" | "resume" | "cancel" | "retry"
+): Promise<DownloadTask> {
+  const response = await fetch(`/api/downloads/${encodeURIComponent(id)}/${action}`, {
+    method: "POST"
+  });
+  await ensureOk(response);
+  const body = (await response.json()) as { task: DownloadTask };
+  return body.task;
+}
+
+export async function deleteDownload(id: string): Promise<void> {
+  const response = await fetch(`/api/downloads/${encodeURIComponent(id)}`, {
+    method: "DELETE"
+  });
+  await ensureOk(response);
+}
+
+export async function getDownloadSettings(): Promise<DownloadSettings> {
+  const response = await fetch("/api/settings/downloads");
+  await ensureOk(response);
+  const body = (await response.json()) as { settings: DownloadSettings | null };
+  return body.settings ?? { concurrency: 1, updatedAt: new Date(0).toISOString() };
+}
+
+export async function updateDownloadSettings(concurrency: number): Promise<DownloadSettings> {
+  const response = await fetch("/api/settings/downloads", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ concurrency })
+  });
+  await ensureOk(response);
+  const body = (await response.json()) as { settings: DownloadSettings };
+  return body.settings;
 }
 
 export async function searchFiles(

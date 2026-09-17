@@ -178,5 +178,41 @@ export const productionMigrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_docker_operations_created_at
         ON docker_operations(created_at);
     `
+  },
+  {
+    id: "013_download_tasks",
+    sql: `
+      CREATE TABLE IF NOT EXISTS download_tasks (
+        id TEXT PRIMARY KEY,
+        url TEXT NOT NULL,
+        root_id TEXT NOT NULL REFERENCES nas_roots(id) ON DELETE RESTRICT,
+        storage_pool_id TEXT NOT NULL,
+        target_directory TEXT NOT NULL,
+        target_file_name TEXT NOT NULL,
+        target_path TEXT NOT NULL,
+        partial_path TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'paused', 'completed', 'failed', 'cancelled')),
+        received_bytes INTEGER NOT NULL DEFAULT 0 CHECK (received_bytes >= 0),
+        total_bytes INTEGER CHECK (total_bytes IS NULL OR total_bytes >= 0),
+        speed_bytes_per_second INTEGER NOT NULL DEFAULT 0 CHECK (speed_bytes_per_second >= 0),
+        etag TEXT,
+        last_modified TEXT,
+        error TEXT,
+        worker_id TEXT,
+        lease_expires_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT,
+        last_progress_at TEXT,
+        file_operation_id TEXT REFERENCES file_operations(id) ON DELETE SET NULL,
+        UNIQUE(root_id, storage_pool_id, target_path)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_download_tasks_status_created_at
+        ON download_tasks(status, created_at);
+      CREATE INDEX IF NOT EXISTS idx_download_tasks_updated_at
+        ON download_tasks(updated_at DESC);
+    `
   }
 ];

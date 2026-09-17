@@ -8,14 +8,21 @@ import {
   createDockerOperationApproval,
   createDockerOperationRecord,
   createDockerRegistryCredential,
+  createDownloadTask,
   createPiToolCallApproval,
   createSession,
   createUserMessageAndJob,
+  claimNextDownloadTask,
+  completeDownloadTask,
   defaultPiToolPolicySettings,
+  defaultDownloadSettings,
+  deleteDownloadTask,
   ensureNasRoots,
   getAgentProviderSession,
   getApproval,
   getDockerOperation,
+  getDownloadSettings,
+  getDownloadTask,
   getModelProviderSettings,
   getPiToolPolicySettings,
   listEvents,
@@ -23,8 +30,12 @@ import {
   listDockerRegistryCredentials,
   listNasRoots,
   openSigmaDb,
+  recordAppliedOperation,
   saveAgentProviderSession,
+  saveDownloadSettings,
   savePiToolPolicySettings,
+  transitionDownloadTask,
+  updateDownloadTaskProgress,
   deleteDockerRegistryCredential,
   updateDockerRegistryCredential,
   updateJobStatus,
@@ -198,6 +209,166 @@ describe("core repositories", () => {
         write: "ask"
       })
     ).toThrow(/Dangerous tool bash/);
+  });
+
+  it("stores download settings and enforces the supported concurrency range", () => {
+    expect(getDownloadSettings(db)).toBeNull();
+    expect(defaultDownloadSettings()).toMatchObject({ concurrency: 1 });
+
+    expect(saveDownloadSettings(db, { concurrency: 3 })).toMatchObject({
+      concurrency: 3
+    });
+    expect(getDownloadSettings(db)).toMatchObject({ concurrency: 3 });
+    expect(() => saveDownloadSettings(db, { concurrency: 0 })).toThrow(/between 1 and 3/);
+    expect(() => saveDownloadSettings(db, { concurrency: 4 })).toThrow(/between 1 and 3/);
+  });
+
+  it("claims download tasks in FIFO order and recovers expired leases", () => {
+    const older = new Date("2026-01-01T00:00:00.000Z");
+    const newer = new Date("2026-01-01T00:00:01.000Z");
+    const first = createDownloadTask(db, {
+      url: "https://example.com/first.bin",
+      rootId: "local",
+      storagePoolId: "/dev/md0",
+      targetDirectory: "downloads",
+      targetFileName: "first.bin",
+      targetPath: "downloads/first.bin",
+      now: older
+    });
+    const second = createDownloadTask(db, {
+      url: "https://example.com/second.bin",
+      rootId: "local",
+      storagePoolId: "/dev/md0",
+      targetDirectory: "downloads",
+      targetFileName: "second.bin",
+      targetPath: "downloads/second.bin",
+      now: newer
+    });
+
+    const claimed = claimNextDownloadTask(db, {
+      workerId: "worker-a",
+      leaseMs: 1_000,
+      now: new Date("2026-01-01T00:00:02.000Z")
+    });
+    expect(claimed).toMatchObject({
+      id: first.id,
+      status: "running",
+      workerId: "worker-a"
+    });
+
+    const nextClaimed = claimNextDownloadTask(db, {
+      workerId: "worker-b",
+      leaseMs: 1_000,
+      now: new Date("2026-01-01T00:00:02.500Z")
+    });
+    expect(nextClaimed?.id).toBe(second.id);
+
+    const recovered = claimNextDownloadTask(db, {
+      workerId: "worker-c",
+      leaseMs: 1_000,
+      now: new Date("2026-01-01T00:00:04.000Z")
+    });
+    expect(recovered).toMatchObject({
+      id: first.id,
+      status: "running",
+      workerId: "worker-c"
+    });
+  });
+
+  it("guards download state transitions and progress ownership", () => {
+    const task = createDownloadTask(db, {
+      url: "https://example.com/archive.zip",
+      rootId: "local",
+      storagePoolId: "/dev/md0",
+      targetDirectory: "downloads",
+      targetFileName: "archive.zip",
+      targetPath: "downloads/archive.zip"
+    });
+    const claimed = claimNextDownloadTask(db, {
+      workerId: "worker-a",
+      leaseMs: 1_000
+    });
+    expect(claimed?.id).toBe(task.id);
+
+    expect(updateDownloadTaskProgress(db, {
+      id: task.id,
+      workerId: "other-worker",
+      receivedBytes: 50,
+      totalBytes: 100,
+      speedBytesPerSecond: 25,
+      leaseMs: 1_000
+    })).toBe(false);
+    expect(updateDownloadTaskProgress(db, {
+      id: task.id,
+      workerId: "worker-a",
+      receivedBytes: 50,
+      totalBytes: 100,
+      speedBytesPerSecond: 25,
+      etag: "\"abc\"",
+      leaseMs: 1_000
+    })).toBe(true);
+    expect(getDownloadTask(db, task.id)).toMatchObject({
+      receivedBytes: 50,
+      totalBytes: 100,
+      speedBytesPerSecond: 25,
+      etag: "\"abc\""
+    });
+
+    expect(transitionDownloadTask(db, {
+      id: task.id,
+      from: ["queued"],
+      to: "paused"
+    })).toBeNull();
+    expect(transitionDownloadTask(db, {
+      id: task.id,
+      from: ["running"],
+      to: "paused"
+    })).toMatchObject({ status: "paused" });
+    expect(transitionDownloadTask(db, {
+      id: task.id,
+      from: ["paused"],
+      to: "queued"
+    })).toMatchObject({ status: "queued" });
+    expect(deleteDownloadTask(db, task.id)).toBe(true);
+  });
+
+  it("marks completed downloads with the associated file operation", () => {
+    const task = createDownloadTask(db, {
+      url: "https://example.com/video.mp4",
+      rootId: "local",
+      storagePoolId: "/dev/md0",
+      targetDirectory: "media",
+      targetFileName: "video.mp4",
+      targetPath: "media/video.mp4"
+    });
+    expect(claimNextDownloadTask(db, {
+      workerId: "worker-a",
+      leaseMs: 1_000
+    })?.id).toBe(task.id);
+    const operation = recordAppliedOperation(db, {
+      approvalId: null,
+      operation: "download",
+      targetPath: "media/video.mp4",
+      status: "applied",
+      metadata: {
+        rootId: "local",
+        storagePoolId: "/dev/md0",
+        reversible: true
+      }
+    });
+
+    expect(completeDownloadTask(db, {
+      id: task.id,
+      workerId: "worker-a",
+      receivedBytes: 1024,
+      totalBytes: 1024,
+      fileOperationId: operation.id
+    })).toMatchObject({
+      status: "completed",
+      receivedBytes: 1024,
+      totalBytes: 1024,
+      fileOperationId: operation.id
+    });
   });
 
   it("creates Pi tool approvals without file operation rows", () => {

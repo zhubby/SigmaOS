@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   Container,
   Copy,
+  Download,
   Files,
   FolderInput,
   FolderPlus,
@@ -49,12 +50,13 @@ import {
 } from "../../lib/uploads.js";
 import { WorkspaceManagementPanel, type ManagementPanelId } from "./WorkspaceManagementPanel.js";
 import { LocalTerminalPanel } from "./LocalTerminalPanel.js";
+import { HttpDownloaderPanel } from "./HttpDownloaderPanel.js";
 import { FileListSkeleton, SkeletonBlock } from "./ManagementSkeleton.js";
 import type { CodeFontSettings } from "../../lib/editor-settings.js";
 import type { ResolvedTheme } from "../../lib/theme-settings.js";
 
 const EPOCH_DATE = new Date(0).toISOString();
-type WorkspacePanelId = "files" | "terminal" | ManagementPanelId;
+type WorkspacePanelId = "files" | "terminal" | "downloads" | ManagementPanelId;
 
 const WORKSPACE_PANELS = [
   {
@@ -68,6 +70,12 @@ const WORKSPACE_PANELS = [
     labelKey: "workspace.panels.terminal",
     shortLabelKey: "workspace.panels.terminalShort",
     Icon: TerminalSquare
+  },
+  {
+    id: "downloads",
+    labelKey: "workspace.panels.downloads",
+    shortLabelKey: "workspace.panels.downloadsShort",
+    Icon: Download
   },
   {
     id: "docker",
@@ -266,6 +274,7 @@ export function WorkspacePane({
   resolvedTheme,
   filesPanelActivationId,
   onSelectStoragePool,
+  onOpenDownloadedDirectory,
   onGoUp,
   onRefreshFiles,
   onSubmitSearch,
@@ -280,6 +289,7 @@ export function WorkspacePane({
   onPlayerCommand,
   onRetryPlayer,
   onRequestCreateFolder,
+  onRequestCreateFolderAt,
   onRequestRename,
   onRequestTrash,
   onRequestTransfer,
@@ -328,6 +338,7 @@ export function WorkspacePane({
   resolvedTheme: ResolvedTheme;
   filesPanelActivationId: number;
   onSelectStoragePool: (poolId: string) => void;
+  onOpenDownloadedDirectory: (rootId: string, storagePoolId: string, path: string) => void;
   onGoUp: () => void;
   onRefreshFiles: () => void;
   onSubmitSearch: (event: FormEvent<HTMLFormElement>) => void;
@@ -342,6 +353,12 @@ export function WorkspacePane({
   onPlayerCommand: (command: Exclude<PlayerCommand, { type: "play" }>) => void;
   onRetryPlayer: () => void;
   onRequestCreateFolder: (folderName: string) => Promise<void>;
+  onRequestCreateFolderAt?: (input: {
+    rootId: string;
+    storagePoolId: string;
+    parentPath: string;
+    name: string;
+  }) => Promise<void>;
   onRequestRename: (entry: FileEntry, targetName: string) => Promise<void>;
   onRequestTrash: (entry: FileEntry) => Promise<void>;
   onRequestTransfer: (entry: FileEntry, operation: "move" | "copy", targetPath: string) => Promise<void>;
@@ -1169,6 +1186,17 @@ export function WorkspacePane({
                 </section>
               </div>
             </>
+          ) : activePanel === "downloads" ? (
+            <HttpDownloaderPanel
+              pools={storagePools}
+              selectedStoragePoolId={selectedStoragePoolId}
+              locale={locale}
+              onSelectStoragePool={onSelectStoragePool}
+              onOpenDirectory={onOpenDownloadedDirectory}
+              {...(onRequestCreateFolderAt ? { onRequestCreateFolder: onRequestCreateFolderAt } : {})}
+              onNotifyError={onNotifyError}
+              onNotifySuccess={onNotifySuccess}
+            />
           ) : activePanel === "terminal" ? null : (
             <WorkspaceManagementPanel
               panel={activePanel}

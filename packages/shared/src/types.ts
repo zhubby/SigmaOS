@@ -26,7 +26,57 @@ export type FileMutationOperation =
   | "restore"
   | "edit"
   | "extract"
-  | "upload";
+  | "upload"
+  | "download";
+
+export type DownloadTaskStatus =
+  | "queued"
+  | "running"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface DownloadTaskRecord {
+  id: string;
+  url: string;
+  rootId: string;
+  storagePoolId: string;
+  targetDirectory: string;
+  targetFileName: string;
+  targetPath: string;
+  partialPath: string;
+  status: DownloadTaskStatus;
+  receivedBytes: number;
+  totalBytes: number | null;
+  speedBytesPerSecond: number;
+  etag: string | null;
+  lastModified: string | null;
+  error: string | null;
+  workerId: string | null;
+  leaseExpiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  lastProgressAt: string | null;
+  fileOperationId: string | null;
+}
+
+export interface DownloadTaskCreateInput {
+  url: string;
+  rootId: string;
+  storagePoolId: string;
+  targetDirectory: string;
+  targetFileName: string;
+}
+
+export interface DownloadSettingsRecord {
+  concurrency: number;
+  updatedAt: string;
+}
+
+export type PublicDownloadSettings = DownloadSettingsRecord;
 
 export type GitFileStatus = "tracked" | "staged" | "modified" | "untracked" | "conflicted";
 

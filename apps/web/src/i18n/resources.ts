@@ -175,6 +175,11 @@ export const en = {
     openStorageManagement: "Open storage management",
     storagePoolUnavailable: "The selected storage pool is no longer available.",
     pathOutsideStoragePool: "That path is outside the selected storage pool.",
+    storagePoolStates: {
+      ready: "Ready",
+      warning: "Attention",
+      unknown: "Unknown"
+    },
     breadcrumbs: "Breadcrumbs",
     searchPlaceholder: "Search filenames",
     searchAria: "Search filenames",
@@ -237,6 +242,69 @@ export const en = {
     uploadFailed: "Failed",
     uploadCancelled: "Cancelled",
     cancelUpload: "Cancel upload",
+    downloads: {
+      eyebrow: "HTTP transfer",
+      title: "Downloads",
+      description: "Queue and monitor public HTTP and HTTPS downloads.",
+      active: "Active",
+      queued: "Queued",
+      speed: "Speed",
+      concurrency: "Connections",
+      newDownload: "New download",
+      filters: "Download filters",
+      filter: {
+        all: "All",
+        active: "In progress",
+        completed: "Completed",
+        failed: "Failed"
+      },
+      connected: "Live",
+      disconnected: "Reconnecting",
+      created: "Download queued",
+      createDescription: "Add a public file to the queue and choose where it should be stored.",
+      sourceTitle: "Source",
+      sourceDescription: "Paste a public HTTP or HTTPS address.",
+      destinationTitle: "Destination",
+      destinationDescription: "Choose a mounted pool and the folder that should receive the file.",
+      url: "HTTP or HTTPS URL",
+      fileName: "File name",
+      fileNameHint: "Defaults to the last path segment of the URL.",
+      targetDirectory: "Target directory",
+      chooseDirectory: "Choose directory",
+      noStoragePool: "No mounted storage pool",
+      newFolder: "New folder",
+      newFolderPlaceholder: "Folder name",
+      requestCreateFolder: "Request folder",
+      startDownload: "Start download",
+      directoryPickerTitle: "Choose target directory",
+      directoryPickerDescription: "Select the mounted storage pool and directory for this download.",
+      directoryPickerList: "Target directories",
+      directoryPickerEmpty: "No subdirectories in this location.",
+      directoryPickerFolder: "Directory",
+      selectCurrentDirectory: "Use current directory",
+      emptyTitle: "No downloads yet",
+      emptyBody: "Start an HTTP or HTTPS download to see it here.",
+      unknownTotal: "size unknown",
+      noSpeed: "Waiting",
+      done: "Done",
+      unknownEta: "ETA unknown",
+      progress: "Download progress for {{name}}",
+      actions: "Download actions",
+      pause: "Pause download",
+      resume: "Resume download",
+      retry: "Retry download",
+      cancel: "Cancel download",
+      openDirectory: "Open target directory",
+      remove: "Remove from history",
+      status: {
+        queued: "Queued",
+        running: "Downloading",
+        paused: "Paused",
+        completed: "Completed",
+        failed: "Failed",
+        cancelled: "Cancelled"
+      }
+    },
     actions: {
       move: "Move",
       moveEntry: "Move {{name}}",
@@ -288,7 +356,9 @@ export const en = {
       shares: "Shares",
       sharesShort: "Share",
       terminal: "Terminal",
-      terminalShort: "Term"
+      terminalShort: "Term",
+      downloads: "Downloads",
+      downloadsShort: "DL"
     },
     terminal: {
       eyebrow: "Local shell",
@@ -1210,6 +1280,10 @@ export const en = {
         title: "Appearance",
         description: "Language, theme, density, and local layout state."
       },
+      downloads: {
+        title: "Downloads",
+        description: "HTTP download concurrency and transfer behavior."
+      },
       advanced: {
         title: "Advanced",
         description: "Runtime paths, process details, and service configuration."
@@ -1273,6 +1347,28 @@ export const en = {
         openrouter: "OpenRouter",
         local: "Local endpoint"
       }
+    },
+    downloads: {
+      concurrencyTitle: "Download concurrency",
+      concurrencyDescription: "Limit the number of HTTP downloads that can run at the same time.",
+      concurrencyField: "Concurrent downloads",
+      connectionCount: "{{count}} connection",
+      concurrencyHelp: "Lower values reduce disk and network pressure. Running tasks are allowed to finish when you lower the limit.",
+      connectionUnit: "connections",
+      behaviorTitle: "Transfer behavior",
+      behaviorDescription: "The downloader keeps each task resumable and protects existing files.",
+      singleConnection: "Single connection",
+      singleConnectionDetail: "Each task uses one HTTP connection.",
+      resumeSupport: "Resume when supported",
+      resumeSupportDetail: "Paused or interrupted tasks use HTTP range requests when available.",
+      conflictPolicy: "No overwrite",
+      conflictPolicyDetail: "A matching file name blocks publishing until the name is changed.",
+      summaryTitle: "Download runtime",
+      summaryDescription: "The resident downloader reads this setting from the shared system profile.",
+      notLoaded: "Not loaded",
+      ready: "Ready",
+      saving: "Saving",
+      saved: "Saved"
     },
     docker: {
       runtimeTitle: "Runtime Access",
@@ -1798,6 +1894,11 @@ export const zhCN = {
     openStorageManagement: "打开存储管理",
     storagePoolUnavailable: "所选存储池已不可用。",
     pathOutsideStoragePool: "该路径不在当前存储池内。",
+    storagePoolStates: {
+      ready: "就绪",
+      warning: "需关注",
+      unknown: "未知"
+    },
     breadcrumbs: "面包屑",
     searchPlaceholder: "搜索文件名",
     searchAria: "搜索文件名",
@@ -1860,6 +1961,69 @@ export const zhCN = {
     uploadFailed: "上传失败",
     uploadCancelled: "已取消",
     cancelUpload: "取消上传",
+    downloads: {
+      eyebrow: "HTTP 传输",
+      title: "下载",
+      description: "排队并监控公网 HTTP/HTTPS 下载任务。",
+      active: "活动",
+      queued: "队列",
+      speed: "速度",
+      concurrency: "并发数",
+      newDownload: "新建下载",
+      filters: "下载筛选",
+      filter: {
+        all: "全部",
+        active: "进行中",
+        completed: "已完成",
+        failed: "失败"
+      },
+      connected: "实时",
+      disconnected: "重连中",
+      created: "已加入下载队列",
+      createDescription: "添加一个公网文件到队列，并选择保存位置。",
+      sourceTitle: "来源",
+      sourceDescription: "粘贴公网 HTTP 或 HTTPS 地址。",
+      destinationTitle: "目标位置",
+      destinationDescription: "选择已挂载的存储池和接收文件的文件夹。",
+      url: "HTTP 或 HTTPS 地址",
+      fileName: "文件名",
+      fileNameHint: "默认使用地址最后一段路径中的文件名。",
+      targetDirectory: "目标目录",
+      chooseDirectory: "选择目录",
+      noStoragePool: "没有已挂载的存储池",
+      newFolder: "新建文件夹",
+      newFolderPlaceholder: "文件夹名称",
+      requestCreateFolder: "请求新建文件夹",
+      startDownload: "开始下载",
+      directoryPickerTitle: "选择目标目录",
+      directoryPickerDescription: "选择已挂载的存储池和下载目录。",
+      directoryPickerList: "目标目录",
+      directoryPickerEmpty: "当前位置没有子目录。",
+      directoryPickerFolder: "目录",
+      selectCurrentDirectory: "使用当前目录",
+      emptyTitle: "暂无下载任务",
+      emptyBody: "开始一个 HTTP 或 HTTPS 下载后，任务会显示在这里。",
+      unknownTotal: "大小未知",
+      noSpeed: "等待中",
+      done: "完成",
+      unknownEta: "剩余时间未知",
+      progress: "{{name}} 的下载进度",
+      actions: "下载操作",
+      pause: "暂停下载",
+      resume: "继续下载",
+      retry: "重试下载",
+      cancel: "取消下载",
+      openDirectory: "打开目标目录",
+      remove: "从历史中移除",
+      status: {
+        queued: "等待中",
+        running: "下载中",
+        paused: "已暂停",
+        completed: "已完成",
+        failed: "失败",
+        cancelled: "已取消"
+      }
+    },
     actions: {
       move: "移动",
       moveEntry: "移动 {{name}}",
@@ -1911,7 +2075,9 @@ export const zhCN = {
       shares: "共享",
       sharesShort: "共享",
       terminal: "终端",
-      terminalShort: "终端"
+      terminalShort: "终端",
+      downloads: "下载",
+      downloadsShort: "下载"
     },
     terminal: {
       eyebrow: "本机 Shell",
@@ -2833,6 +2999,10 @@ export const zhCN = {
         title: "外观",
         description: "语言、主题、密度和本地布局状态。"
       },
+      downloads: {
+        title: "下载",
+        description: "HTTP 下载并发数和传输行为。"
+      },
       advanced: {
         title: "高级",
         description: "运行时路径、进程详情和服务配置。"
@@ -2896,6 +3066,28 @@ export const zhCN = {
         openrouter: "OpenRouter",
         local: "本地端点"
       }
+    },
+    downloads: {
+      concurrencyTitle: "下载并发数",
+      concurrencyDescription: "限制同时运行的 HTTP 下载任务数量。",
+      concurrencyField: "同时下载数",
+      connectionCount: "{{count}} 个连接",
+      concurrencyHelp: "较低的并发数可以减少磁盘和网络压力。降低上限时，已经运行的任务会继续完成。",
+      connectionUnit: "个连接",
+      behaviorTitle: "传输行为",
+      behaviorDescription: "下载器会保留任务的可续传状态，并保护已有文件。",
+      singleConnection: "单连接下载",
+      singleConnectionDetail: "每个任务只使用一个 HTTP 连接。",
+      resumeSupport: "支持续传",
+      resumeSupportDetail: "暂停或中断的任务会在服务端支持时使用 HTTP Range 请求。",
+      conflictPolicy: "不覆盖已有文件",
+      conflictPolicyDetail: "同名文件会阻止发布，直到修改文件名。",
+      summaryTitle: "下载运行时",
+      summaryDescription: "常驻下载服务从共享系统配置中读取此设置。",
+      notLoaded: "未加载",
+      ready: "已就绪",
+      saving: "保存中",
+      saved: "已保存"
     },
     docker: {
       runtimeTitle: "运行时访问",

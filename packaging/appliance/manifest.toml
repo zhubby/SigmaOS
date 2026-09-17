@@ -1,5 +1,5 @@
 name = "sigmaos-appliance"
-version = "0.3.0"
+version = "0.4.0"
 base_suite = "bookworm"
 target_arch = "arm64"
 
@@ -16,6 +16,7 @@ units = [
   "sigmaos-player-helper.service",
   "sigmaos-share-helper.service",
   "sigmaos-worker@1.service",
+  "sigmaos-downloader.service",
   "sigmaos-indexer.timer",
   "sigmaos-scheduler.timer",
   "sigmaos-maintenance.timer",

@@ -1,11 +1,13 @@
-import { lstat, realpath, stat } from "node:fs/promises";
-import path from "node:path";
 import { getNasRoot, type SigmaDatabase } from "@sigmaos/db";
 import type { NasRootRecord, SystemStoragePool } from "@sigmaos/shared";
 import {
-  isPathInside,
-  resolveSafeExistingPath,
-  resolveSafeTargetPath,
+  StorageScopeSafetyError,
+  assertNoSymlinkPathSegments,
+  assertPathInsideStorageScope,
+  createSafeStorageScope,
+  resolveStorageScopeExistingPath,
+  resolveStorageScopeTargetPath,
+  type SafeStorageScope,
   type SafePathResult
 } from "@sigmaos/nas-tools";
 import type { SystemManagementDependencies } from "./system-management.js";
@@ -58,51 +60,26 @@ export async function resolveStoragePoolScope(
   if (!pool || !pool.mountpoint) {
     throw new StorageScopeError("Storage pool is not mounted", 404);
   }
+  const mountpointPath = pool.mountpoint;
 
-  let rootRealPath: string;
-  let mountpointRealPath: string;
-  try {
-    rootRealPath = await realpath(root.path);
-    mountpointRealPath = await realpath(pool.mountpoint);
-  } catch {
-    throw new StorageScopeError("Storage pool is not mounted", 404);
-  }
-
-  if (!isPathInside(rootRealPath, mountpointRealPath)) {
-    throw new StorageScopeError("Storage pool is outside the configured NAS root", 403);
-  }
-
-  try {
-    const mountStat = await stat(mountpointRealPath);
-    if (!mountStat.isDirectory()) {
-      throw new Error("not a directory");
-    }
-  } catch {
-    throw new StorageScopeError("Storage pool is not mounted", 404);
-  }
-
-  const nestedMountpointRealPaths: string[] = [];
-  for (const candidate of summary.pools) {
-    if (candidate.id === pool.id || !candidate.mountpoint) {
-      continue;
-    }
-    try {
-      const candidateRealPath = await realpath(candidate.mountpoint);
-      if (isPathInside(mountpointRealPath, candidateRealPath) && candidateRealPath !== mountpointRealPath) {
-        nestedMountpointRealPaths.push(candidateRealPath);
-      }
-    } catch {
-      // An unavailable nested pool is not an accessible boundary.
-    }
-  }
+  const safeScope = await withStorageScopeError(() =>
+    createSafeStorageScope({
+      rootPath: root.path,
+      mountpointPath,
+      siblingMountpointPaths: summary.pools
+        .filter((candidate) => candidate.id !== pool.id)
+        .map((candidate) => candidate.mountpoint)
+        .filter((candidate): candidate is string => Boolean(candidate))
+    })
+  );
 
   return {
     root,
     pool,
-    rootRealPath,
-    mountpointRealPath,
-    mountpointPath: path.relative(rootRealPath, mountpointRealPath) || ".",
-    nestedMountpointRealPaths
+    rootRealPath: safeScope.rootRealPath,
+    mountpointRealPath: safeScope.mountpointRealPath,
+    mountpointPath: safeScope.mountpointPath,
+    nestedMountpointRealPaths: safeScope.nestedMountpointRealPaths
   };
 }
 
@@ -127,39 +104,24 @@ export async function resolveScopedExistingPath(
   scope: StoragePoolScope,
   requestedPath: string
 ): Promise<SafePathResult> {
-  rejectScopedPathSyntax(requestedPath);
-  const safe = await resolveSafeExistingPath(scope.root.path, requestedPath);
-  if (!isPathInside(scope.mountpointRealPath, safe.realPath)) {
-    throw new StorageScopeError("Path is outside the selected storage pool", 403);
-  }
-  assertNotNestedStoragePool(scope, safe.realPath);
-  return safe;
+  return await withStorageScopeError(() => resolveStorageScopeExistingPath(toSafeScope(scope), requestedPath));
 }
 
 export async function resolveScopedTargetPath(
   scope: StoragePoolScope,
   requestedPath: string
-): Promise<Awaited<ReturnType<typeof resolveSafeTargetPath>>> {
-  rejectScopedPathSyntax(requestedPath);
-  const safe = await resolveSafeTargetPath(scope.root.path, requestedPath);
-  if (!isPathInside(scope.mountpointRealPath, safe.absolutePath)) {
-    throw new StorageScopeError("Path is outside the selected storage pool", 403);
-  }
-  assertNotNestedStoragePool(scope, safe.absolutePath);
-  await assertNoSymlinkPathSegments(scope.rootRealPath, safe.absolutePath);
-  return safe;
+): Promise<Awaited<ReturnType<typeof resolveStorageScopeTargetPath>>> {
+  return await withStorageScopeError(() => resolveStorageScopeTargetPath(toSafeScope(scope), requestedPath));
 }
 
 export function assertPathInsideStoragePool(scope: StoragePoolScope, absolutePath: string): void {
-  if (!isPathInside(scope.mountpointRealPath, absolutePath)) {
-    throw new StorageScopeError("Path is outside the selected storage pool", 403);
-  }
-  assertNotNestedStoragePool(scope, absolutePath);
-}
-
-function assertNotNestedStoragePool(scope: StoragePoolScope, absolutePath: string): void {
-  if (scope.nestedMountpointRealPaths.some((nestedPath) => isPathInside(nestedPath, absolutePath))) {
-    throw new StorageScopeError("Path belongs to another mounted storage pool", 403);
+  try {
+    assertPathInsideStorageScope(toSafeScope(scope), absolutePath);
+  } catch (error) {
+    if (error instanceof StorageScopeSafetyError) {
+      throw new StorageScopeError(error.message, error.statusCode);
+    }
+    throw error;
   }
 }
 
@@ -180,42 +142,32 @@ export async function validateStoragePoolProposal(
       }
       throw error;
     }
-    await assertNoSymlinkPathSegments(scope.rootRealPath, target.absolutePath);
-  }
-}
-
-function rejectScopedPathSyntax(requestedPath: string): void {
-  const normalized = requestedPath.replaceAll("\\", "/");
-  if (
-    normalized.includes("\0") ||
-    normalized.startsWith("/") ||
-    /^[A-Za-z]:\//u.test(normalized) ||
-    normalized.split("/").includes("..")
-  ) {
-    throw new StorageScopeError("Path must stay inside the selected storage pool", 400);
-  }
-}
-
-async function assertNoSymlinkPathSegments(rootRealPath: string, absolutePath: string): Promise<void> {
-  const relativePath = path.relative(rootRealPath, absolutePath);
-  let currentPath = rootRealPath;
-  for (const segment of relativePath.split(path.sep).filter(Boolean)) {
-    currentPath = path.join(currentPath, segment);
-    try {
-      const entry = await lstat(currentPath);
-      if (entry.isSymbolicLink()) {
-        throw new StorageScopeError("Refusing to access through a symlink", 400);
-      }
-    } catch (error) {
-      if (isMissingPathError(error)) {
-        return;
-      }
-      throw error;
-    }
+    await withStorageScopeError(() => assertNoSymlinkPathSegments(scope.rootRealPath, target.absolutePath));
   }
 }
 
 function isMissingPathError(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException).code;
   return code === "ENOENT" || code === "ENOTDIR";
+}
+
+function toSafeScope(scope: StoragePoolScope): SafeStorageScope {
+  return {
+    rootPath: scope.root.path,
+    rootRealPath: scope.rootRealPath,
+    mountpointRealPath: scope.mountpointRealPath,
+    mountpointPath: scope.mountpointPath,
+    nestedMountpointRealPaths: scope.nestedMountpointRealPaths
+  };
+}
+
+async function withStorageScopeError<T>(callback: () => Promise<T>): Promise<T> {
+  try {
+    return await callback();
+  } catch (error) {
+    if (error instanceof StorageScopeSafetyError) {
+      throw new StorageScopeError(error.message, error.statusCode);
+    }
+    throw error;
+  }
 }
