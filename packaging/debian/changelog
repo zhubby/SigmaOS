@@ -1,3 +1,9 @@
+sigmaos (0.4.3) unstable; urgency=medium
+
+  * Unify button and control interaction feedback
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Fri, 18 Sep 2026 09:11:41 +0000
+
 sigmaos (0.4.2) unstable; urgency=medium
 
   * Add persistent operation notifications and keep internal actions out of agent chat.
