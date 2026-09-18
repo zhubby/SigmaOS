@@ -28,15 +28,26 @@
 
   .settings-nav {
     display: flex;
-    gap: 10px;
+    gap: 6px;
     overflow-x: auto;
     overflow-y: hidden;
     padding: 0 4px 4px;
   }
 
   .settings-nav section {
-    flex: 0 0 190px;
+    display: flex;
+    flex: 0 0 auto;
+    gap: 6px;
     margin-bottom: 0;
+  }
+
+  .settings-nav h3 {
+    display: none;
+  }
+
+  .settings-nav button {
+    flex: 0 0 164px;
+    width: 164px;
   }
 
   .settings-nav button.is-active {
@@ -97,6 +108,20 @@
 
   .settings-storage-row dl {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container workspace-stage (max-width: 760px) {
+  .management-body,
+  .management-skeleton-body,
+  .management-lower-grid,
+  .docker-runtime-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .docker-pressure-section,
+  .docker-compose-section {
+    grid-column: auto;
   }
 }
 
@@ -410,18 +435,24 @@
 
   .app-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 1fr);
-    min-height: 100vh;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
   }
 
   .app-notification-region {
-    top: 64px;
-    right: 8px;
-    width: calc(100vw - 16px);
+    position: static;
+    grid-row: 2;
+    grid-column: 1;
+    width: auto;
+    margin: 8px 60px 0 8px;
   }
 
   .mobile-tabs {
     display: grid;
+    grid-row: 1;
+    grid-column: 1;
     grid-template-columns: minmax(0, 1fr) 40px;
     gap: 8px;
     padding: 8px;
@@ -462,12 +493,15 @@
   .chat-pane,
   .workspace-pane {
     display: none;
-    height: calc(100vh - 55px);
+    grid-row: 3;
+    grid-column: 1;
+    height: auto;
+    min-height: 0;
   }
 
   .chat-pane.is-mobile-active {
     display: grid;
-    grid-template-columns: 160px minmax(0, 1fr);
+    grid-template-columns: 68px minmax(0, 1fr);
   }
 
   .workspace-pane.is-mobile-active {
@@ -480,7 +514,7 @@
   }
 
   .workspace-shell {
-    grid-template-columns: minmax(0, 1fr) 52px;
+    grid-template-columns: minmax(0, 1fr) 60px;
     height: 100%;
   }
 
@@ -498,7 +532,7 @@
   }
 
   .workspace-panel-tab {
-    width: 40px;
+    width: 48px;
     min-height: 48px;
   }
 
@@ -721,10 +755,6 @@
     padding: 10px 8px;
   }
 
-  .settings-nav section {
-    flex-basis: 170px;
-  }
-
   .settings-nav button {
     min-height: 40px;
   }
@@ -812,6 +842,16 @@
     justify-self: start;
   }
 
+  .settings-system-list dd small,
+  .settings-storage-row > div:first-child small,
+  .settings-root-list small,
+  .settings-config-row small {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
   .settings-actions {
     align-items: stretch;
     flex-direction: column;
@@ -822,17 +862,20 @@
     grid-template-columns: 1fr 1fr;
   }
 
-  .chat-pane.is-mobile-active {
-    grid-template-columns: 1fr;
-  }
-
-  .agent-list {
-    display: none;
-  }
-
   .chat-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 36px;
     align-items: flex-start;
-    flex-direction: column;
+    gap: 10px;
+  }
+
+  .workspace-terminal-header {
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .workspace-terminal-title .management-title-copy p {
+    display: none;
   }
 
   .approval-card {
@@ -1016,5 +1059,18 @@
 
   .activity-upload-head {
     align-items: flex-start;
+  }
+}
+
+@media (max-width: 360px) {
+  .composer-actions .primary-button,
+  .composer-actions .secondary-button {
+    width: 40px;
+    min-width: 40px;
+    padding: 0;
+  }
+
+  .composer-actions button span {
+    display: none;
   }
 }

@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { createElement } from "react";
+import { createElement, createRef } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { AppStatus } from "../../config/status.js";
-import { ChatMessageContent, composeAgentMessage, composerFeedbackState, shouldSubmitComposerMessage } from "./ChatPane.js";
+import { initI18n } from "../../i18n/index.js";
+import {
+  ChatMessageContent,
+  ChatPane,
+  composeAgentMessage,
+  composerFeedbackState,
+  shouldSubmitComposerMessage
+} from "./ChatPane.js";
 
 type ComposerKeyDownEvent = Parameters<typeof shouldSubmitComposerMessage>[0];
 
@@ -178,5 +185,60 @@ describe("ChatMessageContent", () => {
     expect(html).toContain('data-workspace-path="My Files/report.pdf"');
     expect(html).toContain('data-workspace-path="reports/latest.pdf"');
     expect(html).toContain('<pre class="message-code-block"><code>/srv/nas/not-interactive.txt');
+  });
+});
+
+describe("ChatPane agent rail", () => {
+  it("keeps the compact icon navigation and settings action in the footer", async () => {
+    await initI18n();
+    const session = {
+      id: "session-1",
+      rootId: "root-1",
+      currentPath: ".",
+      createdAt: "2026-09-17T10:00:00.000Z",
+      updatedAt: "2026-09-17T10:00:00.000Z",
+      firstMessage: null,
+      lastMessage: null
+    };
+    const noop = () => undefined;
+    const html = renderToStaticMarkup(
+      createElement(ChatPane, {
+        active: true,
+        selectedRoot: undefined,
+        activeSessionSummary: session,
+        sessions: [session],
+        activeSessionId: session.id,
+        transcript: [],
+        activeApprovals: [],
+        message: "",
+        composerPath: null,
+        status: "ready",
+        locale: "en",
+        modelSettings: null,
+        activeJobId: null,
+        messageSubmitting: false,
+        hasSession: true,
+        transcriptRef: createRef<HTMLDivElement>(),
+        onCreateAgent: noop,
+        onDeleteSession: noop,
+        onOpenSettings: noop,
+        onSelectSession: noop,
+        onApprove: noop,
+        onReject: noop,
+        onSubmitMessage: noop,
+        onMessageChange: noop,
+        onClearComposerPath: noop,
+        onCancelActiveJob: noop,
+        onOpenWorkspacePath: noop
+      })
+    );
+
+    expect(html).toContain('class="agent-brand-logo"');
+    expect(html).toContain('src="/sigmaos-icon.svg"');
+    expect(html).not.toContain("sigmaos-banner");
+    expect(html).toContain('class="session-item is-active"');
+    expect(html).toContain('class="agent-status-indicator"');
+    expect(html).toContain('class="settings-button agent-settings-button"');
+    expect(html.indexOf('class="session-list"')).toBeLessThan(html.indexOf('class="agent-footer"'));
   });
 });

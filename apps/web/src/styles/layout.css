@@ -4,6 +4,7 @@
   grid-template-columns: minmax(560px, var(--chat-pane-width)) 14px minmax(460px, 1fr);
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   min-height: 0;
   background: var(--app-bg);
   color: var(--text);
@@ -16,12 +17,12 @@
 
 .app-notification-region {
   position: fixed;
-  top: 16px;
-  right: 16px;
-  z-index: 80;
+  top: 76px;
+  right: calc(100vw - var(--chat-pane-width) + 16px);
+  z-index: 35;
   display: grid;
   gap: 8px;
-  width: min(420px, calc(100vw - 32px));
+  width: min(420px, calc(var(--chat-pane-width) - 100px));
   pointer-events: none;
 }
 
@@ -37,7 +38,7 @@
   color: var(--text);
   background: var(--dialog-bg);
   box-shadow: var(--shadow), inset 3px 0 0 var(--red);
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 .app-notification > svg {
@@ -93,6 +94,7 @@
   color: var(--muted);
   background: transparent;
   cursor: pointer;
+  pointer-events: auto;
 }
 
 .app-notification button:hover {
@@ -108,7 +110,7 @@
   display: inline-grid;
   place-items: center;
   width: 14px;
-  height: 100vh;
+  height: 100%;
   padding: 0;
   border: 0;
   color: var(--muted-2);

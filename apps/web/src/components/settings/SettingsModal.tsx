@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState, type ReactNode } from "react";
+import { FormEvent, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AlertTriangle,
@@ -69,7 +69,6 @@ import {
   previewFileSizeLimitMiBToBytes
 } from "../../lib/preview-settings.js";
 import type { ResolvedTheme, ThemePreference } from "../../lib/theme-settings.js";
-import { BrandBanner } from "../common/BrandBanner.js";
 import { CustomSelect } from "../common/CustomSelect.js";
 import { VersionSettingsPage } from "./VersionSettingsPage.js";
 
@@ -156,6 +155,9 @@ export function SettingsModal({
 }: SettingsModalProps) {
   const { t } = useTranslation();
   const [settingsSearch, setSettingsSearch] = useState("");
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
   const currentSection = SETTINGS_SECTIONS.find((section) => section.id === activeSection) ?? SETTINGS_SECTIONS[0]!;
   const normalizedSearch = settingsSearch.trim().toLowerCase();
   const visibleSections = normalizedSearch
@@ -174,23 +176,71 @@ export function SettingsModal({
     label: providerLabel(provider, t)
   }));
 
+  useEffect(() => {
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const frame = window.requestAnimationFrame(() => searchInputRef.current?.focus());
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      const previousFocus = previousFocusRef.current;
+      if (previousFocus?.isConnected) {
+        window.requestAnimationFrame(() => previousFocus.focus());
+      }
+    };
+  }, []);
+
+  function handleDialogKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.key === "Escape" && !event.defaultPrevented) {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+
+    if (event.key !== "Tab") {
+      return;
+    }
+
+    const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+    ) ?? [])].filter((element) => element.getClientRects().length > 0);
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (!first || !last) {
+      event.preventDefault();
+      dialogRef.current?.focus();
+      return;
+    }
+
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
   return (
     <div className="settings-backdrop" role="presentation" onMouseDown={onClose}>
       <section
+        ref={dialogRef}
         className="settings-modal settings-center"
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-title"
+        tabIndex={-1}
+        onKeyDown={handleDialogKeyDown}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <aside className="settings-rail" aria-label={t("settings.sectionsLabel")}>
           <div className="settings-rail-brand">
-            <BrandBanner alt={t("common.appName")} />
+            <img className="settings-brand-logo" src="/sigmaos-icon.svg" alt={t("common.appName")} />
           </div>
 
           <label className="settings-search">
             <Search aria-hidden="true" size={15} />
             <input
+              ref={searchInputRef}
               value={settingsSearch}
               onChange={(event) => setSettingsSearch(event.target.value)}
               placeholder={t("settings.searchPlaceholder")}
@@ -288,7 +338,7 @@ export function SettingsModal({
                       </header>
 
                       <fieldset className="settings-field-grid" disabled={loading || saving}>
-                        <label>
+                        <div className="settings-preference-field">
                           <span>{t("settings.modelProvider.provider")}</span>
                           <CustomSelect
                             id="model-provider"
@@ -302,7 +352,7 @@ export function SettingsModal({
                             }
                             ariaLabel={t("settings.modelProvider.provider")}
                           />
-                        </label>
+                        </div>
 
                         <label className="settings-field-wide">
                           <span>{t("settings.modelProvider.baseUrl")}</span>
@@ -1204,7 +1254,7 @@ function SettingsAppearancePage({
               })}
             </span>
           </header>
-          <label className="settings-preference-field">
+          <div className="settings-preference-field">
             <span>{t("settings.appearance.themeField")}</span>
             <CustomSelect
               id="theme-select"
@@ -1214,7 +1264,7 @@ function SettingsAppearancePage({
               onChange={onThemePreferenceChange}
             />
             <small>{t("settings.appearance.themeHelp")}</small>
-          </label>
+          </div>
         </section>
 
         <section className="settings-section-card">
@@ -1225,7 +1275,7 @@ function SettingsAppearancePage({
             </div>
             <span data-state="ready">{languageLocaleLabel(resolvedLocale, t)}</span>
           </header>
-          <label className="settings-preference-field">
+          <div className="settings-preference-field">
             <span>{t("settings.appearance.languageField")}</span>
             <CustomSelect
               id="language-select"
@@ -1235,7 +1285,7 @@ function SettingsAppearancePage({
               onChange={onLanguagePreferenceChange}
             />
             <small>{t("settings.appearance.languageHelp")}</small>
-          </label>
+          </div>
         </section>
 
         <section className="settings-section-card">
@@ -1350,7 +1400,7 @@ function SettingsFilesPage({
             <span data-state="ready">{`${codeFontSettings.fontSizePx}px`}</span>
           </header>
           <div className="settings-editor-font-grid">
-            <label className="settings-preference-field">
+            <div className="settings-preference-field">
               <span>{t("settings.files.monoFont")}</span>
               <CustomSelect
                 id="code-font-family"
@@ -1365,7 +1415,7 @@ function SettingsFilesPage({
                 }
               />
               <small>{t("settings.files.monoFontHelp")}</small>
-            </label>
+            </div>
             <label className="settings-preference-field settings-size-field">
               <span>{t("settings.files.fontSize")}</span>
               <div className="settings-unit-input">

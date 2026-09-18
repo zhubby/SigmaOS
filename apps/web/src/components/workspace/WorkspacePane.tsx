@@ -383,6 +383,9 @@ export function WorkspacePane({
   const [operationSubmitting, setOperationSubmitting] = useState(false);
   const [activePanel, setActivePanel] = useState<WorkspacePanelId>("files");
   const [terminalMounted, setTerminalMounted] = useState(false);
+  const [compactLayout, setCompactLayout] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(max-width: 1040px)").matches
+  );
   const [fileSort, setFileSort] = useState<FileSortState>({ key: "name", direction: "asc" });
   const [isDropActive, setIsDropActive] = useState(false);
   const fileUploadInputRef = useRef<HTMLInputElement | null>(null);
@@ -487,6 +490,15 @@ export function WorkspacePane({
   const transferTargetInvalid =
     transferDirectoryInvalid ||
     transferTargetRootPath === transferState?.entry.path;
+  const workspaceVisible = active || !compactLayout;
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 1040px)");
+    const syncLayout = () => setCompactLayout(media.matches);
+    syncLayout();
+    media.addEventListener("change", syncLayout);
+    return () => media.removeEventListener("change", syncLayout);
+  }, []);
 
   useEffect(() => {
     const input = folderUploadInputRef.current;
@@ -754,7 +766,11 @@ export function WorkspacePane({
   }
 
   return (
-    <section className={`workspace-pane ${active ? "is-mobile-active" : ""}`} aria-label={t("workspace.label")}>
+    <section
+      className={`workspace-pane ${active ? "is-mobile-active" : ""}`}
+      aria-label={t("workspace.label")}
+      aria-hidden={!workspaceVisible}
+    >
       <input
         ref={fileUploadInputRef}
         className="workspace-upload-input"
@@ -1197,7 +1213,7 @@ export function WorkspacePane({
               onNotifyError={onNotifyError}
               onNotifySuccess={onNotifySuccess}
             />
-          ) : activePanel === "terminal" ? null : (
+          ) : activePanel === "terminal" || !workspaceVisible ? null : (
             <WorkspaceManagementPanel
               panel={activePanel}
               roots={roots}
@@ -1216,11 +1232,10 @@ export function WorkspacePane({
           )}
           {terminalMounted ? (
             <LocalTerminalPanel
-              active={activePanel === "terminal"}
+              active={activePanel === "terminal" && workspaceVisible}
               root={selectedRoot}
               codeFontSettings={codeFontSettings}
               resolvedTheme={resolvedTheme}
-              onNotifyError={onNotifyError}
             />
           ) : null}
         </div>

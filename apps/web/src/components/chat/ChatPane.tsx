@@ -44,7 +44,6 @@ import {
   splitWorkspaceMessagePaths
 } from "../../lib/chat-paths.js";
 import { sessionTitle } from "../../lib/session.js";
-import { BrandBanner } from "../common/BrandBanner.js";
 
 type ApprovalRisk = PendingApproval["proposal"][number]["risk"];
 type ApprovalCardKind = "file" | "tool" | "docker" | "vm" | "share" | "storage";
@@ -136,24 +135,25 @@ function SessionList({
 
   return (
     <nav className="session-list" aria-label={ariaLabel}>
-      {sessions.map((item) => (
-        <button
-          key={item.id}
-          type="button"
-          className={item.id === activeSessionId ? "session-item is-active" : "session-item"}
-          onClick={() => onSelectSession(item)}
-        >
-          <Bot aria-hidden="true" size={16} />
-          <span>
-            <strong>{sessionTitle(item, rootAgentTitle)}</strong>
-            <small>
-              <time dateTime={item.updatedAt} title={formatDate(item.updatedAt, locale)}>
-                {formatRelativeTime(item.updatedAt, locale, now)}
-              </time>
-            </small>
-          </span>
-        </button>
-      ))}
+      {sessions.map((item) => {
+        const title = sessionTitle(item, rootAgentTitle);
+        const relativeTime = formatRelativeTime(item.updatedAt, locale, now);
+        const label = `${title} - ${relativeTime} (${formatDate(item.updatedAt, locale)})`;
+
+        return (
+          <button
+            key={item.id}
+            type="button"
+            className={item.id === activeSessionId ? "session-item is-active" : "session-item"}
+            onClick={() => onSelectSession(item)}
+            title={label}
+            aria-label={label}
+            aria-current={item.id === activeSessionId ? "page" : undefined}
+          >
+            <Bot aria-hidden="true" size={19} />
+          </button>
+        );
+      })}
     </nav>
   );
 }
@@ -222,7 +222,6 @@ export function ChatPane({
   const rootAgentTitle = t("chat.rootAgent");
   const hasConversationContent = transcript.length > 0 || activeApprovals.length > 0;
   const activeSessionTitle = activeSessionSummary ? sessionTitle(activeSessionSummary, rootAgentTitle) : t("chat.agent");
-  const showAgentStatus = status !== "ready" && status !== "error" && status !== "offline";
   const composerFeedback = composerFeedbackState({ activeJobId, messageSubmitting, status });
   const deleteDisabled = !activeSessionSummary || composerFeedback !== null || status === "cancelling";
   const composerStatusId = "composer-status";
@@ -328,22 +327,18 @@ export function ChatPane({
     <section className={`chat-pane ${active ? "is-mobile-active" : ""}`} aria-label={t("chat.agents")}>
       <aside className="agent-list" aria-label={t("chat.agentSessions")}>
         <div className="brand">
-          <BrandBanner />
-          <button
-            className="settings-button brand-settings-button"
-            type="button"
-            onClick={onOpenSettings}
-            title={t("common.actions.systemSettings")}
-          >
-            <Settings aria-hidden="true" size={17} />
-          </button>
+          <img className="agent-brand-logo" src="/sigmaos-icon.svg" alt="" aria-hidden="true" />
           <h1 className="visually-hidden">{t("common.appName")}</h1>
         </div>
 
         <div className="agent-list-head">
-          <span>{t("chat.agents")}</span>
-          <button type="button" onClick={onCreateAgent} title={t("common.actions.newAgent")}>
-            <Plus aria-hidden="true" size={16} />
+          <button
+            type="button"
+            onClick={onCreateAgent}
+            title={t("common.actions.newAgent")}
+            aria-label={t("common.actions.newAgent")}
+          >
+            <Plus aria-hidden="true" size={18} />
           </button>
         </div>
 
@@ -356,13 +351,26 @@ export function ChatPane({
           onSelectSession={onSelectSession}
         />
 
-        {showAgentStatus ? (
-          <div className="agent-footer">
-            <div className="agent-status" data-state={status}>
-              <span>{t(`status.${status}`)}</span>
-            </div>
+        <div className="agent-footer">
+          <div
+            className="agent-status-indicator"
+            data-state={status}
+            role="status"
+            title={t(`status.${status}`)}
+            aria-label={t(`status.${status}`)}
+          >
+            <span aria-hidden="true" />
           </div>
-        ) : null}
+          <button
+            className="settings-button agent-settings-button"
+            type="button"
+            onClick={onOpenSettings}
+            title={t("common.actions.systemSettings")}
+            aria-label={t("common.actions.systemSettings")}
+          >
+            <Settings aria-hidden="true" size={18} />
+          </button>
+        </div>
       </aside>
 
       <section className="chat-main" aria-label={t("chat.agentChat")}>
@@ -471,11 +479,24 @@ export function ChatPane({
               <strong>{modelRoute}</strong>
             </div>
             <div className="composer-actions">
-              <button className="secondary-button" type="button" onClick={onCancelActiveJob} disabled={!activeJobId}>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={onCancelActiveJob}
+                disabled={!activeJobId}
+                aria-label={t("common.actions.stop")}
+                title={t("common.actions.stop")}
+              >
                 <CircleStop aria-hidden="true" size={16} />
                 <span>{t("common.actions.stop")}</span>
               </button>
-              <button className="primary-button" type="submit" disabled={!hasSession || (!message.trim() && !composerPath) || messageSubmitting}>
+              <button
+                className="primary-button"
+                type="submit"
+                disabled={!hasSession || (!message.trim() && !composerPath) || messageSubmitting}
+                aria-label={t("common.actions.send")}
+                title={t("common.actions.send")}
+              >
                 <ComposerIcon aria-hidden="true" className={composerIconClass} size={16} />
                 <span>{t("common.actions.send")}</span>
               </button>

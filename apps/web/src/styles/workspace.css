@@ -14,6 +14,8 @@
 }
 
 .workspace-stage {
+  container-name: workspace-stage;
+  container-type: inline-size;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;

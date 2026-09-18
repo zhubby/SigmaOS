@@ -163,6 +163,7 @@ export function CustomSelect<T extends string = string>({
 
     if (event.key === "Escape" && open) {
       event.preventDefault();
+      event.stopPropagation();
       setOpen(false);
     }
   }
@@ -224,7 +225,11 @@ export function CustomSelect<T extends string = string>({
                     setActiveIndex(index);
                   }
                 }}
-                onClick={() => selectIndex(index)}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  selectIndex(index);
+                }}
               >
                 <span>{option.label}</span>
                 {selected ? <Check aria-hidden="true" size={14} /> : null}

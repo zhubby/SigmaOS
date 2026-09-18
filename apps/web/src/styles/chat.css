@@ -1,6 +1,6 @@
 .chat-pane {
   display: grid;
-  grid-template-columns: 210px minmax(0, 1fr);
+  grid-template-columns: 68px minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   background: var(--chat-bg);
@@ -11,97 +11,104 @@
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
-  padding: 14px 10px;
+  padding: 12px 8px 10px;
   background: var(--server-bg);
   border-right: 1px solid rgb(0 0 0 / 24%);
 }
 
 .brand {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 32px;
-  align-content: center;
-  align-items: center;
-  justify-items: start;
-  gap: 8px;
+  place-items: center;
   min-width: 0;
   height: 48px;
-  padding: 0 8px;
+  padding: 0 0 10px;
+  border-bottom: 1px solid var(--line-soft);
 }
 
-.brand .brand-banner {
-  width: min(132px, 100%);
+.agent-brand-logo {
+  display: block;
+  width: 36px;
+  height: 36px;
+  filter: drop-shadow(0 7px 14px rgb(88 101 242 / 18%));
+  transition:
+    filter 140ms ease,
+    transform 140ms ease;
 }
 
-.brand-settings-button {
-  justify-self: end;
-  width: 32px;
-  height: 32px;
+.brand:hover .agent-brand-logo {
+  filter: drop-shadow(0 8px 16px rgb(33 214 194 / 22%));
+  transform: translateY(-1px);
+}
+
+.agent-list-head {
+  justify-content: center;
+  padding: 10px 0 8px;
 }
 
 .agent-list-head button {
-  width: 28px;
-  height: 28px;
+  width: 40px;
+  height: 40px;
   border-radius: 5px;
+  color: var(--muted);
+  background: var(--surface);
 }
-
 
 .session-list {
   display: grid;
   align-content: start;
-  gap: 2px;
+  justify-items: center;
+  gap: 4px;
   min-height: 0;
-  overflow: auto;
-  padding: 0 2px 10px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0 0 10px;
+  scrollbar-color: var(--line) transparent;
+  scrollbar-width: thin;
 }
 
 .session-item {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 42px;
-  padding: 6px 8px;
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  border: 1px solid transparent;
   border-radius: 5px;
   color: var(--muted);
   background: transparent;
-  text-align: left;
   cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
 }
 
-.session-item:hover,
-.session-item.is-active {
+.session-item:hover {
   color: var(--text);
   background: var(--surface-hover);
+  transform: translateY(-1px);
+}
+
+.session-item.is-active {
+  border-color: rgb(142 161 255 / 28%);
+  color: white;
+  background: var(--accent-soft-bg);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .session-item svg {
   color: inherit;
 }
 
-.session-item strong,
-.session-item small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.session-item strong {
-  font-size: 13px;
-  line-height: 1.2;
-}
-
-.session-item small {
-  margin-top: 2px;
-  color: var(--muted-2);
-  font-size: 11.5px;
-}
-
 .agent-footer {
-  display: flex;
+  display: grid;
   align-items: center;
-  gap: 8px;
+  justify-items: center;
+  gap: 7px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
 }
 
 .settings-button {
@@ -112,34 +119,38 @@
   background: var(--surface);
 }
 
-.agent-status {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex: 1;
-  gap: 8px;
-  min-height: 36px;
-  padding: 0 10px;
+.agent-settings-button {
+  width: 40px;
+  height: 40px;
+}
+
+.agent-status-indicator {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 18px;
   border-radius: 5px;
-  background: rgb(35 165 89 / 13%);
-  color: #78d89d;
-  font-size: 12.5px;
-  font-weight: 800;
+  background: transparent;
 }
 
-.agent-status[data-state="error"],
-.agent-status[data-state="offline"] {
-  background: rgb(218 55 60 / 14%);
-  color: #ff8a8e;
+.agent-status-indicator > span {
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--server-bg);
+  border-radius: 50%;
+  background: var(--yellow);
+  box-shadow: 0 0 0 2px rgb(240 178 50 / 18%);
 }
 
-.agent-status[data-state="loading"],
-.agent-status[data-state="searching"],
-.agent-status[data-state="queued"],
-.agent-status[data-state="agent-running"],
-.agent-status[data-state="reconnecting"] {
-  background: rgb(240 178 50 / 15%);
-  color: #ffd37a;
+.agent-status-indicator[data-state="ready"] > span {
+  background: var(--green);
+  box-shadow: 0 0 0 2px rgb(35 165 89 / 18%);
+}
+
+.agent-status-indicator[data-state="error"] > span,
+.agent-status-indicator[data-state="offline"] > span {
+  background: var(--red);
+  box-shadow: 0 0 0 2px rgb(218 55 60 / 18%);
 }
 
 .chat-main {

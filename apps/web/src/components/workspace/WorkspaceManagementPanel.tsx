@@ -719,8 +719,20 @@ function VirtualMachineManagementPanel({
           ) : (
             <span className="management-status-pill" data-state={statusTone}>{vmHostStatusLabel(host?.status, false, t)}</span>
           )}
-          <button type="button" onClick={() => void refresh()} disabled={loading}><RefreshCw aria-hidden="true" size={15} /><span>{t("common.actions.refresh")}</span></button>
-          <button type="button" onClick={openCreateVm} disabled={!canMutate}><Play aria-hidden="true" size={15} /><span>{t("workspace.management.virtualMachines.create")}</span></button>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            disabled={loading}
+            aria-label={t("common.actions.refresh")}
+            title={t("common.actions.refresh")}
+          ><RefreshCw aria-hidden="true" size={15} /><span>{t("common.actions.refresh")}</span></button>
+          <button
+            type="button"
+            onClick={openCreateVm}
+            disabled={!canMutate}
+            aria-label={t("workspace.management.virtualMachines.create")}
+            title={t("workspace.management.virtualMachines.create")}
+          ><Play aria-hidden="true" size={15} /><span>{t("workspace.management.virtualMachines.create")}</span></button>
         </div>
       </header>
       <div className="management-body">
@@ -991,6 +1003,9 @@ function DockerManagementPanel({
   const composeProjects = summary?.composeProjects ?? [];
   const dockerEnabled = Boolean(summary?.enabled);
   const canUseDocker = dockerEnabled && summary?.engine.status === "ready" && !error;
+  const currentDetailsContainer = detailsState
+    ? containers.find((container) => container.id === detailsState.container.id) ?? detailsState.container
+    : null;
 
   useEffect(() => {
     if (!createMenuOpen) {
@@ -1248,7 +1263,13 @@ function DockerManagementPanel({
               {dockerStatusLabel(daemonStatus, loading, t)}
             </span>
           )}
-          <button type="button" onClick={refreshSummary} disabled={loading}>
+          <button
+            type="button"
+            onClick={refreshSummary}
+            disabled={loading}
+            aria-label={t("common.actions.refresh")}
+            title={t("common.actions.refresh")}
+          >
             {loading ? <LoaderCircle aria-hidden="true" size={15} /> : <RefreshCw aria-hidden="true" size={15} />}
             <span>{t("common.actions.refresh")}</span>
           </button>
@@ -1424,15 +1445,15 @@ function DockerManagementPanel({
       {consoleSession ? <DockerConsoleDialog session={consoleSession} onClose={() => setConsoleSession(null)} /> : null}
       {detailsState ? (
         <DockerContainerDetailsDialog
-          state={detailsState}
+          state={{ ...detailsState, container: currentDetailsContainer ?? detailsState.container }}
           locale={locale}
           canUseDocker={canUseDocker}
           pendingAction={pendingAction}
-          consoleApproved={Boolean(approvedConsoleOperation(detailsState.container, dockerOperations))}
+          consoleApproved={Boolean(approvedConsoleOperation(currentDetailsContainer ?? detailsState.container, dockerOperations))}
           onClose={() => setDetailsState(null)}
-          onAction={(action) => void executeContainerAction(detailsState.container, action)}
-          onLogs={() => void openLogs(detailsState.container)}
-          onConsole={() => void requestConsole(detailsState.container)}
+          onAction={(action) => void executeContainerAction(currentDetailsContainer ?? detailsState.container, action)}
+          onLogs={() => void openLogs(currentDetailsContainer ?? detailsState.container)}
+          onConsole={() => void requestConsole(currentDetailsContainer ?? detailsState.container)}
         />
       ) : null}
       {daemonSettingsOpen ? (
@@ -1515,7 +1536,7 @@ function ActionIconButton({
   );
 }
 
-function DockerContainerDetailsDialog({
+export function DockerContainerDetailsDialog({
   state,
   locale,
   canUseDocker,
@@ -1542,7 +1563,9 @@ function DockerContainerDetailsDialog({
   onConsole: () => void;
 }) {
   const { t } = useTranslation();
-  const container = state.details ?? state.container;
+  const container = state.details
+    ? { ...state.details, ...state.container }
+    : state.container;
   const isRunning = container.state === "running";
   const lifecycleAction = isRunning ? "stop" : "start";
   const lifecyclePending = pendingAction === `${lifecycleAction}:${container.id}`;

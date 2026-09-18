@@ -1865,10 +1865,11 @@ export function App() {
       style={appStyle}
     >
       <div className="mobile-tabs">
-        <div className="mobile-tab-buttons" role="tablist" aria-label={t("chat.primaryViews")}>
+        <div className="mobile-tab-buttons" role="group" aria-label={t("chat.primaryViews")}>
           <button
             type="button"
             className={mobileView === "chat" ? "is-active" : ""}
+            aria-pressed={mobileView === "chat"}
             onClick={() => setMobileView("chat")}
           >
             <MessageSquare aria-hidden="true" size={16} />
@@ -1877,13 +1878,20 @@ export function App() {
           <button
             type="button"
             className={mobileView === "workspace" ? "is-active" : ""}
+            aria-pressed={mobileView === "workspace"}
             onClick={() => setMobileView("workspace")}
           >
             <PanelRight aria-hidden="true" size={16} />
             <span>{t("chat.mobileWorkspace")}</span>
           </button>
         </div>
-        <button className="mobile-settings-button" type="button" onClick={() => void openSettings()} title={t("common.actions.systemSettings")}>
+        <button
+          className="mobile-settings-button"
+          type="button"
+          onClick={() => void openSettings()}
+          aria-label={t("common.actions.systemSettings")}
+          title={t("common.actions.systemSettings")}
+        >
           <Settings aria-hidden="true" size={17} />
         </button>
       </div>

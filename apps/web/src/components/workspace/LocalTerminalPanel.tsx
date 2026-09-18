@@ -32,14 +32,12 @@ export function LocalTerminalPanel({
   active,
   root,
   codeFontSettings,
-  resolvedTheme,
-  onNotifyError
+  resolvedTheme
 }: {
   active: boolean;
   root: NasRoot | undefined;
   codeFontSettings: CodeFontSettings;
   resolvedTheme: ResolvedTheme;
-  onNotifyError: (message: string | null) => void;
 }) {
   const { t } = useTranslation();
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
@@ -55,6 +53,7 @@ export function LocalTerminalPanel({
   const activeRef = useRef(active);
   const [connectionKey, setConnectionKey] = useState(0);
   const [status, setStatus] = useState<TerminalStatus>("connecting");
+  const [diagnostic, setDiagnostic] = useState<string | null>(null);
 
   activeRef.current = active;
 
@@ -70,7 +69,6 @@ export function LocalTerminalPanel({
     let socket: WebSocket | null = null;
     let retryTimer: number | null = null;
     let retryAttempt = 0;
-    let disconnectNotified = false;
     let resizeObserver: ResizeObserver | null = null;
     let dataDisposable: { dispose(): void } | null = null;
     const host = terminalHostRef.current;
@@ -126,13 +124,13 @@ export function LocalTerminalPanel({
       socket = currentSocket;
       socketRef.current = currentSocket;
       setStatus("connecting");
+      setDiagnostic(null);
 
       currentSocket.addEventListener("open", () => {
         if (disposed || socketRef.current !== currentSocket) {
           return;
         }
         retryAttempt = 0;
-        disconnectNotified = false;
         fitAndResize();
       });
       currentSocket.addEventListener("message", (event) => {
@@ -161,10 +159,7 @@ export function LocalTerminalPanel({
         }
         if (message.type === "error") {
           setStatus("error");
-          if (!disconnectNotified) {
-            disconnectNotified = true;
-            onNotifyError(message.error ?? t("workspace.terminal.connectionError"));
-          }
+          setDiagnostic(message.error ?? t("workspace.terminal.connectionError"));
         }
         if (message.type === "exit") {
           exited = true;
@@ -174,10 +169,7 @@ export function LocalTerminalPanel({
       currentSocket.addEventListener("error", () => {
         if (!disposed && socketRef.current === currentSocket) {
           setStatus("error");
-          if (!disconnectNotified) {
-            disconnectNotified = true;
-            onNotifyError(t("workspace.terminal.connectionError"));
-          }
+          setDiagnostic(t("workspace.terminal.connectionError"));
         }
       });
       currentSocket.addEventListener("close", () => {
@@ -190,10 +182,7 @@ export function LocalTerminalPanel({
           return;
         }
         setStatus((current) => (current === "exited" || current === "error" ? current : "disconnected"));
-        if (!disconnectNotified) {
-          disconnectNotified = true;
-          onNotifyError(t("workspace.terminal.disconnectedError"));
-        }
+        setDiagnostic((current) => current ?? t("workspace.terminal.disconnectedError"));
         scheduleReconnect();
       });
     };
@@ -252,7 +241,7 @@ export function LocalTerminalPanel({
       terminalRef.current = null;
       terminal.dispose();
     };
-  }, [connectionKey, onNotifyError, root?.id, t]);
+  }, [connectionKey, root?.id, t]);
 
   useEffect(() => {
     if (active) {
@@ -311,7 +300,12 @@ export function LocalTerminalPanel({
           </div>
         </div>
         <div className="workspace-terminal-actions">
-          <span className="management-status-pill" data-state={terminalStatusTone(status)} aria-live="polite">
+          <span
+            className="management-status-pill"
+            data-state={terminalStatusTone(status)}
+            aria-live="polite"
+            title={diagnostic ?? statusLabel}
+          >
             {statusLabel}
           </span>
           <button

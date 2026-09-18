@@ -160,13 +160,18 @@ export function SystemNetworkManagementPanel({
         const nextSummary = await getSystemNetwork();
         if (active) {
           setSummary(nextSummary);
-          notifySummaryIssues(nextSummary.issues, onNotifyError, reportedIssueSignature);
+          notifySummaryIssues(
+            nextSummary.issues,
+            t("workspace.management.network.issuesWarning"),
+            onNotifyError,
+            reportedIssueSignature
+          );
         }
       } catch (nextError) {
         if (active) {
           const message = errorMessage(nextError);
           setError(message);
-          onNotifyError(message);
+          onNotifyError(t("workspace.management.network.loadError"));
         }
       } finally {
         if (active) {
@@ -182,11 +187,16 @@ export function SystemNetworkManagementPanel({
     try {
       const nextSummary = await getSystemNetwork();
       setSummary(nextSummary);
-      notifySummaryIssues(nextSummary.issues, onNotifyError, reportedIssueSignature);
+      notifySummaryIssues(
+        nextSummary.issues,
+        t("workspace.management.network.issuesWarning"),
+        onNotifyError,
+        reportedIssueSignature
+      );
     } catch (nextError) {
       const message = errorMessage(nextError);
       setError(message);
-      onNotifyError(message);
+      onNotifyError(t("workspace.management.network.loadError"));
     } finally {
       setLoading(false);
     }
@@ -218,11 +228,22 @@ export function SystemNetworkManagementPanel({
               {systemStatusLabel(status, false, error, translate)}
             </span>
           )}
-          <button type="button" disabled title={translate("workspace.management.actions.systemIntegrationRequired")}>
+          <button
+            type="button"
+            disabled
+            aria-label={translate("workspace.management.actions.configure")}
+            title={translate("workspace.management.actions.systemIntegrationRequired")}
+          >
             <Settings aria-hidden="true" size={15} />
             <span>{translate("workspace.management.actions.configure")}</span>
           </button>
-          <button type="button" onClick={() => void refreshSummary()} disabled={loading}>
+          <button
+            type="button"
+            onClick={() => void refreshSummary()}
+            disabled={loading}
+            aria-label={t("common.actions.refresh")}
+            title={t("common.actions.refresh")}
+          >
             {loading ? <LoaderCircle aria-hidden="true" size={15} /> : <RefreshCw aria-hidden="true" size={15} />}
             <span>{t("common.actions.refresh")}</span>
           </button>
@@ -241,7 +262,9 @@ export function SystemNetworkManagementPanel({
                 {systemStatusLabel(status, loading, error, translate)}
               </span>
               <h3>{t("workspace.management.network.title")}</h3>
-              <p>{networkStatusDetail(summary, loading, error, translate)}</p>
+              <p title={systemDiagnosticTitle(error, summary?.issues)}>
+                {networkStatusDetail(summary, loading, error, translate)}
+              </p>
             </div>
             <dl className="management-fact-list">
               <Fact label={t("workspace.management.network.facts.backend")} value="systemd-networkd" />
@@ -412,13 +435,18 @@ export function SystemStorageManagementPanel({
         const nextSummary = await getSystemStorage();
         if (active) {
           setSummary(nextSummary);
-          notifySummaryIssues(nextSummary.issues, onNotifyError, reportedIssueSignature);
+          notifySummaryIssues(
+            nextSummary.issues,
+            t("workspace.management.storage.issuesWarning"),
+            onNotifyError,
+            reportedIssueSignature
+          );
         }
       } catch (nextError) {
         if (active) {
           const message = errorMessage(nextError);
           setError(message);
-          onNotifyError(message);
+          onNotifyError(t("workspace.management.storage.loadError"));
         }
       } finally {
         if (active) {
@@ -434,11 +462,16 @@ export function SystemStorageManagementPanel({
     try {
       const nextSummary = await getSystemStorage();
       setSummary(nextSummary);
-      notifySummaryIssues(nextSummary.issues, onNotifyError, reportedIssueSignature);
+      notifySummaryIssues(
+        nextSummary.issues,
+        t("workspace.management.storage.issuesWarning"),
+        onNotifyError,
+        reportedIssueSignature
+      );
     } catch (nextError) {
       const message = errorMessage(nextError);
       setError(message);
-      onNotifyError(message);
+      onNotifyError(t("workspace.management.storage.loadError"));
     } finally {
       setLoading(false);
     }
@@ -607,12 +640,19 @@ export function SystemStorageManagementPanel({
             type="button"
             onClick={openCreateModal}
             disabled={loading || !canCreatePool}
+            aria-label={translate("workspace.management.actions.createPool")}
             title={translate("workspace.management.actions.createPool")}
           >
             <Plus aria-hidden="true" size={15} />
             <span>{translate("workspace.management.actions.createPool")}</span>
           </button>
-          <button type="button" onClick={() => void refreshSummary()} disabled={loading}>
+          <button
+            type="button"
+            onClick={() => void refreshSummary()}
+            disabled={loading}
+            aria-label={t("common.actions.refresh")}
+            title={t("common.actions.refresh")}
+          >
             {loading ? <LoaderCircle aria-hidden="true" size={15} /> : <RefreshCw aria-hidden="true" size={15} />}
             <span>{t("common.actions.refresh")}</span>
           </button>
@@ -631,7 +671,9 @@ export function SystemStorageManagementPanel({
                 {systemStatusLabel(status, loading, error, translate)}
               </span>
               <h3>{t("workspace.management.storage.title")}</h3>
-              <p>{storageStatusDetail(summary, loading, error, translate)}</p>
+              <p title={systemDiagnosticTitle(error, summary?.issues)}>
+                {storageStatusDetail(summary, loading, error, translate)}
+              </p>
             </div>
             <dl className="management-fact-list">
               <Fact label={t("workspace.management.storage.facts.backend")} value="mdadm" />
@@ -2619,6 +2661,7 @@ function errorMessage(error: unknown): string {
 
 function notifySummaryIssues(
   issues: Array<{ source: string; message: string }>,
+  notificationMessage: string,
   onNotifyError: (message: string | null) => void,
   reportedIssueSignature: { current: string | null }
 ): void {
@@ -2631,10 +2674,20 @@ function notifySummaryIssues(
     return;
   }
   reportedIssueSignature.current = signature;
-  onNotifyError(
-    issues
-      .slice(0, 3)
-      .map((issue) => `${issue.source}: ${issue.message}`)
-      .join(" · ")
-  );
+  onNotifyError(notificationMessage);
+}
+
+function systemDiagnosticTitle(
+  error: string | null,
+  issues: Array<{ source: string; message: string }> | undefined
+): string | undefined {
+  if (error) {
+    return error;
+  }
+
+  const detail = issues
+    ?.slice(0, 3)
+    .map((issue) => `${issue.source}: ${issue.message}`)
+    .join(" · ");
+  return detail || undefined;
 }

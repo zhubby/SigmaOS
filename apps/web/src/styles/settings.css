@@ -1,7 +1,7 @@
 .settings-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: 100;
   display: grid;
   place-items: center;
   padding: 20px;
@@ -35,6 +35,13 @@
   justify-items: start;
   min-width: 0;
   padding: 0 8px 14px;
+}
+
+.settings-brand-logo {
+  display: block;
+  width: 36px;
+  height: 36px;
+  filter: drop-shadow(0 7px 14px rgb(88 101 242 / 18%));
 }
 
 .settings-search {
