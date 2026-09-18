@@ -44,6 +44,7 @@ export function mapEvent(row: DbEventRow): AgentEventRecord {
     sessionId: row.session_id,
     jobId: row.job_id,
     type: row.type,
+    audience: row.message_role === "system" ? "notification" : "chat",
     payload: JSON.parse(row.payload_json) as unknown,
     createdAt: row.created_at
   };

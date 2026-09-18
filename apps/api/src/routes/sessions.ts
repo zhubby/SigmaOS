@@ -125,18 +125,24 @@ export function registerSessionRoutes(server: FastifyInstance, { db }: ApiRouteC
     const userMessages = listMessages(db, {
       sessionId: session.id,
       limit: 500
-    }).map((message) => ({
+    })
+      .filter((message) => message.role === "user")
+      .map((message) => ({
       id: `message:${message.id}`,
       role: message.role,
       content: message.content,
       createdAt: message.createdAt
-    }));
+      }));
 
     const agentMessages = listEvents(db, {
       sessionId: session.id,
       limit: 500
     })
-      .filter((event) => (event.type === "agent.message" || event.type === "job.failed") && typeof event.payload === "object")
+      .filter((event) =>
+        event.audience === "chat"
+        && (event.type === "agent.message" || event.type === "job.failed")
+        && typeof event.payload === "object"
+      )
       .map((event) => ({
         id: `event:${event.id}`,
         role: event.type === "job.failed" ? "assistant" : getAgentMessageRole(event.payload),

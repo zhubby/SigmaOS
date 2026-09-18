@@ -1,6 +1,9 @@
 import type { AgentEvent, TranscriptMessage } from "../api.js";
 
 export function eventToTranscriptMessage(event: AgentEvent): TranscriptMessage | null {
+  if (event.audience !== "chat") {
+    return null;
+  }
   if (event.type === "job.failed") {
     return failedJobToTranscriptMessage(event);
   }

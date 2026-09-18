@@ -1,14 +1,21 @@
 import { randomUUID } from "node:crypto";
 import type {
+  AgentEventAudience,
   AgentEventRecord,
   AgentEventType,
   AgentMessageRecord,
   JobRecord,
-  JobStatus
+  JobStatus,
+  OperationNotificationKind,
+  OperationNotificationStatus
 } from "@sigmaos/shared";
 import type { SigmaDatabase } from "../connection.js";
 import { mapEvent, mapJob, mapMessage } from "./agent-mappers.js";
 import type { DbEventRow, DbJobRow, DbMessageRow } from "./repository-rows.js";
+import {
+  createOperationNotification,
+  updateOperationNotificationForJob
+} from "./operation-notifications.js";
 
 export function createUserMessageAndJob(
   db: SigmaDatabase,
@@ -48,6 +55,58 @@ export function createUserMessageAndJob(
   return { message, job };
 }
 
+export function createActionMessageAndJob(
+  db: SigmaDatabase,
+  input: {
+    sessionId: string;
+    content: string;
+    kind: OperationNotificationKind;
+    status: Extract<JobStatus, "running" | "waiting_approval">;
+  }
+): { message: AgentMessageRecord; job: JobRecord; notification: ReturnType<typeof createOperationNotification> } {
+  const now = new Date();
+  const createdAt = now.toISOString();
+  const message: AgentMessageRecord = {
+    id: randomUUID(),
+    sessionId: input.sessionId,
+    role: "system",
+    content: input.content,
+    createdAt
+  };
+  const job: JobRecord = {
+    id: randomUUID(),
+    sessionId: input.sessionId,
+    messageId: message.id,
+    status: input.status,
+    createdAt,
+    updatedAt: createdAt,
+    error: null
+  };
+
+  const tx = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO agent_messages (id, session_id, role, content, created_at)
+      VALUES (@id, @sessionId, @role, @content, @createdAt)
+    `).run(message);
+    db.prepare(`
+      INSERT INTO jobs (id, session_id, message_id, status, error, created_at, updated_at)
+      VALUES (@id, @sessionId, @messageId, @status, @error, @createdAt, @updatedAt)
+    `).run(job);
+    const notification = createOperationNotification(db, {
+      jobId: job.id,
+      sessionId: input.sessionId,
+      kind: input.kind,
+      status: input.status === "waiting_approval" ? "pending_approval" : "running",
+      summary: input.content,
+      now
+    });
+    db.prepare("UPDATE agent_sessions SET updated_at = ? WHERE id = ?").run(createdAt, input.sessionId);
+    return notification;
+  });
+
+  return { message, job, notification: tx() };
+}
+
 export function getMessage(db: SigmaDatabase, messageId: string): AgentMessageRecord | null {
   const row = db
     .prepare("SELECT id, session_id, role, content, created_at FROM agent_messages WHERE id = ?")
@@ -64,8 +123,8 @@ export function getJob(db: SigmaDatabase, jobId: string): JobRecord | null {
 
 export function claimNextJob(db: SigmaDatabase): JobRecord | null {
   const now = new Date().toISOString();
-  const row = db
-    .prepare(`
+  const tx = db.transaction(() => {
+    const row = db.prepare(`
       UPDATE jobs
       SET status = 'running', error = NULL, updated_at = ?
       WHERE id = (
@@ -77,8 +136,17 @@ export function claimNextJob(db: SigmaDatabase): JobRecord | null {
       )
       AND status = 'queued'
       RETURNING id, session_id, message_id, status, created_at, updated_at, error
-    `)
-    .get(now) as DbJobRow | undefined;
+    `).get(now) as DbJobRow | undefined;
+    if (row) {
+      updateOperationNotificationForJob(db, {
+        jobId: row.id,
+        status: "running",
+        now: new Date(now)
+      });
+    }
+    return row;
+  });
+  const row = tx();
 
   return row ? mapJob(row) : null;
 }
@@ -90,7 +158,8 @@ export function updateJobStatus(
   error: string | null = null,
   allowedFrom?: JobStatus[]
 ): boolean {
-  const params: Array<string | null> = [status, error, new Date().toISOString(), jobId];
+  const updatedAt = new Date().toISOString();
+  const params: Array<string | null> = [status, error, updatedAt, jobId];
   const statusGuard = allowedFrom?.length
     ? ` AND status IN (${allowedFrom.map(() => "?").join(", ")})`
     : "";
@@ -99,10 +168,31 @@ export function updateJobStatus(
     params.push(...allowedFrom);
   }
 
-  const result = db
-    .prepare(`UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE id = ?${statusGuard}`)
-    .run(...params);
-  return result.changes === 1;
+  const tx = db.transaction(() => {
+    const result = db
+      .prepare(`UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE id = ?${statusGuard}`)
+      .run(...params);
+    if (result.changes === 1) {
+      if (status === "cancelled") {
+        db.prepare(`
+          UPDATE pending_approvals
+          SET status = 'expired', updated_at = ?
+          WHERE job_id = ? AND status = 'pending'
+        `).run(updatedAt, jobId);
+      }
+      const notificationStatus = notificationStatusForJob(status);
+      if (notificationStatus) {
+        updateOperationNotificationForJob(db, {
+          jobId,
+          status: notificationStatus,
+          error,
+          preserveRejected: status === "completed"
+        });
+      }
+    }
+    return result.changes === 1;
+  });
+  return tx();
 }
 
 export function appendEvent<TPayload>(
@@ -127,6 +217,7 @@ export function appendEvent<TPayload>(
     sessionId: input.sessionId,
     jobId: input.jobId ?? null,
     type: input.type,
+    audience: eventAudience(db, input.jobId ?? null),
     payload: input.payload,
     createdAt
   };
@@ -138,13 +229,42 @@ export function listEvents(
 ): AgentEventRecord[] {
   const rows = db
     .prepare(`
-      SELECT id, session_id, job_id, type, payload_json, created_at
+      SELECT
+        agent_events.id,
+        agent_events.session_id,
+        agent_events.job_id,
+        agent_events.type,
+        agent_events.payload_json,
+        agent_events.created_at,
+        agent_messages.role AS message_role
       FROM agent_events
-      WHERE session_id = ? AND id > ?
-      ORDER BY id ASC
+      LEFT JOIN jobs ON jobs.id = agent_events.job_id
+      LEFT JOIN agent_messages ON agent_messages.id = jobs.message_id
+      WHERE agent_events.session_id = ? AND agent_events.id > ?
+      ORDER BY agent_events.id ASC
       LIMIT ?
     `)
     .all(input.sessionId, input.afterId ?? 0, input.limit ?? 100) as DbEventRow[];
 
   return rows.map(mapEvent);
+}
+
+function notificationStatusForJob(status: JobStatus): OperationNotificationStatus | null {
+  if (status === "waiting_approval") return "pending_approval";
+  if (status === "queued" || status === "running") return "running";
+  if (status === "completed") return "succeeded";
+  if (status === "failed") return "failed";
+  if (status === "cancelled") return "cancelled";
+  return null;
+}
+
+function eventAudience(db: SigmaDatabase, jobId: string | null): AgentEventAudience {
+  if (!jobId) return "chat";
+  const role = db.prepare(`
+    SELECT agent_messages.role
+    FROM jobs
+    JOIN agent_messages ON agent_messages.id = jobs.message_id
+    WHERE jobs.id = ?
+  `).pluck().get(jobId) as AgentMessageRecord["role"] | undefined;
+  return role === "system" ? "notification" : "chat";
 }

@@ -222,6 +222,8 @@ describe("ChatPane agent rail", () => {
         onCreateAgent: noop,
         onDeleteSession: noop,
         onOpenSettings: noop,
+        onOpenNotifications: noop,
+        notificationUnreadCount: 3,
         onSelectSession: noop,
         onApprove: noop,
         onReject: noop,
@@ -238,7 +240,10 @@ describe("ChatPane agent rail", () => {
     expect(html).not.toContain("sigmaos-banner");
     expect(html).toContain('class="session-item is-active"');
     expect(html).toContain('class="agent-status-indicator"');
+    expect(html).toContain('class="agent-notification-button"');
+    expect(html).toContain('class="notification-badge"');
     expect(html).toContain('class="settings-button agent-settings-button"');
     expect(html.indexOf('class="session-list"')).toBeLessThan(html.indexOf('class="agent-footer"'));
+    expect(html.indexOf('class="agent-notification-button"')).toBeLessThan(html.indexOf('class="settings-button agent-settings-button"'));
   });
 });

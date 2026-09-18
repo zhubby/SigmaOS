@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import {
   appendEvent,
   createShareOperationApproval,
-  createUserMessageAndJob,
+  createActionMessageAndJob,
   getSession,
   getShareSettings,
   listNasRoots
@@ -50,9 +50,10 @@ export function registerShareRoutes(server: FastifyInstance, context: ApiRouteCo
         summary: shareProposalSummary(settings),
         settings: publicSettings
       };
-      const { message, job } = createUserMessageAndJob(db, {
+      const { message, job } = createActionMessageAndJob(db, {
         sessionId: session.id,
         content: proposal.summary,
+        kind: "share",
         status: "waiting_approval"
       });
       const { approval, operation } = createShareOperationApproval(db, {

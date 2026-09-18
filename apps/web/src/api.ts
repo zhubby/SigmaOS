@@ -56,7 +56,8 @@ import type {
   VmMemoryBacking,
   VmNetworkModel,
   VmVideoModel,
-  PlayerStatus as SharedPlayerStatus
+  PlayerStatus as SharedPlayerStatus,
+  OperationNotificationRecord as SharedOperationNotification
 } from "@sigmaos/shared";
 
 export interface NasRoot {
@@ -142,7 +143,7 @@ export interface Job {
 export interface AgentMessage {
   id: string;
   sessionId: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system" | "tool";
   content: string;
   createdAt: string;
 }
@@ -227,8 +228,16 @@ export type StorageRaidLevel = SharedStorageRaidLevel;
 export interface AgentEvent {
   id: number;
   type: string;
+  audience: "chat" | "notification";
   payload: Record<string, unknown>;
   createdAt: string;
+}
+
+export type OperationNotification = SharedOperationNotification;
+
+export interface NotificationListResult {
+  notifications: OperationNotification[];
+  unreadCount: number;
 }
 
 export type FilePreviewKind =
@@ -1197,6 +1206,32 @@ export async function getApprovals(): Promise<PendingApproval[]> {
   await ensureOk(response);
   const body = (await response.json()) as { approvals: PendingApproval[] };
   return body.approvals;
+}
+
+export async function getNotifications(limit = 100): Promise<NotificationListResult> {
+  const response = await fetch(`/api/notifications?limit=${limit}`);
+  await ensureOk(response);
+  return (await response.json()) as NotificationListResult;
+}
+
+export async function markNotificationRead(id: string): Promise<{
+  notification: OperationNotification;
+  unreadCount: number;
+}> {
+  const response = await fetch(`/api/notifications/${encodeURIComponent(id)}/read`, {
+    method: "PATCH"
+  });
+  await ensureOk(response);
+  return (await response.json()) as {
+    notification: OperationNotification;
+    unreadCount: number;
+  };
+}
+
+export async function markAllNotificationsRead(): Promise<number> {
+  const response = await fetch("/api/notifications/read-all", { method: "POST" });
+  await ensureOk(response);
+  return ((await response.json()) as { updated: number }).updated;
 }
 
 export async function getOperations(): Promise<FileOperation[]> {

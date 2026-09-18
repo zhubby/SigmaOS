@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   appendEvent,
+  createActionMessageAndJob,
   createPendingApproval,
   createStorageOperationApproval,
   createPiToolCallApproval,
@@ -32,6 +33,7 @@ import {
   listFileOperations,
   listMessages,
   listPendingApprovals,
+  listOperationNotifications,
   openSigmaDb,
   recordIndexFailure,
   saveDockerSettings,
@@ -1365,6 +1367,7 @@ describe("API server", () => {
     });
     expect(proposed.statusCode).toBe(202);
     expect(proposed.json()).toMatchObject({
+      message: { role: "system" },
       job: { status: "completed" },
       operation: {
         action: "create_pool",
@@ -1375,6 +1378,9 @@ describe("API server", () => {
     expect(proposed.json().approval).toBeUndefined();
     expect(helperProposal).toMatchObject({ action: "create_pool", name: "media" });
     expect(listPendingApprovals(db)).toHaveLength(0);
+    expect(listOperationNotifications(db)).toMatchObject([
+      { jobId: proposed.json().job.id, kind: "storage", status: "succeeded" }
+    ]);
 
     const unsafe = await server.inject({
       method: "POST",
@@ -1720,6 +1726,7 @@ describe("API server", () => {
     });
 
     expect(proposed.statusCode).toBe(202);
+    expect(proposed.json().message.role).toBe("system");
     expect(helper.requests).toEqual([]);
     expect(getShareSettings(db)).toBeNull();
     expect(proposed.payload).not.toContain("secret");
@@ -1745,6 +1752,9 @@ describe("API server", () => {
         status: "proposed"
       }
     });
+    expect(listOperationNotifications(db)).toMatchObject([
+      { jobId: proposed.json().job.id, kind: "share", status: "pending_approval" }
+    ]);
 
     const approved = await server.inject({
       method: "POST",
@@ -2339,6 +2349,7 @@ describe("API server", () => {
     });
 
     expect(proposed.statusCode).toBe(202);
+    expect(proposed.json().message.role).toBe("system");
     expect(engine.calls).toEqual([]);
     expect(proposed.json()).toMatchObject({
       approval: {
@@ -2357,6 +2368,9 @@ describe("API server", () => {
         status: "proposed"
       }
     });
+    expect(listOperationNotifications(db)).toMatchObject([
+      { jobId: proposed.json().job.id, kind: "docker", status: "pending_approval" }
+    ]);
 
     const approved = await server.inject({
       method: "POST",
@@ -3146,6 +3160,112 @@ describe("API server", () => {
     await server.close();
   });
 
+  it("keeps internal action failures out of chat titles and transcripts", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const action = createActionMessageAndJob(db, {
+      sessionId: session.id,
+      content: "Restart container alpha",
+      kind: "docker",
+      status: "running"
+    });
+    appendEvent(db, {
+      sessionId: session.id,
+      jobId: action.job.id,
+      type: "job.failed",
+      payload: { jobId: action.job.id, error: "Docker is unavailable" }
+    });
+    const server = await buildServer({ config: testConfig(tempDir), db });
+
+    const transcript = await server.inject({
+      method: "GET",
+      url: `/api/sessions/${session.id}/transcript`
+    });
+    const sessions = await server.inject({ method: "GET", url: "/api/sessions?rootId=local" });
+
+    expect(transcript.statusCode).toBe(200);
+    expect(transcript.json().transcript).toEqual([]);
+    expect(sessions.json().sessions[0]).toMatchObject({ firstMessage: null, lastMessage: null });
+    expect(listEvents(db, { sessionId: session.id }).at(-1)).toMatchObject({ audience: "notification" });
+    await server.close();
+  });
+
+  it("persists composer messages as user chat messages", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const server = await buildServer({ config: testConfig(tempDir), db });
+
+    const response = await server.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/messages`,
+      payload: { content: "Show disk usage" }
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json().message).toMatchObject({ role: "user", content: "Show disk usage" });
+    expect(listMessages(db, { sessionId: session.id })).toMatchObject([
+      { role: "user", content: "Show disk usage" }
+    ]);
+    await server.close();
+  });
+
+  it("lists and marks persistent operation notifications", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const first = createActionMessageAndJob(db, {
+      sessionId: session.id,
+      content: "Move report.txt",
+      kind: "file",
+      status: "waiting_approval"
+    });
+    createActionMessageAndJob(db, {
+      sessionId: session.id,
+      content: "Apply share settings",
+      kind: "share",
+      status: "waiting_approval"
+    });
+    const server = await buildServer({ config: testConfig(tempDir), db });
+
+    const listed = await server.inject({ method: "GET", url: "/api/notifications?limit=100" });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json()).toMatchObject({ unreadCount: 2, notifications: expect.any(Array) });
+
+    const read = await server.inject({ method: "PATCH", url: `/api/notifications/${first.notification.id}/read` });
+    expect(read.statusCode).toBe(200);
+    expect(read.json().notification.readAt).not.toBeNull();
+    expect(read.json().unreadCount).toBe(1);
+
+    const allRead = await server.inject({ method: "POST", url: "/api/notifications/read-all" });
+    expect(allRead.statusCode).toBe(200);
+    expect(allRead.json()).toEqual({ updated: 1 });
+    expect(listOperationNotifications(db).every((notification) => notification.readAt !== null)).toBe(true);
+
+    const missing = await server.inject({ method: "PATCH", url: "/api/notifications/missing/read" });
+    const invalidLimit = await server.inject({ method: "GET", url: "/api/notifications?limit=101" });
+    expect(missing.statusCode).toBe(404);
+    expect(invalidLimit.statusCode).toBe(400);
+    await server.close();
+  });
+
+  it("marks a cancelled action notification without creating chat output", async () => {
+    const session = createSession(db, { rootId: "local" });
+    const action = createActionMessageAndJob(db, {
+      sessionId: session.id,
+      content: "Move archive",
+      kind: "file",
+      status: "waiting_approval"
+    });
+    const server = await buildServer({ config: testConfig(tempDir), db });
+
+    const cancelled = await server.inject({ method: "POST", url: `/api/jobs/${action.job.id}/cancel` });
+    const transcript = await server.inject({ method: "GET", url: `/api/sessions/${session.id}/transcript` });
+
+    expect(cancelled.statusCode).toBe(202);
+    expect(listOperationNotifications(db)).toMatchObject([
+      { jobId: action.job.id, status: "cancelled", readAt: null }
+    ]);
+    expect(listPendingApprovals(db)).toEqual([]);
+    expect(transcript.json().transcript).toEqual([]);
+    await server.close();
+  });
+
   it("returns file preview metadata", async () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({
@@ -3335,6 +3455,7 @@ describe("API server", () => {
     });
 
     expect(response.statusCode).toBe(202);
+    expect(response.json().message.role).toBe("system");
     expect(response.json()).toMatchObject({
       job: {
         sessionId: session.id,
@@ -3360,6 +3481,9 @@ describe("API server", () => {
     const approval = getApproval(db, response.json().approval.id);
     expect(approval?.status).toBe("pending");
     expect(getJob(db, response.json().job.id)?.status).toBe("waiting_approval");
+    expect(listOperationNotifications(db)).toMatchObject([
+      { jobId: response.json().job.id, kind: "file", status: "pending_approval" }
+    ]);
     await server.close();
   });
 

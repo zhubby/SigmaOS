@@ -124,6 +124,41 @@
   height: 40px;
 }
 
+.agent-notification-button {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 5px;
+  color: var(--muted);
+  background: var(--surface);
+}
+
+.agent-notification-button:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.notification-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  display: inline-grid;
+  place-items: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border: 2px solid var(--server-bg);
+  border-radius: 9px;
+  color: white;
+  background: var(--red);
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+}
+
 .agent-status-indicator {
   display: grid;
   place-items: center;

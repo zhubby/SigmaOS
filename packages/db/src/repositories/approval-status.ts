@@ -2,6 +2,7 @@ import type { ApprovalStatus, PendingApprovalRecord } from "@sigmaos/shared";
 import type { SigmaDatabase } from "../connection.js";
 import { mapApproval } from "./operation-mappers.js";
 import type { DbApprovalRow } from "./repository-rows.js";
+import { updateOperationNotificationForJob } from "./operation-notifications.js";
 
 export function listPendingApprovals(db: SigmaDatabase): PendingApprovalRecord[] {
   const rows = db
@@ -30,8 +31,33 @@ export function updateApprovalStatus(
     params.push(...allowedFrom);
   }
 
-  const result = db
-    .prepare(`UPDATE pending_approvals SET status = ?, updated_at = ? WHERE id = ?${statusGuard}`)
-    .run(...params);
-  return result.changes === 1;
+  const tx = db.transaction(() => {
+    const row = db
+      .prepare(`
+        UPDATE pending_approvals
+        SET status = ?, updated_at = ?
+        WHERE id = ?${statusGuard}
+        RETURNING job_id
+      `)
+      .get(...params) as { job_id: string } | undefined;
+    if (!row) return false;
+
+    updateOperationNotificationForJob(db, {
+      jobId: row.job_id,
+      status:
+        status === "pending"
+          ? "pending_approval"
+          : status === "approved"
+            ? "running"
+            : status === "applied"
+              ? "succeeded"
+              : status === "rejected"
+                ? "rejected"
+                : status === "expired"
+                  ? "cancelled"
+                  : "failed"
+    });
+    return true;
+  });
+  return tx();
 }

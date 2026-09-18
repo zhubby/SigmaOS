@@ -15,6 +15,8 @@ import type {
   HealthAlertStatus,
   IndexRunStatus,
   JobStatus,
+  OperationNotificationKind,
+  OperationNotificationStatus,
   PendingApprovalKind,
   RootReadinessStatus,
   ShareOperationAction,
@@ -57,6 +59,20 @@ export type DbEventRow = {
   type: AgentEventType;
   payload_json: string;
   created_at: string;
+  message_role?: AgentMessageRecord["role"] | null;
+};
+
+export type DbOperationNotificationRow = {
+  id: string;
+  job_id: string;
+  session_id: string;
+  kind: OperationNotificationKind;
+  status: OperationNotificationStatus;
+  summary: string;
+  error: string | null;
+  read_at: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type DbNasRootRow = {

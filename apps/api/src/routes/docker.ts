@@ -5,7 +5,7 @@ import {
   createDockerConsoleAuthorization,
   createDockerOperationApproval,
   createDockerOperationRecord,
-  createUserMessageAndJob,
+  createActionMessageAndJob,
   consumeDockerConsoleAuthorization,
   deleteDockerRegistryCredential,
   DockerRegistryCredentialConflictError,
@@ -331,9 +331,10 @@ export function registerDockerRoutes(server: FastifyInstance, context: ApiRouteC
           throw new DockerCreateValidationError(summary.engine.error ?? "Docker engine is not ready", 503);
         }
         const prepared = await prepareDockerCreate(request.body, { ...context, config: nextConfig }, summary);
-        const { message, job } = createUserMessageAndJob(db, {
+        const { message, job } = createActionMessageAndJob(db, {
           sessionId: session.id,
           content: prepared.proposal.summary,
+          kind: "docker",
           status: "running"
         });
         const operation = createDockerOperationRecord(db, { jobId: job.id, proposal: prepared.proposal });
@@ -438,9 +439,10 @@ export function registerDockerRoutes(server: FastifyInstance, context: ApiRouteC
       }
 
       const proposal = await buildDockerProposal(request.body ?? {}, { ...context, config: nextConfig });
-      const { message, job } = createUserMessageAndJob(db, {
+      const { message, job } = createActionMessageAndJob(db, {
         sessionId: session.id,
         content: proposal.summary,
+        kind: "docker",
         status: "waiting_approval"
       });
       const { approval, operation } = createDockerOperationApproval(db, {

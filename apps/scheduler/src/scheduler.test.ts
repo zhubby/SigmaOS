@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ensureNasRoots, finishBackupRun, finishIndexRun, openSigmaDb, recordBackupFailure, startBackupRun, startIndexRun, upsertIndexedFile, upsertRootReadiness, type SigmaDatabase } from "@sigmaos/db";
+import { createActionMessageAndJob, createSession, ensureNasRoots, finishBackupRun, finishIndexRun, openSigmaDb, recordBackupFailure, startBackupRun, startIndexRun, upsertIndexedFile, upsertRootReadiness, type SigmaDatabase } from "@sigmaos/db";
 import type { SigmaConfig } from "@sigmaos/shared";
 import { describeModelProvider, runHealthOnce, runMaintenance, runSchedulerOnce } from "./scheduler.js";
 
@@ -99,12 +99,24 @@ describe("scheduler", () => {
   });
 
   it("runs SQLite maintenance and reports trash without deleting it", async () => {
-    const summary = await runMaintenance({ db, config });
+    const now = new Date("2026-09-18T00:00:00.000Z");
+    const session = createSession(db, { rootId: "local" });
+    const action = createActionMessageAndJob(db, {
+      sessionId: session.id,
+      content: "Old file operation",
+      kind: "file",
+      status: "running"
+    });
+    db.prepare("UPDATE operation_notifications SET updated_at = ? WHERE id = ?")
+      .run("2026-08-18T23:59:59.000Z", action.notification.id);
+
+    const summary = await runMaintenance({ db, config, now });
 
     expect(summary.trash).toMatchObject({
       entries: 1,
       bytes: 5
     });
+    expect(summary.operationNotificationsRemoved).toBe(1);
     await expect(readFile(summary.healthReportPath, "utf8")).resolves.toContain(
       "not permanently deleted"
     );

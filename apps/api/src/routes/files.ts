@@ -18,7 +18,7 @@ import {
   searchFiles,
   type FileEntry
 } from "@sigmaos/nas-tools";
-import { appendEvent, createPendingApproval, createUserMessageAndJob, getSession, recordAppliedOperation } from "@sigmaos/db";
+import { appendEvent, createActionMessageAndJob, createPendingApproval, getSession, recordAppliedOperation } from "@sigmaos/db";
 import type { FileOperationProposal, NasRootRecord } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
 import {
@@ -327,9 +327,10 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, system
     proposal.proposal.storagePoolId = scope.pool.id;
 
     const summary = proposal.proposal.summary;
-    const { message, job } = createUserMessageAndJob(db, {
+    const { message, job } = createActionMessageAndJob(db, {
       sessionId: session.id,
       content: summary,
+      kind: "file",
       status: "waiting_approval"
     });
     const approval = createPendingApproval(db, {

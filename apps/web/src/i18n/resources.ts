@@ -44,7 +44,37 @@ export const en = {
   notifications: {
     errorTitle: "Error",
     successTitle: "Success",
-    warningTitle: "Attention"
+    warningTitle: "Attention",
+    operationPending: "Operation is waiting for approval.",
+    operationSucceeded: "Operation completed.",
+    operationRejected: "Operation was rejected.",
+    center: {
+      eyebrow: "Operations",
+      title: "Notifications",
+      open: "Open notifications",
+      openWithCount: "Open notifications, {{count}} unread",
+      markAllRead: "Mark all as read",
+      unreadCount: "{{count}} unread",
+      loading: "Loading notifications",
+      emptyTitle: "No operation notifications",
+      emptyBody: "File and system operations will appear here.",
+      itemTitle: "{{kind}} · {{status}}",
+      kinds: {
+        file: "Files",
+        docker: "Docker",
+        vm: "Virtual machine",
+        storage: "Storage",
+        share: "Shares"
+      },
+      statuses: {
+        pending_approval: "Waiting for approval",
+        running: "In progress",
+        succeeded: "Completed",
+        failed: "Failed",
+        rejected: "Rejected",
+        cancelled: "Cancelled"
+      }
+    }
   },
   status: {
     starting: "Starting",
@@ -1767,7 +1797,37 @@ export const zhCN = {
   notifications: {
     errorTitle: "错误",
     successTitle: "操作成功",
-    warningTitle: "注意"
+    warningTitle: "注意",
+    operationPending: "操作正在等待审批。",
+    operationSucceeded: "操作已完成。",
+    operationRejected: "操作已拒绝。",
+    center: {
+      eyebrow: "操作",
+      title: "通知",
+      open: "打开通知",
+      openWithCount: "打开通知，{{count}} 条未读",
+      markAllRead: "全部标为已读",
+      unreadCount: "{{count}} 条未读",
+      loading: "正在加载通知",
+      emptyTitle: "暂无操作通知",
+      emptyBody: "文件和系统操作会显示在这里。",
+      itemTitle: "{{kind}} · {{status}}",
+      kinds: {
+        file: "文件",
+        docker: "Docker",
+        vm: "虚拟机",
+        storage: "存储",
+        share: "共享"
+      },
+      statuses: {
+        pending_approval: "等待审批",
+        running: "执行中",
+        succeeded: "已完成",
+        failed: "失败",
+        rejected: "已拒绝",
+        cancelled: "已取消"
+      }
+    }
   },
   status: {
     starting: "启动中",

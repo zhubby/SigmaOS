@@ -7,6 +7,7 @@ describe("event helpers", () => {
     const event: AgentEvent = {
       id: 42,
       type: "agent.message",
+      audience: "chat",
       payload: { content: "Done" },
       createdAt: "2026-08-21T00:00:00.000Z"
     };
@@ -24,6 +25,7 @@ describe("event helpers", () => {
       eventToTranscriptMessage({
         id: 1,
         type: "job.running",
+        audience: "chat",
         payload: { content: "ignored" },
         createdAt: "2026-08-21T00:00:00.000Z"
       })
@@ -32,6 +34,7 @@ describe("event helpers", () => {
       eventToTranscriptMessage({
         id: 2,
         type: "agent.message",
+        audience: "chat",
         payload: { content: "" },
         createdAt: "2026-08-21T00:00:00.000Z"
       })
@@ -40,6 +43,7 @@ describe("event helpers", () => {
       eventToTranscriptMessage({
         id: 3,
         type: "agent.message",
+        audience: "chat",
         payload: { content: null },
         createdAt: "2026-08-21T00:00:00.000Z"
       })
@@ -51,6 +55,7 @@ describe("event helpers", () => {
       eventToTranscriptMessage({
         id: 4,
         type: "job.failed",
+        audience: "chat",
         payload: { error: "Pi model is unavailable" },
         createdAt: "2026-08-21T00:00:00.000Z"
       })
@@ -67,9 +72,20 @@ describe("event helpers", () => {
       eventToTranscriptMessage({
         id: 5,
         type: "agent.failed",
+        audience: "chat",
         payload: { error: "Pi model is unavailable" },
         createdAt: "2026-08-21T00:00:00.000Z"
       })
     ).toBeNull();
+  });
+
+  it("does not turn notification events into chat replies", () => {
+    expect(eventToTranscriptMessage({
+      id: 6,
+      type: "job.failed",
+      audience: "notification",
+      payload: { error: "Docker failed" },
+      createdAt: "2026-08-21T00:00:00.000Z"
+    })).toBeNull();
   });
 });

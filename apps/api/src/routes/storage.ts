@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import {
   appendEvent,
   createStorageOperationRecord,
-  createUserMessageAndJob,
+  createActionMessageAndJob,
   getJob,
   getSession,
   updateJobStatus,
@@ -48,9 +48,10 @@ export function registerStorageRoutes(server: FastifyInstance, context: ApiRoute
       const proposal: StorageOperationProposal = request.body?.action === "delete_pool"
         ? buildStoragePoolDeleteProposal(request.body, summary)
         : buildStoragePoolProposal(request.body ?? {}, summary);
-      const { message, job } = createUserMessageAndJob(db, {
+      const { message, job } = createActionMessageAndJob(db, {
         sessionId: session.id,
         content: proposal.summary,
+        kind: "storage",
         status: "running"
       });
       const operation = createStorageOperationRecord(db, {

@@ -1,6 +1,6 @@
-import { FormEvent, KeyboardEvent, PointerEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { FormEvent, KeyboardEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, CircleAlert, CircleCheck, MessageSquare, PanelRight, Settings, X } from "lucide-react";
+import { AlertTriangle, Bell, CircleAlert, CircleCheck, MessageSquare, PanelRight, Settings, X } from "lucide-react";
 import {
   approveRequest,
   cancelJob,
@@ -26,9 +26,12 @@ import {
   getTextPreview,
   getTranscript,
   getModelProviderSettings,
+  getNotifications,
   getPiToolPolicySettings,
   proposeFileOperation,
   rejectRequest,
+  markAllNotificationsRead,
+  markNotificationRead,
   rollbackOperation,
   saveDockerSettings,
   saveModelProviderSettings,
@@ -52,6 +55,7 @@ import {
   type FileListing,
   type ModelProviderSettings,
   type NasRoot,
+  type OperationNotification,
   type PendingApproval,
   type PiToolPolicySettings,
   type Session,
@@ -64,6 +68,7 @@ import {
   type PlayerStatus
 } from "./api.js";
 import { ChatPane, composeAgentMessage } from "./components/chat/ChatPane.js";
+import { NotificationCenter } from "./components/notifications/NotificationCenter.js";
 import { FileEditorModal } from "./components/editor/FileEditorModal.js";
 import { SettingsModal } from "./components/settings/SettingsModal.js";
 import { WorkspacePane } from "./components/workspace/WorkspacePane.js";
@@ -184,6 +189,11 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
   const [warningNotice, setWarningNotice] = useState<string | null>(null);
+  const [notifications, setNotifications] = useState<OperationNotification[]>([]);
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
+  const [notificationsLoading, setNotificationsLoading] = useState(true);
+  const [notificationCenterOpen, setNotificationCenterOpen] = useState(false);
+  const closeNotificationCenter = useCallback(() => setNotificationCenterOpen(false), []);
   const [mobileView, setMobileView] = useState<MobileView>("chat");
   const [filesPanelActivationId, setFilesPanelActivationId] = useState(0);
   const [splitWidth, setSplitWidth] = useState(() => readStoredSplitWidth());
@@ -231,6 +241,7 @@ export function App() {
     storagePoolId: string;
     path: string;
   } | null>(null);
+  const notificationRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selectedRoot = roots.find((root) => root.id === selectedRootId);
   const storagePoolOptions = useMemo(() => {
@@ -326,6 +337,12 @@ export function App() {
     return () => {
       active = false;
     };
+  }, []);
+
+  useEffect(() => {
+    void refreshNotifications();
+    const timer = window.setInterval(() => void refreshNotifications(), 30_000);
+    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -476,6 +493,15 @@ export function App() {
       }
       seenEvents.current.add(parsed.id);
 
+      if (parsed.audience === "notification") {
+        if (notificationRefreshTimerRef.current) clearTimeout(notificationRefreshTimerRef.current);
+        notificationRefreshTimerRef.current = setTimeout(() => {
+          notificationRefreshTimerRef.current = null;
+          void refreshWorkQueues();
+        }, 100);
+        return;
+      }
+
       const transcriptMessage = eventToTranscriptMessage(parsed);
       if (transcriptMessage) {
         setTranscript((current) =>
@@ -529,6 +555,10 @@ export function App() {
 
     return () => {
       source.close();
+      if (notificationRefreshTimerRef.current) {
+        clearTimeout(notificationRefreshTimerRef.current);
+        notificationRefreshTimerRef.current = null;
+      }
     };
   }, [session]);
 
@@ -714,6 +744,42 @@ export function App() {
     } catch (nextError) {
       setError(toErrorMessage(nextError));
     }
+  }
+
+  async function refreshNotifications(showError = false) {
+    try {
+      const result = await getNotifications();
+      setNotifications(result.notifications);
+      setNotificationUnreadCount(result.unreadCount);
+    } catch (nextError) {
+      if (showError) setError(toErrorMessage(nextError));
+    } finally {
+      setNotificationsLoading(false);
+    }
+  }
+
+  async function readNotification(id: string) {
+    try {
+      const result = await markNotificationRead(id);
+      setNotifications((current) => current.map((item) => item.id === id ? result.notification : item));
+      setNotificationUnreadCount(result.unreadCount);
+    } catch (nextError) {
+      setError(toErrorMessage(nextError));
+    }
+  }
+
+  async function readAllNotifications() {
+    try {
+      await markAllNotificationsRead();
+      await refreshNotifications(true);
+    } catch (nextError) {
+      setError(toErrorMessage(nextError));
+    }
+  }
+
+  function openNotificationCenter() {
+    setNotificationCenterOpen(true);
+    void refreshNotifications(true);
   }
 
   async function openSettings() {
@@ -1313,11 +1379,12 @@ export function App() {
     const queueSessionId = session?.id ?? null;
     const queueStoragePoolId = selectedStoragePoolIdRef.current;
     try {
-      const [nextApprovals, nextOperations, nextDockerOperations, nextVmOperations] = await Promise.all([
+      const [nextApprovals, nextOperations, nextDockerOperations, nextVmOperations, nextNotifications] = await Promise.all([
         getApprovals(),
         getOperations(),
         getDockerOperations(queueSessionId),
-        getVmOperations(queueSessionId)
+        getVmOperations(queueSessionId),
+        getNotifications()
       ]);
       if (queueSessionId !== (session?.id ?? null) || queueStoragePoolId !== selectedStoragePoolIdRef.current) {
         return;
@@ -1330,6 +1397,9 @@ export function App() {
       );
       setDockerOperations(nextDockerOperations);
       setVmOperations(nextVmOperations);
+      setNotifications(nextNotifications.notifications);
+      setNotificationUnreadCount(nextNotifications.unreadCount);
+      setNotificationsLoading(false);
       setOperationsReady(true);
     } catch (nextError) {
       if (queueSessionId !== (session?.id ?? null) || queueStoragePoolId !== selectedStoragePoolIdRef.current) {
@@ -1344,23 +1414,36 @@ export function App() {
     const requestRootId = selectedRootIdRef.current;
     const requestStoragePoolId = selectedStoragePoolIdRef.current;
     setStatus("applying");
-    await approveRequest(approvalId);
-    if (
-      selectedRootIdRef.current !== requestRootId ||
-      selectedStoragePoolIdRef.current !== requestStoragePoolId
-    ) {
-      return;
+    try {
+      await approveRequest(approvalId);
+      if (
+        selectedRootIdRef.current !== requestRootId ||
+        selectedStoragePoolIdRef.current !== requestStoragePoolId
+      ) {
+        return;
+      }
+      applyApprovedSelectionChange(approval);
+      await Promise.all([refreshWorkQueues(), refreshFiles()]);
+      setSuccessNotice(t("notifications.operationSucceeded"));
+      setStatus("ready");
+    } catch (nextError) {
+      setError(toErrorMessage(nextError));
+      await refreshWorkQueues();
+      setStatus("error");
     }
-    applyApprovedSelectionChange(approval);
-    await Promise.all([refreshWorkQueues(), refreshFiles()]);
-    setStatus("ready");
   }
 
   async function handleReject(approvalId: string) {
     setStatus("rejecting");
-    await rejectRequest(approvalId);
-    await refreshWorkQueues();
-    setStatus("ready");
+    try {
+      await rejectRequest(approvalId);
+      await refreshWorkQueues();
+      setWarningNotice(t("notifications.operationRejected"));
+      setStatus("ready");
+    } catch (nextError) {
+      setError(toErrorMessage(nextError));
+      setStatus("error");
+    }
   }
 
   async function handleRollback(operation: FileOperation) {
@@ -1445,6 +1528,7 @@ export function App() {
         targetName
       });
       await Promise.all([refreshWorkQueues(), reloadSessions()]);
+      setWarningNotice(t("notifications.operationPending"));
       setStatus("ready");
     } catch (nextError) {
       setStatus("error");
@@ -1469,6 +1553,7 @@ export function App() {
         sourcePath: entry.path
       });
       await Promise.all([refreshWorkQueues(), reloadSessions()]);
+      setWarningNotice(t("notifications.operationPending"));
       setStatus("ready");
     } catch (nextError) {
       setStatus("error");
@@ -1494,6 +1579,7 @@ export function App() {
         targetPath: joinNasPath(selectedStoragePool.path, targetPath)
       });
       await Promise.all([refreshWorkQueues(), reloadSessions()]);
+      setWarningNotice(t("notifications.operationPending"));
       setStatus("ready");
     } catch (nextError) {
       setStatus("error");
@@ -1563,6 +1649,7 @@ export function App() {
         targetPath: joinNasPath(input.parentPath, input.name)
       });
       await Promise.all([refreshWorkQueues(), reloadSessions()]);
+      setWarningNotice(t("notifications.operationPending"));
       setStatus("ready");
     } catch (nextError) {
       setStatus("error");
@@ -1886,6 +1973,20 @@ export function App() {
           </button>
         </div>
         <button
+          className="mobile-notification-button"
+          type="button"
+          onClick={openNotificationCenter}
+          aria-label={t("notifications.center.openWithCount", { count: notificationUnreadCount })}
+          title={t("notifications.center.open")}
+        >
+          <Bell aria-hidden="true" size={17} />
+          {notificationUnreadCount > 0 ? (
+            <span className="notification-badge" aria-hidden="true">
+              {notificationUnreadCount > 99 ? "99+" : notificationUnreadCount}
+            </span>
+          ) : null}
+        </button>
+        <button
           className="mobile-settings-button"
           type="button"
           onClick={() => void openSettings()}
@@ -1916,6 +2017,8 @@ export function App() {
         onCreateAgent={() => void createAgent()}
         onDeleteSession={() => void deleteActiveSession()}
         onOpenSettings={() => void openSettings()}
+        onOpenNotifications={openNotificationCenter}
+        notificationUnreadCount={notificationUnreadCount}
         onSelectSession={(nextSession) => void selectSession(nextSession)}
         onApprove={(approvalId) => void handleApprove(approvalId)}
         onReject={(approvalId) => void handleReject(approvalId)}
@@ -2061,6 +2164,17 @@ export function App() {
         onNotifyWarning={setWarningNotice}
         onTogglePreviewCollapsed={() => setPreviewCollapsed((collapsed) => !collapsed)}
         onRollback={(operation) => void handleRollback(operation)}
+      />
+
+      <NotificationCenter
+        open={notificationCenterOpen}
+        loading={notificationsLoading}
+        notifications={notifications}
+        unreadCount={notificationUnreadCount}
+        locale={resolvedLocale}
+        onClose={closeNotificationCenter}
+        onRead={(id) => void readNotification(id)}
+        onReadAll={() => void readAllNotifications()}
       />
 
       {editorMeta ? (

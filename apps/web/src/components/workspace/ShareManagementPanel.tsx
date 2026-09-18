@@ -62,7 +62,6 @@ export function ShareManagementPanel({
   locale,
   onWorkQueuesChanged,
   onNotifyError,
-  onNotifySuccess,
   onNotifyWarning
 }: {
   roots: NasRoot[];
@@ -71,7 +70,6 @@ export function ShareManagementPanel({
   locale: SupportedLocale;
   onWorkQueuesChanged: () => void | Promise<void>;
   onNotifyError: (message: string | null) => void;
-  onNotifySuccess: (message: string | null) => void;
   onNotifyWarning: (message: string | null) => void;
 }) {
   const { t } = useTranslation();
@@ -199,7 +197,7 @@ export function ShareManagementPanel({
         sessionId,
         settings: shareFormToInput(form)
       });
-      onNotifySuccess(t("workspace.management.shares.proposalCreated"));
+      onNotifyWarning(t("workspace.management.shares.proposalCreated"));
       setForm((current) => ({
         ...current,
         account: {

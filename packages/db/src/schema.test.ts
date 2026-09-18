@@ -44,7 +44,8 @@ describe("SQLite schema migrations", () => {
       "010_index_run_history_archive",
       "011_storage_pool_delete",
       "012_docker_resource_create",
-      "013_download_tasks"
+      "013_download_tasks",
+      "014_operation_notifications"
     ]);
   });
 

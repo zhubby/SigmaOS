@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import { useTranslation } from "react-i18next";
 import {
   Bot,
+  Bell,
   Check,
   CircleStop,
   Container,
@@ -178,6 +179,8 @@ export function ChatPane({
   onCreateAgent,
   onDeleteSession,
   onOpenSettings,
+  onOpenNotifications,
+  notificationUnreadCount,
   onSelectSession,
   onApprove,
   onReject,
@@ -206,6 +209,8 @@ export function ChatPane({
   onCreateAgent: () => void;
   onDeleteSession: () => void;
   onOpenSettings: () => void;
+  onOpenNotifications: () => void;
+  notificationUnreadCount: number;
   onSelectSession: (session: SessionSummary) => void;
   onApprove: (approvalId: string) => void;
   onReject: (approvalId: string) => void;
@@ -361,6 +366,20 @@ export function ChatPane({
           >
             <span aria-hidden="true" />
           </div>
+          <button
+            className="agent-notification-button"
+            type="button"
+            onClick={onOpenNotifications}
+            title={t("notifications.center.open")}
+            aria-label={t("notifications.center.openWithCount", { count: notificationUnreadCount })}
+          >
+            <Bell aria-hidden="true" size={18} />
+            {notificationUnreadCount > 0 ? (
+              <span className="notification-badge" aria-hidden="true">
+                {notificationUnreadCount > 99 ? "99+" : notificationUnreadCount}
+              </span>
+            ) : null}
+          </button>
           <button
             className="settings-button agent-settings-button"
             type="button"

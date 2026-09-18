@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   appendEvent,
   claimNextJob,
+  createActionMessageAndJob,
   createDockerOperationApproval,
   createDockerOperationRecord,
   createDockerRegistryCredential,
@@ -17,6 +18,7 @@ import {
   defaultPiToolPolicySettings,
   defaultDownloadSettings,
   deleteDownloadTask,
+  deleteSession,
   ensureNasRoots,
   getAgentProviderSession,
   getApproval,
@@ -24,13 +26,19 @@ import {
   getDownloadSettings,
   getDownloadTask,
   getModelProviderSettings,
+  getOperationNotificationByJob,
   getPiToolPolicySettings,
   listEvents,
   listDockerOperations,
   listDockerRegistryCredentials,
   listNasRoots,
+  listMessages,
+  listOperationNotifications,
+  markAllOperationNotificationsRead,
+  markOperationNotificationRead,
   openSigmaDb,
   recordAppliedOperation,
+  pruneOperationNotifications,
   saveAgentProviderSession,
   saveDownloadSettings,
   savePiToolPolicySettings,
@@ -39,6 +47,7 @@ import {
   deleteDockerRegistryCredential,
   updateDockerRegistryCredential,
   updateJobStatus,
+  updateOperationNotificationForJob,
   type SigmaDatabase
 } from "./index.js";
 
@@ -108,6 +117,110 @@ describe("core repositories", () => {
 
     expect(updateJobStatus(db, job.id, "cancelled", null, ["queued", "running"])).toBe(true);
     expect(updateJobStatus(db, job.id, "completed", null, ["running"])).toBe(false);
+  });
+
+  it("persists one evolving operation notification for an internal action job", () => {
+    const session = createSession(db, { rootId: "local" });
+    const { message, job, notification } = createActionMessageAndJob(db, {
+      sessionId: session.id,
+      content: "Move reports into archive",
+      kind: "file",
+      status: "waiting_approval"
+    });
+
+    expect(message.role).toBe("system");
+    expect(listMessages(db, { sessionId: session.id })).toMatchObject([
+      { id: message.id, role: "system", content: "Move reports into archive" }
+    ]);
+    expect(notification).toMatchObject({
+      jobId: job.id,
+      sessionId: session.id,
+      kind: "file",
+      status: "pending_approval",
+      readAt: null
+    });
+
+    const read = markOperationNotificationRead(db, notification.id, new Date("2026-08-01T00:00:00.000Z"));
+    expect(read?.readAt).toBe("2026-08-01T00:00:00.000Z");
+    updateOperationNotificationForJob(db, {
+      jobId: job.id,
+      status: "running",
+      now: new Date("2026-08-01T00:01:00.000Z")
+    });
+    expect(getOperationNotificationByJob(db, job.id)).toMatchObject({
+      id: notification.id,
+      status: "running",
+      readAt: null,
+      updatedAt: "2026-08-01T00:01:00.000Z"
+    });
+
+    markOperationNotificationRead(db, notification.id, new Date("2026-08-01T00:02:00.000Z"));
+    expect(updateOperationNotificationForJob(db, {
+      jobId: job.id,
+      status: "running",
+      now: new Date("2026-08-01T00:03:00.000Z")
+    })).toBeNull();
+    expect(getOperationNotificationByJob(db, job.id)).toMatchObject({
+      status: "running",
+      readAt: "2026-08-01T00:02:00.000Z",
+      updatedAt: "2026-08-01T00:01:00.000Z"
+    });
+
+    updateJobStatus(db, job.id, "failed", "disk unavailable", ["waiting_approval"]);
+    expect(getOperationNotificationByJob(db, job.id)).toMatchObject({
+      id: notification.id,
+      status: "failed",
+      error: "disk unavailable",
+      readAt: null
+    });
+    expect(deleteSession(db, session.id)).toBe(true);
+    expect(getOperationNotificationByJob(db, job.id)).toBeNull();
+  });
+
+  it("lists, marks, and prunes operation notifications with a 30-day retention window", () => {
+    const session = createSession(db, { rootId: "local" });
+    const first = createActionMessageAndJob(db, {
+      sessionId: session.id,
+      content: "Restart container alpha",
+      kind: "docker",
+      status: "running"
+    });
+    const second = createActionMessageAndJob(db, {
+      sessionId: session.id,
+      content: "Apply share settings",
+      kind: "share",
+      status: "waiting_approval"
+    });
+
+    db.prepare("UPDATE operation_notifications SET updated_at = ? WHERE id = ?")
+      .run("2026-08-18T23:59:59.000Z", first.notification.id);
+    db.prepare("UPDATE operation_notifications SET updated_at = ? WHERE id = ?")
+      .run("2026-08-19T00:00:00.000Z", second.notification.id);
+
+    expect(markAllOperationNotificationsRead(db, new Date("2026-09-18T00:00:00.000Z"))).toBe(1);
+    expect(listOperationNotifications(db, { now: new Date("2026-09-18T00:00:00.000Z") }))
+      .toMatchObject([{ id: second.notification.id, readAt: "2026-09-18T00:00:00.000Z" }]);
+    expect(getOperationNotificationByJob(db, first.job.id)?.readAt).toBeNull();
+    expect(pruneOperationNotifications(db, new Date("2026-09-18T00:00:00.000Z"))).toBe(1);
+    expect(getOperationNotificationByJob(db, first.job.id)).toBeNull();
+  });
+
+  it("marks action events for the notification audience while chat events stay in chat", () => {
+    const session = createSession(db, { rootId: "local" });
+    const chat = createUserMessageAndJob(db, { sessionId: session.id, content: "Hello" });
+    const action = createActionMessageAndJob(db, {
+      sessionId: session.id,
+      content: "Create storage pool",
+      kind: "storage",
+      status: "running"
+    });
+    appendEvent(db, { sessionId: session.id, jobId: chat.job.id, type: "job.failed", payload: { error: "chat" } });
+    appendEvent(db, { sessionId: session.id, jobId: action.job.id, type: "job.failed", payload: { error: "action" } });
+
+    expect(listEvents(db, { sessionId: session.id }).map((event) => event.audience)).toEqual([
+      "chat",
+      "notification"
+    ]);
   });
 
   it("persists Pi provider sessions by SigmaOS session id", () => {

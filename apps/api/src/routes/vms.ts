@@ -5,7 +5,7 @@ import type { FastifyInstance } from "fastify";
 import {
   appendEvent,
   createVmOperationRecord,
-  createUserMessageAndJob,
+  createActionMessageAndJob,
   createVmConsoleAuthorization,
   createVmOperationApproval,
   getApproval,
@@ -77,7 +77,7 @@ export function registerVmRoutes(server: FastifyInstance, context: ApiRouteConte
     try {
       const proposal = await buildVmProposal(request.body ?? {}, context);
       if (proposal.action === "create") {
-        const { message, job } = createUserMessageAndJob(context.db, { sessionId: session.id, content: proposal.summary, status: "running" });
+        const { message, job } = createActionMessageAndJob(context.db, { sessionId: session.id, content: proposal.summary, kind: "vm", status: "running" });
         const operation = createVmOperationRecord(context.db, { jobId: job.id, proposal });
         appendEvent(context.db, { sessionId: session.id, jobId: job.id, type: "job.running", payload: { jobId: job.id, vmOperation: operation } });
         try {
@@ -109,7 +109,7 @@ export function registerVmRoutes(server: FastifyInstance, context: ApiRouteConte
         }
         return;
       }
-      const { message, job } = createUserMessageAndJob(context.db, { sessionId: session.id, content: proposal.summary, status: "waiting_approval" });
+      const { message, job } = createActionMessageAndJob(context.db, { sessionId: session.id, content: proposal.summary, kind: "vm", status: "waiting_approval" });
       const { approval, operation } = createVmOperationApproval(context.db, { jobId: job.id, proposal });
       appendEvent(context.db, { sessionId: session.id, jobId: job.id, type: "approval.pending", payload: { approvalId: approval.id, proposal: approval.proposal, summary: proposal.summary } });
       reply.status(202).send({ message, job, approval, operation });

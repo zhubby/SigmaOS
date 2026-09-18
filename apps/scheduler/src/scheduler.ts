@@ -1,6 +1,6 @@
 import { lstat, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { acquireExecutionLock, detectDuplicateIndexedFiles, getIndexRootStatus, heartbeatExecutionLock, listBackupRuns, listIndexRunHistory, listNasRoots, listRootReadiness, releaseExecutionLock, resolveHealthAlert, upsertHealthAlert, type SigmaDatabase } from "@sigmaos/db";
+import { acquireExecutionLock, detectDuplicateIndexedFiles, getIndexRootStatus, heartbeatExecutionLock, listBackupRuns, listIndexRunHistory, listNasRoots, listRootReadiness, pruneOperationNotifications, releaseExecutionLock, resolveHealthAlert, upsertHealthAlert, type SigmaDatabase } from "@sigmaos/db";
 import { randomUUID } from "node:crypto";
 import type { SigmaConfig, SystemHealthSummary } from "@sigmaos/shared";
 import { checkMountReadiness, type MountCommandRunner } from "@sigmaos/nas-tools";
@@ -37,6 +37,7 @@ export interface MaintenanceSummary {
     bytes: number;
   };
   restoreStagingRemoved?: number;
+  operationNotificationsRemoved: number;
 }
 
 export async function runHealthOnce(input: { db: SigmaDatabase; config: SigmaConfig; now?: Date; mountCommandRunner?: MountCommandRunner }): Promise<SystemHealthSummary> {
@@ -226,6 +227,7 @@ export async function runMaintenance(input: {
     input.db.pragma("optimize");
     const trash = await inspectTrash(path.join(input.config.dataDir, "trash"));
     const restoreStagingRemoved = await cleanupRestoreStaging(input.config, input.db, now);
+    const operationNotificationsRemoved = pruneOperationNotifications(input.db, now);
     const healthReportPath = path.join(reportsDir, "health.json");
     await writeJson(healthReportPath, {
       generatedAt,
@@ -233,6 +235,7 @@ export async function runMaintenance(input: {
       walCheckpoint,
       trash,
       restoreStagingRemoved,
+      operationNotificationsRemoved,
       maintenancePolicy: "Trash is reported but not permanently deleted in v1."
     });
 
@@ -247,7 +250,7 @@ export async function runMaintenance(input: {
     }
     input.db.exec(`DELETE FROM backup_runs WHERE status NOT IN ('running', 'validating') AND id NOT IN (SELECT id FROM backup_runs ORDER BY started_at DESC LIMIT 30)`);
     input.db.exec(`DELETE FROM health_alerts WHERE status = 'resolved' AND julianday(resolved_at) < julianday('now', '-30 days')`);
-    return { generatedAt, healthReportPath, walCheckpoint, trash, restoreStagingRemoved };
+    return { generatedAt, healthReportPath, walCheckpoint, trash, restoreStagingRemoved, operationNotificationsRemoved };
   } finally {
     clearInterval(heartbeat);
     releaseExecutionLock(input.db, { name: "maintenance", owner });

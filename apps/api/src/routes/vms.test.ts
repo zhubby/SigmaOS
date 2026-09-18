@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, realpath, rm, symlink, unlink, writeFile } from "node:f
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createSession, ensureNasRoots, listEvents, openSigmaDb, type SigmaDatabase } from "@sigmaos/db";
+import { createSession, ensureNasRoots, listEvents, listOperationNotifications, openSigmaDb, type SigmaDatabase } from "@sigmaos/db";
 import type { SigmaConfig } from "@sigmaos/shared";
 import { buildServer } from "../server.js";
 import { vmQemuCommand, type VmCommandRunner } from "../lib/vm-service.js";
@@ -38,6 +38,10 @@ describe("VM routes", () => {
       payload: { sessionId: session.id, action: "console", domainName: "guest" }
     });
     expect(proposed.statusCode).toBe(202);
+    expect(proposed.json().message.role).toBe("system");
+    expect(listOperationNotifications(db)).toMatchObject([
+      { jobId: proposed.json().job.id, kind: "vm", status: "pending_approval" }
+    ]);
     const proposalBody = proposed.json() as { approval: { id: string }; operation: { id: string; status: string } };
     expect(proposalBody.operation.status).toBe("proposed");
 
@@ -90,6 +94,8 @@ describe("VM routes", () => {
     const rejectedOperationId = rejectedProposal.json().operation.id as string;
     const rejected = await server.inject({ method: "POST", url: `/api/approvals/${rejectedApprovalId}/reject` });
     expect(rejected.statusCode).toBe(202);
+    expect(listOperationNotifications(db).find((notification) => notification.jobId === rejectedProposal.json().job.id))
+      .toMatchObject({ status: "rejected", readAt: null });
     const operations = await server.inject({ method: "GET", url: `/api/vms/operations?sessionId=${session.id}` });
     expect(operations.json().operations).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: rejectedOperationId, status: "failed" })

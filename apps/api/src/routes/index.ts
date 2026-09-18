@@ -10,6 +10,7 @@ import { registerHealthStatusRoutes } from "./health-status.js";
 import { registerReadinessRoutes } from "./readiness.js";
 import { registerJobRoutes } from "./jobs.js";
 import { registerOperationRoutes } from "./operations.js";
+import { registerNotificationRoutes } from "./notifications.js";
 import { registerRootRoutes } from "./roots.js";
 import { registerSessionRoutes } from "./sessions.js";
 import { registerSettingsRoutes } from "./settings.js";
@@ -36,6 +37,7 @@ export function registerApiRoutes(server: FastifyInstance, context: ApiRouteCont
   registerFileRoutes(server, context);
   registerApprovalRoutes(server, context);
   registerOperationRoutes(server, context);
+  registerNotificationRoutes(server, context);
   registerDockerRoutes(server, context);
   registerShareRoutes(server, context);
   registerTerminalRoutes(server, context);

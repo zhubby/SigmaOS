@@ -11,6 +11,7 @@ export * from "./repositories/indexed-file-maintenance.js";
 export * from "./repositories/indexed-files.js";
 export * from "./repositories/jobs.js";
 export * from "./repositories/nas-roots.js";
+export * from "./repositories/operation-notifications.js";
 export * from "./repositories/sessions.js";
 export * from "./repositories/settings.js";
 export * from "./repositories/share-operations.js";

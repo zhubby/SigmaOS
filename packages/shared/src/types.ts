@@ -6,6 +6,18 @@ export type JobStatus =
   | "failed"
   | "cancelled";
 
+export type AgentEventAudience = "chat" | "notification";
+
+export type OperationNotificationKind = "file" | "docker" | "vm" | "storage" | "share";
+
+export type OperationNotificationStatus =
+  | "pending_approval"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "rejected"
+  | "cancelled";
+
 export type ApprovalStatus =
   | "pending"
   | "approved"
@@ -857,8 +869,22 @@ export interface AgentEventRecord<TPayload = unknown> {
   sessionId: string;
   jobId: string | null;
   type: AgentEventType;
+  audience: AgentEventAudience;
   payload: TPayload;
   createdAt: string;
+}
+
+export interface OperationNotificationRecord {
+  id: string;
+  jobId: string;
+  sessionId: string;
+  kind: OperationNotificationKind;
+  status: OperationNotificationStatus;
+  summary: string;
+  error: string | null;
+  readAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface NasRootRecord {

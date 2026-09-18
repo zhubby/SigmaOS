@@ -376,7 +376,6 @@ export function WorkspaceManagementPanel({
         locale={locale}
         onWorkQueuesChanged={onWorkQueuesChanged}
         onNotifyError={onNotifyError}
-        onNotifySuccess={onNotifySuccess}
         onNotifyWarning={onNotifyWarning}
       />
     );
@@ -407,6 +406,7 @@ export function WorkspaceManagementPanel({
         onWorkQueuesChanged={onWorkQueuesChanged}
         onNotifyError={onNotifyError}
         onNotifySuccess={onNotifySuccess}
+        onNotifyWarning={onNotifyWarning}
       />
     );
   }
@@ -553,7 +553,8 @@ function VirtualMachineManagementPanel({
   locale,
   onWorkQueuesChanged,
   onNotifyError,
-  onNotifySuccess
+  onNotifySuccess,
+  onNotifyWarning
 }: {
   storagePools: StorageFilePickerPool[];
   selectedStoragePoolId: string;
@@ -564,6 +565,7 @@ function VirtualMachineManagementPanel({
   onWorkQueuesChanged: () => void | Promise<void>;
   onNotifyError: (message: string | null) => void;
   onNotifySuccess: (message: string | null) => void;
+  onNotifyWarning: (message: string | null) => void;
 }) {
   const { t } = useTranslation();
   const [summary, setSummary] = useState<VmSummary | null>(null);
@@ -596,7 +598,11 @@ function VirtualMachineManagementPanel({
     setPendingAction(`${action}:${domainName}`);
     try {
       await proposeVmOperation({ sessionId, action, domainName, ...extra });
-      onNotifySuccess(t(action === "create" ? "workspace.management.virtualMachines.created" : "workspace.management.virtualMachines.proposalCreated"));
+      if (action === "create") {
+        onNotifySuccess(t("workspace.management.virtualMachines.created"));
+      } else {
+        onNotifyWarning(t("workspace.management.virtualMachines.proposalCreated"));
+      }
       await onWorkQueuesChanged();
       return true;
     } catch (nextError) { onNotifyError(errorMessage(nextError)); return false; }
@@ -962,8 +968,8 @@ function DockerManagementPanel({
   locale,
   onWorkQueuesChanged,
   onNotifyError,
-  onNotifySuccess
-  , onNotifyWarning
+  onNotifySuccess,
+  onNotifyWarning
 }: {
   roots: NasRoot[];
   sessionId: string | null;
@@ -1229,7 +1235,7 @@ function DockerManagementPanel({
         ...input,
         sessionId
       });
-      onNotifySuccess(t("workspace.management.docker.proposalCreated"));
+      onNotifyWarning(t("workspace.management.docker.proposalCreated"));
       await onWorkQueuesChanged();
       return result;
     } catch (nextError) {

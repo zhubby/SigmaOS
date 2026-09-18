@@ -453,7 +453,7 @@
     display: grid;
     grid-row: 1;
     grid-column: 1;
-    grid-template-columns: minmax(0, 1fr) 40px;
+    grid-template-columns: minmax(0, 1fr) 40px 40px;
     gap: 8px;
     padding: 8px;
     background: var(--server-bg);
@@ -468,6 +468,7 @@
   }
 
   .mobile-tab-buttons button,
+  .mobile-notification-button,
   .mobile-settings-button {
     display: inline-flex;
     align-items: center;
@@ -480,7 +481,9 @@
     font-weight: 800;
   }
 
+  .mobile-notification-button,
   .mobile-settings-button {
+    position: relative;
     width: 40px;
     padding: 0;
   }

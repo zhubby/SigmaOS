@@ -214,5 +214,27 @@ export const productionMigrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_download_tasks_updated_at
         ON download_tasks(updated_at DESC);
     `
+  },
+  {
+    id: "014_operation_notifications",
+    sql: `
+      CREATE TABLE IF NOT EXISTS operation_notifications (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL UNIQUE REFERENCES jobs(id) ON DELETE CASCADE,
+        session_id TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('file', 'docker', 'vm', 'storage', 'share')),
+        status TEXT NOT NULL CHECK (status IN ('pending_approval', 'running', 'succeeded', 'failed', 'rejected', 'cancelled')),
+        summary TEXT NOT NULL,
+        error TEXT,
+        read_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_operation_notifications_updated_at
+        ON operation_notifications(updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_operation_notifications_unread_updated_at
+        ON operation_notifications(read_at, updated_at DESC);
+    `
   }
 ];
