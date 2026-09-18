@@ -659,6 +659,12 @@
     display: none;
   }
 
+  .download-create-button {
+    width: 34px;
+    min-width: 34px;
+    padding: 0;
+  }
+
   .download-target-control {
     grid-template-columns: 1fr;
   }

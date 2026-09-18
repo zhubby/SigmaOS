@@ -241,6 +241,7 @@ export function SystemNetworkManagementPanel({
             type="button"
             onClick={() => void refreshSummary()}
             disabled={loading}
+            aria-busy={loading || undefined}
             aria-label={t("common.actions.refresh")}
             title={t("common.actions.refresh")}
           >
@@ -650,6 +651,7 @@ export function SystemStorageManagementPanel({
             type="button"
             onClick={() => void refreshSummary()}
             disabled={loading}
+            aria-busy={loading || undefined}
             aria-label={t("common.actions.refresh")}
             title={t("common.actions.refresh")}
           >
@@ -898,6 +900,7 @@ export function SystemStorageManagementPanel({
                         className="danger-button"
                         onClick={() => void submitPoolDelete()}
                         disabled={deleting || deleteConfirmation.trim() !== storagePoolConfirmationName(selectedPool)}
+                        aria-busy={deleting || undefined}
                       >
                         {deleting ? <LoaderCircle className="storage-pool-spinner" aria-hidden="true" size={15} /> : <Trash2 aria-hidden="true" size={15} />}
                         <span>{deleting ? t("common.states.loading") : t("workspace.management.storage.deleteConfirm")}</span>
@@ -1082,7 +1085,7 @@ export function SystemStorageManagementPanel({
                 <button type="button" onClick={closeCreateModal} disabled={submitting}>
                   {t("common.actions.cancel")}
                 </button>
-                <button type="submit" className="is-primary" disabled={submitting || !sessionId || !confirmed}>
+                <button type="submit" className="is-primary" disabled={submitting || !sessionId || !confirmed} aria-busy={submitting || undefined}>
                   {submitting ? (
                     <LoaderCircle className="storage-pool-spinner" aria-hidden="true" size={15} />
                   ) : (

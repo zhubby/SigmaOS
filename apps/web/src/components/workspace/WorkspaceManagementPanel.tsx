@@ -896,7 +896,7 @@ function VirtualMachineManagementPanel({
 
               {wizardError ? <p className="vm-create-error" role="alert"><CircleAlert size={14} />{wizardError}</p> : null}
             </div>
-            <footer className="vm-create-dialog-footer"><span>{t("workspace.management.virtualMachines.stepCounter", { current: createStep, total: 4 })} · {form.name || t("workspace.management.virtualMachines.createReviewPlaceholder")}</span><div><button type="button" onClick={() => setCreateOpen(false)} disabled={pendingAction !== null}>{t("common.actions.cancel")}</button>{createStep > 1 ? <button type="button" onClick={retreatWizard} disabled={pendingAction !== null}><ChevronLeft size={14} />{t("workspace.management.virtualMachines.previous")}</button> : null}{createStep < 4 ? <button type="button" className="vm-create-submit" onClick={advanceWizard}><span>{t("workspace.management.virtualMachines.next")}</span><ChevronRight size={14} /></button> : <button type="submit" className="vm-create-submit" disabled={pendingAction !== null}>{pendingAction === `create:${form.name.trim()}` ? <><LoaderCircle className="spin" size={14} />{t("workspace.management.virtualMachines.creating")}</> : <><Settings2 size={14} />{t("workspace.management.virtualMachines.createNow")}</>}</button>}</div></footer>
+            <footer className="vm-create-dialog-footer"><span>{t("workspace.management.virtualMachines.stepCounter", { current: createStep, total: 4 })} · {form.name || t("workspace.management.virtualMachines.createReviewPlaceholder")}</span><div><button type="button" onClick={() => setCreateOpen(false)} disabled={pendingAction !== null}>{t("common.actions.cancel")}</button>{createStep > 1 ? <button type="button" onClick={retreatWizard} disabled={pendingAction !== null}><ChevronLeft size={14} />{t("workspace.management.virtualMachines.previous")}</button> : null}{createStep < 4 ? <button type="button" className="vm-create-submit" onClick={advanceWizard}><span>{t("workspace.management.virtualMachines.next")}</span><ChevronRight size={14} /></button> : <button type="submit" className="vm-create-submit" disabled={pendingAction !== null} aria-busy={pendingAction === `create:${form.name.trim()}` || undefined}>{pendingAction === `create:${form.name.trim()}` ? <><LoaderCircle className="spin" size={14} />{t("workspace.management.virtualMachines.creating")}</> : <><Settings2 size={14} />{t("workspace.management.virtualMachines.createNow")}</>}</button>}</div></footer>
           </form>
         </div>
       ) : null}
@@ -1273,6 +1273,7 @@ function DockerManagementPanel({
             type="button"
             onClick={refreshSummary}
             disabled={loading}
+            aria-busy={loading || undefined}
             aria-label={t("common.actions.refresh")}
             title={t("common.actions.refresh")}
           >
@@ -1533,11 +1534,12 @@ function ActionIconButton({
       type="button"
       className={danger ? "management-icon-action is-danger" : "management-icon-action"}
       disabled={disabled}
+      aria-busy={pending || undefined}
       title={label}
       aria-label={label}
       onClick={() => void onClick()}
     >
-      <ButtonIcon aria-hidden="true" size={13} />
+      <ButtonIcon className={pending ? "spin" : undefined} aria-hidden="true" size={13} />
     </button>
   );
 }
@@ -1758,8 +1760,8 @@ function DockerDetailActionButton({
 }) {
   const ButtonIcon = pending ? LoaderCircle : Icon;
   return (
-    <button type="button" className={danger ? "docker-detail-action is-danger" : "docker-detail-action"} disabled={disabled} onClick={onClick} title={label}>
-      <ButtonIcon aria-hidden="true" size={14} />
+    <button type="button" className={danger ? "docker-detail-action is-danger" : "docker-detail-action"} disabled={disabled} aria-busy={pending || undefined} onClick={onClick} title={label}>
+      <ButtonIcon className={pending ? "spin" : undefined} aria-hidden="true" size={14} />
       <span>{label}</span>
     </button>
   );

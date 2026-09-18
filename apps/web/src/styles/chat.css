@@ -88,7 +88,6 @@
 .session-item:hover {
   color: var(--text);
   background: var(--surface-hover);
-  transform: translateY(-1px);
 }
 
 .session-item.is-active {
@@ -713,10 +712,6 @@
 .approval-actions button:last-child:hover {
   color: white;
   background: var(--red);
-}
-
-.approval-actions button:hover {
-  transform: translateY(-1px);
 }
 
 .composer {

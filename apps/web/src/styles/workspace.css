@@ -77,10 +77,6 @@
   box-shadow: inset 0 3px 0 var(--accent);
 }
 
-.workspace-panel-tab:hover {
-  transform: translateY(-1px);
-}
-
 .workspace-panel-tab span {
   max-width: 100%;
   overflow: hidden;
@@ -717,7 +713,6 @@
   color: var(--text);
   border-color: rgb(255 255 255 / 14%);
   background: var(--surface-hover);
-  transform: translateY(-1px);
 }
 
 .file-action-button-send {
@@ -1018,6 +1013,7 @@
 }
 
 .download-create-button {
+  min-width: 132px;
   min-height: 32px;
 }
 
@@ -1255,7 +1251,7 @@
 }
 
 .download-task-action:disabled {
-  cursor: default;
+  cursor: not-allowed;
   opacity: .5;
 }
 
@@ -1743,7 +1739,7 @@
 
 .docker-create-add:disabled,
 .docker-create-row button:disabled {
-  cursor: default;
+  cursor: not-allowed;
   opacity: .55;
 }
 
@@ -6714,7 +6710,7 @@
 }
 
 .vm-create-stepper button:disabled {
-  cursor: default;
+  cursor: not-allowed;
   opacity: 0.48;
 }
 

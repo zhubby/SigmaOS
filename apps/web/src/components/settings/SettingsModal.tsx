@@ -476,7 +476,7 @@ export function SettingsModal({
                   <button className="secondary-button" type="button" onClick={onClose}>
                     {t("common.actions.cancel")}
                   </button>
-                  <button className="primary-button" type="submit" disabled={loading || saving}>
+                  <button className="primary-button" type="submit" disabled={loading || saving} aria-busy={loading || saving || undefined}>
                     {saving ? t("common.actions.saving") : t("common.actions.saveChanges")}
                   </button>
                 </div>
@@ -1626,7 +1626,7 @@ function SettingsDownloadsPage({
           <button className="secondary-button" type="button" onClick={onClose} disabled={saving}>
             {t("common.actions.cancel")}
           </button>
-          <button className="primary-button" type="submit" disabled={loading || saving || !settings}>
+          <button className="primary-button" type="submit" disabled={loading || saving || !settings} aria-busy={loading || saving || undefined}>
             {saving ? t("settings.downloads.saving") : saved ? <><Check aria-hidden="true" size={14} />{t("settings.downloads.saved")}</> : t("common.actions.saveChanges")}
           </button>
         </div>
@@ -1765,7 +1765,7 @@ function SettingsToolPolicyPage({
           <button className="secondary-button" type="button" onClick={onClose}>
             {t("common.actions.cancel")}
           </button>
-          <button className="primary-button" type="submit" disabled={loading || saving}>
+          <button className="primary-button" type="submit" disabled={loading || saving} aria-busy={loading || saving || undefined}>
             {saving ? t("common.actions.saving") : t("common.actions.saveChanges")}
           </button>
         </div>
@@ -2050,7 +2050,7 @@ function SettingsDockerPage({
           <button className="secondary-button" type="button" onClick={onClose}>
             {t("common.actions.cancel")}
           </button>
-          <button className="primary-button" type="submit" disabled={loading || saving}>
+          <button className="primary-button" type="submit" disabled={loading || saving} aria-busy={loading || saving || undefined}>
             {saving ? t("common.actions.saving") : t("common.actions.saveChanges")}
           </button>
         </div>

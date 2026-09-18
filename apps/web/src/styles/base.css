@@ -79,6 +79,18 @@
   --selection-bg: rgb(88 101 242 / 36%);
   --focus-ring-soft: rgb(142 161 255 / 72%);
   --focus-ring-inset: rgb(142 161 255 / 38%);
+  --control-accent-active: #3f49ad;
+  --control-danger-active: #9f292e;
+  --control-hover-shadow: 0 4px 12px rgb(0 0 0 / 18%);
+  --control-active-shadow: inset 0 1px 2px rgb(0 0 0 / 28%);
+  --control-disabled-bg: #292b35;
+  --control-disabled-border: #383b48;
+  --control-disabled-text: #767c88;
+  --control-busy-bg: #343746;
+  --control-busy-text: #d7dae0;
+  --control-focus: #aab5ff;
+  --control-duration: 140ms;
+  --control-easing: cubic-bezier(0.2, 0, 0, 1);
   --alert-danger-text: #ffced0;
   --alert-danger-bg: rgb(94 30 38 / 34%);
   --alert-danger-border: rgb(255 179 182 / 18%);
@@ -180,6 +192,16 @@
   --selection-bg: rgb(67 83 216 / 20%);
   --focus-ring-soft: rgb(67 83 216 / 45%);
   --focus-ring-inset: rgb(67 83 216 / 25%);
+  --control-accent-active: #2937a0;
+  --control-danger-active: #8f242b;
+  --control-hover-shadow: 0 4px 12px rgb(31 45 68 / 12%);
+  --control-active-shadow: inset 0 1px 2px rgb(31 45 68 / 22%);
+  --control-disabled-bg: #e6ebf1;
+  --control-disabled-border: #d2dbe6;
+  --control-disabled-text: #7b8797;
+  --control-busy-bg: #dfe5ed;
+  --control-busy-text: #455368;
+  --control-focus: #334bd2;
   --alert-danger-text: #8f252c;
   --alert-danger-bg: rgb(199 53 60 / 9%);
   --alert-danger-border: rgb(199 53 60 / 20%);
@@ -225,19 +247,6 @@ textarea {
 
 button {
   border: 0;
-}
-
-button:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
 }
 
 .visually-hidden {
@@ -386,7 +395,7 @@ button:disabled {
   border-radius: 5px;
   color: white;
   font-weight: 800;
-  cursor: pointer;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
 }
 
 .primary-button {
@@ -395,6 +404,12 @@ button:disabled {
 
 .primary-button:hover:not(:disabled) {
   background: var(--accent-hover);
+  box-shadow: var(--control-hover-shadow);
+}
+
+.primary-button:active:not(:disabled) {
+  background: var(--control-accent-active);
+  box-shadow: var(--control-active-shadow);
 }
 
 .secondary-button {
@@ -404,6 +419,12 @@ button:disabled {
 
 .secondary-button:hover:not(:disabled) {
   background: var(--surface-hover);
+  box-shadow: var(--control-hover-shadow);
+}
+
+.secondary-button:active:not(:disabled) {
+  background: var(--surface-strong);
+  box-shadow: var(--control-active-shadow);
 }
 
 .danger-button {
@@ -413,4 +434,10 @@ button:disabled {
 
 .danger-button:hover:not(:disabled) {
   background: var(--red-hover);
+  box-shadow: var(--control-hover-shadow);
+}
+
+.danger-button:active:not(:disabled) {
+  background: var(--control-danger-active);
+  box-shadow: var(--control-active-shadow);
 }

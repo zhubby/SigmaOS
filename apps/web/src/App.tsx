@@ -2101,6 +2101,7 @@ export function App() {
         selectedRoot={selectedRoot}
         selectedRootId={selectedRootId}
         storagePools={storagePoolOptions}
+        storageSummaryLoading={storageSummaryLoading}
         selectedStoragePoolId={selectedStoragePoolId}
         currentPath={currentPath}
         displayPath={displayPath}

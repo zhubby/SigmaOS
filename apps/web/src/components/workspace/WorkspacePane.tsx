@@ -244,6 +244,7 @@ export function WorkspacePane({
   selectedRoot,
   selectedRootId,
   storagePools,
+  storageSummaryLoading,
   selectedStoragePoolId,
   currentPath,
   displayPath,
@@ -308,6 +309,7 @@ export function WorkspacePane({
   selectedRoot: NasRoot | undefined;
   selectedRootId: string;
   storagePools: FileStoragePoolOption[];
+  storageSummaryLoading: boolean;
   selectedStoragePoolId: string;
   currentPath: string;
   displayPath: string;
@@ -1205,13 +1207,16 @@ export function WorkspacePane({
           ) : activePanel === "downloads" ? (
             <HttpDownloaderPanel
               pools={storagePools}
+              storagePoolsLoading={storageSummaryLoading}
               selectedStoragePoolId={selectedStoragePoolId}
               locale={locale}
               onSelectStoragePool={onSelectStoragePool}
               onOpenDirectory={onOpenDownloadedDirectory}
+              onOpenStorage={() => selectPanel("storage")}
               {...(onRequestCreateFolderAt ? { onRequestCreateFolder: onRequestCreateFolderAt } : {})}
               onNotifyError={onNotifyError}
               onNotifySuccess={onNotifySuccess}
+              onNotifyWarning={onNotifyWarning}
             />
           ) : activePanel === "terminal" || !workspaceVisible ? null : (
             <WorkspaceManagementPanel
@@ -1293,7 +1298,7 @@ export function WorkspacePane({
               <button type="button" className="secondary-button" onClick={closeActionDialog} disabled={operationSubmitting}>
                 {t("common.actions.cancel")}
               </button>
-              <button type="submit" className="primary-button" disabled={operationSubmitting || folderNameInvalid}>
+              <button type="submit" className="primary-button" disabled={operationSubmitting || folderNameInvalid} aria-busy={operationSubmitting || undefined}>
                 {operationSubmitting ? t("common.actions.saving") : t("workspace.actions.requestCreateFolder")}
               </button>
             </footer>
@@ -1329,6 +1334,7 @@ export function WorkspacePane({
                 type="submit"
                 className="primary-button"
                 disabled={operationSubmitting || renameNameInvalid || renameNameUnchanged}
+                aria-busy={operationSubmitting || undefined}
               >
                 {operationSubmitting ? t("common.actions.saving") : t("workspace.actions.requestRename")}
               </button>
@@ -1350,7 +1356,7 @@ export function WorkspacePane({
               <button type="button" className="secondary-button" onClick={closeActionDialog} disabled={operationSubmitting}>
                 {t("common.actions.cancel")}
               </button>
-              <button type="button" className="danger-button" onClick={() => void submitDelete()} disabled={operationSubmitting}>
+              <button type="button" className="danger-button" onClick={() => void submitDelete()} disabled={operationSubmitting} aria-busy={operationSubmitting || undefined}>
                 {operationSubmitting
                   ? t("common.actions.saving")
                   : deleteIsDirectory && !deleteIsFinal
@@ -1402,7 +1408,7 @@ export function WorkspacePane({
               <button type="button" className="secondary-button" onClick={closeActionDialog} disabled={operationSubmitting}>
                 {t("common.actions.cancel")}
               </button>
-              <button type="submit" className="primary-button" disabled={operationSubmitting || transferTargetInvalid}>
+              <button type="submit" className="primary-button" disabled={operationSubmitting || transferTargetInvalid} aria-busy={operationSubmitting || undefined}>
                 {operationSubmitting
                   ? t("common.actions.saving")
                   : transferState.operation === "move"

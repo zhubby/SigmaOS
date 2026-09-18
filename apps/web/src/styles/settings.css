@@ -729,7 +729,6 @@
   color: var(--text);
   border-color: rgb(255 255 255 / 13%);
   background: var(--surface-hover);
-  transform: translateY(-1px);
 }
 
 .settings-docker-grid {

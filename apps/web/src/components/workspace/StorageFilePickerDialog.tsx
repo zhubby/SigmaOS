@@ -294,7 +294,7 @@ export function StorageFilePickerDialog({
                         aria-label={t("workspace.actions.folderName")}
                         disabled={createFolderSubmitting}
                       />
-                      <button type="submit" disabled={createFolderSubmitting || !createFolderName.trim()} title={t("workspace.downloads.requestCreateFolder")} aria-label={t("workspace.downloads.requestCreateFolder")}>
+                      <button type="submit" disabled={createFolderSubmitting || !createFolderName.trim()} aria-busy={createFolderSubmitting || undefined} title={t("workspace.downloads.requestCreateFolder")} aria-label={t("workspace.downloads.requestCreateFolder")}>
                         {createFolderSubmitting ? <LoaderCircle className="is-spinning" aria-hidden="true" size={14} /> : <Check aria-hidden="true" size={14} />}
                       </button>
                       <button type="button" onClick={() => { setCreateFolderOpen(false); setCreateFolderName(""); }} disabled={createFolderSubmitting} title={t("common.actions.cancel")} aria-label={t("common.actions.cancel")}>

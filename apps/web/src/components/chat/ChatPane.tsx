@@ -513,6 +513,7 @@ export function ChatPane({
                 className="primary-button"
                 type="submit"
                 disabled={!hasSession || (!message.trim() && !composerPath) || messageSubmitting}
+                aria-busy={messageSubmitting || undefined}
                 aria-label={t("common.actions.send")}
                 title={t("common.actions.send")}
               >

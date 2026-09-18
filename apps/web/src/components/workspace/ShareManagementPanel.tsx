@@ -361,6 +361,7 @@ export function ShareManagementPanel({
             type="button"
             onClick={refreshShareData}
             disabled={loading || refreshing || submitting}
+            aria-busy={loading || refreshing || undefined}
             title={t("common.actions.refresh")}
             aria-label={t("common.actions.refresh")}
           >
@@ -371,6 +372,7 @@ export function ShareManagementPanel({
             type="submit"
             form="share-management-form"
             disabled={submitDisabled}
+            aria-busy={submitting || undefined}
             title={pendingShareApproval ? t("workspace.management.actions.pendingApproval") : t("workspace.management.shares.requestApproval")}
             aria-label={pendingShareApproval ? t("workspace.management.actions.pendingApproval") : t("workspace.management.shares.requestApproval")}
           >

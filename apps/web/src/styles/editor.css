@@ -143,7 +143,7 @@
 
 .editor-textarea:disabled {
   caret-color: transparent;
-  cursor: wait;
+  cursor: progress;
 }
 
 .editor-textarea::selection {

@@ -31,19 +31,24 @@ type DownloadFilter = "all" | "active" | "completed" | "failed";
 
 export function HttpDownloaderPanel({
   pools,
+  storagePoolsLoading,
   selectedStoragePoolId,
   locale,
   onSelectStoragePool,
   onOpenDirectory,
+  onOpenStorage,
   onRequestCreateFolder,
   onNotifyError,
-  onNotifySuccess
+  onNotifySuccess,
+  onNotifyWarning
 }: {
   pools: HttpDownloaderPool[];
+  storagePoolsLoading: boolean;
   selectedStoragePoolId: string;
   locale: SupportedLocale;
   onSelectStoragePool: (poolId: string) => void;
   onOpenDirectory: (rootId: string, storagePoolId: string, path: string) => void;
+  onOpenStorage: () => void;
   onRequestCreateFolder?: (input: {
     rootId: string;
     storagePoolId: string;
@@ -52,6 +57,7 @@ export function HttpDownloaderPanel({
   }) => Promise<void>;
   onNotifyError: (message: string | null) => void;
   onNotifySuccess: (message: string | null) => void;
+  onNotifyWarning: (message: string | null) => void;
 }) {
   const { t } = useTranslation();
   const [tasks, setTasks] = useState<DownloadTask[]>([]);
@@ -133,6 +139,12 @@ export function HttpDownloaderPanel({
   const totalSpeed = tasks.reduce((sum, task) => sum + (task.status === "running" ? task.speedBytesPerSecond : 0), 0);
 
   function openCreateDialog() {
+    if (storagePoolsLoading) return;
+    if (mountedPools.length === 0) {
+      onNotifyWarning(t("workspace.downloads.configureStoragePool"));
+      onOpenStorage();
+      return;
+    }
     const pool = pools.find((candidate) => candidate.id === selectedStoragePoolId) ?? mountedPools[0] ?? null;
     setTarget(pool ? { rootId: pool.rootId, storagePoolId: pool.id, path: pool.path, name: pool.name } : null);
     setUrl("");
@@ -232,11 +244,19 @@ export function HttpDownloaderPanel({
             type="button"
             className="primary-button download-create-button"
             onClick={openCreateDialog}
-            disabled={!mountedPools.length}
-            title={!mountedPools.length ? t("workspace.downloads.noStoragePool") : undefined}
+            disabled={storagePoolsLoading}
+            aria-busy={storagePoolsLoading || undefined}
+            data-state={storagePoolsLoading ? "loading" : mountedPools.length ? "ready" : "needs-storage"}
+            title={storagePoolsLoading
+              ? t("workspace.downloads.loadingStoragePools")
+              : mountedPools.length
+                ? undefined
+                : t("workspace.downloads.configureStoragePool")}
           >
-            <Plus aria-hidden="true" size={15} />
-            <span>{t("workspace.downloads.newDownload")}</span>
+            {storagePoolsLoading
+              ? <LoaderCircle className="is-spinning" aria-hidden="true" size={15} />
+              : <Plus aria-hidden="true" size={15} />}
+            <span>{t(storagePoolsLoading ? "workspace.downloads.loadingStoragePools" : "workspace.downloads.newDownload")}</span>
           </button>
         </div>
       </header>
@@ -348,7 +368,7 @@ export function HttpDownloaderPanel({
             </div>
             <footer className="download-create-dialog-footer">
               <button type="button" className="secondary-button" onClick={() => setCreateOpen(false)} disabled={submitting}>{t("common.actions.cancel")}</button>
-              <button type="submit" className="primary-button" disabled={submitting || !target || !url.trim() || !fileName.trim()}>
+              <button type="submit" className="primary-button" disabled={submitting || !target || !url.trim() || !fileName.trim()} aria-busy={submitting || undefined}>
                 {submitting ? <LoaderCircle className="is-spinning" aria-hidden="true" size={15} /> : <Download aria-hidden="true" size={15} />}
                 <span>{t("workspace.downloads.startDownload")}</span>
               </button>
@@ -424,29 +444,29 @@ function DownloadTaskRow({
       </div>
       <div className="download-task-actions" aria-label={t("workspace.downloads.actions")}>
         {canPause ? (
-          <IconAction icon={<Pause aria-hidden="true" size={14} />} label={t("workspace.downloads.pause")} disabled={actionBusy} onClick={() => onAction("pause")} />
+          <IconAction icon={<Pause aria-hidden="true" size={14} />} label={t("workspace.downloads.pause")} disabled={actionBusy} busy={actionBusy} onClick={() => onAction("pause")} />
         ) : null}
         {canResume ? (
-          <IconAction icon={<Play aria-hidden="true" size={14} />} label={t("workspace.downloads.resume")} disabled={actionBusy} onClick={() => onAction("resume")} />
+          <IconAction icon={<Play aria-hidden="true" size={14} />} label={t("workspace.downloads.resume")} disabled={actionBusy} busy={actionBusy} onClick={() => onAction("resume")} />
         ) : null}
         {canRetry ? (
-          <IconAction icon={<RotateCw aria-hidden="true" size={14} />} label={t("workspace.downloads.retry")} disabled={actionBusy} onClick={() => onAction("retry")} />
+          <IconAction icon={<RotateCw aria-hidden="true" size={14} />} label={t("workspace.downloads.retry")} disabled={actionBusy} busy={actionBusy} onClick={() => onAction("retry")} />
         ) : null}
         {canCancel ? (
-          <IconAction icon={<X aria-hidden="true" size={14} />} label={t("workspace.downloads.cancel")} disabled={actionBusy} onClick={() => onAction("cancel")} />
+          <IconAction icon={<X aria-hidden="true" size={14} />} label={t("workspace.downloads.cancel")} disabled={actionBusy} busy={actionBusy} onClick={() => onAction("cancel")} />
         ) : null}
         <IconAction icon={<FolderOpen aria-hidden="true" size={14} />} label={t("workspace.downloads.openDirectory")} onClick={onOpenDirectory} />
         {task.status !== "running" ? (
-          <IconAction icon={<Trash2 aria-hidden="true" size={14} />} label={t("workspace.downloads.remove")} disabled={actionBusy} onClick={onDelete} />
+          <IconAction icon={<Trash2 aria-hidden="true" size={14} />} label={t("workspace.downloads.remove")} disabled={actionBusy} busy={actionBusy} onClick={onDelete} />
         ) : null}
       </div>
     </article>
   );
 }
 
-function IconAction({ icon, label, disabled, onClick }: { icon: ReactNode; label: string; disabled?: boolean; onClick: () => void }) {
+function IconAction({ icon, label, disabled, busy, onClick }: { icon: ReactNode; label: string; disabled?: boolean; busy?: boolean; onClick: () => void }) {
   return (
-    <button type="button" className="download-task-action" title={label} aria-label={label} disabled={disabled} onClick={onClick}>
+    <button type="button" className="download-task-action" title={label} aria-label={label} aria-busy={busy || undefined} disabled={disabled} onClick={onClick}>
       {icon}
     </button>
   );

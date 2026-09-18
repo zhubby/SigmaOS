@@ -375,7 +375,7 @@ function DockerImageDetailsDialog({
           {deleteConfirming ? (
             <>
               <button type="button" onClick={onCancelDelete} disabled={deleting}>{t("common.actions.cancel")}</button>
-              <button type="button" className="is-danger" onClick={onConfirmDelete} disabled={!engineReady || removalBlocked || deleting}>
+              <button type="button" className="is-danger" onClick={onConfirmDelete} disabled={!engineReady || removalBlocked || deleting} aria-busy={deleting || undefined}>
                 {deleting ? <LoaderCircle aria-hidden="true" size={15} /> : <Trash2 aria-hidden="true" size={15} />}
                 <span>{t("workspace.management.docker.images.confirmRemove")}</span>
               </button>
@@ -455,7 +455,7 @@ function DockerImagePullDialog({
         </div>
         <footer className="docker-image-dialog-footer">
           <button type="button" onClick={onClose} disabled={submitting}>{t("common.actions.cancel")}</button>
-          <button type="submit" className="is-primary" disabled={!engineReady || !valid || submitting}>
+          <button type="submit" className="is-primary" disabled={!engineReady || !valid || submitting} aria-busy={submitting || undefined}>
             {submitting ? <LoaderCircle aria-hidden="true" size={15} /> : <Download aria-hidden="true" size={15} />}
             <span>{submitting ? t("workspace.management.docker.images.pulling") : t("workspace.management.docker.images.pull")}</span>
           </button>
@@ -628,12 +628,12 @@ function DockerRegistryDialog({
           {deleteCandidate ? (
             <>
               <button type="button" onClick={() => setDeleteCandidate(null)} disabled={submitting}>{t("common.actions.cancel")}</button>
-              <button type="button" className="is-danger" onClick={() => void confirmRegistryDelete()} disabled={submitting}>{submitting ? <LoaderCircle aria-hidden="true" size={15} /> : <Trash2 aria-hidden="true" size={15} />}<span>{t("workspace.management.docker.images.deleteRegistry")}</span></button>
+              <button type="button" className="is-danger" onClick={() => void confirmRegistryDelete()} disabled={submitting} aria-busy={submitting || undefined}>{submitting ? <LoaderCircle aria-hidden="true" size={15} /> : <Trash2 aria-hidden="true" size={15} />}<span>{t("workspace.management.docker.images.deleteRegistry")}</span></button>
             </>
           ) : editing ? (
             <>
               <button type="button" onClick={() => setEditing(null)} disabled={submitting}>{t("common.actions.cancel")}</button>
-              <button type="submit" form="docker-registry-form" className="is-primary" disabled={!formValid || submitting}>{submitting ? <LoaderCircle aria-hidden="true" size={15} /> : <Check aria-hidden="true" size={15} />}<span>{t("workspace.management.docker.images.saveRegistry")}</span></button>
+              <button type="submit" form="docker-registry-form" className="is-primary" disabled={!formValid || submitting} aria-busy={submitting || undefined}>{submitting ? <LoaderCircle aria-hidden="true" size={15} /> : <Check aria-hidden="true" size={15} />}<span>{t("workspace.management.docker.images.saveRegistry")}</span></button>
             </>
           ) : (
             <>

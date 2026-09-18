@@ -235,7 +235,7 @@ export function DockerDaemonSettingsDialog({
               <button type="button" onClick={() => setPhase("edit")} disabled={submitting}>
                 {t("common.actions.cancel")}
               </button>
-              <button type="button" className="is-danger" onClick={() => void submit(true)} disabled={submitting}>
+              <button type="button" className="is-danger" onClick={() => void submit(true)} disabled={submitting} aria-busy={submitting || undefined}>
                 {submitting ? <LoaderCircle aria-hidden="true" size={15} /> : <RotateCw aria-hidden="true" size={15} />}
                 <span>{t("workspace.management.docker.daemon.confirmRestart")}</span>
               </button>
@@ -246,7 +246,7 @@ export function DockerDaemonSettingsDialog({
                 {t("common.actions.cancel")}
               </button>
               <div>
-                <button type="button" onClick={() => void submit(false)} disabled={!canSave}>
+                <button type="button" onClick={() => void submit(false)} disabled={!canSave} aria-busy={submitting || undefined}>
                   {submitting ? <LoaderCircle aria-hidden="true" size={15} /> : <Save aria-hidden="true" size={15} />}
                   <span>{t("workspace.management.docker.daemon.save")}</span>
                 </button>
