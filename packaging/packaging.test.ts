@@ -47,6 +47,8 @@ describe("native packaging artifacts", () => {
     await expect(readPackagingFile("systemd", "sigmaos-maintenance.timer")).resolves.toContain(
       "OnCalendar=daily"
     );
+    await expect(readPackagingFile("systemd", "sigmaos-indexer.timer")).resolves.toContain("OnBootSec=5min");
+    await expect(readPackagingFile("systemd", "sigmaos-health.timer")).resolves.toContain("OnBootSec=6min");
     await expect(readPackagingFile("debian", "postinst")).resolves.toContain("sigmaos-refresh-groups.sh");
     await expect(readPackagingFile("scripts", "sigmaos-refresh-groups.sh")).resolves.toContain("optional-groups.conf");
     await expect(readPackagingFile("scripts", "sigmaos-refresh-groups.sh")).resolves.toContain("kvm");

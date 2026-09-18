@@ -3,7 +3,20 @@ import type { SigmaDatabase } from "../connection.js";
 import { mapNasRoot } from "./operation-mappers.js";
 import type { DbNasRootRow } from "./repository-rows.js";
 
+type DbNasRootConfigRow = Pick<
+  DbNasRootRow,
+  "id" | "name" | "path" | "enabled" | "mount_policy" | "expected_source" | "expected_uuid" | "expected_fstype"
+>;
+
 export function ensureNasRoots(db: SigmaDatabase, roots: NasRootConfig[]): void {
+  const storedRoots = db.prepare(`
+    SELECT id, name, path, enabled, mount_policy, expected_source, expected_uuid, expected_fstype
+    FROM nas_roots
+  `).all() as DbNasRootConfigRow[];
+  if (nasRootsMatchConfig(storedRoots, roots)) {
+    return;
+  }
+
   const now = new Date().toISOString();
   const existingRoot = db.prepare(
     "SELECT path, mount_policy, expected_source, expected_uuid, expected_fstype FROM nas_roots WHERE id = ?"
@@ -66,7 +79,31 @@ export function ensureNasRoots(db: SigmaDatabase, roots: NasRootConfig[]): void 
     disableMissing.run(now, ...items.map((root) => root.id));
   });
 
-  tx(roots);
+  tx.immediate(roots);
+}
+
+function nasRootsMatchConfig(storedRoots: DbNasRootConfigRow[], roots: NasRootConfig[]): boolean {
+  const configuredIds = new Set(roots.map((root) => root.id));
+  if (configuredIds.size !== roots.length) {
+    return false;
+  }
+
+  const storedById = new Map(storedRoots.map((root) => [root.id, root]));
+  const enabledRoots = storedRoots.filter((root) => root.enabled === 1);
+  if (enabledRoots.length !== roots.length || enabledRoots.some((root) => !configuredIds.has(root.id))) {
+    return false;
+  }
+
+  return roots.every((root) => {
+    const stored = storedById.get(root.id);
+    return stored?.enabled === 1
+      && stored.name === root.name
+      && stored.path === root.path
+      && stored.mount_policy === (root.mountPolicy ?? "optional")
+      && stored.expected_source === (root.expectedSource ?? null)
+      && stored.expected_uuid === (root.expectedUuid ?? null)
+      && stored.expected_fstype === (root.expectedFstype ?? null);
+  });
 }
 
 export function listNasRoots(db: SigmaDatabase): NasRootRecord[] {

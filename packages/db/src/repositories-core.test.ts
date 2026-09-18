@@ -108,6 +108,20 @@ describe("core repositories", () => {
     expect(listNasRoots(db).map((root) => root.id)).toEqual(["local"]);
   });
 
+  it("does not rewrite unchanged NAS root configuration", () => {
+    const sentinel = "2020-01-01T00:00:00.000Z";
+    db.prepare("UPDATE nas_roots SET updated_at = ? WHERE id = ?").run(sentinel, "local");
+
+    ensureNasRoots(db, [{ id: "local", name: "Local", path: tempDir }]);
+    expect(db.prepare("SELECT updated_at FROM nas_roots WHERE id = ?").pluck().get("local")).toBe(sentinel);
+
+    ensureNasRoots(db, [{ id: "local", name: "Primary", path: tempDir }]);
+    expect(db.prepare("SELECT name, updated_at FROM nas_roots WHERE id = ?").get("local")).toMatchObject({
+      name: "Primary",
+      updated_at: expect.not.stringMatching(/^2020-/u)
+    });
+  });
+
   it("guards terminal job status transitions", () => {
     const session = createSession(db, { rootId: "local" });
     const { job } = createUserMessageAndJob(db, {
