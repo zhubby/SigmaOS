@@ -1,6 +1,6 @@
 {
   "name": "@sigmaos/downloader",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "type": "module",
   "exports": {
     ".": "./src/downloader.ts"
@@ -12,8 +12,8 @@
     "build": "cd ../.. && tsup apps/downloader/src/index.ts --format esm --platform node --target node22 --external=better-sqlite3 --out-dir apps/downloader/dist"
   },
   "dependencies": {
-    "@sigmaos/db": "0.4.1",
-    "@sigmaos/nas-tools": "0.4.1",
-    "@sigmaos/shared": "0.4.1"
+    "@sigmaos/db": "0.4.2",
+    "@sigmaos/nas-tools": "0.4.2",
+    "@sigmaos/shared": "0.4.2"
   }
 }

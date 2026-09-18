@@ -1,3 +1,9 @@
+sigmaos (0.4.2) unstable; urgency=medium
+
+  * Add persistent operation notifications and keep internal actions out of agent chat.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Fri, 18 Sep 2026 05:48:25 +0000
+
 sigmaos (0.4.1) unstable; urgency=medium
 
   * Harden appliance workflows and unify the Agent and workspace interface.
