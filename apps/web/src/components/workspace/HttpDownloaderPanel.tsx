@@ -291,6 +291,7 @@ export function HttpDownloaderPanel({
             onClick={openCreateDialog}
             disabled={storagePoolsLoading}
             aria-busy={storagePoolsLoading || undefined}
+            aria-label={t(storagePoolsLoading ? "workspace.downloads.loadingStoragePools" : "workspace.downloads.newDownload")}
             data-state={storagePoolsLoading ? "loading" : mountedPools.length ? "ready" : "needs-storage"}
             title={storagePoolsLoading
               ? t("workspace.downloads.loadingStoragePools")

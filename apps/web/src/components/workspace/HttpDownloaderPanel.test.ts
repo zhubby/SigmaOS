@@ -23,6 +23,7 @@ describe("HttpDownloaderPanel download creation", () => {
 
     expect(button).toContain("disabled");
     expect(button).toContain('aria-busy="true"');
+    expect(button).toContain('aria-label="Loading storage"');
     expect(button).toContain('data-state="loading"');
     expect(button).toContain("is-spinning");
     expect(button).toContain("Loading storage");
@@ -33,6 +34,7 @@ describe("HttpDownloaderPanel download creation", () => {
 
     expect(button).not.toContain("disabled");
     expect(button).not.toContain("aria-busy");
+    expect(button).toContain('aria-label="New download"');
     expect(button).toContain('data-state="needs-storage"');
     expect(button).toContain("Configure a mounted storage pool");
     expect(button).toContain("New download");
@@ -43,6 +45,7 @@ describe("HttpDownloaderPanel download creation", () => {
 
     expect(button).not.toContain("disabled");
     expect(button).not.toContain("aria-busy");
+    expect(button).toContain('aria-label="New download"');
     expect(button).toContain('data-state="ready"');
     expect(button).toContain("New download");
   });
