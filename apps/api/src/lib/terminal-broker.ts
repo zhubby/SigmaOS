@@ -108,6 +108,7 @@ class BrokerTerminalPty implements TerminalPty {
     if (this.closed) {
       return;
     }
+    this.send({ type: "close" });
     this.closed = true;
     this.exited = true;
     this.socket.end();

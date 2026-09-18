@@ -60,6 +60,11 @@ export async function processNextJob({ db, config, agentRunner, allowLocalFallba
     }
   });
 
+  const isCancelled = () => {
+    const currentJob = getJob(db, job.id);
+    return !currentJob || currentJob.status === "cancelled";
+  };
+
   try {
     const shouldUseLocalFallback =
       allowLocalFallback === true || process.env.SIGMAOS_ENABLE_LOCAL_AGENT_FALLBACK === "1";
@@ -76,7 +81,7 @@ export async function processNextJob({ db, config, agentRunner, allowLocalFallba
               payload: event.payload
             });
           },
-          isCancelled: () => getJob(db, job.id)?.status === "cancelled",
+          isCancelled,
           queryIndex: async (query, currentPath) => {
             try {
               return queryIndexedText(db, {
@@ -113,7 +118,7 @@ export async function processNextJob({ db, config, agentRunner, allowLocalFallba
               payload: event.payload
             });
           },
-          isCancelled: () => getJob(db, job.id)?.status === "cancelled",
+          isCancelled,
           saveProviderSession: (providerSession) => {
             saveAgentProviderSession(db, {
               sessionId: session.id,

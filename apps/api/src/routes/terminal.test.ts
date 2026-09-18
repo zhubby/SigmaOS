@@ -49,12 +49,13 @@ describe("terminal WebSocket", () => {
 
     socket.close();
     await socketEvent(socket, "close");
+    await waitFor(() => runtime.terminal.disconnected);
     expect(runtime.terminal.killed).toBe(false);
-    await server.close();
     expect(runtime.terminal.disconnected).toBe(true);
+    await server.close();
   });
 
-  it("reuses detached sessions and replays output after reconnecting", async () => {
+  it("releases the broker attachment and reconnects the persistent tmux session", async () => {
     const runtime = new FakeTerminalRuntime();
     const server = await buildServer({ config: testConfig(), db, terminal: runtime });
     const socket = await connect(server);
@@ -63,18 +64,17 @@ describe("terminal WebSocket", () => {
 
     socket.close();
     await socketEvent(socket, "close");
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(runtime.terminal.killed).toBe(false);
-    runtime.terminal.emitData("during-refresh");
+    await waitFor(() => runtime.terminals[0]!.disconnected);
+    expect(runtime.terminals[0]!.killed).toBe(false);
 
     const reconnect = await connect(server, "local", String(sessionId));
     expect(await nextMessage(reconnect)).toEqual({ type: "ready", cwd: os.homedir(), sessionId });
-    expect(await nextMessage(reconnect)).toEqual({ type: "output", data: "during-refresh" });
-    expect(runtime.spawnCount).toBe(1);
+    expect(runtime.spawnCount).toBe(2);
+    expect(runtime.optionsHistory[0]!.sessionName).toBe(runtime.optionsHistory[1]!.sessionName);
 
     reconnect.send(JSON.stringify({ type: "close" }));
     await socketEvent(reconnect, "close");
-    expect(runtime.terminal.killed).toBe(true);
+    expect(runtime.terminals[1]!.killed).toBe(true);
     await server.close();
   });
 
@@ -130,12 +130,14 @@ class FakeTerminalRuntime implements TerminalRuntime {
   spawnCount = 0;
   shell = "";
   options: Parameters<TerminalRuntime["spawn"]>[2] | null = null;
+  optionsHistory: Array<Parameters<TerminalRuntime["spawn"]>[2]> = [];
 
   spawn(shell: string, _args: string[], options: Parameters<TerminalRuntime["spawn"]>[2]): TerminalPty {
     this.spawned = true;
     this.spawnCount += 1;
     this.shell = shell;
     this.options = options;
+    this.optionsHistory.push(options);
     if (this.spawnCount > 1) {
       this.terminal = new FakeTerminal();
       this.terminals.push(this.terminal);

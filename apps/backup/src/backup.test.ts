@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ensureNasRoots, openSigmaDb, type SigmaDatabase } from "@sigmaos/db";
 import type { SigmaConfig } from "@sigmaos/shared";
-import { initBackup, runBackup, validateBackup } from "./backup.js";
+import { initBackup, runBackup, shouldSkipScheduledBackup, validateBackup } from "./backup.js";
 
 let tempDir: string | undefined;
 let db: SigmaDatabase | undefined;
@@ -36,6 +36,14 @@ function config(root: string, repository: string, passwordFile: string): SigmaCo
 }
 
 describe("backup workflow", () => {
+  it("skips scheduled runs when backup is disabled", () => {
+    const cfg = config("/tmp/root", "/tmp/repo", "/tmp/password");
+
+    expect(shouldSkipScheduledBackup({ ...cfg, backup: { ...cfg.backup!, enabled: false } }, "run")).toBe(true);
+    expect(shouldSkipScheduledBackup(cfg, "run")).toBe(false);
+    expect(shouldSkipScheduledBackup({ ...cfg, backup: { ...cfg.backup!, enabled: false } }, "validate")).toBe(false);
+  });
+
   it("validates credentials and records a completed restic run", async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-backup-"));
     const root = path.join(tempDir, "root");

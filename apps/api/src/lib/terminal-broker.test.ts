@@ -92,7 +92,7 @@ describe("terminal broker client", () => {
     await waitFor(() => requests.some((request) => request.type === "close"));
   });
 
-  it("disconnects without sending a destroy request", async () => {
+  it("disconnects the broker attachment without destroying the tmux session", async () => {
     const socketPath = await createSocketPath();
     const requests: TerminalBrokerRequest[] = [];
     let disconnected = false;
@@ -134,9 +134,9 @@ describe("terminal broker client", () => {
     });
 
     terminal.disconnect();
-    await waitFor(() => disconnected);
+    await waitFor(() => disconnected && requests.some((request) => request.type === "close"));
     expect(requests).not.toContainEqual({ type: "close", destroy: true });
-    expect(requests).not.toContainEqual({ type: "close" });
+    expect(requests).toContainEqual({ type: "close" });
   });
 
   it("rejects when the broker closes before ready", async () => {

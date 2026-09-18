@@ -6,11 +6,12 @@ import type { ApiRouteContext } from "../context.js";
 export function registerBackupRoutes(server: FastifyInstance, { db, config }: ApiRouteContext): void {
   server.get("/api/backup/status", async () => {
     const repositoryAvailable = Boolean(config.backup?.repositoryPath) && await access(config.backup!.repositoryPath!, fsConstants.R_OK | fsConstants.W_OK).then(() => true).catch(() => false);
+    const passwordConfigured = Boolean(config.backup?.passwordFile) && await access(config.backup!.passwordFile!, fsConstants.R_OK).then(() => true).catch(() => false);
     return {
     enabled: Boolean(config.backup?.enabled),
     repositoryConfigured: Boolean(config.backup?.repositoryPath),
     repositoryAvailable,
-    passwordConfigured: Boolean(config.backup?.passwordFile),
+    passwordConfigured,
     repositoryPath: config.backup?.repositoryPath ?? null,
     stagingPath: config.backup?.stagingPath ?? null,
     runs: listBackupRuns(db, 30),

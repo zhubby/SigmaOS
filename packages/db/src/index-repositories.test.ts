@@ -130,6 +130,48 @@ describe("SQLite schema and repositories", () => {
     expect(db.prepare("SELECT COUNT(*) FROM index_runs WHERE root_id = ?").pluck().get("local")).toBe(2);
   });
 
+  it("measures freshness from the latest successful scan even when no files changed", () => {
+    const successful = startIndexRun(db, {
+      rootId: "local",
+      now: new Date("2026-02-01T00:00:00.000Z")
+    });
+    finishIndexRun(db, {
+      runId: successful.id,
+      status: "completed",
+      scanned: 3,
+      indexed: 0,
+      unchanged: 3,
+      removed: 0,
+      skipped: 0,
+      failed: 0,
+      finishedAt: new Date("2026-02-01T00:02:00.000Z")
+    });
+
+    expect(
+      getIndexRootStatus(db, "local", new Date("2026-02-01T00:32:00.000Z")).metrics?.freshnessMs
+    ).toBe(30 * 60 * 1000);
+
+    const failed = startIndexRun(db, {
+      rootId: "local",
+      now: new Date("2026-02-01T00:35:00.000Z")
+    });
+    finishIndexRun(db, {
+      runId: failed.id,
+      status: "failed",
+      scanned: 1,
+      indexed: 0,
+      unchanged: 0,
+      removed: 0,
+      skipped: 0,
+      failed: 1,
+      finishedAt: new Date("2026-02-01T00:36:00.000Z")
+    });
+
+    expect(
+      getIndexRootStatus(db, "local", new Date("2026-02-01T00:42:00.000Z")).metrics?.freshnessMs
+    ).toBe(40 * 60 * 1000);
+  });
+
   it("rejects index failure rows whose root does not match the run", () => {
     ensureNasRoots(db, [
       { id: "local", name: "Local", path: tempDir },

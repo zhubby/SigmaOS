@@ -95,7 +95,7 @@ export function hasActiveJobsForSession(db: SigmaDatabase, sessionId: string): b
       SELECT 1 AS marker
       FROM jobs
       WHERE session_id = ?
-        AND status IN ('queued', 'running')
+        AND status IN ('queued', 'running', 'waiting_approval')
       LIMIT 1
     `)
     .get(sessionId) as { marker: number } | undefined;

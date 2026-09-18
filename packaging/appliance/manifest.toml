@@ -47,8 +47,10 @@ base = [
   "libvirt-daemon-system",
   "libvirt-clients",
   "qemu-system-arm",
+  "qemu-efi-aarch64",
   "qemu-utils",
-  "virtinst"
+  "virtinst",
+  "ipxe-qemu"
 ]
 ai = [
   "pi"

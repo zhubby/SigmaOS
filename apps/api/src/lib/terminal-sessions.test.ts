@@ -41,7 +41,7 @@ describe("TerminalSessionManager", () => {
     lease.release();
   });
 
-  it("replays a truncation marker after detached output exceeds the buffer", async () => {
+  it("disconnects the broker attachment on browser detach and reconnects the persistent session", async () => {
     const runtime = new FakeRuntime();
     const manager = new TerminalSessionManager(runtime, 60_000, 4);
     const lease = await manager.acquire("root", firstSessionId);
@@ -51,35 +51,35 @@ describe("TerminalSessionManager", () => {
     lease.release(true);
     manager.detach(firstSessionId, firstSocket);
 
-    runtime.terminals[0]!.emitData("x".repeat(200 * 1024));
-    runtime.terminals[0]!.emitData("y".repeat(100 * 1024));
+    expect(runtime.terminals[0]!.disconnected).toBe(true);
+    expect(runtime.terminals[0]!.killed).toBe(false);
+
+    const reconnect = await manager.acquire("root", firstSessionId);
     const reconnectSocket = new FakeSocket();
     const reconnectMessages: Array<Record<string, unknown>> = [];
-    expect(lease.session.attach(reconnectSocket, collect(reconnectMessages))).toBe(true);
+    expect(reconnect.session.attach(reconnectSocket, collect(reconnectMessages))).toBe(true);
 
     expect(reconnectMessages[0]).toMatchObject({ type: "ready", sessionId: firstSessionId });
-    expect(reconnectMessages[1]).toMatchObject({ type: "output", truncated: true });
-    expect(String(reconnectMessages[1]!.data)).toContain("output omitted");
-    lease.release(true);
+    expect(runtime.spawnCount).toBe(2);
+    reconnect.release(true);
     manager.disconnectAll();
   });
 
-  it("evicts the oldest detached session before rejecting at capacity", async () => {
+  it("rejects at capacity while all sessions are attached", async () => {
     const runtime = new FakeRuntime();
     const manager = new TerminalSessionManager(runtime, 60_000, 2);
     const first = await manager.acquire("root", firstSessionId);
     first.release(true);
     const firstSocket = new FakeSocket();
     expect(first.session.attach(firstSocket, () => true)).toBe(true);
-    manager.detach(firstSessionId, firstSocket);
 
     const second = await manager.acquire("root", secondSessionId);
     second.release(true);
-    const third = await manager.acquire("root", thirdSessionId);
+    const secondSocket = new FakeSocket();
+    expect(second.session.attach(secondSocket, () => true)).toBe(true);
 
-    expect(runtime.terminals[0]!.killed).toBe(true);
-    expect(runtime.spawnCount).toBe(3);
-    third.release(true);
+    await expect(manager.acquire("root", thirdSessionId)).rejects.toThrow("Terminal session limit reached");
+    expect(runtime.spawnCount).toBe(2);
     manager.disconnectAll();
   });
 });

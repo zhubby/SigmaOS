@@ -1,13 +1,15 @@
 import { ensureNasRoots, openSigmaDb } from "@sigmaos/db";
 import { loadConfig } from "@sigmaos/shared";
-import { checkBackup, initBackup, restoreBackup, runBackup, validateBackup } from "./backup.js";
+import { checkBackup, initBackup, restoreBackup, runBackup, shouldSkipScheduledBackup, validateBackup } from "./backup.js";
 
 const config = loadConfig();
 const db = openSigmaDb(config.databasePath);
 ensureNasRoots(db, config.nasRoots);
 const [command, ...rest] = process.argv.slice(2);
 try {
-  if (command === "validate") {
+  if (shouldSkipScheduledBackup(config, command)) {
+    console.log(JSON.stringify({ event: "backup.run.skipped", reason: "disabled" }));
+  } else if (command === "validate") {
     const result = await validateBackup({ db, config });
     console.log(JSON.stringify(result));
     if (!result.ok) process.exitCode = 1;

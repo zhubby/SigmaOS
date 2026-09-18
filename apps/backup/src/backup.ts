@@ -24,6 +24,10 @@ export interface BackupDependencies {
   mountCommandRunner?: MountCommandRunner;
 }
 
+export function shouldSkipScheduledBackup(config: SigmaConfig, command: string | undefined): boolean {
+  return command === "run" && !config.backup?.enabled;
+}
+
 export async function validateBackup(input: BackupDependencies): Promise<{ ok: boolean; issues: string[] }> {
   const config = input.config.backup;
   if (!config?.enabled) return { ok: true, issues: [] };

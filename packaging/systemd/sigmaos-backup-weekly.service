@@ -2,6 +2,7 @@
 Description=SigmaOS weekly restic check and retention
 After=local-fs.target
 RequiresMountsFor=/srv/nas /srv/backup
+ConditionPathExists=/etc/sigmaos/restic-password
 
 [Service]
 Type=oneshot

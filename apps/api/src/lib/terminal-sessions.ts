@@ -151,7 +151,14 @@ export class TerminalSessionManager {
   }
 
   detach(sessionId: string, socket: TerminalSocket): void {
-    this.sessions.get(sessionId)?.detach(socket);
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return;
+    }
+    session.detach(socket);
+    if (!session.hasActiveSocket()) {
+      session.disconnect();
+    }
   }
 
   close(sessionId: string, rootId?: string): boolean {

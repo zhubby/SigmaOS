@@ -102,6 +102,7 @@ class BrokerConnection {
     socket.setNoDelay(true);
     socket.setEncoding("utf8");
     socket.on("data", (chunk: string) => this.receive(chunk));
+    socket.on("end", () => this.close());
     socket.on("close", () => this.close());
     socket.on("error", () => this.close());
   }

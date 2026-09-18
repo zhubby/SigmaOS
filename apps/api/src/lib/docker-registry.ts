@@ -42,11 +42,12 @@ export function findDockerRegistryCredential(
 }
 
 export function dockerRegistryAuthHeader(record: DockerRegistryCredentialRecord): string {
-  return Buffer.from(JSON.stringify({
+  const encoded = Buffer.from(JSON.stringify({
     username: record.username,
     password: record.password,
     serveraddress: record.serverAddress
-  }), "utf8").toString("base64url");
+  }), "utf8").toString("base64");
+  return encoded.replaceAll("+", "-").replaceAll("/", "_");
 }
 
 export function dockerConfigAuths(records: DockerRegistryCredentialRecord[]): Record<string, { auth: string }> {

@@ -156,8 +156,9 @@ install_optional_runtime() {
     runtime_packages="$runtime_packages docker.io docker-cli docker-compose"
   fi
   if [ "$VM_ENABLED" = "1" ]; then
+    runtime_packages="$runtime_packages ipxe-qemu"
     case "$ARCH" in
-      arm64) runtime_packages="$runtime_packages libvirt-daemon-system libvirt-clients qemu-system-arm qemu-utils virtinst" ;;
+      arm64) runtime_packages="$runtime_packages libvirt-daemon-system libvirt-clients qemu-system-arm qemu-efi-aarch64 qemu-utils virtinst" ;;
       amd64) runtime_packages="$runtime_packages libvirt-daemon-system libvirt-clients qemu-system-x86 qemu-utils virtinst" ;;
     esac
   fi

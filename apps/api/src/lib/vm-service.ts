@@ -1,8 +1,9 @@
 import { execFile } from "node:child_process";
-import { access, realpath } from "node:fs/promises";
+import { access, chmod, realpath, unlink } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { promisify } from "node:util";
+import { XMLParser } from "fast-xml-parser";
 import type {
   SigmaConfig,
   VmConfig,
@@ -131,12 +132,30 @@ export async function applyVmOperation(
     case "resume": await runVirsh(runner, vmConfig, ["resume", domain]); break;
     case "reset": await runVirsh(runner, vmConfig, ["reset", domain]); break;
     case "snapshot":
-      await runVirsh(runner, vmConfig, ["snapshot-create-as", domain, requiredSnapshot(proposal), "--atomic"]);
-      break;
-    case "delete":
+      await runVirsh(runner, vmConfig, [
+        "snapshot-create-as",
+        domain,
+        requiredSnapshot(proposal),
+        "--disk-only",
+        "--atomic"
+      ]);
+      return { action: proposal.action, domainName: domain, snapshotMode: "disk-only" };
+    case "delete": {
+      const diskPaths = await collectDomainDiskChain(vmConfig, runner, domain);
       await runVirsh(runner, vmConfig, ["destroy", domain]).catch(() => undefined);
-      await runVirsh(runner, vmConfig, ["undefine", domain, "--remove-all-storage"]);
-      break;
+      await runVirsh(runner, vmConfig, [
+        "undefine",
+        domain,
+        "--managed-save",
+        "--snapshots-metadata",
+        "--checkpoints-metadata",
+        "--nvram"
+      ]);
+      await Promise.all(diskPaths.map((diskPath) => unlink(diskPath).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT") throw error;
+      })));
+      return { action: proposal.action, domainName: domain, removedDiskPaths: diskPaths.length };
+    }
     case "create": {
       const diskPath = proposal.diskPath ?? path.join(vmConfig.storagePath, `${domain}.qcow2`);
       await assertDiskPath(vmConfig.storagePath, diskPath);
@@ -153,6 +172,7 @@ export async function applyVmOperation(
           throw new Error("Existing virtual machine disk was not found");
         }
       }
+      await chmod(diskPath, 0o600);
       const args = buildVmCreateArgs(vmConfig, domain, diskPath, proposal);
       await runner.run("virt-install", args);
       break;
@@ -304,5 +324,37 @@ async function assertAllowedIso(config: VmConfig, isoPath: string) {
     }
   }
   throw new Error("ISO path must stay inside a configured ISO root");
+}
+async function collectDomainDiskChain(config: VmConfig, runner: VmCommandRunner, domain: string): Promise<string[]> {
+  const xml = await runVirsh(runner, config, ["dumpxml", domain]);
+  type DiskNode = {
+    "@_device"?: string;
+    "@_type"?: string;
+    source?: { "@_file"?: string };
+    backingStore?: DiskNode;
+  };
+  const parsed = new XMLParser({ ignoreAttributes: false, processEntities: false }).parse(xml) as {
+    domain?: { devices?: { disk?: DiskNode | DiskNode[] } };
+  };
+  const disks = parsed.domain?.devices?.disk;
+  const fileDisks = (Array.isArray(disks) ? disks : disks ? [disks] : [])
+    .filter((disk) => disk["@_device"] === "disk" && disk["@_type"] === "file");
+  if (!fileDisks.length) throw new Error("Unable to identify managed virtual machine disks");
+
+  const diskPaths = new Set<string>();
+  for (const disk of fileDisks) {
+    let current: DiskNode | undefined = disk;
+    while (current?.source?.["@_file"]) {
+      diskPaths.add(await managedDiskPath(config.storagePath, current.source["@_file"]));
+      current = current.backingStore;
+    }
+  }
+  return [...diskPaths];
+}
+async function managedDiskPath(root: string, candidate: string): Promise<string> {
+  const rootReal = await realpath(root);
+  const targetReal = await realpath(candidate);
+  if (!isInside(rootReal, targetReal)) throw new Error("Virtual machine disk must stay inside the configured storage path");
+  return targetReal;
 }
 function isInside(root: string, candidate: string) { const base = path.resolve(root); const target = path.resolve(candidate); return target === base || target.startsWith(`${base}${path.sep}`); }

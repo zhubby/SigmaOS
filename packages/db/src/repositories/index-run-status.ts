@@ -81,10 +81,17 @@ function countConsecutiveIndexFailures(db: SigmaDatabase, rootId: string): numbe
 
 function getIndexFreshnessMs(db: SigmaDatabase, rootId: string, now = new Date()): number | null {
   const row = db
-    .prepare("SELECT MAX(indexed_at) AS indexed_at FROM indexed_files WHERE root_id = ?")
-    .get(rootId) as { indexed_at: string | null } | undefined;
-  if (!row?.indexed_at) return null;
-  const timestamp = Date.parse(row.indexed_at);
+    .prepare(`
+      SELECT MAX(finished_at) AS finished_at
+      FROM (
+        SELECT finished_at FROM index_runs WHERE root_id = ? AND status = 'completed'
+        UNION ALL
+        SELECT finished_at FROM index_run_history WHERE root_id = ? AND status = 'completed'
+      )
+    `)
+    .get(rootId, rootId) as { finished_at: string | null } | undefined;
+  if (!row?.finished_at) return null;
+  const timestamp = Date.parse(row.finished_at);
   return Number.isFinite(timestamp) ? Math.max(0, now.getTime() - timestamp) : null;
 }
 

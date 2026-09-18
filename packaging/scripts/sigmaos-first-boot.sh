@@ -76,7 +76,8 @@ if [ -z "$NAS_ROOT_PATH" ]; then
   NAS_ROOT_PATH="$(ask_default "NAS root path" "/srv/nas")"
 fi
 
-install -d -m 0750 "$DATA_DIR" "$DATA_DIR/trash" "$DATA_DIR/pi-sessions" "$DATA_DIR/reports" "$DATA_DIR/backup-staging" "$DATA_DIR/vmstore" /srv/backup
+install -d -m 0750 "$DATA_DIR" "$DATA_DIR/trash" "$DATA_DIR/pi-sessions" "$DATA_DIR/reports" "$DATA_DIR/backup-staging" /srv/backup
+install -d -m 0711 "$DATA_DIR/vmstore"
 install -d -m 0755 "$(dirname "$CONFIG_PATH")" "$NAS_ROOT_PATH"
 
 umask 077

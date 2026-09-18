@@ -507,7 +507,10 @@ async function withApproval(
 async function waitForApprovalDecision(input: PiAgentRuntimeInput, approvalId: string): Promise<ApprovalStatus> {
   while (!input.isCancelled()) {
     const status = await input.getApprovalStatus(approvalId);
-    if (status && status !== "pending") {
+    if (status === null) {
+      return "expired";
+    }
+    if (status !== "pending") {
       return status;
     }
     await sleep(APPROVAL_POLL_MS);

@@ -46,12 +46,17 @@ describe("Docker registry credentials", () => {
   });
 
   it("encodes Engine and Compose authentication without exposing secrets publicly", () => {
-    const decoded = JSON.parse(Buffer.from(dockerRegistryAuthHeader(privateRegistry), "base64url").toString("utf8"));
+    const authHeader = dockerRegistryAuthHeader(privateRegistry);
+    const decoded = JSON.parse(Buffer.from(authHeader, "base64url").toString("utf8"));
     expect(decoded).toEqual({
       username: "builder",
       password: "private-token",
       serveraddress: "registry.example.com:5000"
     });
+    const paddedRecord = registry("padded", "Padded", "registry.example.com", "u", "p");
+    expect(dockerRegistryAuthHeader(paddedRecord)).toMatch(/==$/u);
+    expect(dockerRegistryAuthHeader(paddedRecord).length % 4).toBe(0);
+    expect(authHeader).not.toMatch(/[+/]/u);
     expect(dockerConfigAuths(records)).toEqual({
       "https://index.docker.io/v1/": { auth: Buffer.from("hub-user:hub-token").toString("base64") },
       "registry.example.com:5000": { auth: Buffer.from("builder:private-token").toString("base64") }

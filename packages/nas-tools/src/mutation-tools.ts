@@ -117,7 +117,7 @@ export async function restoreTrashPath(
   await assertNoSymlinkPathSegments(target.rootRealPath, path.dirname(target.absolutePath));
   await assertTargetDoesNotExist(target.absolutePath);
   await mkdir(path.dirname(target.absolutePath), { recursive: true });
-  await rename(trash.realPath, target.absolutePath);
+  await movePath(trash.realPath, target.absolutePath);
 
   return {
     proposal: {
@@ -240,7 +240,7 @@ async function applyMove(root: NasRootRecord, proposal: FileOperationProposal): 
   await assertTransferDestinationIsValid(source, target.absolutePath);
   await assertTargetDoesNotExist(target.absolutePath);
   await mkdir(path.dirname(target.absolutePath), { recursive: true });
-  await rename(source.realPath, target.absolutePath);
+  await movePath(source.realPath, target.absolutePath);
   return {
     proposal,
     sourcePath: source.relativePath,
@@ -320,7 +320,7 @@ async function applyTrash(
   const source = await resolveSafeExistingPath(root.path, proposal.sourcePath);
   const trash = trashPathFor(trashRootPath, root.id, source.relativePath);
   await mkdir(path.dirname(trash.absoluteTrashPath), { recursive: true });
-  await rename(source.realPath, trash.absoluteTrashPath);
+  await movePath(source.realPath, trash.absoluteTrashPath);
   return {
     proposal: {
       ...proposal,
@@ -618,7 +618,7 @@ async function rollbackMove(
   await assertNoSymlinkPathSegments(original.rootRealPath, path.dirname(original.absolutePath));
   await assertTargetDoesNotExist(original.absolutePath);
   await mkdir(path.dirname(original.absolutePath), { recursive: true });
-  await rename(current.realPath, original.absolutePath);
+  await movePath(current.realPath, original.absolutePath);
 
   return {
     operation: operation.operation,
@@ -645,7 +645,7 @@ async function rollbackByTrashingTarget(
   const target = await resolveSafeExistingPath(root.path, targetPath);
   const trash = trashPathFor(trashRootPath, root.id, target.relativePath);
   await mkdir(path.dirname(trash.absoluteTrashPath), { recursive: true });
-  await rename(target.realPath, trash.absoluteTrashPath);
+  await movePath(target.realPath, trash.absoluteTrashPath);
 
   return {
     operation: "trash",
@@ -657,4 +657,42 @@ async function rollbackByTrashingTarget(
       absoluteTrashPath: trash.absoluteTrashPath
     }
   };
+}
+
+async function movePath(sourcePath: string, targetPath: string): Promise<void> {
+  try {
+    await rename(sourcePath, targetPath);
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EXDEV") {
+      throw error;
+    }
+  }
+
+  const temporaryTargetPath = `${targetPath}.${randomUUID()}.tmp`;
+  try {
+    await cp(sourcePath, temporaryTargetPath, {
+      recursive: true,
+      errorOnExist: true,
+      force: false,
+      preserveTimestamps: true
+    });
+    await rename(temporaryTargetPath, targetPath);
+    try {
+      await rm(sourcePath, { recursive: true });
+    } catch (sourceRemovalError) {
+      try {
+        await rm(targetPath, { recursive: true, force: true });
+      } catch (targetCleanupError) {
+        throw new AggregateError(
+          [sourceRemovalError, targetCleanupError],
+          "Cross-device move failed and the copied target could not be cleaned up"
+        );
+      }
+      throw sourceRemovalError;
+    }
+  } catch (error) {
+    await rm(temporaryTargetPath, { recursive: true, force: true });
+    throw error;
+  }
 }

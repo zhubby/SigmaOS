@@ -60,6 +60,8 @@ describe("native packaging artifacts", () => {
       "BindReadOnlyPaths=-/run/libvirt/libvirt-sock"
     );
     await expect(readPackagingFile("systemd", "sigmaos-backup-daily.service")).resolves.toContain("LoadCredential=restic-password");
+    await expect(readPackagingFile("systemd", "sigmaos-backup-daily.service")).resolves.toContain("ConditionPathExists=/etc/sigmaos/restic-password");
+    await expect(readPackagingFile("systemd", "sigmaos-backup-weekly.service")).resolves.toContain("ConditionPathExists=/etc/sigmaos/restic-password");
     await expect(readPackagingFile("systemd", "sigmaos-backup-weekly.timer")).resolves.toContain("OnCalendar=Sun");
   });
 
@@ -170,6 +172,8 @@ describe("native packaging artifacts", () => {
     const buildDeb = await readPackagingFile("scripts", "build-deb.sh");
     const rules = await readPackagingFile("debian", "rules");
     const control = await readPackagingFile("debian", "control");
+    const postinst = await readPackagingFile("debian", "postinst");
+    const firstBoot = await readPackagingFile("scripts", "sigmaos-first-boot.sh");
 
     expect(installer).toContain("dpkg --print-architecture");
     expect(installer).toContain("SIGMAOS_APT_MIRROR");
@@ -202,6 +206,8 @@ describe("native packaging artifacts", () => {
     expect(installer).toContain("--force-confold");
     expect(installer).toContain("--reinstall");
     expect(installer).toContain("qemu-system-arm");
+    expect(installer).toContain("qemu-efi-aarch64");
+    expect(installer).toContain("ipxe-qemu");
     expect(installer).toContain("net-autostart default");
     expect(installer).toContain("net-start default");
     expect(installer).toContain("libvirt-daemon-system");
@@ -215,6 +221,10 @@ describe("native packaging artifacts", () => {
     expect(rules).toContain("npm ci --registry");
     expect(control).toContain("Build-Depends: debhelper-compat (= 13), nodejs, npm");
     expect(control).toContain("Depends: nodejs (>= 20)");
+    expect(control).toContain("qemu-efi-aarch64");
+    expect(control).toContain("ipxe-qemu");
+    expect(postinst).toContain("-m 0711 /var/lib/sigmaos/vmstore");
+    expect(firstBoot).toContain("-m 0711 \"$DATA_DIR/vmstore\"");
   });
 
   it("ships a loopback API reverse proxy for LAN access", async () => {

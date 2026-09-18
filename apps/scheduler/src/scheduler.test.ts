@@ -219,6 +219,53 @@ describe("scheduler", () => {
     ]));
   });
 
+  it("does not report an unchanged successful scan as stale", async () => {
+    const now = new Date("2026-01-03T00:00:00.000Z");
+    config = {
+      ...config,
+      health: {
+        staleIndexWarningMs: 2 * 60 * 60 * 1000,
+        staleIndexCriticalMs: 6 * 60 * 60 * 1000,
+        stalledRunMs: 15 * 60 * 1000,
+        consecutiveFailureThreshold: 2,
+        backupStaleMs: 26 * 60 * 60 * 1000
+      }
+    };
+    db.prepare("UPDATE indexed_files SET indexed_at = ? WHERE root_id = ?")
+      .run("2025-12-01T00:00:00.000Z", "local");
+    upsertRootReadiness(db, {
+      rootId: "local",
+      status: "ready",
+      checkedAt: now.toISOString(),
+      reason: null,
+      source: null,
+      uuid: null,
+      fstype: null
+    });
+    const run = startIndexRun(db, {
+      rootId: "local",
+      now: new Date("2026-01-02T23:29:00.000Z")
+    });
+    finishIndexRun(db, {
+      runId: run.id,
+      status: "completed",
+      scanned: 2,
+      indexed: 0,
+      unchanged: 2,
+      removed: 0,
+      skipped: 0,
+      failed: 0,
+      finishedAt: new Date("2026-01-02T23:30:00.000Z")
+    });
+
+    const summary = await runHealthOnce({ db, config, now });
+
+    expect(summary.indexerFreshnessMs).toBe(30 * 60 * 1000);
+    expect(summary.issues).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "stale_index" })
+    ]));
+  });
+
   it("reports backup failures and repository check failures", async () => {
     const backupRepository = path.join(tempDir, "backup-repository");
     await mkdir(backupRepository);

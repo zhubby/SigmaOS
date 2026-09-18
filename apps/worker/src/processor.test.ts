@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createSession,
   createUserMessageAndJob,
+  deleteSession,
   ensureNasRoots,
   getAgentProviderSession,
   getJob,
@@ -108,6 +109,21 @@ describe("worker processor", () => {
       "agent.failed",
       "job.failed"
     ]);
+  });
+
+  it("treats a cascaded job record as cancellation", async () => {
+    const session = createSession(db, { rootId: "local" });
+    createUserMessageAndJob(db, {
+      sessionId: session.id,
+      content: "List files"
+    });
+    const runner: PiAgentRunner = async (input) => {
+      expect(deleteSession(db, session.id)).toBe(true);
+      expect(input.isCancelled()).toBe(true);
+      return { status: "cancelled" };
+    };
+
+    await expect(processNextJob({ db, config: testConfig(), agentRunner: runner })).resolves.toBe(true);
   });
 
   it("stores mutation proposals and leaves files unchanged while waiting for approval", async () => {

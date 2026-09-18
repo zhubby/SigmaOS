@@ -1,9 +1,9 @@
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NasRootRecord } from "@sigmaos/shared";
 import {
   applyFileMutation,
@@ -14,6 +14,14 @@ import {
   rollbackFileMutation,
   validateArchiveEntries
 } from "./mutation-tools.js";
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...fs,
+    rename: vi.fn((...args: Parameters<typeof fs.rename>) => fs.rename(...args))
+  };
+});
 
 const execFileAsync = promisify(execFile);
 
@@ -244,6 +252,41 @@ describe("approval-gated mutation tools", () => {
 
     expect(result.metadata.trashEntryId).toEqual(expect.any(String));
     await expect(stat(String(result.metadata.absoluteTrashPath))).resolves.toBeTruthy();
+  });
+
+  it("moves directories to trash and restores them across filesystems", async () => {
+    await mkdir(path.join(rootDir, "folder"));
+    await writeFile(path.join(rootDir, "folder", "nested.txt"), "cross-device");
+    const crossDeviceError = Object.assign(new Error("cross-device link not permitted"), {
+      code: "EXDEV"
+    });
+    vi.mocked(rename).mockRejectedValueOnce(crossDeviceError);
+
+    const trashed = await applyFileMutation(
+      root,
+      {
+        operation: "trash",
+        rootId: root.id,
+        sourcePath: "folder",
+        risk: "medium",
+        reversible: true,
+        summary: "Trash folder"
+      },
+      trashDir
+    );
+    const trashPath = String(trashed.metadata.absoluteTrashPath);
+
+    await expect(stat(path.join(rootDir, "folder"))).rejects.toThrow();
+    await expect(readFile(path.join(trashPath, "nested.txt"), "utf8")).resolves.toBe("cross-device");
+
+    vi.mocked(rename).mockRejectedValueOnce(crossDeviceError);
+    await restoreTrashPath(root, {
+      trashPath,
+      originalPath: "folder"
+    });
+
+    await expect(readFile(path.join(rootDir, "folder", "nested.txt"), "utf8")).resolves.toBe("cross-device");
+    await expect(stat(trashPath)).rejects.toThrow();
   });
 
   it("rolls move operations back to the original path", async () => {

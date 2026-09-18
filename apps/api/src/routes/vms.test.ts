@@ -390,6 +390,12 @@ function vmRunner(calls: string[][] = []): VmCommandRunner {
   return {
     async run(command, args) {
       calls.push([command, ...args]);
+      if (command === "qemu-img") {
+        const diskPath = args[3]!;
+        await mkdir(path.dirname(diskPath), { recursive: true });
+        await writeFile(diskPath, "qcow2");
+        return "";
+      }
       if (command === "virsh" && args.includes("version")) return "Using library: libvirt 10.0.0\nUsing API: QEMU 8.2.2";
       if (command === "virsh" && args.includes("--name")) return "guest\n";
       if (command === "virsh" && args.includes("dominfo")) return "State: running\nCPU(s): 2\nUsed memory: 2097152 KiB\nMax memory: 4194304 KiB\nUUID: guest-uuid";

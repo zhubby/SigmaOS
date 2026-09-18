@@ -158,7 +158,7 @@ Optional host tools enable additional features:
 | Storage and network inspection | `ip`, `lsblk`, `findmnt`, `mdadm`, `smartctl` |
 | Share management | Samba, Apache WebDAV, vsftpd, NFS server, MiniDLNA, and the packaged share helper |
 | Docker management | Docker Engine socket access and the Docker CLI for Compose actions; enable explicitly on an appliance |
-| Virtual machines | `libvirt-daemon-system`, `libvirt-clients`, `qemu-system-arm` (arm64) or `qemu-system-x86` (amd64), `qemu-utils`, and `virtinst` |
+| Virtual machines | `libvirt-daemon-system`, `libvirt-clients`, `qemu-system-arm` and `qemu-efi-aarch64` (arm64) or `qemu-system-x86` (amd64), `qemu-utils`, `virtinst`, and `ipxe-qemu` |
 
 ## Local development
 

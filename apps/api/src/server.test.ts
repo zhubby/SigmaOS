@@ -288,6 +288,37 @@ describe("API server", () => {
     await server.close();
   });
 
+  it("does not report a configured backup password when the file is missing", async () => {
+    const repositoryPath = path.join(tempDir, "backup-repository");
+    await mkdir(repositoryPath);
+    const config = {
+      ...testConfig(tempDir),
+      backup: {
+        enabled: false,
+        repositoryPath,
+        passwordFile: path.join(tempDir, "missing-restic-password"),
+        stagingPath: path.join(tempDir, "backup-staging"),
+        requireMount: false,
+        retryCount: 1,
+        timeoutMs: 1_000,
+        keepDaily: 7,
+        keepWeekly: 4
+      }
+    };
+    const server = await buildServer({ config, db });
+
+    const response = await server.inject({ method: "GET", url: "/api/backup/status" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      enabled: false,
+      repositoryConfigured: true,
+      repositoryAvailable: true,
+      passwordConfigured: false
+    });
+    await server.close();
+  });
+
   it("does not allow cross-origin access by default", async () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({
@@ -2957,7 +2988,7 @@ describe("API server", () => {
     await server.close();
   });
 
-  it("deletes sessions waiting for approval and cascades session-owned rows", async () => {
+  it("protects sessions waiting for approval and cascades rows after work completes", async () => {
     const session = createSession(db, { rootId: "local" });
     const { job } = createUserMessageAndJob(db, {
       sessionId: session.id,
@@ -2986,12 +3017,23 @@ describe("API server", () => {
     updateJobStatus(db, job.id, "waiting_approval");
     const server = await buildServer({ config: testConfig(tempDir), db });
 
-    const response = await server.inject({
+    const activeResponse = await server.inject({
       method: "DELETE",
       url: `/api/sessions/${session.id}`
     });
 
-    expect(response.statusCode).toBe(204);
+    expect(activeResponse.statusCode).toBe(409);
+    expect(activeResponse.json()).toEqual({ error: "Session has active work" });
+    expect(getSession(db, session.id)).toMatchObject({ id: session.id });
+    expect(listPendingApprovals(db)).toHaveLength(1);
+
+    updateJobStatus(db, job.id, "completed");
+    const completedResponse = await server.inject({
+      method: "DELETE",
+      url: `/api/sessions/${session.id}`
+    });
+
+    expect(completedResponse.statusCode).toBe(204);
     expect(getSession(db, session.id)).toBeNull();
     expect(listMessages(db, { sessionId: session.id })).toEqual([]);
     expect(listEvents(db, { sessionId: session.id })).toEqual([]);
