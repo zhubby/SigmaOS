@@ -1,6 +1,6 @@
 import { FormEvent, KeyboardEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Bell, CircleAlert, CircleCheck, MessageSquare, PanelRight, Settings, X } from "lucide-react";
+import { AlertTriangle, CircleAlert, CircleCheck, MessageSquare, PanelRight, X } from "lucide-react";
 import {
   approveRequest,
   cancelJob,
@@ -1972,29 +1972,6 @@ export function App() {
             <span>{t("chat.mobileWorkspace")}</span>
           </button>
         </div>
-        <button
-          className="mobile-notification-button"
-          type="button"
-          onClick={openNotificationCenter}
-          aria-label={t("notifications.center.openWithCount", { count: notificationUnreadCount })}
-          title={t("notifications.center.open")}
-        >
-          <Bell aria-hidden="true" size={17} />
-          {notificationUnreadCount > 0 ? (
-            <span className="notification-badge" aria-hidden="true">
-              {notificationUnreadCount > 99 ? "99+" : notificationUnreadCount}
-            </span>
-          ) : null}
-        </button>
-        <button
-          className="mobile-settings-button"
-          type="button"
-          onClick={() => void openSettings()}
-          aria-label={t("common.actions.systemSettings")}
-          title={t("common.actions.systemSettings")}
-        >
-          <Settings aria-hidden="true" size={17} />
-        </button>
       </div>
 
       <ChatPane
