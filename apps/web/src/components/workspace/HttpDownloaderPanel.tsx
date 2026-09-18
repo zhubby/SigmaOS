@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import {
   CheckCircle2,
   CircleAlert,
@@ -72,6 +72,8 @@ export function HttpDownloaderPanel({
   const [target, setTarget] = useState<StorageFileSelection | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const createDialogRef = useRef<HTMLFormElement | null>(null);
+  const createUrlInputRef = useRef<HTMLInputElement | null>(null);
   const selectedPool = pools.find((pool) => pool.id === (target?.storagePoolId ?? selectedStoragePoolId)) ?? null;
   const mountedPools = useMemo(() => pools.filter((pool) => pool.status !== "offline"), [pools]);
   useEffect(() => {
@@ -128,6 +130,18 @@ export function HttpDownloaderPanel({
     }
   }, [createOpen, mountedPools, pools, selectedStoragePoolId, target]);
 
+  useEffect(() => {
+    if (!createOpen) return;
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const frame = window.requestAnimationFrame(() => createUrlInputRef.current?.focus());
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (previouslyFocused?.isConnected) {
+        window.requestAnimationFrame(() => previouslyFocused.focus());
+      }
+    };
+  }, [createOpen]);
+
   const visibleTasks = useMemo(() => tasks.filter((task) => {
     if (filter === "active") return task.status === "queued" || task.status === "running" || task.status === "paused";
     if (filter === "completed") return task.status === "completed";
@@ -151,6 +165,37 @@ export function HttpDownloaderPanel({
     setFileName("");
     setFileNameEdited(false);
     setCreateOpen(true);
+  }
+
+  function closeCreateDialog() {
+    if (!submitting) setCreateOpen(false);
+  }
+
+  function handleCreateDialogKeyDown(event: KeyboardEvent<HTMLFormElement>) {
+    if (event.key === "Escape" && !event.defaultPrevented && !submitting) {
+      event.preventDefault();
+      setCreateOpen(false);
+      return;
+    }
+    if (event.key !== "Tab") return;
+
+    const focusable = [...(createDialogRef.current?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+    ) ?? [])].filter((element) => element.getClientRects().length > 0);
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (!first || !last) {
+      event.preventDefault();
+      createDialogRef.current?.focus();
+      return;
+    }
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   function updateUrl(value: string) {
@@ -307,8 +352,17 @@ export function HttpDownloaderPanel({
       </div>
 
       {createOpen ? (
-        <div className="management-dialog-backdrop" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setCreateOpen(false)}>
-          <form className="management-dialog download-create-dialog" role="dialog" aria-modal="true" aria-labelledby="download-create-title" onSubmit={(event) => void submitCreate(event)}>
+        <div className="management-dialog-backdrop" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && closeCreateDialog()}>
+          <form
+            ref={createDialogRef}
+            className="management-dialog download-create-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="download-create-title"
+            tabIndex={-1}
+            onKeyDown={handleCreateDialogKeyDown}
+            onSubmit={(event) => void submitCreate(event)}
+          >
             <header className="download-create-dialog-header">
               <div className="download-create-dialog-heading">
                 <span className="download-create-dialog-icon" aria-hidden="true"><Download size={19} /></span>
@@ -318,7 +372,7 @@ export function HttpDownloaderPanel({
                   <p>{t("workspace.downloads.createDescription")}</p>
                 </div>
               </div>
-              <button type="button" className="management-icon-action" onClick={() => setCreateOpen(false)} aria-label={t("common.actions.close")}>
+              <button type="button" className="management-icon-action" onClick={closeCreateDialog} disabled={submitting} aria-label={t("common.actions.close")}>
                 <X aria-hidden="true" size={16} />
               </button>
             </header>
@@ -333,7 +387,7 @@ export function HttpDownloaderPanel({
                 </div>
                 <label className="download-form-field download-form-field-wide">
                   <span>{t("workspace.downloads.url")}</span>
-                  <input autoFocus type="url" value={url} onChange={(event) => updateUrl(event.target.value)} placeholder="https://example.com/file.zip" />
+                  <input ref={createUrlInputRef} type="url" value={url} onChange={(event) => updateUrl(event.target.value)} placeholder="https://example.com/file.zip" />
                 </label>
                 <label className="download-form-field">
                   <span>{t("workspace.downloads.fileName")}</span>
@@ -367,7 +421,7 @@ export function HttpDownloaderPanel({
               </section>
             </div>
             <footer className="download-create-dialog-footer">
-              <button type="button" className="secondary-button" onClick={() => setCreateOpen(false)} disabled={submitting}>{t("common.actions.cancel")}</button>
+              <button type="button" className="secondary-button" onClick={closeCreateDialog} disabled={submitting}>{t("common.actions.cancel")}</button>
               <button type="submit" className="primary-button" disabled={submitting || !target || !url.trim() || !fileName.trim()} aria-busy={submitting || undefined}>
                 {submitting ? <LoaderCircle className="is-spinning" aria-hidden="true" size={15} /> : <Download aria-hidden="true" size={15} />}
                 <span>{t("workspace.downloads.startDownload")}</span>

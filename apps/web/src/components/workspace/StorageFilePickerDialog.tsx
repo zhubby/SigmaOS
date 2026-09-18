@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   ArrowUp,
   Check,
@@ -100,9 +100,20 @@ export function StorageFilePickerDialog({
   }, []);
 
   useEffect(() => {
-    dialogRef.current?.focus();
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const frame = window.requestAnimationFrame(() => dialogRef.current?.focus());
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (previouslyFocused?.isConnected) {
+        window.requestAnimationFrame(() => previouslyFocused.focus());
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
+        event.preventDefault();
         onCancel();
       }
     }
@@ -143,6 +154,27 @@ export function StorageFilePickerDialog({
       path: selection.path,
       name: selection.name
     });
+  }
+
+  function handleDialogKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Tab") return;
+    const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+    ) ?? [])].filter((element) => element.getClientRects().length > 0);
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (!first || !last) {
+      event.preventDefault();
+      dialogRef.current?.focus();
+      return;
+    }
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   async function submitCreateFolder(event: FormEvent<HTMLFormElement>) {
@@ -193,6 +225,7 @@ export function StorageFilePickerDialog({
         aria-modal="true"
         aria-labelledby="storage-file-picker-title"
         tabIndex={-1}
+        onKeyDown={handleDialogKeyDown}
       >
         <header className="storage-file-picker-header">
           <div className="storage-file-picker-heading">
