@@ -1,6 +1,6 @@
 {
   "name": "@sigmaos/agent",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
@@ -8,7 +8,7 @@
   "types": "./src/index.ts",
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.82.1",
-    "@sigmaos/nas-tools": "0.4.0",
-    "@sigmaos/shared": "0.4.0"
+    "@sigmaos/nas-tools": "0.4.1",
+    "@sigmaos/shared": "0.4.1"
   }
 }

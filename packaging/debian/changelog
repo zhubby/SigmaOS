@@ -1,3 +1,9 @@
+sigmaos (0.4.1) unstable; urgency=medium
+
+  * Harden appliance workflows and unify the Agent and workspace interface.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Fri, 18 Sep 2026 01:30:11 +0000
+
 sigmaos (0.4.0) unstable; urgency=medium
 
   * Add persistent HTTP downloader panel and service
