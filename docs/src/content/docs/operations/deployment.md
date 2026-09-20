@@ -4,7 +4,7 @@ description: 原生 Debian 包、systemd 服务、Nginx 和 appliance 构建。
 type: operation
 status: current
 audience: [operator]
-sourceOfTruth: [packaging/debian/rules, packaging/debian/install, packaging/systemd/sigmaos-api.service, packaging/appliance/manifest.toml]
+sourceOfTruth: [packaging/debian/rules, packaging/debian/install, packaging/scripts/sigmaos-deploy, packaging/systemd/sigmaos-api.service, packaging/appliance/manifest.toml]
 sidebar:
   order: 1
 ---
@@ -104,6 +104,49 @@ sudo systemctl restart sigmaos-api.service sigmaos-worker@1.service
 ```
 
 确认新版本通过验收后再重新启用 timers。降级只能恢复程序包，迁移脚本没有通用的数据库反向迁移；若新版本已改变 schema，应使用升级前的 SQLite 备份和对应版本包一起恢复。
+
+## GitHub Actions 与 Tailscale 自动升级
+
+公开仓库不在 CM5 上运行 GitHub self-hosted runner。tag 发布由 GitHub-hosted ARM64 runner 构建，在 Bookworm 环境中生成 `arm64` Debian 包；成功的 `Package Release` workflow 完成后，独立的 `Deploy CM5` workflow 通过 Tailscale 临时节点连接 CM5。
+
+CM5 首次安装当前版本后，执行一次部署 bootstrap：
+
+```bash
+sudo tailscale set --ssh
+sudo /usr/lib/sigmaos/scripts/sigmaos-deploy-bootstrap.sh
+```
+
+bootstrap 会创建无密码的 `sigmaos-deploy` 用户、`/var/lib/sigmaos-deploy/incoming` staging 目录，并把包内 `/usr/lib/sigmaos/scripts/sigmaos-deploy` 链接到 root-owned 的 `/usr/local/sbin/sigmaos-deploy`；sudoers 只允许执行这个固定路径。部署用户不应使用 root 密码或通用 root shell。
+
+Tailnet policy 只允许 `tag:github-actions` 访问 `tag:sigmaos-cm5` 的 Tailscale SSH，并且只允许 `sigmaos-deploy` 用户。GitHub `production` environment 需要配置 Tailscale Workload Identity Federation 的 `TS_OAUTH_CLIENT_ID`、`TS_AUDIENCE`，以及 CM5 的 MagicDNS 名称或 `100.x.y.z` 地址变量 `CM5_HOST`。家庭 LAN 地址和公网端口转发不参与部署。
+
+在 Tailscale admin console 的 policy file 中创建两个 tag，并将以下关系合并到现有 ACL（保留你已有的 `tagOwners` 和其他业务规则）：
+
+```json
+{
+  "acls": [
+    {
+      "action": "accept",
+      "src": ["tag:github-actions"],
+      "dst": ["tag:sigmaos-cm5:22"]
+    }
+  ],
+  "ssh": [
+    {
+      "action": "accept",
+      "src": ["tag:github-actions"],
+      "dst": ["tag:sigmaos-cm5"],
+      "users": ["sigmaos-deploy"]
+    }
+  ]
+}
+```
+
+为 `tag:github-actions` 和 `tag:sigmaos-cm5` 配置仅限管理员的 `tagOwners`，并将 CM5 标记为 `tag:sigmaos-cm5`。不要把 `tag:github-actions` 授予普通成员或其他设备。
+
+部署按精确 tag 下载 Release asset，校验 `release-manifest.json`、SHA256、Debian 版本和 `arm64` 架构，然后通过 `sudo -n /usr/local/sbin/sigmaos-deploy` 执行升级。workflow 具有 `cm5-production` 并发锁；失败时保留旧包、配置/state 备份和 journal，不自动执行可能破坏数据库 migration 的降级。
+
+自动部署只接受受保护的 `vX.Y.Z` tag。需要重试已发布版本时，在 GitHub Actions 手动运行 `Deploy CM5` 并填写原 tag；不要使用 `latest` 或未校验的任意 URL。
 
 构建前先运行 `npm run version:check`。构建过程会在源码复制到 Debian staging 之前冻结 commit、tag/branch、构建时间、来源和 dirty 状态，并将 `/usr/lib/sigmaos/build-info.json` 随包安装。运行中的 API 通过 `/api/system/build-info` 暴露可公开的追溯字段，Web 设置的“版本”分类展示同一份信息。
 

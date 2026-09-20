@@ -95,6 +95,8 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("packaging/scripts/sigmaos-configure-locale.sh usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/scripts/sigmaos-refresh-terminal.sh usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/scripts/sigmaos-refresh-player.sh usr/lib/sigmaos/scripts/");
+    expect(install).toContain("packaging/scripts/sigmaos-deploy-bootstrap.sh usr/lib/sigmaos/scripts/");
+    expect(install).toContain("packaging/scripts/sigmaos-deploy usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/nginx/sigmaos.conf usr/share/sigmaos/nginx/");
     expect(install).toContain("etc/sigmaos/");
     expect(install).toContain("lib/systemd/system/");
@@ -290,6 +292,27 @@ describe("native packaging artifacts", () => {
     expect(refresh).toContain("BindPaths=%s\\n");
     expect(refresh).toContain("SIGMAOS_TERMINAL_HELPER_SOCKET_PATH");
     expect(refresh).toContain("root terminal user is not allowed");
+  });
+
+  it("ships a constrained CM5 deployment helper", async () => {
+    const deploy = await readPackagingFile("scripts", "sigmaos-deploy");
+    const bootstrap = await readPackagingFile("scripts", "sigmaos-deploy-bootstrap.sh");
+
+    expect(deploy).toContain("flock -n 9");
+    expect(deploy).toContain("package checksum does not match release manifest");
+    expect(deploy).toContain("refusing to downgrade");
+    expect(deploy).toContain("tar -C /etc -czf");
+    expect(deploy).toContain("tar -C /var/lib -czf");
+    expect(deploy).toContain("systemctl daemon-reload");
+    expect(deploy).toContain("restore_unit_state \"$unit\" \"$state_dir\"");
+    expect(deploy).toContain("package.deb must be a regular file");
+    expect(deploy).toContain("/api/roots/readiness");
+    expect(deploy).toContain("/api/system/build-info");
+    expect(bootstrap).toContain("/usr/local/sbin/sigmaos-deploy");
+    expect(bootstrap).toContain("/usr/lib/sigmaos/scripts/sigmaos-deploy");
+    expect(bootstrap).toContain("NOPASSWD: /usr/local/sbin/sigmaos-deploy");
+    expect(bootstrap).toContain("install -d -o root -g \"$DEPLOY_USER\" -m 0730");
+    expect(bootstrap).toContain("visudo -cf");
   });
 });
 

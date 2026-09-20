@@ -20,6 +20,8 @@ packaging/scripts/sigmaos-configure-locale.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-refresh-groups.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-refresh-terminal.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-refresh-player.sh usr/lib/sigmaos/scripts/
+packaging/scripts/sigmaos-deploy-bootstrap.sh usr/lib/sigmaos/scripts/
+packaging/scripts/sigmaos-deploy usr/lib/sigmaos/scripts/
 packaging/nginx/sigmaos.conf usr/share/sigmaos/nginx/
 packaging/systemd/*.service lib/systemd/system/
 packaging/systemd/*.timer lib/systemd/system/

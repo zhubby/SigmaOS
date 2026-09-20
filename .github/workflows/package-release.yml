@@ -22,13 +22,13 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: npm
@@ -58,27 +58,19 @@ jobs:
         run: npm run build
 
   package:
-    name: Package (${{ matrix.deb_arch }})
+    name: Package (amd64)
     needs: quality
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - deb_arch: amd64
-            runner: ubuntu-24.04
-          - deb_arch: arm64
-            runner: ubuntu-24.04-arm
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
 
@@ -99,7 +91,7 @@ jobs:
 
       - name: Collect package artifacts
         run: |
-          artifact_dir="artifacts/${{ matrix.deb_arch }}"
+          artifact_dir="artifacts/amd64"
           mkdir -p "$artifact_dir"
 
           shopt -s nullglob
@@ -112,9 +104,9 @@ jobs:
           cp "${files[@]}" "$artifact_dir/"
 
           for extension in deb changes buildinfo; do
-            matches=("$artifact_dir"/sigmaos_*_${{ matrix.deb_arch }}."$extension")
+            matches=("$artifact_dir"/sigmaos_*_amd64."$extension")
             if (( ${#matches[@]} != 1 )); then
-              echo "Expected exactly one ${{ matrix.deb_arch }} .$extension artifact, found ${#matches[@]}" >&2
+              echo "Expected exactly one amd64 .$extension artifact, found ${#matches[@]}" >&2
               printf '%s\n' "${matches[@]}" >&2
               exit 1
             fi
@@ -123,10 +115,74 @@ jobs:
           ls -lh "$artifact_dir"
 
       - name: Upload package artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: sigmaos-deb-${{ matrix.deb_arch }}
-          path: artifacts/${{ matrix.deb_arch }}/*
+          name: sigmaos-deb-amd64
+          path: artifacts/amd64/*
+          if-no-files-found: error
+          retention-days: 30
+
+  package-arm64:
+    name: Package (arm64)
+    needs: quality
+    runs-on: ubuntu-24.04-arm
+    container: node:22-bookworm
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Debian packaging dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            debhelper \
+            dpkg-dev \
+            fakeroot \
+            git \
+            rsync
+
+      - name: Verify Node.js runtime
+        run: node --version | grep -Eq '^v22\.'
+
+      - name: Build Debian package
+        run: SIGMAOS_NPM_REGISTRY=https://registry.npmmirror.com packaging/scripts/build-deb.sh
+
+      - name: Collect package artifacts
+        run: |
+          artifact_dir="artifacts/arm64"
+          mkdir -p "$artifact_dir"
+
+          shopt -s nullglob
+          files=(.sigmaos/*.deb .sigmaos/*.changes .sigmaos/*.buildinfo)
+          if (( ${#files[@]} == 0 )); then
+            echo "No Debian package artifacts were produced under .sigmaos" >&2
+            exit 1
+          fi
+
+          cp "${files[@]}" "$artifact_dir/"
+
+          for extension in deb changes buildinfo; do
+            matches=("$artifact_dir"/sigmaos_*_arm64."$extension")
+            if (( ${#matches[@]} != 1 )); then
+              echo "Expected exactly one arm64 .$extension artifact, found ${#matches[@]}" >&2
+              printf '%s\n' "${matches[@]}" >&2
+              exit 1
+            fi
+          done
+
+          ls -lh "$artifact_dir"
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: sigmaos-deb-arm64
+          path: artifacts/arm64/*
           if-no-files-found: error
           retention-days: 30
 
@@ -137,12 +193,12 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: npm
@@ -163,15 +219,16 @@ jobs:
 
   release:
     name: GitHub Release
-    needs: package
+    needs: [package, package-arm64, docs-browser]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:
+      actions: read
       contents: write
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -199,7 +256,7 @@ jobs:
           fi
 
       - name: Download package artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: sigmaos-deb-*
           path: release-assets
@@ -225,6 +282,32 @@ jobs:
           cd release-assets
           sha256sum *.deb *.changes *.buildinfo > SHA256SUMS
           cat SHA256SUMS
+
+          arm64_asset="sigmaos_${GITHUB_REF_NAME#v}_arm64.deb"
+          arm64_sha256="$(awk -v asset="$arm64_asset" '$2 == asset { print $1; exit }' SHA256SUMS)"
+          if [[ ! "$arm64_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "Could not find a SHA256 checksum for $arm64_asset" >&2
+            exit 1
+          fi
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg tag "$GITHUB_REF_NAME" \
+            --arg version "${GITHUB_REF_NAME#v}" \
+            --arg commitSha "$GITHUB_SHA" \
+            --arg architecture "arm64" \
+            --arg asset "$arm64_asset" \
+            --arg sha256 "$arm64_sha256" \
+            '{repository, tag, version, commitSha, architecture, asset, sha256}' \
+            > release-manifest.json
+          cat release-manifest.json
+
+      - name: Upload CM5 release manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cm5-release-manifest
+          path: release-assets/release-manifest.json
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Create GitHub Release
         env:

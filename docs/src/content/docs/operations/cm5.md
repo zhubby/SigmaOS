@@ -4,7 +4,7 @@ description: 在 arm64 CM5 上原生构建、安装、验收和回滚 SigmaOS。
 type: operation
 status: current
 audience: [operator]
-sourceOfTruth: [packaging/scripts/build-deb.sh, packaging/scripts/install.sh, packaging/debian/rules]
+sourceOfTruth: [packaging/scripts/build-deb.sh, packaging/scripts/install.sh, packaging/scripts/sigmaos-deploy, packaging/debian/rules]
 sidebar:
   order: 2
 ---
@@ -72,6 +72,27 @@ curl -fsS http://127.0.0.1:3010/api/system/network
 页面应识别 `NetworkManager`、`wlan0` 和 AP 能力。依次验证扫描、连接/断开现有 profile、创建临时 WPA2 热点、客户端获取 `10.42.x.x` 地址、停止热点恢复原客户端连接，以及 autostart 开/关。验收后删除临时热点；不要在仅有 Wi-Fi 管理链路时测试 radio 关闭或热点切换。
 
 ## 升级、保留与回滚
+
+### Tailscale 自动升级 bootstrap
+
+CM5 不安装 GitHub self-hosted runner。生产升级由 GitHub-hosted ARM64 runner 构建，再由 Tailscale ephemeral node 通过 SSH 触发 CM5 上受限的部署 helper。CM5 不需要公网 IP 或端口转发，GitHub workflow 使用 Tailscale MagicDNS hostname 或 `100.x.y.z` 地址。
+
+首次启用自动升级时，在本地控制台或现有维护 SSH 中执行：
+
+```bash
+sudo tailscale set --ssh
+sudo /usr/lib/sigmaos/scripts/sigmaos-deploy-bootstrap.sh
+```
+
+确认：
+
+```bash
+id sigmaos-deploy
+sudo -l -U sigmaos-deploy
+sudo -n stat -c '%U:%G %a %n' /usr/local/sbin/sigmaos-deploy /var/lib/sigmaos-deploy/incoming
+```
+
+`sigmaos-deploy` 只能无密码执行 `/usr/local/sbin/sigmaos-deploy`（该路径由 bootstrap 链接到包内 helper）；不要给它通用 `sudo` 权限，也不要在 workflow 中保存 root 或登录密码。GitHub production environment 的 `CM5_HOST` 必须是 Tailscale 名称/IP，`CM5_DEPLOY_USER` 默认是 `sigmaos-deploy`。
 
 升级前停止 indexer、scheduler、maintenance、health、daily/weekly backup timers，并备份：
 

@@ -1,0 +1,306 @@
+name: Deploy CM5
+
+'on':
+  workflow_run:
+    workflows:
+      - Package Release
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to deploy, for example v0.5.0
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: cm5-production
+  cancel-in-progress: false
+
+jobs:
+  select-release:
+    name: Select verified release
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      deploy: ${{ steps.select.outputs.deploy }}
+      tag: ${{ steps.select.outputs.tag }}
+      version: ${{ steps.select.outputs.version }}
+      commit_sha: ${{ steps.select.outputs.commit_sha }}
+      asset: ${{ steps.select.outputs.asset }}
+      sha256: ${{ steps.select.outputs.sha256 }}
+    steps:
+      - name: Select release manifest
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_EVENT: ${{ github.event.workflow_run.event }}
+          WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          WORKFLOW_RUN_HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
+          DISPATCH_TAG: ${{ inputs.tag }}
+          REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          work_dir="$RUNNER_TEMP/cm5-release"
+          rm -rf "$work_dir"
+          mkdir -p "$work_dir"
+
+          write_skip() {
+            printf 'deploy=false\n' >> "$GITHUB_OUTPUT"
+          }
+
+          if [[ "$EVENT_NAME" == "workflow_run" ]]; then
+            if [[ "$WORKFLOW_RUN_EVENT" != "push" || "$WORKFLOW_RUN_CONCLUSION" != "success" ||
+                  "$WORKFLOW_RUN_HEAD_REPOSITORY" != "$REPOSITORY" ||
+                  ! "$WORKFLOW_RUN_HEAD_BRANCH" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              write_skip
+              exit 0
+            fi
+
+            if ! gh run download "$WORKFLOW_RUN_ID" \
+              --repo "$REPOSITORY" \
+              --name cm5-release-manifest \
+              --dir "$work_dir" >"$work_dir/download.log" 2>&1; then
+              # Branch pushes do not publish a release manifest and are expected
+              # to produce a no-op deploy workflow run.
+              write_skip
+              exit 0
+            fi
+            expected_commit_sha="$WORKFLOW_RUN_HEAD_SHA"
+            expected_tag="$WORKFLOW_RUN_HEAD_BRANCH"
+          else
+            dispatch_tag="$DISPATCH_TAG"
+            if [[ ! "$dispatch_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "workflow_dispatch tag must be a stable vX.Y.Z tag" >&2
+              exit 1
+            fi
+            gh release download "$dispatch_tag" \
+              --repo "$REPOSITORY" \
+              --pattern release-manifest.json \
+              --dir "$work_dir"
+            expected_commit_sha=""
+            expected_tag="$dispatch_tag"
+          fi
+
+          manifest_path="$(find "$work_dir" -type f -name release-manifest.json -print -quit)"
+          if [[ -z "$manifest_path" || ! -f "$manifest_path" ]]; then
+            echo "Release manifest was not found" >&2
+            exit 1
+          fi
+
+          if ! jq -e \
+            --arg repository "$REPOSITORY" \
+            --arg expected_commit_sha "$expected_commit_sha" \
+            --arg expected_tag "$expected_tag" \
+            'type == "object" and
+             .repository == $repository and
+             (.tag | type == "string" and test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")) and
+             (.version | type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and
+             (.commitSha | type == "string" and test("^[0-9a-f]{40}$")) and
+             (.architecture == "arm64") and
+             (.asset | type == "string" and test("^sigmaos_[0-9]+\\.[0-9]+\\.[0-9]+_arm64\\.deb$")) and
+             (.sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+             (.tag == ("v" + .version)) and
+             (.asset == ("sigmaos_" + .version + "_arm64.deb")) and
+             ($expected_commit_sha == "" or .commitSha == $expected_commit_sha) and
+             .tag == $expected_tag' \
+            "$manifest_path"; then
+            echo "Release manifest validation failed" >&2
+            exit 1
+          fi
+
+          mapfile -t manifest_values < <(jq -r '.tag, .version, .commitSha, .asset, .sha256' "$manifest_path")
+          tag="${manifest_values[0]}"
+          version="${manifest_values[1]}"
+          commit_sha="${manifest_values[2]}"
+          asset="${manifest_values[3]}"
+          sha256="${manifest_values[4]}"
+
+          release_dir="$work_dir/release"
+          mkdir -p "$release_dir"
+          gh release download "$tag" \
+            --repo "$REPOSITORY" \
+            --pattern "$asset" \
+            --dir "$release_dir"
+          package_path="$release_dir/$asset"
+          [[ -f "$package_path" && ! -L "$package_path" ]] || {
+            echo "Release asset $asset was not found" >&2
+            exit 1
+          }
+          actual_sha256="$(sha256sum "$package_path" | awk '{print $1}')"
+          [[ "$actual_sha256" == "$sha256" ]] || {
+            echo "Release package checksum mismatch" >&2
+            exit 1
+          }
+          [[ "$(dpkg-deb -f "$package_path" Version)" == "$version" ]] || {
+            echo "Release package version mismatch" >&2
+            exit 1
+          }
+          [[ "$(dpkg-deb -f "$package_path" Architecture)" == arm64 ]] || {
+            echo "Release package architecture mismatch" >&2
+            exit 1
+          }
+
+          printf 'deploy=true\n' >> "$GITHUB_OUTPUT"
+          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+          printf 'commit_sha=%s\n' "$commit_sha" >> "$GITHUB_OUTPUT"
+          printf 'asset=%s\n' "$asset" >> "$GITHUB_OUTPUT"
+          printf 'sha256=%s\n' "$sha256" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Deploy CM5
+    needs: select-release
+    if: needs.select-release.outputs.deploy == 'true'
+    runs-on: ubuntu-24.04
+    environment: production
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ needs.select-release.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.select-release.outputs.version }}
+      RELEASE_COMMIT_SHA: ${{ needs.select-release.outputs.commit_sha }}
+      RELEASE_ASSET: ${{ needs.select-release.outputs.asset }}
+      RELEASE_SHA256: ${{ needs.select-release.outputs.sha256 }}
+      CM5_HOST: ${{ vars.CM5_HOST }}
+      CM5_DEPLOY_USER: ${{ vars.CM5_DEPLOY_USER }}
+    steps:
+      - name: Download and verify release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          release_dir="$RUNNER_TEMP/cm5-release"
+          rm -rf "$release_dir"
+          mkdir -p "$release_dir"
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "$RELEASE_ASSET" \
+            --pattern release-manifest.json \
+            --dir "$release_dir"
+
+          package_path="$release_dir/$RELEASE_ASSET"
+          manifest_path="$release_dir/release-manifest.json"
+          [[ -f "$package_path" && -f "$manifest_path" ]]
+
+          jq -e \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg tag "$RELEASE_TAG" \
+            --arg version "$RELEASE_VERSION" \
+            --arg commit_sha "$RELEASE_COMMIT_SHA" \
+            --arg asset "$RELEASE_ASSET" \
+            --arg sha256 "$RELEASE_SHA256" \
+            '.repository == $repository and .tag == $tag and .version == $version and
+             .commitSha == $commit_sha and .architecture == "arm64" and
+             .asset == $asset and .sha256 == $sha256' "$manifest_path"
+
+          actual_sha256="$(sha256sum "$package_path" | awk '{print $1}')"
+          [[ "$actual_sha256" == "$RELEASE_SHA256" ]] || {
+            echo "Release package checksum mismatch" >&2
+            exit 1
+          }
+
+          package_version="$(dpkg-deb -f "$package_path" Version)"
+          package_architecture="$(dpkg-deb -f "$package_path" Architecture)"
+          [[ "$package_version" == "$RELEASE_VERSION" ]]
+          [[ "$package_architecture" == arm64 ]]
+
+          cp "$package_path" "$release_dir/package.deb"
+
+      - name: Validate CM5 target
+        run: |
+          set -euo pipefail
+          : "${CM5_HOST:?production variable CM5_HOST is required}"
+          [[ "$CM5_HOST" =~ ^[A-Za-z0-9._:-]+$ ]]
+          CM5_DEPLOY_USER="${CM5_DEPLOY_USER:-sigmaos-deploy}"
+          [[ "$CM5_DEPLOY_USER" =~ ^[A-Za-z0-9._-]+$ ]]
+          [[ "$CM5_DEPLOY_USER" != root ]]
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:github-actions
+          ping: ${{ vars.CM5_HOST }}
+
+      - name: Upload release to CM5
+        run: |
+          set -euo pipefail
+
+          : "${CM5_HOST:?production variable CM5_HOST is required}"
+          CM5_DEPLOY_USER="${CM5_DEPLOY_USER:-sigmaos-deploy}"
+          [[ "$CM5_HOST" =~ ^[A-Za-z0-9._:-]+$ ]]
+          [[ "$CM5_DEPLOY_USER" =~ ^[A-Za-z0-9._-]+$ ]]
+          [[ "$CM5_DEPLOY_USER" != root ]]
+
+          ssh_options=(
+            -o BatchMode=yes
+            -o ConnectTimeout=15
+            -o StrictHostKeyChecking=accept-new
+          )
+          release_dir="$RUNNER_TEMP/cm5-release"
+          scp "${ssh_options[@]}" \
+            "$release_dir/package.deb" \
+            "$release_dir/release-manifest.json" \
+            "$CM5_DEPLOY_USER@$CM5_HOST:/var/lib/sigmaos-deploy/incoming/"
+          ssh "${ssh_options[@]}" "$CM5_DEPLOY_USER@$CM5_HOST" \
+            'sudo -n /usr/local/sbin/sigmaos-deploy'
+
+      - name: Verify CM5 services and build metadata
+        run: |
+          set -euo pipefail
+
+          CM5_DEPLOY_USER="${CM5_DEPLOY_USER:-sigmaos-deploy}"
+          ssh_options=(
+            -o BatchMode=yes
+            -o ConnectTimeout=15
+            -o StrictHostKeyChecking=accept-new
+          )
+          ssh "${ssh_options[@]}" "$CM5_DEPLOY_USER@$CM5_HOST" sh -s -- \
+            "$RELEASE_VERSION" "$RELEASE_COMMIT_SHA" <<'REMOTE'
+          set -eu
+          expected_version=$1
+          expected_commit_sha=$2
+          check_dir="$(mktemp -d /tmp/sigmaos-deploy-check.XXXXXX)"
+          trap 'rm -rf "$check_dir"' EXIT HUP INT TERM
+
+          systemctl is-active --quiet sigmaos-api.service
+          systemctl is-active --quiet sigmaos-worker@1.service
+          systemctl is-active --quiet sigmaos-downloader.service
+          systemctl is-active --quiet sigmaos-share-helper.service
+          systemctl is-active --quiet sigmaos-terminal-helper.service
+
+          failed_units="$(systemctl --failed --no-legend --plain || true)"
+          if [ -n "$failed_units" ]; then
+            printf '%s\n' "$failed_units" >&2
+            exit 1
+          fi
+
+          curl --fail --silent --show-error --max-time 15 http://127.0.0.1:3010/health > "$check_dir/health.json"
+          curl --fail --silent --show-error --max-time 15 http://127.0.0.1:3010/api/roots/readiness > "$check_dir/readiness.json"
+          curl --fail --silent --show-error --max-time 15 http://127.0.0.1:3010/api/system/health > "$check_dir/system-health.json"
+          curl --fail --silent --show-error --max-time 15 http://127.0.0.1:3010/api/system/build-info > "$check_dir/build-info.json"
+
+          node - "$check_dir/build-info.json" "$expected_version" "$expected_commit_sha" <<'NODE'
+          const fs = require("node:fs");
+          const [file, expectedVersion, expectedCommitSha] = process.argv.slice(2);
+          const payload = JSON.parse(fs.readFileSync(file, "utf8"));
+          const build = payload?.build;
+          if (build?.version !== expectedVersion || build?.commitSha?.toLowerCase() !== expectedCommitSha.toLowerCase()) {
+            throw new Error(`build metadata mismatch: ${JSON.stringify(build)}`);
+          }
+          NODE
+          REMOTE
