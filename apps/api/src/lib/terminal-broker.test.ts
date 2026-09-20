@@ -179,6 +179,40 @@ describe("terminal broker client", () => {
     await expect(runtime.destroySession("sigmaos-persisted")).rejects.toThrow("tmux kill failed");
   });
 
+  it("marks helper connection loss as a recoverable terminal exit", async () => {
+    const socketPath = await createSocketPath();
+    const server = net.createServer((socket) => {
+      clientSockets.push(socket);
+      socket.setEncoding("utf8");
+      socket.on("data", (chunk: string) => {
+        const request = parseTerminalBrokerMessage(chunk.trim());
+        if (request?.type !== "open") return;
+        socket.write(encodeTerminalBrokerMessage({
+          type: "ready",
+          user: request.user,
+          cwd: "/home/zhubby",
+          shell: "/usr/bin/zsh"
+        }));
+        setTimeout(() => socket.end(), 0);
+      });
+    });
+    sockets.push(server);
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+    const runtime = createTerminalRuntime({ user: "zhubby", helperSocketPath: socketPath });
+    const terminal = await runtime.spawn("", [], {
+      name: "xterm-256color",
+      cols: 120,
+      rows: 32,
+      sessionName: "sigmaos-persisted",
+      persistent: true,
+      env: {}
+    });
+    const exit = new Promise<{ exitCode: number; recoverable?: boolean }>((resolve) => terminal.onExit(resolve));
+
+    await expect(exit).resolves.toMatchObject({ exitCode: -1, recoverable: true });
+  });
+
   it("rejects when the broker closes before ready", async () => {
     const socketPath = await createSocketPath();
     const server = net.createServer((socket) => {

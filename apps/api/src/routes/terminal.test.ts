@@ -271,6 +271,31 @@ describe("terminal tab routes", () => {
     });
     await server.close();
   });
+
+  it("restarts a tab without deleting metadata and preserves it on destroy failure", async () => {
+    const runtime = new FakeTerminalRuntime();
+    const server = await buildServer({ config: testConfig(), db, terminal: runtime });
+    const initialized = await server.inject({
+      method: "POST",
+      url: "/api/terminal/tabs/initialize",
+      payload: { rootId: "local" }
+    });
+    const id = String(initialized.json().activeTabId);
+
+    const restarted = await server.inject({ method: "POST", url: `/api/terminal/tabs/${id}/restart` });
+    expect(restarted.statusCode).toBe(200);
+    expect(restarted.json()).toMatchObject({ activeTabId: id, tabs: [{ id }] });
+    expect(runtime.destroyedSessionNames).toHaveLength(1);
+
+    runtime.destroyError = new Error("tmux kill failed");
+    const failed = await server.inject({ method: "POST", url: `/api/terminal/tabs/${id}/restart` });
+    expect(failed.statusCode).toBe(503);
+    expect((await server.inject({ method: "GET", url: "/api/terminal/tabs?rootId=local" })).json()).toMatchObject({
+      activeTabId: id,
+      tabs: [{ id }]
+    });
+    await server.close();
+  });
 });
 
 class FakeTerminalRuntime implements TerminalRuntime {

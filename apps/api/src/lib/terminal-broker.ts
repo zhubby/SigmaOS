@@ -115,7 +115,9 @@ class BrokerTerminalPty implements TerminalPty {
   readonly cwd: string;
   readonly shell: string;
   private readonly dataListeners = new Set<(data: string) => void>();
-  private readonly exitListeners = new Set<(event: { exitCode: number; signal?: number }) => void>();
+  private readonly exitListeners = new Set<(
+    event: { exitCode: number; signal?: number; recoverable?: boolean }
+  ) => void>();
   private frameBuffer = "";
   private pendingData: string[] = [];
   private exited = false;
@@ -133,7 +135,7 @@ class BrokerTerminalPty implements TerminalPty {
     socket.setEncoding("utf8");
     socket.on("data", (chunk: string) => this.receive(chunk));
     socket.on("error", (error) => this.fail(error.message));
-    socket.on("close", () => this.finish(-1));
+    socket.on("close", () => this.finish(-1, undefined, true));
   }
 
   static async connect(
@@ -162,7 +164,9 @@ class BrokerTerminalPty implements TerminalPty {
     return { dispose: () => this.dataListeners.delete(listener) };
   }
 
-  onExit(listener: (event: { exitCode: number; signal?: number }) => void): { dispose(): void } {
+  onExit(listener: (
+    event: { exitCode: number; signal?: number; recoverable?: boolean }
+  ) => void): { dispose(): void } {
     this.exitListeners.add(listener);
     return { dispose: () => this.exitListeners.delete(listener) };
   }
@@ -252,15 +256,19 @@ class BrokerTerminalPty implements TerminalPty {
     if (this.closed) return;
     this.closed = true;
     this.socket.destroy(new Error(message));
-    this.finish(-1);
+    this.finish(-1, undefined, true);
   }
 
-  private finish(exitCode: number, signal?: number): void {
+  private finish(exitCode: number, signal?: number, recoverable = false): void {
     if (this.exited) return;
     this.exited = true;
     this.closed = true;
     for (const listener of this.exitListeners) {
-      listener({ exitCode, ...(signal === undefined ? {} : { signal }) });
+      listener({
+        exitCode,
+        ...(signal === undefined ? {} : { signal }),
+        ...(recoverable ? { recoverable: true } : {})
+      });
     }
   }
 }

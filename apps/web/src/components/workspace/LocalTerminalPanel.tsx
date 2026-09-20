@@ -536,6 +536,12 @@ export function TerminalTabBar({
   const { t } = useTranslation();
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
 
+  useEffect(() => {
+    if (activeTabId) {
+      tabRefs.current.get(activeTabId)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }, [activeTabId, tabs]);
+
   function handleKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, tabId: string) {
     if (!isTerminalNavigationKey(event.key)) {
       return;
@@ -724,7 +730,7 @@ function TerminalSessionView({
       if (disposed || stopped || retryTimer !== null) {
         return;
       }
-      const delay = Math.min(5_000, 250 * 2 ** Math.min(retryAttempt, 5));
+      const delay = terminalReconnectDelay(retryAttempt);
       retryAttempt += 1;
       retryTimer = window.setTimeout(() => {
         retryTimer = null;
@@ -743,7 +749,6 @@ function TerminalSessionView({
         if (disposed || socketRef.current !== socket) {
           return;
         }
-        retryAttempt = 0;
         fitAndResize();
       });
       socket.addEventListener("message", (event) => {
@@ -755,6 +760,7 @@ function TerminalSessionView({
           return;
         }
         if (message.type === "ready") {
+          retryAttempt = 0;
           report("connected");
           fitAndResize();
         } else if (message.type === "output" && message.data) {
@@ -811,6 +817,10 @@ function TerminalSessionView({
       hidden={!active}
     />
   );
+}
+
+export function terminalReconnectDelay(attempt: number): number {
+  return Math.min(5_000, 250 * 2 ** Math.min(Math.max(0, attempt), 5));
 }
 
 function TerminalEmptyState({

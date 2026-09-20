@@ -9,7 +9,7 @@ export interface TerminalPty {
   readonly cwd: string;
   readonly shell: string;
   onData(listener: (data: string) => void): { dispose(): void };
-  onExit(listener: (event: { exitCode: number; signal?: number }) => void): { dispose(): void };
+  onExit(listener: (event: { exitCode: number; signal?: number; recoverable?: boolean }) => void): { dispose(): void };
   write(data: string): void;
   resize(columns: number, rows: number): void;
   kill(signal?: string): void;

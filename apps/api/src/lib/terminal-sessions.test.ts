@@ -117,6 +117,25 @@ describe("TerminalSessionManager", () => {
     lease.release(true);
     manager.disconnectAll();
   });
+
+  it("reconnects after a recoverable broker transport failure without reporting shell exit", async () => {
+    const runtime = new FakeRuntime();
+    const manager = new TerminalSessionManager(runtime, 60_000, 4);
+    const lease = await manager.acquire("root", firstSessionId, true);
+    const socket = new FakeSocket();
+    const messages: Array<Record<string, unknown>> = [];
+    expect(lease.session.attach(socket, collect(messages))).toBe(true);
+    lease.release(true);
+
+    runtime.terminals[0]!.emitExit(-1, undefined, true);
+
+    expect(socket.closed).toBe(true);
+    expect(messages).toEqual([{ type: "ready", cwd: os.homedir(), sessionId: firstSessionId }]);
+    const reconnect = await manager.acquire("root", firstSessionId, true);
+    expect(runtime.spawnCount).toBe(2);
+    reconnect.release();
+    manager.disconnectAll();
+  });
 });
 
 class FakeRuntime implements TerminalRuntime {
@@ -186,9 +205,13 @@ class FakeTerminal implements TerminalPty {
       listener(data);
     }
   }
-  emitExit(exitCode = 0): void {
+  emitExit(exitCode = 0, signal?: number, recoverable = false): void {
     for (const listener of this.exitListeners) {
-      listener({ exitCode });
+      listener({
+        exitCode,
+        ...(signal === undefined ? {} : { signal }),
+        ...(recoverable ? { recoverable: true } : {})
+      });
     }
   }
 }

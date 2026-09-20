@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { TerminalTab } from "../../api.js";
 import { i18n, initI18n } from "../../i18n/index.js";
-import { TerminalTabBar } from "./LocalTerminalPanel.js";
+import { terminalReconnectDelay, TerminalTabBar } from "./LocalTerminalPanel.js";
 
 const tabs: TerminalTab[] = [
   terminalTab("11111111-1111-4111-8111-111111111111", 1),
@@ -36,6 +36,21 @@ describe("TerminalTabBar", () => {
     expect(html).toContain('aria-label="新建终端"');
     expect(html).toContain("disabled");
     expect(html).toContain("已达到整机 2 个终端会话的上限。");
+  });
+});
+
+describe("terminalReconnectDelay", () => {
+  it("backs off failed terminal connections and caps retries at five seconds", () => {
+    expect(Array.from({ length: 8 }, (_, attempt) => terminalReconnectDelay(attempt))).toEqual([
+      250,
+      500,
+      1_000,
+      2_000,
+      4_000,
+      5_000,
+      5_000,
+      5_000
+    ]);
   });
 });
 

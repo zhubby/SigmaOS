@@ -449,13 +449,15 @@ function createTerminalSession(
     }
   };
 
-  exitSubscription = terminal.onExit(({ exitCode, signal }) => {
+  exitSubscription = terminal.onExit(({ exitCode, signal, recoverable }) => {
     if (closed) {
       return;
     }
     const socket = activeSocket;
-    if (socket) {
+    if (socket && !recoverable) {
       optionsSend(socket, { type: "exit", exitCode, ...(signal === undefined ? {} : { signal }) });
+    }
+    if (socket) {
       try {
         socket.close();
       } catch {
