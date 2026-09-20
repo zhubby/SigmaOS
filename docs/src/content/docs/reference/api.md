@@ -4,7 +4,7 @@ description: API 传输面、端点分组和稳定契约。
 type: reference
 status: current
 audience: [developer]
-sourceOfTruth: [apps/api/src/routes/index.ts, apps/api/src/routes/files.ts, apps/api/src/routes/sessions.ts, apps/api/src/routes/downloads.ts, apps/api/src/routes/docker.ts, apps/api/src/lib/docker-daemon.ts, apps/api/src/lib/docker-registry.ts, apps/web/src/api.ts]
+sourceOfTruth: [apps/api/src/routes/index.ts, apps/api/src/routes/files.ts, apps/api/src/routes/sessions.ts, apps/api/src/routes/downloads.ts, apps/api/src/routes/docker.ts, apps/api/src/routes/terminal.ts, apps/api/src/lib/docker-daemon.ts, apps/api/src/lib/docker-registry.ts, apps/web/src/api.ts]
 sidebar:
   order: 2
 ---
@@ -12,6 +12,17 @@ sidebar:
 REST 路由按 roots、files/search、sessions/jobs/events、approvals/operations、indexer/readiness/health、backup、settings、system、storage、shares、Docker、VM 和 terminal 分组。
 
 Agent 事件通过 session SSE stream 传递；terminal、Docker console 和 VM console 使用 WebSocket。写操作的 approval 要求以 route 实现和 `packages/shared/src/types.ts` 为准；本页不复制易漂移的完整 JSON schema。
+
+## Terminal 标签与 WebSocket
+
+- `GET /api/terminal/tabs?rootId=...` 返回指定 NAS root 的初始化状态、按创建顺序排列的标签、活动标签 ID 和整机会话上限。
+- `POST /api/terminal/tabs/initialize` 接收 `rootId` 和可选的旧 `legacySessionId`，事务性地完成首次创建或旧会话导入；重复请求不会重复创建同一旧会话。
+- `POST /api/terminal/tabs` 新建并激活标签；`PATCH /api/terminal/tabs/:id` 更新可空自定义名称；`POST /api/terminal/tabs/:id/activate` 更新整机共享的活动项。
+- `POST /api/terminal/tabs/:id/restart` 销毁对应 tmux shell 但保留标签；`DELETE /api/terminal/tabs/:id` 先销毁 shell，再删除标签。销毁失败返回 `503` 且不修改标签元数据，客户端可以重试。
+
+标签 ID 和旧会话 ID 必须是 UUID；名称去除首尾空格后为 1–64 个字符，也可传 `null` 恢复默认名称。无效 root、ID 或名称返回 `400/404`，会话上限或旧 ID 冲突返回 `409`。删除活动标签时优先激活右侧标签，其次左侧；删除最后一个标签后活动项为 `null`。
+
+`GET /api/terminal?rootId=...` 使用 `sigmaos-terminal-v1` 和 `sigmaos-session.<uuid>` WebSocket subprotocol。已登记标签以 persistent 模式打开；未登记 ID 保持旧客户端兼容并按空闲策略回收。一个标签只允许一个控制连接，新连接建立后旧连接收到 `{ "type": "taken_over" }`。`open` broker 请求的 `persistent` 字段可选，省略时等同旧版非持久会话。
 
 ## HTTP 下载
 

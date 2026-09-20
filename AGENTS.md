@@ -242,6 +242,13 @@ CSS variables, and `lucide-react` icons. Keep layouts stable across desktop and
 mobile, avoid text overlap, keep user-facing copy short and operational, and
 verify preview/file-browser changes in a browser when practical.
 
+The normative frontend design language is documented in
+`docs/src/content/docs/reference/frontend-design.md`. Read and follow it before
+making UI changes. Update that document when intentionally changing shared
+visual tokens, layout breakpoints, interaction semantics, or responsive
+information architecture; do not introduce page-local design rules that
+contradict it.
+
 ## Git
 
 Stage only files relevant to the request. Do not commit generated output.

@@ -57,7 +57,9 @@ import type {
   VmNetworkModel,
   VmVideoModel,
   PlayerStatus as SharedPlayerStatus,
-  OperationNotificationRecord as SharedOperationNotification
+  OperationNotificationRecord as SharedOperationNotification,
+  TerminalTab as SharedTerminalTab,
+  TerminalTabState as SharedTerminalTabState
 } from "@sigmaos/shared";
 
 export interface NasRoot {
@@ -105,6 +107,8 @@ export interface ReadinessResponse { roots: RootReadiness[]; }
 export type SystemHealth = SystemHealthSummary;
 export type DownloadTask = SharedDownloadTask;
 export type DownloadSettings = PublicDownloadSettings;
+export type TerminalTab = SharedTerminalTab;
+export type TerminalTabState = SharedTerminalTabState;
 export type VmSummary = PublicVmSummary;
 export type VmOperation = VmOperationRecord;
 export type VmAction = VmOperationAction;
@@ -929,6 +933,61 @@ export async function deleteDownload(id: string): Promise<void> {
     method: "DELETE"
   });
   await ensureOk(response);
+}
+
+export async function getTerminalTabs(rootId: string): Promise<TerminalTabState> {
+  const params = new URLSearchParams({ rootId });
+  const response = await fetch(`/api/terminal/tabs?${params.toString()}`);
+  await ensureOk(response);
+  return (await response.json()) as TerminalTabState;
+}
+
+export async function initializeTerminalTabs(rootId: string, legacySessionId?: string): Promise<TerminalTabState> {
+  const response = await fetch("/api/terminal/tabs/initialize", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rootId, ...(legacySessionId ? { legacySessionId } : {}) })
+  });
+  await ensureOk(response);
+  return (await response.json()) as TerminalTabState;
+}
+
+export async function createTerminalTab(rootId: string): Promise<TerminalTabState> {
+  const response = await fetch("/api/terminal/tabs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rootId })
+  });
+  await ensureOk(response);
+  return (await response.json()) as TerminalTabState;
+}
+
+export async function renameTerminalTab(id: string, customTitle: string | null): Promise<TerminalTabState> {
+  const response = await fetch(`/api/terminal/tabs/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ customTitle })
+  });
+  await ensureOk(response);
+  return (await response.json()) as TerminalTabState;
+}
+
+export async function activateTerminalTab(id: string): Promise<TerminalTabState> {
+  const response = await fetch(`/api/terminal/tabs/${encodeURIComponent(id)}/activate`, { method: "POST" });
+  await ensureOk(response);
+  return (await response.json()) as TerminalTabState;
+}
+
+export async function restartTerminalTab(id: string): Promise<TerminalTabState> {
+  const response = await fetch(`/api/terminal/tabs/${encodeURIComponent(id)}/restart`, { method: "POST" });
+  await ensureOk(response);
+  return (await response.json()) as TerminalTabState;
+}
+
+export async function deleteTerminalTab(id: string): Promise<TerminalTabState> {
+  const response = await fetch(`/api/terminal/tabs/${encodeURIComponent(id)}`, { method: "DELETE" });
+  await ensureOk(response);
+  return (await response.json()) as TerminalTabState;
 }
 
 export async function getDownloadSettings(): Promise<DownloadSettings> {

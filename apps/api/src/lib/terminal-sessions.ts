@@ -62,7 +62,7 @@ export class TerminalSessionManager {
     private readonly maxSessions = 32
   ) {}
 
-  async acquire(rootId: string, requestedSessionId?: string): Promise<TerminalSessionLease> {
+  async acquire(rootId: string, requestedSessionId?: string, persistent = false): Promise<TerminalSessionLease> {
     if (this.closed) {
       throw new Error("Terminal session manager is closed");
     }
@@ -89,7 +89,7 @@ export class TerminalSessionManager {
         session: null,
         cancelled: false
       };
-      const creation = this.createSession(rootId, sessionId);
+      const creation = this.createSession(rootId, sessionId, persistent);
       pending.promise = creation
         .then((session) => {
           pending!.session = session;
@@ -139,7 +139,8 @@ export class TerminalSessionManager {
   async reset(
     rootId: string,
     previousSessionId?: string,
-    nextSessionId?: string
+    nextSessionId?: string,
+    persistent = false
   ): Promise<TerminalSessionLease> {
     if (previousSessionId) {
       this.close(previousSessionId, rootId);
@@ -147,7 +148,26 @@ export class TerminalSessionManager {
     } else {
       this.cancelPending(rootId);
     }
-    return this.acquire(rootId, nextSessionId);
+    return this.acquire(rootId, nextSessionId, persistent);
+  }
+
+  async destroy(rootId: string, sessionId: string, _persistent = false): Promise<void> {
+    const existing = this.sessions.get(sessionId);
+    if (existing) {
+      if (existing.rootId !== rootId) {
+        throw new Error("Terminal session is not available");
+      }
+      existing.disconnect();
+      this.sessions.delete(sessionId);
+    }
+    const key = terminalSessionKey(rootId, sessionId);
+    const pending = this.pendingByKey.get(key);
+    if (pending) {
+      pending.cancelled = true;
+      this.pendingByKey.delete(key);
+      await pending.promise.catch(() => undefined);
+    }
+    await this.runtime.destroySession(terminalSessionName(rootId, sessionId));
   }
 
   detach(sessionId: string, socket: TerminalSocket): void {
@@ -194,12 +214,13 @@ export class TerminalSessionManager {
     this.pendingByKey.clear();
   }
 
-  private async createSession(rootId: string, sessionId: string): Promise<TerminalSession> {
+  private async createSession(rootId: string, sessionId: string, persistent: boolean): Promise<TerminalSession> {
     const terminal = await this.runtime.spawn("", [], {
       name: "xterm-256color",
       cols: DEFAULT_TERMINAL_COLS,
       rows: DEFAULT_TERMINAL_ROWS,
       sessionName: terminalSessionName(rootId, sessionId),
+      persistent,
       env: {
         ...process.env,
         TERM: "xterm-256color"
@@ -310,6 +331,7 @@ function createTerminalSession(
         return false;
       }
       if (activeSocket && activeSocket !== socket) {
+        activeSend?.(activeSocket, { type: "taken_over" });
         try {
           activeSocket.close();
         } catch {

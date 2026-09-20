@@ -4,12 +4,16 @@ description: share-helper 和 terminal-helper 的 Unix socket 权限隔离。
 type: reference
 status: current
 audience: [developer, operator]
-sourceOfTruth: [apps/share-helper/src/index.ts, apps/share-helper/src/helper.ts, apps/terminal-helper/src/index.ts, packaging/systemd/sigmaos-share-helper.service]
+sourceOfTruth: [apps/share-helper/src/index.ts, apps/share-helper/src/helper.ts, apps/terminal-helper/src/index.ts, apps/terminal-helper/src/session-policy.ts, packages/shared/src/terminal-protocol.ts, packaging/systemd/sigmaos-share-helper.service, packaging/systemd/sigmaos-terminal-helper.service]
 sidebar:
   order: 6
 ---
 
-share-helper 以 root 运行，但只接受固定 HTTP Unix socket 路径、allowlist 命令和配置目标。terminal-helper 以配置的非 root 用户运行 tmux，并通过 attach PTY 提供终端。session 名称由 NAS root 和客户端 session ID 稳定生成，因此 API 或 WebSocket 重连只会重新 attach，不会重复创建 shell；tmux socket 位于终端用户 home 下。helper 限制 frame、输出和并发 session，并通过 systemd drop-in 绑定用户 home；空闲 session 会按配置回收。
+share-helper 以 root 运行，但只接受固定 HTTP Unix socket 路径、allowlist 命令和配置目标。terminal-helper 以配置的非 root 用户运行 tmux，并通过 attach PTY 提供终端。session 名称由 NAS root 和标签 ID 稳定生成，因此 API 或 WebSocket 重连只会重新 attach，不会重复创建 shell；tmux socket 位于终端用户 home 下。
+
+API 在已登记标签的 broker `open` 请求中发送可选的 `persistent: true`。helper 把该状态写入 tmux session 的 `@sigmaos_persistent` 选项；空闲 reaper 和容量淘汰都会跳过这些 session。未携带标记的旧客户端 session 继续按配置的空闲时间回收。整机上所有持久与非持久 session 共同受 `terminal.maxSessions` 限制，容量不足时只可淘汰非持久 session。
+
+关闭或重启标签时，API 使用稳定 session 名称向 helper 发送 destroy，即使当前没有 WebSocket 连接也会终止 tmux session。销毁失败时 API 保留 SQLite 标签，避免元数据宣称进程已结束。API/helper 进程重启不会影响仍由 tmux 承载的 shell；主机重启会终止 tmux，之后同一标签首次连接时创建新 shell，不恢复旧进程或 scrollback。
 
 API 通过 Unix socket 调用 helper；浏览器永远不直接连接宿主机 socket。
 

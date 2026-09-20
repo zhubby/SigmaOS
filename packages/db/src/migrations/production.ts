@@ -236,5 +236,52 @@ export const productionMigrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_operation_notifications_unread_updated_at
         ON operation_notifications(read_at, updated_at DESC);
     `
+  },
+  {
+    id: "015_terminal_tabs",
+    sql: `
+      CREATE TABLE IF NOT EXISTS terminal_tabs (
+        id TEXT PRIMARY KEY,
+        root_id TEXT NOT NULL REFERENCES nas_roots(id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL CHECK (ordinal > 0),
+        custom_title TEXT CHECK (
+          custom_title IS NULL OR (length(custom_title) BETWEEN 1 AND 64 AND custom_title = trim(custom_title))
+        ),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(root_id, ordinal)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_terminal_tabs_root_ordinal
+        ON terminal_tabs(root_id, ordinal);
+
+      CREATE TABLE IF NOT EXISTS terminal_tab_sets (
+        root_id TEXT PRIMARY KEY REFERENCES nas_roots(id) ON DELETE CASCADE,
+        active_tab_id TEXT,
+        next_ordinal INTEGER NOT NULL DEFAULT 1 CHECK (next_ordinal > 0),
+        initialized_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TRIGGER IF NOT EXISTS trg_terminal_tab_sets_active_insert
+      BEFORE INSERT ON terminal_tab_sets
+      WHEN NEW.active_tab_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM terminal_tabs
+        WHERE id = NEW.active_tab_id AND root_id = NEW.root_id
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'active terminal tab must belong to root');
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS trg_terminal_tab_sets_active_update
+      BEFORE UPDATE OF active_tab_id, root_id ON terminal_tab_sets
+      WHEN NEW.active_tab_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM terminal_tabs
+        WHERE id = NEW.active_tab_id AND root_id = NEW.root_id
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'active terminal tab must belong to root');
+      END;
+    `
   }
 ];

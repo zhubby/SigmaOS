@@ -1,31 +1,58 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent
+} from "react";
 import { useTranslation } from "react-i18next";
-import { RefreshCw, TerminalSquare } from "lucide-react";
+import { LoaderCircle, Pencil, Plus, RefreshCw, TerminalSquare, X } from "lucide-react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import type { NasRoot } from "../../api.js";
+import {
+  activateTerminalTab,
+  createTerminalTab,
+  deleteTerminalTab,
+  getTerminalTabs,
+  initializeTerminalTabs,
+  renameTerminalTab,
+  restartTerminalTab,
+  type NasRoot,
+  type TerminalTab,
+  type TerminalTabState
+} from "../../api.js";
 import type { CodeFontSettings } from "../../lib/editor-settings.js";
 import {
-  createTerminalSessionId,
   clearStoredTerminalSessionId,
-  readStoredTerminalSessionId,
-  writeStoredTerminalSessionId
+  readStoredTerminalSessionId
 } from "../../lib/terminal-session.js";
+import {
+  shouldInitializeTerminalTabs,
+  terminalTabLabel,
+  terminalTabNavigationTarget,
+  type TerminalTabNavigationKey
+} from "../../lib/terminal-tabs.js";
 import type { ResolvedTheme } from "../../lib/theme-settings.js";
 import { applyTerminalOptions, terminalOptions } from "../../lib/terminal-theme.js";
 import { SkeletonBlock } from "./ManagementSkeleton.js";
 
-type TerminalStatus = "connecting" | "connected" | "disconnected" | "error" | "exited";
+type TerminalStatus = "connecting" | "connected" | "disconnected" | "error" | "exited" | "takenOver";
 
 interface TerminalMessage {
-  type: "ready" | "output" | "exit" | "error";
+  type: "ready" | "output" | "exit" | "error" | "taken_over";
   cwd?: string;
   sessionId?: string;
   data?: string;
   truncated?: boolean;
   exitCode?: number;
   error?: string;
+}
+
+interface TerminalViewState {
+  status: TerminalStatus;
+  diagnostic: string | null;
 }
 
 export function LocalTerminalPanel({
@@ -40,38 +67,567 @@ export function LocalTerminalPanel({
   resolvedTheme: ResolvedTheme;
 }) {
   const { t } = useTranslation();
-  const terminalHostRef = useRef<HTMLDivElement | null>(null);
+  const rootId = root?.id;
+  const currentRootIdRef = useRef(rootId);
+  const requestVersionRef = useRef(0);
+  const actionVersionRef = useRef(0);
+  const [tabState, setTabState] = useState<TerminalTabState | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [visitedTabIds, setVisitedTabIds] = useState<Set<string>>(() => new Set());
+  const [viewStates, setViewStates] = useState<Record<string, TerminalViewState>>({});
+  const [connectionVersions, setConnectionVersions] = useState<Record<string, number>>({});
+  const [renameCandidate, setRenameCandidate] = useState<TerminalTab | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [closeCandidate, setCloseCandidate] = useState<TerminalTab | null>(null);
+
+  currentRootIdRef.current = rootId;
+
+  const applyState = useCallback((nextState: TerminalTabState) => {
+    setTabState(nextState);
+    if (nextState.activeTabId) {
+      setVisitedTabIds((current) => addToSet(current, nextState.activeTabId!));
+    }
+  }, []);
+
+  const refreshTabs = useCallback(async (targetRootId: string, showLoading: boolean) => {
+    const requestVersion = ++requestVersionRef.current;
+    if (showLoading) {
+      setLoading(true);
+    }
+    try {
+      let nextState = await getTerminalTabs(targetRootId);
+      const legacySessionId = readStoredTerminalSessionId(targetRootId);
+      if (shouldInitializeTerminalTabs(nextState, legacySessionId)) {
+        nextState = await initializeTerminalTabs(targetRootId, legacySessionId ?? undefined);
+        if (legacySessionId) {
+          clearStoredTerminalSessionId(targetRootId);
+        }
+      } else if (legacySessionId) {
+        clearStoredTerminalSessionId(targetRootId);
+      }
+      if (requestVersion === requestVersionRef.current && currentRootIdRef.current === targetRootId) {
+        applyState(nextState);
+        setLoadError(null);
+      }
+    } catch (error) {
+      if (requestVersion === requestVersionRef.current && currentRootIdRef.current === targetRootId) {
+        setLoadError(errorMessage(error));
+      }
+    } finally {
+      if (requestVersion === requestVersionRef.current && currentRootIdRef.current === targetRootId) {
+        setLoading(false);
+      }
+    }
+  }, [applyState]);
+
+  useEffect(() => {
+    requestVersionRef.current += 1;
+    actionVersionRef.current += 1;
+    setTabState(null);
+    setLoading(false);
+    setLoadError(null);
+    setActionError(null);
+    setPendingAction(null);
+    setVisitedTabIds(new Set());
+    setViewStates({});
+    setConnectionVersions({});
+    setRenameCandidate(null);
+    setCloseCandidate(null);
+  }, [rootId]);
+
+  useEffect(() => {
+    if (active && rootId) {
+      void refreshTabs(rootId, true);
+    }
+  }, [active, refreshTabs, rootId]);
+
+  useEffect(() => {
+    const handleFocus = () => {
+      if (active && rootId) {
+        void refreshTabs(rootId, false);
+      }
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [active, refreshTabs, rootId]);
+
+  const updateViewState = useCallback((tabId: string, nextState: TerminalViewState) => {
+    setViewStates((current) => {
+      const previous = current[tabId];
+      if (previous?.status === nextState.status && previous.diagnostic === nextState.diagnostic) {
+        return current;
+      }
+      return { ...current, [tabId]: nextState };
+    });
+  }, []);
+
+  async function selectTab(tabId: string) {
+    if (!tabState || tabState.activeTabId === tabId || pendingAction) {
+      return;
+    }
+    const targetRootId = tabs.find((tab) => tab.id === tabId)?.rootId;
+    if (!targetRootId) {
+      return;
+    }
+    const previousState = tabState;
+    const actionVersion = ++actionVersionRef.current;
+    applyState({ ...tabState, activeTabId: tabId });
+    setActionError(null);
+    setPendingAction(`activate:${tabId}`);
+    try {
+      const nextState = await activateTerminalTab(tabId);
+      if (actionVersion === actionVersionRef.current && currentRootIdRef.current === targetRootId) {
+        requestVersionRef.current += 1;
+        applyState(nextState);
+      }
+    } catch (error) {
+      if (actionVersion === actionVersionRef.current && currentRootIdRef.current === targetRootId) {
+        setTabState(previousState);
+        setActionError(errorMessage(error));
+      }
+    } finally {
+      if (actionVersion === actionVersionRef.current && currentRootIdRef.current === targetRootId) {
+        setPendingAction(null);
+      }
+    }
+  }
+
+  async function createTab() {
+    if (!rootId || pendingAction) {
+      return;
+    }
+    setActionError(null);
+    const actionVersion = ++actionVersionRef.current;
+    setPendingAction("create");
+    try {
+      const nextState = await createTerminalTab(rootId);
+      if (actionVersion === actionVersionRef.current && currentRootIdRef.current === rootId) {
+        requestVersionRef.current += 1;
+        applyState(nextState);
+      }
+    } catch (error) {
+      if (actionVersion === actionVersionRef.current && currentRootIdRef.current === rootId) {
+        setActionError(
+          errorMessage(error) === "Terminal session limit reached"
+            ? String(t("workspace.terminal.limitReached", { count: tabState?.maxSessions ?? 32 }))
+            : errorMessage(error)
+        );
+      }
+    } finally {
+      if (actionVersion === actionVersionRef.current && currentRootIdRef.current === rootId) {
+        setPendingAction(null);
+      }
+    }
+  }
+
+  function openRenameDialog(tab: TerminalTab) {
+    setRenameCandidate(tab);
+    setRenameValue(tab.customTitle ?? "");
+    setActionError(null);
+  }
+
+  async function submitRename(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!renameCandidate || pendingAction) {
+      return;
+    }
+    const customTitle = renameValue.trim() || null;
+    const targetRootId = renameCandidate.rootId;
+    const actionVersion = ++actionVersionRef.current;
+    setActionError(null);
+    setPendingAction("rename");
+    try {
+      const nextState = await renameTerminalTab(renameCandidate.id, customTitle);
+      if (actionVersion === actionVersionRef.current && currentRootIdRef.current === targetRootId) {
+        requestVersionRef.current += 1;
+        applyState(nextState);
+        setRenameCandidate(null);
+      }
+    } catch (error) {
+      if (actionVersion === actionVersionRef.current && currentRootIdRef.current === targetRootId) {
+        setActionError(errorMessage(error));
+      }
+    } finally {
+      if (actionVersion === actionVersionRef.current && currentRootIdRef.current === targetRootId) {
+        setPendingAction(null);
+      }
+    }
+  }
+
+  async function restartTab(tabId: string) {
+    if (pendingAction) {
+      return;
+    }
+    const targetRootId = tabs.find((tab) => tab.id === tabId)?.rootId;
+    if (!targetRootId) {
+      return;
+    }
+    const actionVersion = ++actionVersionRef.current;
+    setActionError(null);
+    setPendingAction("restart");
+    try {
+      const nextState = await restartTerminalTab(tabId);
+      if (actionVersion === actionVersionRef.current && currentRootIdRef.current === targetRootId) {
+        requestVersionRef.current += 1;
+        applyState(nextState);
+        setConnectionVersions((current) => ({ ...current, [tabId]: (current[tabId] ?? 0) + 1 }));
+        updateViewState(tabId, { status: "connecting", diagnostic: null });
+      }
+    } catch (error) {
+      if (actionVersion === actionVersionRef.current && currentRootIdRef.current === targetRootId) {
+        setActionError(errorMessage(error));
+      }
+    } finally {
+      if (actionVersion === actionVersionRef.current && currentRootIdRef.current === targetRootId) {
+        setPendingAction(null);
+      }
+    }
+  }
+
+  async function closeTab() {
+    if (!closeCandidate || pendingAction) {
+      return;
+    }
+    const tabId = closeCandidate.id;
+    const targetRootId = closeCandidate.rootId;
+    const actionVersion = ++actionVersionRef.current;
+    setActionError(null);
+    setPendingAction("close");
+    try {
+      const nextState = await deleteTerminalTab(tabId);
+      if (actionVersion === actionVersionRef.current && currentRootIdRef.current === targetRootId) {
+        requestVersionRef.current += 1;
+        applyState(nextState);
+        setVisitedTabIds((current) => removeFromSet(current, tabId));
+        setViewStates((current) => omitKey(current, tabId));
+        setConnectionVersions((current) => omitKey(current, tabId));
+        setCloseCandidate(null);
+      }
+    } catch (error) {
+      if (actionVersion === actionVersionRef.current && currentRootIdRef.current === targetRootId) {
+        setActionError(errorMessage(error));
+      }
+    } finally {
+      if (actionVersion === actionVersionRef.current && currentRootIdRef.current === targetRootId) {
+        setPendingAction(null);
+      }
+    }
+  }
+
+  function reconnect(tabId: string) {
+    setConnectionVersions((current) => ({ ...current, [tabId]: (current[tabId] ?? 0) + 1 }));
+    updateViewState(tabId, { status: "connecting", diagnostic: null });
+  }
+
+  const tabs = tabState?.tabs ?? [];
+  const activeTab = tabs.find((tab) => tab.id === tabState?.activeTabId) ?? null;
+  const activeViewState = activeTab
+    ? viewStates[activeTab.id] ?? { status: "connecting" as const, diagnostic: null }
+    : null;
+  const atLocalLimit = Boolean(tabState && tabs.length >= tabState.maxSessions);
+  const visibleTabs = tabs.filter((tab) => visitedTabIds.has(tab.id));
+
+  return (
+    <section className="workspace-terminal-panel" hidden={!active} aria-hidden={!active} aria-label={t("workspace.terminal.title")}>
+      <header className="workspace-terminal-header">
+        {tabState ? (
+          <TerminalTabBar
+            tabs={tabs}
+            activeTabId={tabState.activeTabId}
+            maxSessions={tabState.maxSessions}
+            createDisabled={Boolean(pendingAction) || atLocalLimit}
+            onSelect={(tabId) => void selectTab(tabId)}
+            onCreate={() => void createTab()}
+            onRename={openRenameDialog}
+          />
+        ) : (
+          <div className="workspace-terminal-tabs-placeholder" aria-hidden="true" />
+        )}
+        <div className="workspace-terminal-actions">
+          {activeViewState ? (
+            <span
+              className="management-status-pill"
+              data-state={terminalStatusTone(activeViewState.status)}
+              aria-live="polite"
+              title={activeViewState.diagnostic ?? terminalStatusLabel(activeViewState.status, t)}
+            >
+              {terminalStatusLabel(activeViewState.status, t)}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            className="management-icon-action"
+            onClick={() => activeTab && openRenameDialog(activeTab)}
+            disabled={!activeTab || Boolean(pendingAction)}
+            title={t("workspace.terminal.rename")}
+            aria-label={t("workspace.terminal.rename")}
+          >
+            <Pencil aria-hidden="true" size={14} />
+          </button>
+          <button
+            type="button"
+            className="management-icon-action"
+            onClick={() => activeTab && void restartTab(activeTab.id)}
+            disabled={!activeTab || Boolean(pendingAction)}
+            title={t("workspace.terminal.restart")}
+            aria-label={t("workspace.terminal.restart")}
+          >
+            <RefreshCw aria-hidden="true" size={14} />
+          </button>
+          <button
+            type="button"
+            className="management-icon-action is-danger"
+            onClick={() => {
+              setActionError(null);
+              if (activeTab) setCloseCandidate(activeTab);
+            }}
+            disabled={!activeTab || Boolean(pendingAction)}
+            title={t("workspace.terminal.close")}
+            aria-label={t("workspace.terminal.close")}
+          >
+            <X aria-hidden="true" size={15} />
+          </button>
+        </div>
+      </header>
+
+      <div className="workspace-terminal-stage">
+        {!rootId ? (
+          <TerminalEmptyState title={t("workspace.terminal.noRoot")} />
+        ) : loading && !tabState ? (
+          <div className="workspace-terminal-skeleton" aria-hidden="true">
+            <SkeletonBlock width="38%" />
+            <SkeletonBlock width="64%" />
+            <SkeletonBlock width="52%" />
+          </div>
+        ) : loadError && !tabState ? (
+          <TerminalEmptyState
+            title={t("workspace.terminal.loadFailed")}
+            detail={loadError}
+            actionLabel={t("workspace.terminal.retry")}
+            onAction={() => void refreshTabs(rootId, true)}
+          />
+        ) : tabState && tabs.length === 0 ? (
+          <TerminalEmptyState
+            title={t("workspace.terminal.emptyTitle")}
+            detail={t("workspace.terminal.emptyBody")}
+            actionLabel={t("workspace.terminal.newTab")}
+            onAction={() => void createTab()}
+            disabled={Boolean(pendingAction)}
+          />
+        ) : null}
+
+        {visibleTabs.map((tab) => (
+          <TerminalSessionView
+            key={tab.id}
+            tab={tab}
+            rootId={tab.rootId}
+            label={terminalTabLabel(tab, t)}
+            active={active && tab.id === tabState?.activeTabId}
+            codeFontSettings={codeFontSettings}
+            resolvedTheme={resolvedTheme}
+            connectionVersion={connectionVersions[tab.id] ?? 0}
+            connectionError={String(t("workspace.terminal.connectionError"))}
+            disconnectedError={String(t("workspace.terminal.disconnectedError"))}
+            onStateChange={updateViewState}
+          />
+        ))}
+
+        {activeTab && activeViewState?.status === "takenOver" ? (
+          <div className="workspace-terminal-notice" role="status">
+            <strong>{t("workspace.terminal.takenOverTitle")}</strong>
+            <span>{t("workspace.terminal.takenOverBody")}</span>
+            <button type="button" className="secondary-button" onClick={() => reconnect(activeTab.id)}>
+              <RefreshCw aria-hidden="true" size={14} />
+              <span>{t("workspace.terminal.takeOver")}</span>
+            </button>
+          </div>
+        ) : activeTab && activeViewState?.status === "exited" ? (
+          <div className="workspace-terminal-notice" role="status">
+            <strong>{t("workspace.terminal.exitedTitle")}</strong>
+            <span>{t("workspace.terminal.exitedBody")}</span>
+            <button type="button" className="secondary-button" onClick={() => void restartTab(activeTab.id)} disabled={Boolean(pendingAction)}>
+              <RefreshCw aria-hidden="true" size={14} />
+              <span>{t("workspace.terminal.restart")}</span>
+            </button>
+          </div>
+        ) : null}
+
+        {actionError ? (
+          <div className="workspace-terminal-error" role="alert">
+            <span>{actionError}</span>
+            <button type="button" onClick={() => setActionError(null)} aria-label={t("common.actions.close")}>
+              <X aria-hidden="true" size={14} />
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      {renameCandidate ? (
+        <div className="file-action-backdrop" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setRenameCandidate(null)}>
+          <form className="file-action-dialog" role="dialog" aria-modal="true" aria-labelledby="terminal-rename-title" onSubmit={(event) => void submitRename(event)}>
+            <header>
+              <span className="eyebrow">{t("workspace.terminal.rename")}</span>
+              <h2 id="terminal-rename-title">{terminalTabLabel(renameCandidate, t)}</h2>
+            </header>
+            <label className="file-action-field">
+              <span>{t("workspace.terminal.tabName")}</span>
+              <input
+                autoFocus
+                value={renameValue}
+                maxLength={64}
+                onChange={(event) => setRenameValue(event.target.value)}
+                aria-describedby="terminal-rename-hint"
+              />
+            </label>
+            <p id="terminal-rename-hint" className="file-action-hint">{t("workspace.terminal.renameHint")}</p>
+            {actionError ? <p className="file-action-error" role="alert">{actionError}</p> : null}
+            <footer>
+              <button type="button" className="secondary-button" onClick={() => setRenameCandidate(null)} disabled={Boolean(pendingAction)}>{t("common.actions.cancel")}</button>
+              <button type="submit" className="primary-button" disabled={Boolean(pendingAction)} aria-busy={pendingAction === "rename" || undefined}>
+                {pendingAction === "rename" ? t("common.actions.saving") : t("workspace.terminal.saveName")}
+              </button>
+            </footer>
+          </form>
+        </div>
+      ) : null}
+
+      {closeCandidate ? (
+        <div className="file-action-backdrop" role="presentation">
+          <section className="file-action-dialog" role="dialog" aria-modal="true" aria-labelledby="terminal-close-title">
+            <header>
+              <span className="eyebrow">{t("workspace.terminal.close")}</span>
+              <h2 id="terminal-close-title">{terminalTabLabel(closeCandidate, t)}</h2>
+            </header>
+            <p className="file-action-copy">{t("workspace.terminal.closeConfirm")}</p>
+            {actionError ? <p className="file-action-error" role="alert">{actionError}</p> : null}
+            <footer>
+              <button type="button" className="secondary-button" onClick={() => setCloseCandidate(null)} disabled={Boolean(pendingAction)}>{t("common.actions.cancel")}</button>
+              <button type="button" className="danger-button" onClick={() => void closeTab()} disabled={Boolean(pendingAction)} aria-busy={pendingAction === "close" || undefined}>
+                {pendingAction === "close" ? t("workspace.terminal.closing") : t("workspace.terminal.closeAndStop")}
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+export function TerminalTabBar({
+  tabs,
+  activeTabId,
+  maxSessions,
+  createDisabled,
+  onSelect,
+  onCreate,
+  onRename
+}: {
+  tabs: TerminalTab[];
+  activeTabId: string | null;
+  maxSessions: number;
+  createDisabled: boolean;
+  onSelect: (tabId: string) => void;
+  onCreate: () => void;
+  onRename?: (tab: TerminalTab) => void;
+}) {
+  const { t } = useTranslation();
+  const tabRefs = useRef(new Map<string, HTMLButtonElement>());
+
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, tabId: string) {
+    if (!isTerminalNavigationKey(event.key)) {
+      return;
+    }
+    event.preventDefault();
+    const targetId = terminalTabNavigationTarget(tabs, tabId, event.key);
+    if (!targetId) {
+      return;
+    }
+    onSelect(targetId);
+    window.setTimeout(() => tabRefs.current.get(targetId)?.focus(), 0);
+  }
+
+  return (
+    <div className="workspace-terminal-tabbar">
+      <div className="workspace-terminal-tabs" role="tablist" aria-label={t("workspace.terminal.tabsLabel")}>
+        {tabs.map((tab) => {
+          const selected = tab.id === activeTabId;
+          return (
+            <button
+              key={tab.id}
+              ref={(element) => {
+                if (element) tabRefs.current.set(tab.id, element);
+                else tabRefs.current.delete(tab.id);
+              }}
+              type="button"
+              role="tab"
+              className={`workspace-terminal-tab${selected ? " is-active" : ""}`}
+              aria-selected={selected}
+              aria-controls={`terminal-panel-${tab.id}`}
+              tabIndex={selected ? 0 : -1}
+              title={terminalTabLabel(tab, t)}
+              onClick={() => onSelect(tab.id)}
+              onDoubleClick={() => onRename?.(tab)}
+              onKeyDown={(event) => handleKeyDown(event, tab.id)}
+            >
+              <TerminalSquare aria-hidden="true" size={14} />
+              <span>{terminalTabLabel(tab, t)}</span>
+            </button>
+          );
+        })}
+      </div>
+      <button
+        type="button"
+        className="workspace-terminal-new-tab"
+        onClick={onCreate}
+        disabled={createDisabled}
+        title={createDisabled && tabs.length >= maxSessions ? t("workspace.terminal.limitReached", { count: maxSessions }) : t("workspace.terminal.newTab")}
+        aria-label={t("workspace.terminal.newTab")}
+      >
+        <Plus aria-hidden="true" size={15} />
+      </button>
+    </div>
+  );
+}
+
+function TerminalSessionView({
+  tab,
+  rootId,
+  label,
+  active,
+  codeFontSettings,
+  resolvedTheme,
+  connectionVersion,
+  connectionError,
+  disconnectedError,
+  onStateChange
+}: {
+  tab: TerminalTab;
+  rootId: string;
+  label: string;
+  active: boolean;
+  codeFontSettings: CodeFontSettings;
+  resolvedTheme: ResolvedTheme;
+  connectionVersion: number;
+  connectionError: string;
+  disconnectedError: string;
+  onStateChange: (tabId: string, state: TerminalViewState) => void;
+}) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
-  const sessionIdsRef = useRef(new Map<string, string>());
-  const resetSessionRef = useRef(false);
-  const resetSessionIdRef = useRef<string | null>(null);
-  const resetNextSessionIdRef = useRef<string | null>(null);
-  const connectRef = useRef<(() => void) | null>(null);
-  const suspendRef = useRef<(() => void) | null>(null);
   const activeRef = useRef(active);
-  const [connectionKey, setConnectionKey] = useState(0);
-  const [status, setStatus] = useState<TerminalStatus>("connecting");
-  const [diagnostic, setDiagnostic] = useState<string | null>(null);
 
   activeRef.current = active;
 
   useEffect(() => {
-    const rootId = root?.id;
-    if (!rootId || !terminalHostRef.current) {
+    const host = hostRef.current;
+    if (!host) {
       return;
     }
-
-    let disposed = false;
-    let suspended = !activeRef.current;
-    let exited = false;
-    let socket: WebSocket | null = null;
-    let retryTimer: number | null = null;
-    let retryAttempt = 0;
-    let resizeObserver: ResizeObserver | null = null;
-    let dataDisposable: { dispose(): void } | null = null;
-    const host = terminalHostRef.current;
     const terminal = new Terminal({
       cursorBlink: true,
       convertEol: true,
@@ -84,8 +640,79 @@ export function LocalTerminalPanel({
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
+    const fit = () => {
+      if (!activeRef.current || host.clientWidth === 0 || host.clientHeight === 0) {
+        return;
+      }
+      fitAddon.fit();
+      const socket = socketRef.current;
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "resize", cols: terminal.cols, rows: terminal.rows }));
+      }
+    };
+    const resizeObserver = new ResizeObserver(fit);
+    resizeObserver.observe(host);
+    const dataDisposable = terminal.onData((data) => {
+      const socket = socketRef.current;
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "input", data }));
+      }
+    });
+
+    return () => {
+      resizeObserver.disconnect();
+      dataDisposable.dispose();
+      socketRef.current?.close();
+      socketRef.current = null;
+      fitAddonRef.current = null;
+      terminalRef.current = null;
+      terminal.dispose();
+    };
+  }, []);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    const host = hostRef.current;
+    if (!terminal || !host) {
+      return;
+    }
+    applyTerminalOptions(terminal, host);
+    if (active) {
+      window.setTimeout(() => {
+        if (terminalRef.current !== terminal || !fitAddonRef.current || host.clientWidth === 0 || host.clientHeight === 0) {
+          return;
+        }
+        fitAddonRef.current.fit();
+        terminal.focus();
+      }, 0);
+    }
+  }, [active, codeFontSettings.familyId, codeFontSettings.fontSizePx, resolvedTheme]);
+
+  useEffect(() => {
+    if (!active) {
+      const currentSocket = socketRef.current;
+      socketRef.current = null;
+      if (currentSocket && currentSocket.readyState < WebSocket.CLOSING) {
+        currentSocket.close();
+      }
+      return;
+    }
+
+    let disposed = false;
+    let stopped = false;
+    let retryTimer: number | null = null;
+    let retryAttempt = 0;
+
+    const report = (status: TerminalStatus, diagnostic: string | null = null) => {
+      if (!disposed) {
+        onStateChange(tab.id, { status, diagnostic });
+      }
+    };
     const fitAndResize = () => {
-      if (disposed || !activeRef.current || host.clientWidth === 0 || host.clientHeight === 0) {
+      const terminal = terminalRef.current;
+      const fitAddon = fitAddonRef.current;
+      const host = hostRef.current;
+      if (!terminal || !fitAddon || !host || host.clientWidth === 0 || host.clientHeight === 0) {
         return;
       }
       fitAddon.fit();
@@ -93,9 +720,8 @@ export function LocalTerminalPanel({
         socketRef.current.send(JSON.stringify({ type: "resize", cols: terminal.cols, rows: terminal.rows }));
       }
     };
-
     const scheduleReconnect = () => {
-      if (disposed || suspended || exited || retryTimer !== null) {
+      if (disposed || stopped || retryTimer !== null) {
         return;
       }
       const delay = Math.min(5_000, 250 * 2 ** Math.min(retryAttempt, 5));
@@ -105,36 +731,23 @@ export function LocalTerminalPanel({
         connect();
       }, delay);
     };
-
     const connect = () => {
-      if (disposed || suspended || exited || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) {
+      const existing = socketRef.current;
+      if (disposed || stopped || existing?.readyState === WebSocket.OPEN || existing?.readyState === WebSocket.CONNECTING) {
         return;
       }
-      const isReset = resetSessionRef.current;
-      const previousSessionId = isReset ? resetSessionIdRef.current : null;
-      const sessionId = isReset
-        ? resetNextSessionIdRef.current ?? createTerminalSessionId()
-        : readStoredTerminalSessionId(rootId) ?? sessionIdsRef.current.get(rootId) ?? createTerminalSessionId();
-      writeStoredTerminalSessionId(rootId, sessionId);
-
-      const currentSocket = new WebSocket(
-        terminalWebSocketUrl(rootId),
-        terminalWebSocketProtocols(sessionId, isReset ? previousSessionId : null, isReset ? sessionId : null)
-      );
-      socket = currentSocket;
-      socketRef.current = currentSocket;
-      setStatus("connecting");
-      setDiagnostic(null);
-
-      currentSocket.addEventListener("open", () => {
-        if (disposed || socketRef.current !== currentSocket) {
+      const socket = new WebSocket(terminalWebSocketUrl(rootId), terminalWebSocketProtocols(tab.id));
+      socketRef.current = socket;
+      report("connecting");
+      socket.addEventListener("open", () => {
+        if (disposed || socketRef.current !== socket) {
           return;
         }
         retryAttempt = 0;
         fitAndResize();
       });
-      currentSocket.addEventListener("message", (event) => {
-        if (disposed || socketRef.current !== currentSocket) {
+      socket.addEventListener("message", (event) => {
+        if (disposed || socketRef.current !== socket) {
           return;
         }
         const message = parseTerminalMessage(event.data);
@@ -142,188 +755,89 @@ export function LocalTerminalPanel({
           return;
         }
         if (message.type === "ready") {
-          if (message.sessionId) {
-            sessionIdsRef.current.set(rootId, message.sessionId);
-            writeStoredTerminalSessionId(rootId, message.sessionId);
-            if (resetSessionRef.current && resetNextSessionIdRef.current === message.sessionId) {
-              resetSessionRef.current = false;
-              resetSessionIdRef.current = null;
-              resetNextSessionIdRef.current = null;
-            }
-          }
-          setStatus("connected");
+          report("connected");
           fitAndResize();
-        }
-        if (message.type === "output" && message.data) {
-          terminal.write(message.data);
-        }
-        if (message.type === "error") {
-          setStatus("error");
-          setDiagnostic(message.error ?? t("workspace.terminal.connectionError"));
-        }
-        if (message.type === "exit") {
-          exited = true;
-          setStatus("exited");
-        }
-      });
-      currentSocket.addEventListener("error", () => {
-        if (!disposed && socketRef.current === currentSocket) {
-          setStatus("error");
-          setDiagnostic(t("workspace.terminal.connectionError"));
+        } else if (message.type === "output" && message.data) {
+          terminalRef.current?.write(message.data);
+        } else if (message.type === "error") {
+          report("error", message.error ?? connectionError);
+        } else if (message.type === "exit") {
+          stopped = true;
+          report("exited");
+        } else if (message.type === "taken_over") {
+          stopped = true;
+          report("takenOver");
         }
       });
-      currentSocket.addEventListener("close", () => {
-        if (socketRef.current !== currentSocket) {
+      socket.addEventListener("error", () => {
+        if (!disposed && socketRef.current === socket && !stopped) {
+          report("error", connectionError);
+        }
+      });
+      socket.addEventListener("close", () => {
+        if (socketRef.current !== socket) {
           return;
         }
         socketRef.current = null;
-        socket = null;
-        if (disposed || suspended || exited) {
+        if (disposed || stopped) {
           return;
         }
-        setStatus((current) => (current === "exited" || current === "error" ? current : "disconnected"));
-        setDiagnostic((current) => current ?? t("workspace.terminal.disconnectedError"));
+        report("disconnected", disconnectedError);
         scheduleReconnect();
       });
     };
 
-    const suspend = () => {
-      suspended = true;
-      if (retryTimer !== null) {
-        window.clearTimeout(retryTimer);
-        retryTimer = null;
-      }
-      const currentSocket = socketRef.current;
-      socketRef.current = null;
-      socket = null;
-      if (currentSocket && currentSocket.readyState < WebSocket.CLOSING) {
-        currentSocket.close();
-      }
-    };
-
-    const resume = () => {
-      suspended = false;
-      if (!exited) {
-        connect();
-      }
-    };
-
-    connectRef.current = resume;
-    suspendRef.current = suspend;
-    resizeObserver = new ResizeObserver(fitAndResize);
-    resizeObserver.observe(host);
-    dataDisposable = terminal.onData((data) => {
-      if (socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({ type: "input", data }));
-      }
-    });
-    if (activeRef.current) {
-      connect();
-    } else {
-      setStatus("disconnected");
-    }
-
+    connect();
     return () => {
       disposed = true;
-      resizeObserver?.disconnect();
-      dataDisposable?.dispose();
       if (retryTimer !== null) {
         window.clearTimeout(retryTimer);
       }
-      connectRef.current = null;
-      suspendRef.current = null;
-      const currentSocket = socketRef.current;
+      const socket = socketRef.current;
       socketRef.current = null;
-      if (currentSocket && currentSocket.readyState < WebSocket.CLOSING) {
-        currentSocket.close();
+      if (socket && socket.readyState < WebSocket.CLOSING) {
+        socket.close();
       }
-      fitAddonRef.current = null;
-      terminalRef.current = null;
-      terminal.dispose();
     };
-  }, [connectionKey, root?.id, t]);
-
-  useEffect(() => {
-    if (active) {
-      connectRef.current?.();
-    } else {
-      suspendRef.current?.();
-    }
-  }, [active]);
-
-  useEffect(() => {
-    const terminal = terminalRef.current;
-    const host = terminalHostRef.current;
-    if (!terminal || !host) {
-      return;
-    }
-    applyTerminalOptions(terminal, host);
-    if (active) {
-      window.setTimeout(() => {
-        if (terminalRef.current !== terminal || !fitAddonRef.current || !terminalHostRef.current) {
-          return;
-        }
-        fitAddonRef.current.fit();
-        terminal.focus();
-      }, 0);
-    }
-  }, [active, codeFontSettings.familyId, codeFontSettings.fontSizePx, resolvedTheme]);
-
-  function restart() {
-    if (!root) {
-      return;
-    }
-    const previousSessionId = sessionIdsRef.current.get(root.id) ?? readStoredTerminalSessionId(root.id);
-    const nextSessionId = createTerminalSessionId();
-    clearStoredTerminalSessionId(root.id);
-    sessionIdsRef.current.set(root.id, nextSessionId);
-    writeStoredTerminalSessionId(root.id, nextSessionId);
-    resetSessionRef.current = true;
-    resetSessionIdRef.current = previousSessionId;
-    resetNextSessionIdRef.current = nextSessionId;
-    setConnectionKey((current) => current + 1);
-  }
-
-  const statusLabel = terminalStatusLabel(status, t);
+  }, [active, connectionError, connectionVersion, disconnectedError, onStateChange, rootId, tab.id]);
 
   return (
-    <section className="workspace-terminal-panel" hidden={!active} aria-hidden={!active} aria-label={t("workspace.terminal.title")}>
-      <header className="workspace-terminal-header">
-        <div className="workspace-terminal-title management-title-block">
-          <span className="management-title-icon">
-            <TerminalSquare aria-hidden="true" size={20} />
-          </span>
-          <div className="management-title-copy">
-            <span className="eyebrow">{t("workspace.terminal.eyebrow")}</span>
-            <h2>{t("workspace.terminal.title")}</h2>
-            <p>{t("workspace.terminal.description")}</p>
-          </div>
-        </div>
-        <div className="workspace-terminal-actions">
-          <span
-            className="management-status-pill"
-            data-state={terminalStatusTone(status)}
-            aria-live="polite"
-            title={diagnostic ?? statusLabel}
-          >
-            {statusLabel}
-          </span>
-          <button
-            type="button"
-            className="management-icon-action"
-            onClick={restart}
-            disabled={!root}
-            title={t("workspace.terminal.restart")}
-            aria-label={t("workspace.terminal.restart")}
-          >
-            <RefreshCw aria-hidden="true" size={14} />
-          </button>
-        </div>
-      </header>
-      <div ref={terminalHostRef} className={`workspace-terminal${status === "connecting" ? " is-connecting" : ""}`} aria-busy={status === "connecting"}>
-        {status === "connecting" ? <div className="workspace-terminal-skeleton" aria-hidden="true"><SkeletonBlock width="38%" /><SkeletonBlock width="64%" /><SkeletonBlock width="52%" /></div> : null}
-      </div>
-    </section>
+    <div
+      ref={hostRef}
+      id={`terminal-panel-${tab.id}`}
+      className="workspace-terminal"
+      role="tabpanel"
+      aria-label={label}
+      hidden={!active}
+    />
+  );
+}
+
+function TerminalEmptyState({
+  title,
+  detail,
+  actionLabel,
+  onAction,
+  disabled = false
+}: {
+  title: string;
+  detail?: string;
+  actionLabel?: string;
+  onAction?: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="workspace-terminal-empty">
+      <TerminalSquare aria-hidden="true" size={24} />
+      <strong>{title}</strong>
+      {detail ? <span>{detail}</span> : null}
+      {actionLabel && onAction ? (
+        <button type="button" className="secondary-button" onClick={onAction} disabled={disabled}>
+          {disabled ? <LoaderCircle className="is-spinning" aria-hidden="true" size={14} /> : <Plus aria-hidden="true" size={14} />}
+          <span>{actionLabel}</span>
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -333,19 +847,14 @@ function terminalWebSocketUrl(rootId: string): string {
   return url.toString();
 }
 
-function terminalWebSocketProtocols(sessionId: string, resetSessionId: string | null, nextSessionId: string | null): string[] {
-  return [
-    "sigmaos-terminal-v1",
-    `sigmaos-session.${sessionId}`,
-    ...(resetSessionId ? [`sigmaos-reset.${resetSessionId}`] : []),
-    ...(nextSessionId ? [`sigmaos-next.${nextSessionId}`] : [])
-  ];
+function terminalWebSocketProtocols(sessionId: string): string[] {
+  return ["sigmaos-terminal-v1", `sigmaos-session.${sessionId}`];
 }
 
 function parseTerminalMessage(raw: unknown): TerminalMessage | null {
   try {
     const parsed = JSON.parse(String(raw)) as TerminalMessage;
-    if (!["ready", "output", "exit", "error"].includes(parsed.type)) {
+    if (!["ready", "output", "exit", "error", "taken_over"].includes(parsed.type)) {
       return null;
     }
     return parsed;
@@ -362,11 +871,39 @@ function terminalStatusTone(status: TerminalStatus): "ready" | "warning" | "offl
   if (status === "connected") {
     return "ready";
   }
-  if (status === "error" || status === "disconnected") {
+  if (status === "error" || status === "disconnected" || status === "takenOver") {
     return "offline";
   }
   if (status === "connecting") {
     return "warning";
   }
   return "neutral";
+}
+
+function isTerminalNavigationKey(key: string): key is TerminalTabNavigationKey {
+  return key === "ArrowLeft" || key === "ArrowRight" || key === "Home" || key === "End";
+}
+
+function addToSet(current: Set<string>, value: string): Set<string> {
+  if (current.has(value)) {
+    return current;
+  }
+  const next = new Set(current);
+  next.add(value);
+  return next;
+}
+
+function removeFromSet(current: Set<string>, value: string): Set<string> {
+  const next = new Set(current);
+  next.delete(value);
+  return next;
+}
+
+function omitKey<T>(current: Record<string, T>, key: string): Record<string, T> {
+  const { [key]: _removed, ...next } = current;
+  return next;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

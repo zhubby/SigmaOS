@@ -679,7 +679,7 @@
   gap: 6px;
   opacity: 0;
   overflow: visible;
-  padding-right: 8px;
+  padding-right: 16px;
   pointer-events: none;
   transition: opacity 140ms ease;
   white-space: normal;
@@ -837,6 +837,14 @@
 .file-action-copy {
   margin: 0;
   line-height: 1.45;
+}
+
+.file-action-error {
+  margin: 0;
+  color: var(--danger-text);
+  font-size: 11.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .file-action-copy {
@@ -1504,50 +1512,155 @@
 .workspace-terminal-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 10px;
   min-width: 0;
-  min-height: 70px;
-  padding: 14px 16px;
+  min-height: 46px;
+  padding: 0 10px;
   border-bottom: 1px solid var(--header-border);
   background: var(--channel-bg);
 }
 
-.workspace-terminal-title {
+.workspace-terminal-tabbar {
+  display: flex;
   flex: 1 1 auto;
-}
-
-.workspace-terminal-title h2 {
+  align-items: stretch;
   min-width: 0;
-  margin: 0;
+  height: 45px;
+}
+
+.workspace-terminal-tabs {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: stretch;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-color: var(--line) transparent;
+  scrollbar-width: thin;
+}
+
+.workspace-terminal-tab {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 92px;
+  max-width: 190px;
+  height: 45px;
+  padding: 0 12px;
   overflow: hidden;
+  border: 0;
+  border-right: 1px solid var(--line-soft);
+  border-radius: 0;
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-terminal-tab::after {
+  position: absolute;
+  right: 8px;
+  bottom: 0;
+  left: 8px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: transparent;
+  content: "";
+}
+
+.workspace-terminal-tab:hover {
   color: var(--text);
-  font-size: 20px;
-  line-height: 1.15;
+  background: var(--surface-hover);
+}
+
+.workspace-terminal-tab.is-active {
+  color: var(--text);
+  background: var(--code-bg);
+}
+
+.workspace-terminal-tab.is-active::after {
+  background: var(--accent);
+}
+
+.workspace-terminal-tab:focus-visible,
+.workspace-terminal-new-tab:focus-visible {
+  z-index: 1;
+  outline: 2px solid var(--focus-ring-soft);
+  outline-offset: -2px;
+}
+
+.workspace-terminal-tab svg {
+  flex: 0 0 auto;
+}
+
+.workspace-terminal-tab span {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.workspace-terminal-title p {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.workspace-terminal-new-tab {
+  display: inline-grid;
+  flex: 0 0 38px;
+  place-items: center;
+  width: 38px;
+  height: 45px;
+  padding: 0;
+  border: 0;
+  border-right: 1px solid var(--line-soft);
+  border-radius: 0;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.workspace-terminal-new-tab:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.workspace-terminal-new-tab:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.workspace-terminal-tabs-placeholder {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .workspace-terminal-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex: 0 0 auto;
 }
 
-.workspace-terminal {
+.workspace-terminal-stage {
   position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--code-bg);
+}
+
+.workspace-terminal {
+  position: absolute;
+  inset: 0;
   min-width: 0;
   min-height: 0;
   padding: 10px;
   overflow: hidden;
   background: var(--code-bg);
+}
+
+.workspace-terminal[hidden] {
+  display: none;
 }
 
 .workspace-terminal-skeleton {
@@ -1584,6 +1697,98 @@
 .workspace-terminal .xterm-viewport,
 .workspace-terminal .xterm-screen {
   background: transparent !important;
+}
+
+.workspace-terminal-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 24px;
+  color: var(--muted-2);
+  text-align: center;
+}
+
+.workspace-terminal-empty strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.workspace-terminal-empty > span {
+  max-width: 420px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.workspace-terminal-empty .secondary-button,
+.workspace-terminal-notice .secondary-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.workspace-terminal-notice {
+  position: absolute;
+  z-index: 4;
+  top: 12px;
+  left: 50%;
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  width: min(420px, calc(100% - 24px));
+  padding: 12px 14px;
+  transform: translateX(-50%);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--modal-bg);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  text-align: center;
+}
+
+.workspace-terminal-notice strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.workspace-terminal-error {
+  position: absolute;
+  z-index: 5;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(520px, calc(100% - 24px));
+  padding: 9px 10px 9px 12px;
+  border: 1px solid var(--danger-border);
+  border-radius: 5px;
+  color: var(--danger-text);
+  background: var(--modal-bg);
+  box-shadow: var(--shadow);
+  font-size: 11.5px;
+}
+
+.workspace-terminal-error span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.workspace-terminal-error button {
+  display: inline-grid;
+  flex: 0 0 24px;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
 }
 
 .management-header {

@@ -869,11 +869,21 @@
   }
 
   .workspace-terminal-header {
-    gap: 10px;
-    padding: 12px;
+    gap: 6px;
+    padding: 0 8px;
   }
 
-  .workspace-terminal-title .management-title-copy p {
+  .workspace-terminal-tab {
+    min-width: 82px;
+    max-width: 132px;
+    padding: 0 9px;
+  }
+
+  .workspace-terminal-actions {
+    gap: 4px;
+  }
+
+  .workspace-terminal-actions .management-status-pill {
     display: none;
   }
 
@@ -920,7 +930,7 @@
 
   .file-row-actions {
     gap: 4px;
-    padding-right: 8px;
+    padding-right: 16px;
   }
 
   .file-action-button {

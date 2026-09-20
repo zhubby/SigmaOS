@@ -9,13 +9,15 @@ export const TERMINAL_BROKER_MIN_ROWS = 1;
 export const TERMINAL_BROKER_MAX_ROWS = 200;
 
 export type TerminalBrokerRequest =
-  | { type: "open"; user: string; cols: number; rows: number; sessionName?: string }
+  | { type: "open"; user: string; cols: number; rows: number; sessionName?: string; persistent?: boolean }
+  | { type: "destroy"; user: string; sessionName: string }
   | { type: "input"; data: string }
   | { type: "resize"; cols: number; rows: number }
   | { type: "close"; destroy?: boolean };
 
 export type TerminalBrokerEvent =
   | { type: "ready"; user: string; cwd: string; shell: string }
+  | { type: "destroyed"; sessionName: string }
   | { type: "output"; data: string }
   | { type: "exit"; exitCode: number; signal?: number }
   | { type: "error"; error: string };
@@ -50,12 +52,22 @@ export function parseTerminalBrokerMessage(raw: string): TerminalBrokerRequest |
       user: value.user,
       cols,
       rows,
-      ...(sessionName ? { sessionName } : {})
+      ...(sessionName ? { sessionName } : {}),
+      ...(value.persistent === true ? { persistent: true } : {})
     };
   }
 
   if (value.type === "input" && typeof value.data === "string") {
     return { type: "input", data: value.data };
+  }
+
+  if (
+    value.type === "destroy" &&
+    typeof value.user === "string" &&
+    typeof value.sessionName === "string" &&
+    isSafeSessionName(value.sessionName)
+  ) {
+    return { type: "destroy", user: value.user, sessionName: value.sessionName };
   }
 
   if (value.type === "resize") {
@@ -91,6 +103,9 @@ export function parseTerminalBrokerEvent(raw: string): TerminalBrokerEvent | nul
   }
   if (value.type === "output" && typeof value.data === "string") {
     return { type: "output", data: value.data };
+  }
+  if (value.type === "destroyed" && typeof value.sessionName === "string" && isSafeSessionName(value.sessionName)) {
+    return { type: "destroyed", sessionName: value.sessionName };
   }
   if (value.type === "exit" && typeof value.exitCode === "number") {
     return {

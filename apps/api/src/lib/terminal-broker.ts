@@ -16,6 +16,14 @@ import {
 
 export function createTerminalRuntime(config: TerminalConfig): TerminalRuntime {
   return {
+    async destroySession(sessionName) {
+      if (!config.user) {
+        throw new Error("Terminal user is not configured");
+      }
+      const timeoutMs = config.connectTimeoutMs ?? TERMINAL_SESSION_DEFAULT_CONNECT_TIMEOUT_MS;
+      const socket = await connectSocket(config.helperSocketPath, timeoutMs);
+      await waitForDestroyed(socket, config.user, sessionName, timeoutMs);
+    },
     spawn(_shell, _args, options) {
       if (!config.user) {
         throw new Error("Terminal user is not configured");
@@ -26,10 +34,81 @@ export function createTerminalRuntime(config: TerminalConfig): TerminalRuntime {
         options.cols,
         options.rows,
         options.sessionName,
+        options.persistent,
         config.connectTimeoutMs ?? TERMINAL_SESSION_DEFAULT_CONNECT_TIMEOUT_MS
       );
     }
   };
+}
+
+async function waitForDestroyed(
+  socket: net.Socket,
+  user: string,
+  sessionName: string,
+  timeoutMs: number
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let frameBuffer = "";
+    let settled = false;
+    const timeout = setTimeout(() => fail(new Error("Timed out destroying terminal session")), timeoutMs);
+    const cleanup = () => {
+      socket.off("data", onData);
+      socket.off("error", onError);
+      socket.off("close", onClose);
+      clearTimeout(timeout);
+    };
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      socket.destroy();
+      reject(error);
+    };
+    const succeed = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      socket.end();
+      resolve();
+    };
+    const onError = (error: Error) => fail(error);
+    const onClose = () => fail(new Error("Terminal broker connection closed before destroy completed"));
+    const onData = (chunk: string) => {
+      frameBuffer += chunk;
+      if (Buffer.byteLength(frameBuffer, "utf8") > TERMINAL_BROKER_MAX_FRAME_BYTES && !frameBuffer.includes("\n")) {
+        fail(new Error("Terminal broker frame is too large"));
+        return;
+      }
+      const newlineIndex = frameBuffer.indexOf("\n");
+      while (newlineIndex >= 0) {
+        const frame = frameBuffer.slice(0, newlineIndex);
+        frameBuffer = frameBuffer.slice(newlineIndex + 1);
+        const event = parseTerminalBrokerEvent(frame);
+        if (!event) {
+          fail(new Error("Invalid terminal broker response"));
+          return;
+        }
+        if (event.type === "destroyed" && event.sessionName === sessionName) {
+          succeed();
+          return;
+        }
+        if (event.type === "error") {
+          fail(new Error(event.error));
+          return;
+        }
+        fail(new Error("Terminal broker sent an unexpected destroy response"));
+        return;
+      }
+    };
+    socket.on("data", onData);
+    socket.once("error", onError);
+    socket.once("close", onClose);
+    try {
+      socket.write(encodeTerminalBrokerMessage({ type: "destroy", user, sessionName }));
+    } catch (error) {
+      fail(error instanceof Error ? error : new Error("Unable to contact terminal broker"));
+    }
+  });
 }
 
 class BrokerTerminalPty implements TerminalPty {
@@ -63,10 +142,11 @@ class BrokerTerminalPty implements TerminalPty {
     cols = DEFAULT_TERMINAL_COLS,
     rows = DEFAULT_TERMINAL_ROWS,
     sessionName?: string,
+    persistent = false,
     timeoutMs = TERMINAL_SESSION_DEFAULT_CONNECT_TIMEOUT_MS
   ): Promise<BrokerTerminalPty> {
     const socket = await connectSocket(socketPath, timeoutMs);
-    const handshake = await waitForReady(socket, user, cols, rows, sessionName, timeoutMs);
+    const handshake = await waitForReady(socket, user, cols, rows, sessionName, persistent, timeoutMs);
     const terminal = new BrokerTerminalPty(socket, handshake.ready, handshake.pendingBuffer);
     for (const event of handshake.pendingEvents) {
       terminal.handleEvent(event);
@@ -156,6 +236,7 @@ class BrokerTerminalPty implements TerminalPty {
       case "error":
         this.fail(event.error);
         break;
+      case "destroyed":
       case "ready":
         break;
     }
@@ -190,6 +271,7 @@ async function waitForReady(
   cols: number,
   rows: number,
   sessionName: string | undefined,
+  persistent: boolean,
   timeoutMs: number
 ): Promise<{
   ready: Extract<TerminalBrokerEvent, { type: "ready" }>;
@@ -266,7 +348,8 @@ async function waitForReady(
         user,
         cols,
         rows,
-        ...(sessionName ? { sessionName } : {})
+        ...(sessionName ? { sessionName } : {}),
+        ...(persistent ? { persistent: true } : {})
       }));
     } catch (error) {
       fail(error instanceof Error ? error : new Error("Unable to contact terminal broker"));

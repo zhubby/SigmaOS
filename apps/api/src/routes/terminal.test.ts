@@ -121,6 +121,156 @@ describe("terminal WebSocket", () => {
     expect(runtime.terminal.killed).toBe(true);
     await server.close();
   });
+
+  it("marks registered tabs persistent and notifies the previous controller on takeover", async () => {
+    const runtime = new FakeTerminalRuntime();
+    const server = await buildServer({ config: testConfig(), db, terminal: runtime });
+    const sessionId = "11111111-1111-4111-8111-111111111111";
+    const initialized = await server.inject({
+      method: "POST",
+      url: "/api/terminal/tabs/initialize",
+      payload: { rootId: "local", legacySessionId: sessionId }
+    });
+    expect(initialized.statusCode).toBe(200);
+
+    const firstSocket = await connect(server, "local", sessionId);
+    await nextMessage(firstSocket);
+    const secondSocket = await connect(server, "local", sessionId);
+
+    expect(await nextMessage(firstSocket)).toEqual({ type: "taken_over" });
+    expect(await nextMessage(secondSocket)).toMatchObject({ type: "ready", sessionId });
+    expect(runtime.optionsHistory[0]?.persistent).toBe(true);
+
+    secondSocket.close();
+    await socketEvent(secondSocket, "close");
+    await server.close();
+  });
+
+  it("rejects a registered tab through a different root without spawning a shell", async () => {
+    const otherRootDir = path.join(tempDir, "other-root");
+    await mkdir(otherRootDir);
+    ensureNasRoots(db, [
+      { id: "local", name: "Local", path: rootDir },
+      { id: "other", name: "Other", path: otherRootDir }
+    ]);
+    const runtime = new FakeTerminalRuntime();
+    const server = await buildServer({ config: testConfig(), db, terminal: runtime });
+    const sessionId = "11111111-1111-4111-8111-111111111111";
+    const initialized = await server.inject({
+      method: "POST",
+      url: "/api/terminal/tabs/initialize",
+      payload: { rootId: "local", legacySessionId: sessionId }
+    });
+    expect(initialized.statusCode).toBe(200);
+
+    const socket = await connect(server, "other", sessionId);
+
+    expect(await nextMessage(socket)).toEqual({ type: "error", error: "Terminal session is not available" });
+    await socketEvent(socket, "close");
+    expect(runtime.spawned).toBe(false);
+    await server.close();
+  });
+});
+
+describe("terminal tab routes", () => {
+  it("initializes, creates, renames, activates, and deletes persistent tabs", async () => {
+    const runtime = new FakeTerminalRuntime();
+    const server = await buildServer({ config: testConfig(), db, terminal: runtime });
+    const legacySessionId = "11111111-1111-4111-8111-111111111111";
+
+    const empty = await server.inject({ method: "GET", url: "/api/terminal/tabs?rootId=local" });
+    expect(empty.json()).toMatchObject({ initialized: false, tabs: [], activeTabId: null, maxSessions: 4 });
+
+    const initialized = await server.inject({
+      method: "POST",
+      url: "/api/terminal/tabs/initialize",
+      payload: { rootId: "local", legacySessionId }
+    });
+    expect(initialized.json()).toMatchObject({
+      initialized: true,
+      activeTabId: legacySessionId,
+      tabs: [{ id: legacySessionId, ordinal: 1, customTitle: null }]
+    });
+
+    const created = await server.inject({ method: "POST", url: "/api/terminal/tabs", payload: { rootId: "local" } });
+    expect(created.statusCode).toBe(201);
+    const createdState = created.json();
+    const secondId = String(createdState.activeTabId);
+    expect(createdState.tabs).toHaveLength(2);
+
+    const renamed = await server.inject({
+      method: "PATCH",
+      url: `/api/terminal/tabs/${secondId}`,
+      payload: { customTitle: " Build shell " }
+    });
+    expect(renamed.json().tabs[1].customTitle).toBe("Build shell");
+
+    const activated = await server.inject({ method: "POST", url: `/api/terminal/tabs/${legacySessionId}/activate` });
+    expect(activated.json().activeTabId).toBe(legacySessionId);
+
+    const deleted = await server.inject({ method: "DELETE", url: `/api/terminal/tabs/${secondId}` });
+    expect(deleted.json()).toMatchObject({ activeTabId: legacySessionId });
+    expect(deleted.json().tabs).toHaveLength(1);
+    expect(runtime.destroyedSessionNames).toEqual([expect.stringMatching(/^sigmaos-/u)]);
+    await server.close();
+  });
+
+  it("validates roots, ids, names, and the global tab limit", async () => {
+    const server = await buildServer({ config: testConfig(), db, terminal: new FakeTerminalRuntime() });
+
+    expect((await server.inject({ method: "GET", url: "/api/terminal/tabs" })).statusCode).toBe(400);
+    expect((await server.inject({
+      method: "POST",
+      url: "/api/terminal/tabs/initialize",
+      payload: { rootId: "missing" }
+    })).statusCode).toBe(404);
+    expect((await server.inject({
+      method: "POST",
+      url: "/api/terminal/tabs/initialize",
+      payload: { rootId: "local", legacySessionId: "invalid" }
+    })).statusCode).toBe(400);
+
+    const initialized = await server.inject({
+      method: "POST",
+      url: "/api/terminal/tabs/initialize",
+      payload: { rootId: "local" }
+    });
+    const id = String(initialized.json().activeTabId);
+    expect((await server.inject({
+      method: "PATCH",
+      url: `/api/terminal/tabs/${id}`,
+      payload: { customTitle: "  " }
+    })).statusCode).toBe(400);
+
+    await server.inject({ method: "POST", url: "/api/terminal/tabs", payload: { rootId: "local" } });
+    await server.inject({ method: "POST", url: "/api/terminal/tabs", payload: { rootId: "local" } });
+    await server.inject({ method: "POST", url: "/api/terminal/tabs", payload: { rootId: "local" } });
+    const limited = await server.inject({ method: "POST", url: "/api/terminal/tabs", payload: { rootId: "local" } });
+    expect(limited.statusCode).toBe(409);
+    expect(limited.json()).toEqual({ error: "Terminal session limit reached" });
+    await server.close();
+  });
+
+  it("keeps tab metadata when helper destruction fails", async () => {
+    const runtime = new FakeTerminalRuntime();
+    const server = await buildServer({ config: testConfig(), db, terminal: runtime });
+    const initialized = await server.inject({
+      method: "POST",
+      url: "/api/terminal/tabs/initialize",
+      payload: { rootId: "local" }
+    });
+    const id = String(initialized.json().activeTabId);
+    runtime.destroyError = new Error("tmux kill failed");
+
+    const response = await server.inject({ method: "DELETE", url: `/api/terminal/tabs/${id}` });
+
+    expect(response.statusCode).toBe(503);
+    expect((await server.inject({ method: "GET", url: "/api/terminal/tabs?rootId=local" })).json()).toMatchObject({
+      activeTabId: id,
+      tabs: [{ id }]
+    });
+    await server.close();
+  });
 });
 
 class FakeTerminalRuntime implements TerminalRuntime {
@@ -131,6 +281,13 @@ class FakeTerminalRuntime implements TerminalRuntime {
   shell = "";
   options: Parameters<TerminalRuntime["spawn"]>[2] | null = null;
   optionsHistory: Array<Parameters<TerminalRuntime["spawn"]>[2]> = [];
+  destroyError: Error | null = null;
+  destroyedSessionNames: string[] = [];
+
+  async destroySession(sessionName: string): Promise<void> {
+    if (this.destroyError) throw this.destroyError;
+    this.destroyedSessionNames.push(sessionName);
+  }
 
   spawn(shell: string, _args: string[], options: Parameters<TerminalRuntime["spawn"]>[2]): TerminalPty {
     this.spawned = true;
@@ -225,7 +382,7 @@ function testConfig(): SigmaConfig {
       account: { username: "sigma-share", password: null },
       shares: []
     },
-    terminal: { user: "test-user", helperSocketPath: "/tmp/terminal-helper.sock" },
+    terminal: { user: "test-user", helperSocketPath: "/tmp/terminal-helper.sock", maxSessions: 4 },
     player: { enabled: false, helperSocketPath: "/tmp/player-helper.sock", videoOutput: "drm", drmConnector: null, audioOutput: "alsa", audioDevice: null, hwdec: "auto-safe", user: "sigmaos" },
     nasRoots: [{ id: "local", name: "Local", path: rootDir }]
   };

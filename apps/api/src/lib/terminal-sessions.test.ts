@@ -82,16 +82,62 @@ describe("TerminalSessionManager", () => {
     expect(runtime.spawnCount).toBe(2);
     manager.disconnectAll();
   });
+
+  it("passes persistence to the broker and destroys a detached session by id", async () => {
+    const runtime = new FakeRuntime();
+    const manager = new TerminalSessionManager(runtime, 60_000, 4);
+
+    await manager.destroy("root", firstSessionId, true);
+
+    expect(runtime.destroyedSessionNames).toEqual([expect.stringMatching(/^sigmaos-/u)]);
+    expect(runtime.spawnCount).toBe(0);
+  });
+
+  it("propagates broker destroy failures", async () => {
+    const runtime = new FakeRuntime();
+    const manager = new TerminalSessionManager(runtime, 60_000, 4);
+    runtime.destroyError = new Error("Unable to destroy tmux session");
+
+    await expect(manager.destroy("root", firstSessionId, true)).rejects.toThrow("Unable to destroy tmux session");
+  });
+
+  it("notifies the previous socket before a new controller takes over", async () => {
+    const runtime = new FakeRuntime();
+    const manager = new TerminalSessionManager(runtime, 60_000, 4);
+    const lease = await manager.acquire("root", firstSessionId, true);
+    const firstSocket = new FakeSocket();
+    const firstMessages: Array<Record<string, unknown>> = [];
+    const secondSocket = new FakeSocket();
+
+    expect(lease.session.attach(firstSocket, collect(firstMessages))).toBe(true);
+    expect(lease.session.attach(secondSocket, () => true)).toBe(true);
+
+    expect(firstMessages.at(-1)).toEqual({ type: "taken_over" });
+    expect(firstSocket.closed).toBe(true);
+    lease.release(true);
+    manager.disconnectAll();
+  });
 });
 
 class FakeRuntime implements TerminalRuntime {
   readonly terminals: FakeTerminal[] = [];
+  readonly options: Array<Parameters<TerminalRuntime["spawn"]>[2]> = [];
   spawnCount = 0;
   deferNext = false;
+  destroyError: Error | null = null;
+  readonly destroyedSessionNames: string[] = [];
   private resolver: (() => void) | null = null;
 
-  spawn(): Promise<TerminalPty> {
+  async destroySession(sessionName: string): Promise<void> {
+    if (this.destroyError) {
+      throw this.destroyError;
+    }
+    this.destroyedSessionNames.push(sessionName);
+  }
+
+  spawn(_shell: string, _args: string[], options: Parameters<TerminalRuntime["spawn"]>[2]): Promise<TerminalPty> {
     this.spawnCount += 1;
+    this.options.push(options);
     const terminal = new FakeTerminal();
     this.terminals.push(terminal);
     if (!this.deferNext) {

@@ -19,3 +19,4 @@ export * from "./repositories/storage-operations.js";
 export * from "./repositories/vm-operations.js";
 export * from "./repositories/vm-console-authorizations.js";
 export * from "./repositories/system-status.js";
+export * from "./repositories/terminal-tabs.js";

@@ -362,6 +362,22 @@ export interface TerminalConfig {
   maxSessions?: number;
 }
 
+export interface TerminalTab {
+  id: string;
+  rootId: string;
+  ordinal: number;
+  customTitle: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TerminalTabState {
+  initialized: boolean;
+  tabs: TerminalTab[];
+  activeTabId: string | null;
+  maxSessions: number;
+}
+
 export interface PlayerConfig {
   enabled: boolean;
   helperSocketPath: string;

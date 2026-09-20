@@ -15,6 +15,11 @@ import {
   TERMINAL_SESSION_DEFAULT_IDLE_TIMEOUT_MS,
   type TerminalBrokerRequest
 } from "@sigmaos/shared";
+import {
+  selectTerminalSessionEvictionCandidate,
+  shouldReapTerminalSession,
+  type ManagedTerminalSession
+} from "./session-policy.js";
 
 const execFileAsync = promisify(execFile);
 const socketPath = process.env.SIGMAOS_TERMINAL_HELPER_SOCKET_PATH ?? "/run/sigmaos/terminal-helper.sock";
@@ -116,7 +121,7 @@ class BrokerConnection {
     this.tmuxSessionName = null;
     if (sessionName) {
       if (destroyTmuxSession) {
-        void destroyTmuxSessionByName(sessionName);
+        void destroyTmuxSessionByName(sessionName).catch(() => undefined);
       } else {
         void markTmuxSessionDetached(sessionName);
       }
@@ -171,11 +176,13 @@ class BrokerConnection {
       return;
     }
     if (!this.pty) {
-      if (request.type !== "open") {
+      if (request.type === "open") {
+        await this.open(request);
+      } else if (request.type === "destroy") {
+        await this.destroy(request);
+      } else {
         this.fail("Terminal session is not open");
-        return;
       }
-      await this.open(request);
       return;
     }
 
@@ -191,6 +198,7 @@ class BrokerConnection {
         this.socket.end();
         break;
       case "open":
+      case "destroy":
         this.fail("Terminal session is already open");
         break;
     }
@@ -203,7 +211,7 @@ class BrokerConnection {
     }
     try {
       const sessionName = request.sessionName ?? `sigmaos-${randomUUID().replaceAll("-", "")}`;
-      await ensureTmuxSession(sessionName);
+      await ensureTmuxSession(sessionName, request.persistent === true);
       this.tmuxSessionName = sessionName;
       this.pty = nodePty.spawn("tmux", ["-S", tmuxSocketPath, "attach-session", "-t", sessionName], {
         name: "xterm-256color",
@@ -242,6 +250,17 @@ class BrokerConnection {
     } catch (error) {
       this.fail(error instanceof Error ? error.message : "Unable to start terminal session");
     }
+  }
+
+  private async destroy(request: Extract<TerminalBrokerRequest, { type: "destroy" }>): Promise<void> {
+    if (request.user !== this.account.name) {
+      throw new Error("Terminal user is not allowed");
+    }
+    await destroyTmuxSessionByName(request.sessionName);
+    this.send({ type: "destroyed", sessionName: request.sessionName });
+    this.closed = true;
+    this.socket.end();
+    this.onClosed();
   }
 
   private writeOutput(data: string): void {
@@ -284,16 +303,15 @@ async function ensureTmuxAvailable(): Promise<void> {
   }
 }
 
-async function ensureTmuxSession(sessionName: string): Promise<void> {
+async function ensureTmuxSession(sessionName: string, persistent: boolean): Promise<void> {
   if (await hasTmuxSession(sessionName)) {
+    await markTmuxSessionPersistent(sessionName, persistent);
     await markTmuxSessionAttached(sessionName);
     return;
   }
   const sessions = await listManagedTmuxSessions();
   if (sessions.length >= maxSessions) {
-    const oldestDetached = sessions
-      .filter((session) => session.attached === 0 && session.detachedAt > 0)
-      .sort((left, right) => left.detachedAt - right.detachedAt)[0];
+    const oldestDetached = selectTerminalSessionEvictionCandidate(sessions);
     if (!oldestDetached) {
       throw new Error("Terminal session limit reached");
     }
@@ -310,7 +328,12 @@ async function ensureTmuxSession(sessionName: string): Promise<void> {
     throw error;
   }
   await tmux(["set-option", "-t", sessionName, "@sigmaos_managed", "1"]);
+  await markTmuxSessionPersistent(sessionName, persistent);
   await tmux(["set-option", "-t", sessionName, "@sigmaos_detached_at", "0"]);
+}
+
+async function markTmuxSessionPersistent(sessionName: string, persistent: boolean): Promise<void> {
+  await tmux(["set-option", "-t", sessionName, "@sigmaos_persistent", persistent ? "1" : "0"]);
 }
 
 async function markTmuxSessionAttached(sessionName: string): Promise<void> {
@@ -328,9 +351,20 @@ async function markTmuxSessionDetached(sessionName: string): Promise<void> {
 async function destroyTmuxSessionByName(sessionName: string): Promise<void> {
   try {
     await tmux(["kill-session", "-t", sessionName]);
-  } catch {
-    // The tmux session may already have exited.
+  } catch (error) {
+    if (!isMissingTmuxSessionError(error)) {
+      throw error;
+    }
   }
+}
+
+function isMissingTmuxSessionError(error: unknown): boolean {
+  const details = error instanceof Error
+    ? `${error.message}\n${"stderr" in error ? String(error.stderr) : ""}`
+    : String(error);
+  return details.includes("can't find session")
+    || details.includes("no server running")
+    || details.includes("No such file or directory");
 }
 
 async function hasTmuxSession(sessionName: string): Promise<boolean> {
@@ -342,28 +376,23 @@ async function hasTmuxSession(sessionName: string): Promise<boolean> {
   }
 }
 
-interface ManagedTmuxSession {
-  name: string;
-  attached: number;
-  detachedAt: number;
-}
-
-async function listManagedTmuxSessions(): Promise<ManagedTmuxSession[]> {
+async function listManagedTmuxSessions(): Promise<ManagedTerminalSession[]> {
   try {
-    const { stdout } = await tmux(["list-sessions", "-F", "#{session_name}\t#{session_attached}\t#{@sigmaos_managed}\t#{@sigmaos_detached_at}"]);
+    const { stdout } = await tmux(["list-sessions", "-F", "#{session_name}\t#{session_attached}\t#{@sigmaos_managed}\t#{@sigmaos_detached_at}\t#{@sigmaos_persistent}"]);
     return stdout
       .trim()
       .split("\n")
       .map((line) => {
-        const [name, attached, managed, detachedAt] = line.split("\t");
+        const [name, attached, managed, detachedAt, persistent] = line.split("\t");
         return {
           name: name ?? "",
           attached: Number(attached),
           detachedAt: Number(detachedAt),
-          managed: managed === "1"
+          managed: managed === "1",
+          persistent: persistent === "1"
         };
       })
-      .filter((session): session is ManagedTmuxSession & { managed: true } =>
+      .filter((session): session is ManagedTerminalSession & { managed: true } =>
         session.managed && /^sigmaos-[a-z0-9_-]+$/u.test(session.name)
       );
   } catch {
@@ -375,8 +404,12 @@ async function reapDetachedTmuxSessions(): Promise<void> {
   const now = Date.now();
   const sessions = await listManagedTmuxSessions();
   for (const session of sessions) {
-    if (session.attached === 0 && session.detachedAt > 0 && now - session.detachedAt >= sessionIdleTimeoutMs) {
-      await destroyTmuxSessionByName(session.name);
+    if (shouldReapTerminalSession(session, now, sessionIdleTimeoutMs)) {
+      try {
+        await destroyTmuxSessionByName(session.name);
+      } catch (error) {
+        console.error(`sigmaos-terminal-helper: unable to reap ${session.name}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
 }

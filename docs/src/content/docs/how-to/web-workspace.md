@@ -4,7 +4,7 @@ description: 文件浏览、搜索、预览、上传、agent 对话和审批操�
 type: how-to
 status: current
 audience: [user, operator]
-sourceOfTruth: [apps/web/src/App.tsx, apps/web/src/components/workspace/WorkspacePane.tsx, apps/web/src/components/workspace/DockerImageManagement.tsx, apps/web/src/components/chat/ChatPane.tsx, apps/web/src/components/preview/PreviewContent.tsx, apps/web/src/api.ts]
+sourceOfTruth: [apps/web/src/App.tsx, apps/web/src/components/workspace/WorkspacePane.tsx, apps/web/src/components/workspace/LocalTerminalPanel.tsx, apps/web/src/components/workspace/DockerImageManagement.tsx, apps/web/src/components/chat/ChatPane.tsx, apps/web/src/components/preview/PreviewContent.tsx, apps/web/src/api.ts]
 sidebar:
   order: 1
 ---
@@ -57,7 +57,13 @@ sidebar:
 
 ## 终端与管理面板
 
-Workspace 的 Terminal 使用 terminal-helper 和 tmux 承载受限 PTY。切换面板、刷新页面或 API/helper 重启都会复用同一个 terminal session；点击重启按钮才会销毁旧 shell。断开期间的输出会短暂缓存在 API 中，超过缓冲上限会显示丢失提示；默认空闲 30 分钟后由 helper 回收 tmux session。连接失败时检查 `tmux`、`sigmaos-terminal-helper.service` 和终端用户 drop-in。Downloads 面板使用独立 `sigmaos-downloader.service`，支持公网 HTTP/HTTPS 地址、目录选择、排队、暂停/继续、取消、重试和历史；失败任务保留 `.part` 文件，取消任务清理临时文件，同名目标不会覆盖。Docker、VM、Shares、Storage 面板只在配置和宿主机能力可用时展示完整操作；Docker 资源创建是直接执行的管理流程，生命周期和 Compose 变更仍通过 approval。
+Workspace 的 Terminal 使用 terminal-helper 和 tmux 承载受限 PTY。每个 NAS root 有独立的顶部标签列表；标签名称、创建顺序和活动项保存在 SQLite，并在浏览器之间共享。首次打开会自动创建“终端 1”；旧版浏览器保存的会话 ID 会在首次访问时导入。新建标签受整机 `terminal.maxSessions` 限制，默认上限为 32。
+
+切换标签时浏览器保留已经打开标签的本地显示缓冲，但只有活动标签连接 WebSocket。刷新页面、断开浏览器或重启 API/helper 不会终止已登记标签的 tmux shell；重启标签或确认关闭标签会终止其中的 shell 和所有子进程。关闭最后一个标签后保持空状态，不会立即自动创建新标签。未登记的旧客户端会话仍使用原有空闲回收策略。
+
+同一标签同时只允许一个控制端。另一个浏览器连接时，原连接会显示“会话已在其他位置打开”并停止自动重连；点击重新接管会把控制权取回。整机重启后 SQLite 中的标签、名称、顺序和活动项仍保留，但 tmux 进程和 scrollback 不会恢复，首次重新连接会启动新的 shell。连接失败时检查 `tmux`、`sigmaos-terminal-helper.service` 和终端用户 drop-in。
+
+Downloads 面板使用独立 `sigmaos-downloader.service`，支持公网 HTTP/HTTPS 地址、目录选择、排队、暂停/继续、取消、重试和历史；失败任务保留 `.part` 文件，取消任务清理临时文件，同名目标不会覆盖。Docker、VM、Shares、Storage 面板只在配置和宿主机能力可用时展示完整操作；Docker 资源创建是直接执行的管理流程，生命周期和 Compose 变更仍通过 approval。
 
 Docker 面板的镜像区域可以搜索本地镜像、查看完整 ID/tags/digests/占用信息、拉取镜像和删除未被容器引用的具体 tag。删除需要在详情弹窗中再次确认，不会强制删除，也不进入 agent approval。多标签镜像必须先选择要删除的具体 tag；无标签镜像使用完整 ID。
 

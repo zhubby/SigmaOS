@@ -1,5 +1,15 @@
-import type { FastifyInstance } from "fastify";
-import { getNasRoot } from "@sigmaos/db";
+import type { FastifyInstance, FastifyReply } from "fastify";
+import {
+  activateTerminalTab,
+  createTerminalTab,
+  deleteTerminalTab,
+  getNasRoot,
+  getTerminalTab,
+  getTerminalTabState,
+  initializeTerminalTabs,
+  renameTerminalTab
+} from "@sigmaos/db";
+import { TERMINAL_BROKER_MAX_SESSIONS } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
 import { terminalMessage } from "../lib/terminal.js";
 import { createTerminalRuntime } from "../lib/terminal-broker.js";
@@ -18,13 +28,112 @@ interface TerminalQuery {
 
 export function registerTerminalRoutes(server: FastifyInstance, context: ApiRouteContext): void {
   const runtime = context.terminal ?? createTerminalRuntime(context.config.terminal);
+  const maxSessions = context.config.terminal.maxSessions ?? TERMINAL_BROKER_MAX_SESSIONS;
   const sessions = new TerminalSessionManager(
     runtime,
     context.config.terminal.sessionIdleTimeoutMs,
-    context.config.terminal.maxSessions
+    maxSessions
   );
   server.addHook("onClose", async () => {
     sessions.disconnectAll();
+  });
+
+  server.get<{ Querystring: { rootId?: string } }>("/api/terminal/tabs", async (request, reply) => {
+    const root = terminalRoot(context, request.query.rootId, reply);
+    if (!root) return;
+    reply.send(getTerminalTabState(context.db, root.id, maxSessions));
+  });
+
+  server.post<{ Body: { rootId?: string; legacySessionId?: string } }>("/api/terminal/tabs/initialize", async (request, reply) => {
+    const root = terminalRoot(context, request.body?.rootId, reply);
+    if (!root) return;
+    const legacySessionId = request.body?.legacySessionId?.trim();
+    if (legacySessionId && !isTerminalSessionId(legacySessionId)) {
+      reply.status(400).send({ error: "Invalid terminal session id" });
+      return;
+    }
+    try {
+      reply.send(initializeTerminalTabs(context.db, {
+        rootId: root.id,
+        maxSessions,
+        ...(legacySessionId ? { legacySessionId } : {})
+      }));
+    } catch (error) {
+      sendTerminalTabMutationError(reply, error);
+    }
+  });
+
+  server.post<{ Body: { rootId?: string } }>("/api/terminal/tabs", async (request, reply) => {
+    const root = terminalRoot(context, request.body?.rootId, reply);
+    if (!root) return;
+    try {
+      reply.status(201).send(createTerminalTab(context.db, { rootId: root.id, maxSessions }));
+    } catch (error) {
+      sendTerminalTabMutationError(reply, error);
+    }
+  });
+
+  server.patch<{ Params: { id: string }; Body: { customTitle?: string | null } }>("/api/terminal/tabs/:id", async (request, reply) => {
+    if (!isTerminalSessionId(request.params.id)) {
+      reply.status(400).send({ error: "Invalid terminal session id" });
+      return;
+    }
+    const title = normalizeTerminalTabTitle(request.body?.customTitle);
+    if ("error" in title) {
+      reply.status(400).send({ error: title.error });
+      return;
+    }
+    const state = renameTerminalTab(context.db, {
+      id: request.params.id,
+      customTitle: title.value,
+      maxSessions
+    });
+    if (!state) {
+      reply.status(404).send({ error: "Terminal tab not found" });
+      return;
+    }
+    reply.send(state);
+  });
+
+  server.post<{ Params: { id: string } }>("/api/terminal/tabs/:id/activate", async (request, reply) => {
+    if (!isTerminalSessionId(request.params.id)) {
+      reply.status(400).send({ error: "Invalid terminal session id" });
+      return;
+    }
+    const state = activateTerminalTab(context.db, { id: request.params.id, maxSessions });
+    if (!state) {
+      reply.status(404).send({ error: "Terminal tab not found" });
+      return;
+    }
+    reply.send(state);
+  });
+
+  server.post<{ Params: { id: string } }>("/api/terminal/tabs/:id/restart", async (request, reply) => {
+    const tab = terminalTab(context, request.params.id, reply);
+    if (!tab) return;
+    try {
+      await sessions.destroy(tab.rootId, tab.id, true);
+      reply.send(getTerminalTabState(context.db, tab.rootId, maxSessions));
+    } catch (error) {
+      reply.status(503).send({ error: terminalErrorMessage(error) });
+    }
+  });
+
+  server.delete<{ Params: { id: string } }>("/api/terminal/tabs/:id", async (request, reply) => {
+    const tab = terminalTab(context, request.params.id, reply);
+    if (!tab) return;
+    try {
+      await sessions.destroy(tab.rootId, tab.id, true);
+    } catch (error) {
+      reply.status(503).send({ error: terminalErrorMessage(error) });
+      return;
+    }
+    const state = deleteTerminalTab(context.db, { id: tab.id, maxSessions });
+    if (!state) {
+      reply.status(404).send({ error: "Terminal tab not found" });
+      return;
+    }
+    reply.send(state);
   });
 
   server.get<{ Querystring: TerminalQuery }>("/api/terminal", { websocket: true }, async (socket, request) => {
@@ -38,6 +147,15 @@ export function registerTerminalRoutes(server: FastifyInstance, context: ApiRout
       closeWithError(socket, "NAS root not found");
       return;
     }
+    const requestedTab = requestedSessionId ? getTerminalTab(context.db, requestedSessionId) : null;
+    const nextTab = nextSessionId ? getTerminalTab(context.db, nextSessionId) : null;
+    if ((requestedTab && requestedTab.rootId !== root.id) || (nextTab && nextTab.rootId !== root.id)) {
+      closeWithError(socket, "Terminal session is not available");
+      return;
+    }
+    const persistent = shouldReset
+      ? nextTab?.rootId === root.id
+      : requestedTab?.rootId === root.id;
     if (!isAllowedWebSocketOrigin(request.headers.origin, request.headers.host, context.config.api.allowedOrigins)) {
       closeWithError(socket, "Terminal origin is not allowed");
       return;
@@ -83,8 +201,8 @@ export function registerTerminalRoutes(server: FastifyInstance, context: ApiRout
 
     try {
       lease = shouldReset
-        ? await sessions.reset(root.id, resetSessionId, nextSessionId)
-        : await sessions.acquire(root.id, requestedSessionId);
+        ? await sessions.reset(root.id, resetSessionId, nextSessionId, persistent)
+        : await sessions.acquire(root.id, requestedSessionId, persistent);
       const session = lease.session;
       if (closed) {
         lease.release();
@@ -136,6 +254,62 @@ export function registerTerminalRoutes(server: FastifyInstance, context: ApiRout
       socket.close();
     }
   });
+}
+
+function terminalRoot(
+  context: ApiRouteContext,
+  rootId: string | undefined,
+  reply: FastifyReply
+): ReturnType<typeof getNasRoot> {
+  if (!rootId?.trim()) {
+    reply.status(400).send({ error: "NAS root is required" });
+    return null;
+  }
+  const root = getNasRoot(context.db, rootId.trim());
+  if (!root) {
+    reply.status(404).send({ error: "NAS root not found" });
+    return null;
+  }
+  return root;
+}
+
+function terminalTab(context: ApiRouteContext, id: string, reply: FastifyReply) {
+  if (!isTerminalSessionId(id)) {
+    reply.status(400).send({ error: "Invalid terminal session id" });
+    return null;
+  }
+  const tab = getTerminalTab(context.db, id);
+  if (!tab) {
+    reply.status(404).send({ error: "Terminal tab not found" });
+    return null;
+  }
+  return tab;
+}
+
+function normalizeTerminalTabTitle(value: unknown): { value: string | null } | { error: string } {
+  if (value === null) {
+    return { value: null };
+  }
+  if (typeof value !== "string") {
+    return { error: "Terminal tab title is required" };
+  }
+  const title = value.trim();
+  return title.length >= 1 && title.length <= 64
+    ? { value: title }
+    : { error: "Terminal tab title must be between 1 and 64 characters" };
+}
+
+function isTerminalSessionId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value);
+}
+
+function sendTerminalTabMutationError(reply: FastifyReply, error: unknown): void {
+  const message = terminalErrorMessage(error);
+  if (message === "Terminal session limit reached" || message === "Terminal session is not available") {
+    reply.status(409).send({ error: message });
+    return;
+  }
+  throw error;
 }
 
 function closeWithError(socket: { send(data: string): void; close(): void }, error: string): void {

@@ -66,6 +66,7 @@ describe("terminal broker client", () => {
       cols: 120,
       rows: 32,
       sessionName: "sigmaos-persisted",
+      persistent: true,
       env: {}
     });
     const output: string[] = [];
@@ -80,7 +81,8 @@ describe("terminal broker client", () => {
       user: "zhubby",
       cols: 120,
       rows: 32,
-      sessionName: "sigmaos-persisted"
+      sessionName: "sigmaos-persisted",
+      persistent: true
     });
 
     terminal.write("whoami\r");
@@ -139,6 +141,44 @@ describe("terminal broker client", () => {
     expect(requests).toContainEqual({ type: "close" });
   });
 
+  it("waits for helper acknowledgement when destroying a session by name", async () => {
+    const socketPath = await createSocketPath();
+    const requests: TerminalBrokerRequest[] = [];
+    const server = net.createServer((socket) => {
+      clientSockets.push(socket);
+      socket.setEncoding("utf8");
+      socket.on("data", (chunk: string) => {
+        const request = parseTerminalBrokerMessage(chunk.trim());
+        if (request?.type !== "destroy") return;
+        requests.push(request);
+        socket.write(encodeTerminalBrokerMessage({ type: "destroyed", sessionName: request.sessionName }));
+      });
+    });
+    sockets.push(server);
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+    const runtime = createTerminalRuntime({ user: "zhubby", helperSocketPath: socketPath });
+    await runtime.destroySession("sigmaos-persisted");
+
+    expect(requests).toEqual([{ type: "destroy", user: "zhubby", sessionName: "sigmaos-persisted" }]);
+  });
+
+  it("propagates helper destroy failures", async () => {
+    const socketPath = await createSocketPath();
+    const server = net.createServer((socket) => {
+      clientSockets.push(socket);
+      socket.setEncoding("utf8");
+      socket.on("data", () => {
+        socket.write(encodeTerminalBrokerMessage({ type: "error", error: "tmux kill failed" }));
+      });
+    });
+    sockets.push(server);
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+    const runtime = createTerminalRuntime({ user: "zhubby", helperSocketPath: socketPath });
+    await expect(runtime.destroySession("sigmaos-persisted")).rejects.toThrow("tmux kill failed");
+  });
+
   it("rejects when the broker closes before ready", async () => {
     const socketPath = await createSocketPath();
     const server = net.createServer((socket) => {
@@ -154,11 +194,12 @@ describe("terminal broker client", () => {
     ).rejects.toBeInstanceOf(Error);
   });
 
-  it("fails closed when no terminal user is configured", () => {
+  it("fails closed when no terminal user is configured", async () => {
     const runtime = createTerminalRuntime({ user: null, helperSocketPath: "/run/sigmaos/terminal-helper.sock" });
     expect(() => runtime.spawn("", [], { name: "xterm-256color", cols: 120, rows: 32, env: {} })).toThrow(
       "Terminal user is not configured"
     );
+    await expect(runtime.destroySession("sigmaos-persisted")).rejects.toThrow("Terminal user is not configured");
   });
 });
 

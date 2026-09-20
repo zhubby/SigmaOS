@@ -17,6 +17,7 @@ export interface TerminalPty {
 }
 
 export interface TerminalRuntime {
+  destroySession(sessionName: string): Promise<void>;
   spawn(
     shell: string,
     args: string[],
@@ -27,6 +28,7 @@ export interface TerminalRuntime {
       cwd?: string;
       env: NodeJS.ProcessEnv;
       sessionName?: string;
+      persistent?: boolean;
     }
   ): TerminalPty | Promise<TerminalPty>;
 }

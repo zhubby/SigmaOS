@@ -31,6 +31,19 @@ describe("terminal broker protocol", () => {
       rows: 32,
       sessionName: "sigmaos-demo"
     });
+    expect(parseTerminalBrokerMessage('{"type":"open","user":"zhubby","cols":120,"rows":32,"sessionName":"sigmaos-demo","persistent":true}')).toEqual({
+      type: "open",
+      user: "zhubby",
+      cols: 120,
+      rows: 32,
+      sessionName: "sigmaos-demo",
+      persistent: true
+    });
+    expect(parseTerminalBrokerMessage('{"type":"destroy","user":"zhubby","sessionName":"sigmaos-demo"}')).toEqual({
+      type: "destroy",
+      user: "zhubby",
+      sessionName: "sigmaos-demo"
+    });
   });
 
   it("rejects malformed and out-of-range requests", () => {
@@ -44,12 +57,17 @@ describe("terminal broker protocol", () => {
       cols: 120,
       rows: 32
     });
+    expect(parseTerminalBrokerMessage('{"type":"destroy","user":"zhubby","sessionName":"bad name"}')).toBeNull();
   });
 
   it("parses broker events and encodes newline-delimited messages", () => {
     const event = { type: "ready", user: "zhubby", cwd: "/home/zhubby", shell: "/usr/bin/zsh" } as const;
     expect(parseTerminalBrokerEvent(JSON.stringify(event))).toEqual(event);
     expect(parseTerminalBrokerEvent('{"type":"exit","exitCode":0}')).toEqual({ type: "exit", exitCode: 0 });
+    expect(parseTerminalBrokerEvent('{"type":"destroyed","sessionName":"sigmaos-demo"}')).toEqual({
+      type: "destroyed",
+      sessionName: "sigmaos-demo"
+    });
     expect(encodeTerminalBrokerMessage(event)).toBe(`${JSON.stringify(event)}\n`);
   });
 });
