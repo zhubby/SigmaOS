@@ -69,6 +69,17 @@ export function composeAgentMessage(message: string, composerPath: string | null
   return [composerPath, message.trim()].filter(Boolean).join("\n");
 }
 
+export function agentSessionHeaderTitle(
+  session: SessionSummary | undefined,
+  newSessionTitle: string,
+  rootFallback: string
+): string {
+  if (!session?.firstMessage?.trim() && !session?.lastMessage?.trim()) {
+    return newSessionTitle;
+  }
+  return sessionTitle(session, rootFallback);
+}
+
 export function composerFeedbackState({
   activeJobId,
   messageSubmitting,
@@ -226,7 +237,7 @@ export function ChatPane({
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const rootAgentTitle = t("chat.rootAgent");
   const hasConversationContent = transcript.length > 0 || activeApprovals.length > 0;
-  const activeSessionTitle = activeSessionSummary ? sessionTitle(activeSessionSummary, rootAgentTitle) : t("chat.agent");
+  const activeSessionTitle = agentSessionHeaderTitle(activeSessionSummary, t("chat.newSessionTitle"), rootAgentTitle);
   const composerFeedback = composerFeedbackState({ activeJobId, messageSubmitting, status });
   const deleteDisabled = !activeSessionSummary || composerFeedback !== null || status === "cancelling";
   const composerStatusId = "composer-status";
@@ -394,9 +405,14 @@ export function ChatPane({
 
       <section className="chat-main" aria-label={t("chat.agentChat")}>
         <header className="chat-header">
-          <div>
-            <span className="eyebrow">{selectedRoot?.name ?? t("chat.noRoot")}</span>
+          <div className="chat-header-copy">
             <h2>{activeSessionTitle}</h2>
+            <span className="chat-header-subtitle">
+              <HardDrive aria-hidden="true" size={13} />
+              <span className="chat-header-root">{selectedRoot?.name ?? t("chat.noRoot")}</span>
+              <span className="chat-header-subtitle-dot" aria-hidden="true" />
+              <span>{t("chat.localNasWorkspace")}</span>
+            </span>
           </div>
           <button
             type="button"

@@ -6,6 +6,7 @@ import { initI18n } from "../../i18n/index.js";
 import {
   ChatMessageContent,
   ChatPane,
+  agentSessionHeaderTitle,
   composeAgentMessage,
   composerFeedbackState,
   shouldSubmitComposerMessage
@@ -40,6 +41,29 @@ describe("composeAgentMessage", () => {
     expect(composeAgentMessage("Inspect this", "/srv/nas/docs/readme.md")).toBe("/srv/nas/docs/readme.md\nInspect this");
     expect(composeAgentMessage("", "/srv/nas/docs/readme.md")).toBe("/srv/nas/docs/readme.md");
     expect(composeAgentMessage("Inspect this", null)).toBe("Inspect this");
+  });
+});
+
+describe("agentSessionHeaderTitle", () => {
+  const session = {
+    id: "session-1",
+    rootId: "root-1",
+    currentPath: ".",
+    createdAt: "2026-09-17T10:00:00.000Z",
+    updatedAt: "2026-09-17T10:00:00.000Z",
+    firstMessage: null,
+    lastMessage: null
+  };
+
+  it("uses a fixed title before a session has any messages", () => {
+    expect(agentSessionHeaderTitle(undefined, "New session", "Root agent")).toBe("New session");
+    expect(agentSessionHeaderTitle(session, "New session", "Root agent")).toBe("New session");
+  });
+
+  it("uses the API session title after the conversation starts", () => {
+    expect(agentSessionHeaderTitle({ ...session, firstMessage: "Inspect storage health" }, "New session", "Root agent")).toBe(
+      "Inspect storage health"
+    );
   });
 });
 
@@ -239,6 +263,9 @@ describe("ChatPane agent rail", () => {
     expect(html).toContain('src="/sigmaos-icon.svg"');
     expect(html).not.toContain("sigmaos-banner");
     expect(html).toContain('class="session-item is-active"');
+    expect(html).toContain("How can I help with your NAS?");
+    expect(html).toContain('class="chat-header-subtitle"');
+    expect(html).toContain("Local NAS workspace");
     expect(html).toContain('class="agent-status-indicator"');
     expect(html).toContain('class="agent-notification-button"');
     expect(html).toContain('class="notification-badge"');

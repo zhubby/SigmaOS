@@ -92,9 +92,9 @@
 
 .session-item.is-active {
   border-color: rgb(142 161 255 / 28%);
-  color: white;
+  color: var(--accent-soft-text);
   background: var(--accent-soft-bg);
-  box-shadow: inset 3px 0 0 var(--accent);
+  box-shadow: none;
 }
 
 .session-item svg {
@@ -213,6 +213,44 @@
 
 .chat-header > div {
   min-width: 0;
+}
+
+.chat-header-copy {
+  display: grid;
+  gap: 5px;
+}
+
+.chat-header-subtitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted-2);
+  font-size: 11.5px;
+  font-weight: 650;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.chat-header-subtitle > svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.chat-header-root {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+}
+
+.chat-header-subtitle-dot {
+  flex: 0 0 auto;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--muted-2);
 }
 
 .eyebrow {
