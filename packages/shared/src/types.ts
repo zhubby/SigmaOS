@@ -650,15 +650,164 @@ export interface SystemNetworkRoute {
   scope: string | null;
 }
 
+export type SystemNetworkBackend = "NetworkManager" | "systemd-networkd" | "unknown";
+export type SystemWifiBand = "auto" | "2.4" | "5";
+export type SystemWifiSecurity = "open" | "wpa2" | "wpa3" | "unsupported";
+export type SystemWifiDeviceState =
+  | "connected"
+  | "connecting"
+  | "disconnected"
+  | "hotspot"
+  | "unavailable";
+
+export interface SystemWifiDevice {
+  id: string;
+  name: string;
+  mac: string | null;
+  driver: string | null;
+  state: SystemWifiDeviceState;
+  mode: "client" | "hotspot" | "idle";
+  activeConnectionId: string | null;
+  activeConnectionName: string | null;
+  ssid: string | null;
+  signal: number | null;
+  frequencyMHz: number | null;
+  channel: number | null;
+  managementPath: boolean;
+  capabilities: {
+    accessPoint: boolean;
+    bands: Array<Exclude<SystemWifiBand, "auto">>;
+    channels: number[];
+  };
+}
+
+export interface SystemWifiAccessPoint {
+  ssid: string;
+  bssid: string;
+  signal: number;
+  frequencyMHz: number;
+  channel: number;
+  band: Exclude<SystemWifiBand, "auto">;
+  security: SystemWifiSecurity;
+  active: boolean;
+  savedProfileId: string | null;
+}
+
+export interface SystemWifiProfile {
+  id: string;
+  name: string;
+  ssid: string;
+  device: string | null;
+  security: SystemWifiSecurity;
+  autoconnect: boolean;
+  active: boolean;
+  managed: boolean;
+  credentialConfigured: boolean;
+  revision: string | null;
+}
+
+export interface SystemWifiHotspot {
+  device: string;
+  profileId: string;
+  ssid: string;
+  band: SystemWifiBand;
+  channel: number | null;
+  autostart: boolean;
+  active: boolean;
+  credentialConfigured: boolean;
+  revision: string;
+  restoreProfileId: string | null;
+}
+
+export interface SystemWifiStatus {
+  collectedAt: string;
+  backend: SystemNetworkBackend;
+  radioEnabled: boolean | null;
+  helperReady: boolean;
+  devices: SystemWifiDevice[];
+  hotspots: SystemWifiHotspot[];
+}
+
+export interface SystemWifiSummary extends SystemWifiStatus {
+  profiles: SystemWifiProfile[];
+}
+
+export interface SystemWifiScanInput {
+  device: string;
+}
+
+export interface SystemWifiScanResult {
+  device: string;
+  scannedAt: string;
+  accessPoints: SystemWifiAccessPoint[];
+}
+
+export interface SystemWifiConnectInput {
+  device: string;
+  profileId?: string;
+  ssid?: string;
+  bssid?: string;
+  security?: Exclude<SystemWifiSecurity, "unsupported">;
+  password?: string;
+  autoconnect?: boolean;
+  confirmed: boolean;
+}
+
+export interface SystemWifiDisconnectInput {
+  device: string;
+  confirmed: boolean;
+}
+
+export interface SystemWifiRadioInput {
+  enabled: boolean;
+  confirmed: boolean;
+}
+
+export interface SystemWifiProfileUpdateInput {
+  ssid?: string;
+  security?: Exclude<SystemWifiSecurity, "unsupported">;
+  password?: string;
+  autoconnect?: boolean;
+  expectedRevision: string;
+  confirmed: boolean;
+}
+
+export interface SystemWifiHotspotUpdateInput {
+  device: string;
+  ssid: string;
+  password?: string;
+  band: SystemWifiBand;
+  channel: number | null;
+  autostart: boolean;
+  expectedRevision?: string;
+  confirmed: boolean;
+}
+
+export interface SystemWifiHotspotActionInput {
+  device: string;
+  confirmed: boolean;
+}
+
+export type SystemWifiRollbackResult = "not_required" | "succeeded" | "failed";
+
+export interface SystemWifiOperationResult {
+  status: SystemWifiStatus;
+  rollback: SystemWifiRollbackResult;
+  message: string | null;
+}
+
 export interface SystemNetworkSummary {
   collectedAt: string;
   status: SystemCollectionStatus;
   capabilities: {
-    backend: "systemd-networkd";
-    canApplyConfiguration: false;
+    backend: SystemNetworkBackend;
+    canApplyConfiguration: boolean;
     canConfigureBridge: false;
     canConfigureBond: false;
     canConfigureVlan: false;
+    canManageWifi: boolean;
+    canManageHotspot: boolean;
+    helperReady: boolean;
   };
   metrics: {
     interfaces: number;
@@ -668,6 +817,7 @@ export interface SystemNetworkSummary {
   };
   interfaces: SystemNetworkInterface[];
   routes: SystemNetworkRoute[];
+  wifi: SystemWifiSummary;
   issues: SystemCollectionIssue[];
 }
 

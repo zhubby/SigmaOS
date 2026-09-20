@@ -381,7 +381,13 @@ export function WorkspaceManagementPanel({
     );
   }
   if (panel === "network") {
-    return <SystemNetworkManagementPanel locale={locale} onNotifyError={onNotifyError} />;
+    return (
+      <SystemNetworkManagementPanel
+        locale={locale}
+        onNotifyError={onNotifyError}
+        onNotifySuccess={onNotifySuccess}
+      />
+    );
   }
   if (panel === "storage") {
     return (

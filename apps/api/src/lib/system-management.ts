@@ -24,6 +24,7 @@ import type {
   SystemStoragePool,
   SystemStorageSummary
 } from "@sigmaos/shared";
+import type { NetworkManagerRuntime } from "./network-manager.js";
 
 const execFileAsync = promisify(execFile);
 const COMMAND_TIMEOUT_MS = 5_000;
@@ -36,6 +37,7 @@ export interface SystemCommandRunner {
 
 export interface SystemManagementDependencies {
   commandRunner?: SystemCommandRunner;
+  networkManager?: NetworkManagerRuntime;
 }
 
 class NodeSystemCommandRunner implements SystemCommandRunner {
@@ -187,17 +189,34 @@ export async function collectSystemNetwork(
       mapNetworkInterface(name, linksByName.get(name) ?? null, addressesByName.get(name) ?? null, defaultRouteDevices)
     )
   );
+  let wifi: SystemNetworkSummary["wifi"] = unavailableWifiSummary();
+  if (dependencies.networkManager) {
+    try {
+      wifi = await dependencies.networkManager.getSummary();
+    } catch (error) {
+      issues.push({
+        source: "Wi-Fi status",
+        message: safeSystemMessage(error)
+      });
+    }
+  }
   const status = collectionStatus(interfaces.length > 0 || routes.length > 0, issues);
 
   return {
     collectedAt: new Date().toISOString(),
     status,
     capabilities: {
-      backend: "systemd-networkd",
-      canApplyConfiguration: false,
+      backend: wifi.backend,
+      canApplyConfiguration: wifi.backend === "NetworkManager" && wifi.helperReady,
       canConfigureBridge: false,
       canConfigureBond: false,
-      canConfigureVlan: false
+      canConfigureVlan: false,
+      canManageWifi: wifi.backend === "NetworkManager" && wifi.helperReady && wifi.devices.length > 0,
+      canManageHotspot:
+        wifi.backend === "NetworkManager" &&
+        wifi.helperReady &&
+        wifi.devices.some((device) => device.capabilities.accessPoint),
+      helperReady: wifi.helperReady
     },
     metrics: {
       interfaces: interfaces.length,
@@ -207,7 +226,20 @@ export async function collectSystemNetwork(
     },
     interfaces,
     routes,
+    wifi,
     issues
+  };
+}
+
+function unavailableWifiSummary(): SystemNetworkSummary["wifi"] {
+  return {
+    collectedAt: new Date().toISOString(),
+    backend: "unknown",
+    radioEnabled: null,
+    helperReady: false,
+    devices: [],
+    hotspots: [],
+    profiles: []
   };
 }
 
@@ -1032,5 +1064,8 @@ function errorStdout(error: unknown): string {
 
 function safeSystemMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  return message.replace(/Bearer\s+\S+/giu, "Bearer [redacted]").slice(0, 500);
+  return message
+    .replace(/Bearer\s+\S+/giu, "Bearer [redacted]")
+    .replace(/(psk|password|secret|token)\s*[:=]\s*[^\s,;}]+/giu, "$1=[redacted]")
+    .slice(0, 500);
 }

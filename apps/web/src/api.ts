@@ -36,6 +36,15 @@ import type {
   ShareSummary as PublicShareSummary,
   SystemNetworkSummary,
   SystemNetworkTrafficSummary,
+  SystemWifiConnectInput,
+  SystemWifiHotspotActionInput,
+  SystemWifiHotspotUpdateInput,
+  SystemWifiOperationResult,
+  SystemWifiProfileUpdateInput,
+  SystemWifiRadioInput,
+  SystemWifiScanInput,
+  SystemWifiScanResult,
+  SystemWifiStatus,
   SystemStorageSummary,
   BackupRunSummary,
   RootReadiness,
@@ -287,6 +296,7 @@ export type BuildInfo = PublicBuildInfo;
 export type SystemInfoStorageVolume = PublicSystemInfo["storage"]["volumes"][number];
 export type NetworkSummary = SystemNetworkSummary;
 export type NetworkTrafficSummary = SystemNetworkTrafficSummary;
+export type WifiStatus = SystemWifiStatus;
 export type StorageSummary = SystemStorageSummary;
 export type DockerSummary = PublicDockerSummary;
 export type DockerImageSummary = SharedDockerImageSummary;
@@ -300,6 +310,16 @@ export type {
   DockerRegistryCredentialUpdateInput
 };
 export type { DockerDaemonConfigSnapshot, DockerDaemonConfigUpdateInput, DockerDaemonConfigUpdateResult, DockerDaemonStatus };
+export type {
+  SystemWifiConnectInput,
+  SystemWifiHotspotActionInput,
+  SystemWifiHotspotUpdateInput,
+  SystemWifiOperationResult,
+  SystemWifiProfileUpdateInput,
+  SystemWifiRadioInput,
+  SystemWifiScanInput,
+  SystemWifiScanResult
+};
 export type ShareSettings = PublicShareSettings;
 export type ShareSummary = PublicShareSummary;
 export type ShareSettingsInput = Omit<ShareSettings, "account" | "updatedAt"> & {
@@ -444,6 +464,65 @@ export async function getSystemNetworkTraffic(): Promise<NetworkTrafficSummary> 
   await ensureOk(response);
   const body = (await response.json()) as { traffic: NetworkTrafficSummary };
   return body.traffic;
+}
+
+export async function scanSystemWifi(input: SystemWifiScanInput): Promise<SystemWifiScanResult> {
+  const response = await fetch("/api/system/network/wifi/scan", jsonRequest("POST", input));
+  await ensureOk(response);
+  return ((await response.json()) as { scan: SystemWifiScanResult }).scan;
+}
+
+export async function connectSystemWifi(input: SystemWifiConnectInput): Promise<SystemWifiOperationResult> {
+  return wifiMutation("/api/system/network/wifi/connect", "POST", input);
+}
+
+export async function disconnectSystemWifi(device: string, confirmed: boolean): Promise<SystemWifiOperationResult> {
+  return wifiMutation("/api/system/network/wifi/disconnect", "POST", { device, confirmed });
+}
+
+export async function setSystemWifiRadio(input: SystemWifiRadioInput): Promise<SystemWifiOperationResult> {
+  return wifiMutation("/api/system/network/wifi/radio", "PUT", input);
+}
+
+export async function updateSystemWifiProfile(
+  profileId: string,
+  input: SystemWifiProfileUpdateInput
+): Promise<SystemWifiOperationResult> {
+  return wifiMutation(`/api/system/network/wifi/profiles/${encodeURIComponent(profileId)}`, "PATCH", input);
+}
+
+export async function deleteSystemWifiProfile(profileId: string, confirmed: boolean): Promise<SystemWifiOperationResult> {
+  return wifiMutation(`/api/system/network/wifi/profiles/${encodeURIComponent(profileId)}`, "DELETE", { confirmed });
+}
+
+export async function updateSystemWifiHotspot(input: SystemWifiHotspotUpdateInput): Promise<SystemWifiOperationResult> {
+  return wifiMutation("/api/system/network/wifi/hotspot", "PUT", input);
+}
+
+export async function startSystemWifiHotspot(input: SystemWifiHotspotActionInput): Promise<SystemWifiOperationResult> {
+  return wifiMutation("/api/system/network/wifi/hotspot/start", "POST", input);
+}
+
+export async function stopSystemWifiHotspot(input: SystemWifiHotspotActionInput): Promise<SystemWifiOperationResult> {
+  return wifiMutation("/api/system/network/wifi/hotspot/stop", "POST", input);
+}
+
+export async function deleteSystemWifiHotspot(input: SystemWifiHotspotActionInput): Promise<SystemWifiOperationResult> {
+  return wifiMutation("/api/system/network/wifi/hotspot", "DELETE", input);
+}
+
+async function wifiMutation(url: string, method: "POST" | "PUT" | "PATCH" | "DELETE", input: unknown) {
+  const response = await fetch(url, jsonRequest(method, input));
+  await ensureOk(response);
+  return ((await response.json()) as { result: SystemWifiOperationResult }).result;
+}
+
+function jsonRequest(method: string, input: unknown): RequestInit {
+  return {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  };
 }
 
 export async function getSystemStorage(): Promise<StorageSummary> {

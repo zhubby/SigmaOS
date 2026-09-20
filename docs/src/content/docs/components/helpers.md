@@ -4,7 +4,7 @@ description: share-helper 和 terminal-helper 的 Unix socket 权限隔离。
 type: reference
 status: current
 audience: [developer, operator]
-sourceOfTruth: [apps/share-helper/src/index.ts, apps/share-helper/src/helper.ts, apps/terminal-helper/src/index.ts, apps/terminal-helper/src/session-policy.ts, packages/shared/src/terminal-protocol.ts, packaging/systemd/sigmaos-share-helper.service, packaging/systemd/sigmaos-terminal-helper.service]
+sourceOfTruth: [apps/share-helper/src/index.ts, apps/share-helper/src/helper.ts, apps/share-helper/src/network-manager.ts, apps/terminal-helper/src/index.ts, apps/terminal-helper/src/session-policy.ts, packages/shared/src/terminal-protocol.ts, packaging/systemd/sigmaos-share-helper.service, packaging/systemd/sigmaos-terminal-helper.service]
 sidebar:
   order: 6
 ---
@@ -24,3 +24,13 @@ share-helper 还提供固定的 Docker daemon 配置操作。它只允许读写 
 保存前 API 与 helper 都会解析 JSON 并要求顶层为对象；helper 随后运行 `dockerd --validate --config-file`。目标若为符号链接或非普通文件会被拒绝。写入使用 `/etc/docker` 同目录临时文件、`0644 root:root` 权限和原子 rename，并以内容 SHA-256 revision 防止覆盖 SSH 或其他进程的并发修改。
 
 第一次保存待应用配置时，helper 在 root 专用的 `/var/lib/sigmaos/docker-daemon/`（`0700 root:root`）保存最后已生效的基线和事务元数据。继续保存只更新待应用版本，不覆盖基线。重启成功后事务材料会清理；重启失败时 helper 恢复基线并再次启动 Docker。若回滚启动也失败，恢复材料会保留供人工处理。
+
+## NetworkManager 配置边界
+
+Wi-Fi 与热点写操作复用 share-helper 的固定 `/network-manager` 端点。请求只能选择扫描、连接、断开、radio、SigmaOS profile 和热点动作，不能传入命令、路径、systemd unit 或任意参数数组。API 保持 `sigmaos` 用户身份且不获得网络 capabilities。
+
+SigmaOS 只写 `/etc/NetworkManager/system-connections/sigmaos-*.nmconnection`，拒绝符号链接和非普通文件，使用同目录临时文件、`0600 root:root` 与原子 rename。编辑使用内容 SHA-256 revision；Netplan 或其他工具建立的外部 profile 可以连接和断开，但 helper 不允许编辑或删除。
+
+基础 keyfile 由 `nmcli --offline` 生成，密码只在 helper 内存和 root-only keyfile 中出现，不放入命令参数、日志、错误或 API 响应。公开状态只返回 `credentialConfigured`。这些凭据没有应用层静态加密，备份 `/etc` 时必须按秘密材料保护。
+
+同一网卡的客户端和热点模式互斥。启动热点前，helper 将待恢复的客户端 UUID 写入 `/var/lib/sigmaos/network-manager/state.json`（目录 `0700`、文件 `0600`）；热点激活失败或正常停止时尝试恢复。恢复失败会保留状态并返回 `502`，不会谎报连接已恢复。

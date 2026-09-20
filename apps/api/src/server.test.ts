@@ -58,17 +58,28 @@ import type {
   ShareApplyRequest,
   ShareApplyResult,
   SigmaConfig,
+  SystemWifiConnectInput,
+  SystemWifiHotspotActionInput,
+  SystemWifiHotspotUpdateInput,
+  SystemWifiProfileUpdateInput,
+  SystemWifiRadioInput,
+  SystemWifiScanInput,
+  SystemWifiStatus,
+  SystemWifiSummary,
   StorageOperationProposal
 } from "@sigmaos/shared";
 import type { DockerComposeRuntime } from "./lib/docker-compose.js";
 import { DockerRequestError, type DockerEngineRuntime, type DockerExecStream } from "./lib/docker-client.js";
 import { DockerDaemonRequestError, type DockerDaemonRuntime } from "./lib/docker-daemon.js";
+import type { NetworkManagerRuntime } from "./lib/network-manager.js";
 import { streamDockerDaemonEvents } from "./routes/docker.js";
+import { streamWifiEvents } from "./routes/system.js";
 import type { SystemCommandRunner } from "./lib/system-management.js";
 import { buildServer as buildApiServer, type ServerDependencies } from "./server.js";
 
 const execFileAsync = promisify(execFile);
 const TEST_STORAGE_POOL_ID = "/dev/md/test-pool";
+const TEST_WIFI_PROFILE_ID = "12345678-1234-4123-8123-123456789abc";
 
 let tempDir: string;
 let rootDir: string;
@@ -953,7 +964,8 @@ describe("API server", () => {
       "ip -j route": JSON.stringify([
         { dst: "default", gateway: "192.168.50.1", dev: "enp1s0", protocol: "dhcp" },
         { dst: "192.168.50.0/24", dev: "enp1s0", prefsrc: "192.168.50.10", scope: "link" }
-      ])
+      ]),
+      "systemctl is-active systemd-networkd.service": "active\n"
     });
     const server = await buildServer({ config: testConfig(tempDir), db, system: { commandRunner } });
     const response = await server.inject({
@@ -1029,6 +1041,48 @@ describe("API server", () => {
     await server.close();
   });
 
+  it("keeps interface data when the Wi-Fi summary fails", async () => {
+    const commandRunner = new FakeSystemCommandRunner({
+      "ip -j link": JSON.stringify([
+        {
+          ifindex: 2,
+          ifname: "eth0",
+          flags: ["BROADCAST", "MULTICAST", "UP", "LOWER_UP"],
+          mtu: 1500,
+          operstate: "UP",
+          link_type: "ether",
+          address: "52:54:00:12:34:56"
+        }
+      ]),
+      "ip -j addr": JSON.stringify([
+        {
+          ifname: "eth0",
+          addr_info: [{ family: "inet", local: "192.168.11.91", prefixlen: 24, scope: "global", label: "eth0" }]
+        }
+      ]),
+      "ip -j route": JSON.stringify([
+        { dst: "default", gateway: "192.168.11.1", dev: "eth0", protocol: "dhcp" }
+      ])
+    });
+    const networkManager = new FakeNetworkManager();
+    networkManager.summaryError = new Error("nmcli failed: password=do-not-leak");
+    const server = await buildServer({ config: testConfig(tempDir), db, system: { commandRunner, networkManager } });
+
+    const response = await server.inject({ method: "GET", url: "/api/system/network" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      network: {
+        status: "partial",
+        interfaces: [expect.objectContaining({ name: "eth0", state: "connected" })],
+        wifi: { backend: "unknown", helperReady: false, devices: [] },
+        issues: [expect.objectContaining({ source: "Wi-Fi status" })]
+      }
+    });
+    expect(response.body).not.toContain("do-not-leak");
+    await server.close();
+  });
+
   it("returns lightweight per-interface network traffic counters", async () => {
     const commandRunner = new FakeSystemCommandRunner({
       "cat /proc/net/dev": [
@@ -1050,6 +1104,108 @@ describe("API server", () => {
     });
     expect(response.json().traffic.collectedAt).toEqual(expect.any(String));
     await server.close();
+  });
+
+  it("scans and connects Wi-Fi while enforcing management-path confirmation", async () => {
+    const networkManager = new FakeNetworkManager();
+    networkManager.status.devices[0]!.managementPath = true;
+    const server = await buildServer({
+      config: testConfig(tempDir),
+      db,
+      system: { commandRunner: new FakeSystemCommandRunner({}), networkManager }
+    });
+
+    const scan = await server.inject({
+      method: "POST",
+      url: "/api/system/network/wifi/scan",
+      payload: { device: "wlan0" }
+    });
+    expect(scan.statusCode).toBe(200);
+    expect(scan.json()).toMatchObject({ scan: { device: "wlan0", accessPoints: [{ ssid: "Home" }] } });
+
+    const unsafeConnect = await server.inject({
+      method: "POST",
+      url: "/api/system/network/wifi/connect",
+      payload: { device: "wlan0", profileId: TEST_WIFI_PROFILE_ID, confirmed: false }
+    });
+    expect(unsafeConnect.statusCode).toBe(400);
+    expect(networkManager.connectCalls).toHaveLength(0);
+
+    const confirmedConnect = await server.inject({
+      method: "POST",
+      url: "/api/system/network/wifi/connect",
+      payload: { device: "wlan0", profileId: TEST_WIFI_PROFILE_ID, confirmed: true }
+    });
+    expect(confirmedConnect.statusCode).toBe(200);
+    expect(networkManager.connectCalls).toHaveLength(1);
+    await server.close();
+  });
+
+  it("requires confirmation for Wi-Fi deletion and dispatches hotspot actions", async () => {
+    const networkManager = new FakeNetworkManager();
+    const server = await buildServer({
+      config: testConfig(tempDir),
+      db,
+      system: { commandRunner: new FakeSystemCommandRunner({}), networkManager }
+    });
+
+    const unconfirmedDelete = await server.inject({
+      method: "DELETE",
+      url: `/api/system/network/wifi/profiles/${TEST_WIFI_PROFILE_ID}`,
+      payload: { confirmed: false }
+    });
+    expect(unconfirmedDelete.statusCode).toBe(400);
+
+    const confirmedDelete = await server.inject({
+      method: "DELETE",
+      url: `/api/system/network/wifi/profiles/${TEST_WIFI_PROFILE_ID}`,
+      payload: { confirmed: true }
+    });
+    expect(confirmedDelete.statusCode).toBe(200);
+    expect(networkManager.deletedProfiles).toEqual([TEST_WIFI_PROFILE_ID]);
+
+    const hotspot = await server.inject({
+      method: "POST",
+      url: "/api/system/network/wifi/hotspot/start",
+      payload: { device: "wlan0", confirmed: true }
+    });
+    expect(hotspot.statusCode).toBe(200);
+    expect(networkManager.hotspotActions).toEqual(["start:wlan0"]);
+    await server.close();
+  });
+
+  it("streams initial and changed Wi-Fi states, heartbeats, and stops on close", async () => {
+    vi.useFakeTimers();
+    try {
+      const networkManager = new FakeNetworkManager();
+      const closeSignal = new EventEmitter();
+      const chunks: string[] = [];
+      await streamWifiEvents(
+        closeSignal,
+        { write: (chunk) => chunks.push(chunk) },
+        networkManager,
+        { sampleMs: 100, heartbeatMs: 250 }
+      );
+
+      expect(chunks.join("")).toContain("retry: 2000");
+      expect(chunks.join("")).toContain('"backend":"NetworkManager"');
+      expect(chunks.filter((chunk) => chunk === "event: system.wifi.status\n")).toHaveLength(1);
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(chunks.filter((chunk) => chunk === "event: system.wifi.status\n")).toHaveLength(1);
+      networkManager.status.radioEnabled = false;
+      await vi.advanceTimersByTimeAsync(100);
+      expect(chunks.filter((chunk) => chunk === "event: system.wifi.status\n")).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(50);
+      expect(chunks).toContain(": heartbeat\n\n");
+
+      const callsAtClose = networkManager.statusCalls;
+      closeSignal.emit("close");
+      await vi.advanceTimersByTimeAsync(500);
+      expect(networkManager.statusCalls).toBe(callsAtClose);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("returns read-only storage management summary from block, RAID, mount, and SMART commands", async () => {
@@ -4318,6 +4474,131 @@ class FakeSystemCommandRunner implements SystemCommandRunner {
       throw new Error(`${key} unavailable`);
     }
     return output;
+  }
+}
+
+class FakeNetworkManager implements NetworkManagerRuntime {
+  statusCalls = 0;
+  connectCalls: SystemWifiConnectInput[] = [];
+  deletedProfiles: string[] = [];
+  hotspotActions: string[] = [];
+  summaryError: Error | null = null;
+  status: SystemWifiStatus = {
+    collectedAt: "2026-09-20T00:00:00.000Z",
+    backend: "NetworkManager",
+    radioEnabled: true,
+    helperReady: true,
+    devices: [
+      {
+        id: "wlan0",
+        name: "wlan0",
+        mac: "00:11:22:33:44:55",
+        driver: "brcmfmac",
+        state: "connected",
+        mode: "client",
+        activeConnectionId: TEST_WIFI_PROFILE_ID,
+        activeConnectionName: "Home",
+        ssid: "Home",
+        signal: 80,
+        frequencyMHz: 5180,
+        channel: 36,
+        managementPath: false,
+        capabilities: { accessPoint: true, bands: ["2.4", "5"], channels: [1, 6, 11, 36, 40] }
+      }
+    ],
+    hotspots: []
+  };
+
+  async getStatus(): Promise<SystemWifiStatus> {
+    this.statusCalls += 1;
+    return structuredClone(this.status);
+  }
+
+  async getSummary(): Promise<SystemWifiSummary> {
+    if (this.summaryError) throw this.summaryError;
+    return {
+      ...(await this.getStatus()),
+      profiles: [
+        {
+          id: TEST_WIFI_PROFILE_ID,
+          name: "Home",
+          ssid: "Home",
+          device: "wlan0",
+          security: "wpa2",
+          autoconnect: true,
+          active: true,
+          managed: false,
+          credentialConfigured: true,
+          revision: null
+        }
+      ]
+    };
+  }
+
+  async scan(input: SystemWifiScanInput) {
+    return {
+      device: input.device,
+      scannedAt: "2026-09-20T00:00:00.000Z",
+      accessPoints: [
+        {
+          ssid: "Home",
+          bssid: "AA:BB:CC:DD:EE:FF",
+          signal: 80,
+          frequencyMHz: 5180,
+          channel: 36,
+          band: "5" as const,
+          security: "wpa2" as const,
+          active: true,
+          savedProfileId: TEST_WIFI_PROFILE_ID
+        }
+      ]
+    };
+  }
+
+  async connect(input: SystemWifiConnectInput) {
+    this.connectCalls.push(input);
+    return this.operationResult();
+  }
+
+  async disconnect(_input: { device: string; confirmed: boolean }) {
+    return this.operationResult();
+  }
+
+  async setRadio(input: SystemWifiRadioInput) {
+    this.status.radioEnabled = input.enabled;
+    return this.operationResult();
+  }
+
+  async updateProfile(_profileId: string, _input: SystemWifiProfileUpdateInput) {
+    return this.operationResult();
+  }
+
+  async deleteProfile(profileId: string, _confirmed: boolean) {
+    this.deletedProfiles.push(profileId);
+    return this.operationResult();
+  }
+
+  async updateHotspot(_input: SystemWifiHotspotUpdateInput) {
+    return this.operationResult();
+  }
+
+  async startHotspot(input: SystemWifiHotspotActionInput) {
+    this.hotspotActions.push(`start:${input.device}`);
+    return this.operationResult();
+  }
+
+  async stopHotspot(input: SystemWifiHotspotActionInput) {
+    this.hotspotActions.push(`stop:${input.device}`);
+    return this.operationResult();
+  }
+
+  async deleteHotspot(input: SystemWifiHotspotActionInput) {
+    this.hotspotActions.push(`delete:${input.device}`);
+    return this.operationResult();
+  }
+
+  private async operationResult() {
+    return { status: await this.getStatus(), rollback: "not_required" as const, message: null };
   }
 }
 

@@ -4,7 +4,7 @@ description: API 传输面、端点分组和稳定契约。
 type: reference
 status: current
 audience: [developer]
-sourceOfTruth: [apps/api/src/routes/index.ts, apps/api/src/routes/files.ts, apps/api/src/routes/sessions.ts, apps/api/src/routes/downloads.ts, apps/api/src/routes/docker.ts, apps/api/src/routes/terminal.ts, apps/api/src/lib/docker-daemon.ts, apps/api/src/lib/docker-registry.ts, apps/web/src/api.ts]
+sourceOfTruth: [apps/api/src/routes/index.ts, apps/api/src/routes/files.ts, apps/api/src/routes/sessions.ts, apps/api/src/routes/downloads.ts, apps/api/src/routes/docker.ts, apps/api/src/routes/system.ts, apps/api/src/routes/terminal.ts, apps/api/src/lib/docker-daemon.ts, apps/api/src/lib/docker-registry.ts, apps/api/src/lib/network-manager.ts, apps/web/src/api.ts]
 sidebar:
   order: 2
 ---
@@ -12,6 +12,18 @@ sidebar:
 REST 路由按 roots、files/search、sessions/jobs/events、approvals/operations、indexer/readiness/health、backup、settings、system、storage、shares、Docker、VM 和 terminal 分组。
 
 Agent 事件通过 session SSE stream 传递；terminal、Docker console 和 VM console 使用 WebSocket。写操作的 approval 要求以 route 实现和 `packages/shared/src/types.ts` 为准；本页不复制易漂移的完整 JSON schema。
+
+## Wi-Fi 与热点
+
+- `GET /api/system/network` 同时返回内核接口/路由和 NetworkManager 无线摘要。`capabilities.backend` 为 `NetworkManager`、`systemd-networkd` 或 `unknown`；只有 NetworkManager 与 helper 同时可用时才开放写操作。
+- `POST /api/system/network/wifi/scan|connect|disconnect` 分别扫描、连接和断开；`PUT /api/system/network/wifi/radio` 切换全局 Wi-Fi radio。
+- `PATCH/DELETE /api/system/network/wifi/profiles/:id` 只允许修改或遗忘 SigmaOS 创建的 profile。外部 profile 可以通过 `connect` 使用，但更新或删除返回 `409`。
+- `PUT /api/system/network/wifi/hotspot` 保存 WPA2 热点；`POST .../hotspot/start|stop` 启停，`DELETE .../hotspot` 删除。热点使用 NetworkManager `ipv4.method=shared`，没有默认上行时仍提供本地网络。
+- `GET /api/system/network/wifi/events` 是状态 SSE：立即发送 `system.wifi.status`，每秒采样、仅变化时推送，每 15 秒 heartbeat，重连提示 2 秒。扫描结果不进入 SSE。
+
+写请求最多 64 KiB。SSID 为 1–32 字节；Personal 密码为 8–63 个可打印字符或 64 位十六进制。首期新连接只支持开放、WPA2 Personal 和 WPA3 Personal；WEP、802.1X 和隐藏网络返回 `400`。管理链路切换及破坏性操作要求 `confirmed: true`，它表示 UI 已完成二次确认而不是身份认证。
+
+输入错误为 `400`，缺少设备/profile 为 `404`，外部配置或 revision 冲突为 `409`，NetworkManager 操作或恢复失败为 `502`，后端/helper/依赖不可用为 `503`。所有公开响应、日志和通知禁止包含 Wi-Fi 或热点密码。
 
 ## Terminal 标签与 WebSocket
 

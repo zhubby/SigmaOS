@@ -16,6 +16,12 @@ import {
   validateStorageHelperRequest,
   type StorageHelperRequest
 } from "./helper.js";
+import {
+  executeNetworkManagerHelperRequest,
+  NetworkManagerHelperError,
+  networkManagerHelperStatus,
+  safeNetworkManagerHelperMessage
+} from "./network-manager.js";
 
 const SOCKET_PATH = process.env.SIGMAOS_SHARE_HELPER_SOCKET_PATH ?? "/run/sigmaos/share-helper.sock";
 const SOCKET_GROUP = process.env.SIGMAOS_SHARE_HELPER_GROUP ?? "sigmaos";
@@ -29,7 +35,8 @@ const server = http.createServer(async (request, response) => {
     (request.url !== "/apply" &&
       request.url !== "/storage-command" &&
       request.url !== "/storage-operation" &&
-      request.url !== "/docker-daemon")
+      request.url !== "/docker-daemon" &&
+      request.url !== "/network-manager")
   ) {
     sendJson(response, 404, { error: "Not found" });
     return;
@@ -44,16 +51,20 @@ const server = http.createServer(async (request, response) => {
       result = { stdout: await runStorageCommand(validateStorageHelperRequest(body)) };
     } else if (request.url === "/storage-operation") {
       result = await applyStoragePoolOperation(validateStorageOperationRequest(body));
+    } else if (request.url === "/network-manager") {
+      result = await executeNetworkManagerHelperRequest(body);
     } else {
       result = await handleDockerDaemonRequest(body);
     }
     sendJson(response, 200, result);
   } catch (error) {
-    sendJson(response, dockerDaemonHelperStatus(error), {
-      error: safeShareHelperMessage(error),
+    const networkManagerError = error instanceof NetworkManagerHelperError;
+    sendJson(response, networkManagerError ? networkManagerHelperStatus(error) : dockerDaemonHelperStatus(error), {
+      error: networkManagerError ? safeNetworkManagerHelperMessage(error) : safeShareHelperMessage(error),
       ...(error instanceof DockerDaemonHelperError
         ? { code: error.code, ...(error.result ? { result: error.result } : {}) }
-        : {})
+        : {}),
+      ...(networkManagerError ? { code: error.code, rollback: error.rollback } : {})
     });
   }
 });

@@ -17,6 +17,7 @@ CM5 必须在目标 arm64 主机上构建 Debian 包，以匹配 `better-sqlite3
 - 至少准备一个非 root 本地用户作为 terminal-helper 身份；
 - 将 NAS 数据盘挂载到 `/srv/nas`，需要备份时将仓库放在与 NAS、`/var/lib/sigmaos` 不重叠的 `/srv/backup`；
 - 确保构建阶段可以访问 APT、Node.js release 和 npm registry，或传入内部镜像；
+- Wi-Fi 管理要求 NetworkManager、wpa_supplicant、dnsmasq-base、wireless-regdb 和 iw；Debian 包会声明这些依赖，但不会自动把现有 networkd 主机迁移到 NetworkManager；
 - 预留足够空间用于 `.sigmaos/deb-build`、`docs/node_modules` 和 Debian 产物。
 
 ## 原生构建与安装
@@ -56,7 +57,19 @@ curl -fsS http://127.0.0.1:3010/api/system/health
 
 然后从浏览器验证 Web 和 `/docs/`，选择 NAS root，打开终端，上传一个小文件，执行一次索引并确认 `/api/indexer/status` 有完成记录。不要只以 systemd 的 `active` 判断 oneshot 任务成功；请查看对应 journal 和数据库状态。
 
-share-helper 的 root 状态目录应为 `/var/lib/sigmaos/docker-daemon`，不能声明共享父目录或共享 LogsDirectory。父目录和数据库仍由 `sigmaos` 使用，恢复子目录为 `root:root 0700`。现有相同配置的 host drop-in 可保留，升级后检查实际合并 unit；在维护窗口按两种启动顺序验证，并观察 helper 重启是否影响 API/worker。详见[目录所有权排查](/docs/operations/troubleshooting/#服务目录所有权与启动顺序)。
+share-helper 的 root 状态目录应为 `/var/lib/sigmaos/docker-daemon` 和 `/var/lib/sigmaos/network-manager`，不能声明共享父目录或共享 LogsDirectory。父目录和数据库仍由 `sigmaos` 使用，两个恢复子目录为 `root:root 0700`。现有相同配置的 host drop-in 可保留，升级后检查实际合并 unit；在维护窗口按两种启动顺序验证，并观察 helper 重启是否影响 API/worker。详见[目录所有权排查](/docs/operations/troubleshooting/#服务目录所有权与启动顺序)。
+
+CM5 无线验收先确认设备与驱动，再通过页面操作。推荐保留 `eth0` 作为独立管理链路：
+
+```bash
+nmcli general status
+nmcli device status
+iw dev wlan0 info
+sudo journalctl -u NetworkManager.service -u sigmaos-share-helper.service -n 100 --no-pager
+curl -fsS http://127.0.0.1:3010/api/system/network
+```
+
+页面应识别 `NetworkManager`、`wlan0` 和 AP 能力。依次验证扫描、连接/断开现有 profile、创建临时 WPA2 热点、客户端获取 `10.42.x.x` 地址、停止热点恢复原客户端连接，以及 autostart 开/关。验收后删除临时热点；不要在仅有 Wi-Fi 管理链路时测试 radio 关闭或热点切换。
 
 ## 升级、保留与回滚
 

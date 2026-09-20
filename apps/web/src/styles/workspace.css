@@ -4977,6 +4977,434 @@
   line-height: 1.4;
 }
 
+.system-wifi-section {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 12px;
+}
+
+.system-wifi-header {
+  align-items: flex-start;
+}
+
+.system-wifi-toolbar,
+.system-wifi-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.system-wifi-toolbar select {
+  min-width: 104px;
+  height: 32px;
+  padding: 0 28px 0 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  color: var(--text);
+  background: var(--surface-strong);
+}
+
+.system-wifi-toolbar > button:not(.management-icon-action),
+.system-wifi-device-summary > button,
+.system-wifi-network-row > button,
+.system-wifi-hotspot-bar > button:not(.management-icon-action) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--text);
+  background: var(--surface-strong);
+}
+
+.system-wifi-error,
+.system-wifi-unavailable {
+  margin: 0;
+  border: 1px solid var(--danger-border);
+  border-radius: 5px;
+  color: var(--danger-text);
+  background: var(--danger-bg);
+}
+
+.system-wifi-error {
+  padding: 9px 10px;
+  font-size: 12px;
+}
+
+.system-wifi-unavailable {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 12px;
+}
+
+.system-wifi-unavailable strong,
+.system-wifi-unavailable p {
+  margin: 0;
+}
+
+.system-wifi-unavailable p {
+  margin-top: 3px;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.system-wifi-device-summary {
+  display: grid;
+  grid-template-columns: 42px minmax(160px, 1fr) minmax(240px, auto) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--channel-bg);
+}
+
+.system-wifi-device-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--neutral-status-text);
+  background: var(--surface-strong);
+}
+
+.system-wifi-device-icon[data-state="ready"] {
+  border-color: var(--success-border);
+  color: var(--success-text);
+  background: var(--success-bg);
+}
+
+.system-wifi-device-icon[data-state="warning"] {
+  border-color: var(--warning-border);
+  color: var(--warning-text);
+  background: var(--warning-bg);
+}
+
+.system-wifi-device-icon[data-state="offline"] {
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+  background: var(--danger-bg);
+}
+
+.system-wifi-device-copy {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.system-wifi-device-copy strong,
+.system-wifi-device-copy small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.system-wifi-device-copy strong {
+  font-size: 13px;
+}
+
+.system-wifi-device-copy small,
+.system-wifi-network-row small,
+.system-wifi-profile-row small,
+.system-wifi-hotspot-bar small {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.system-wifi-device-summary dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(64px, 1fr));
+  gap: 14px;
+  margin: 0;
+}
+
+.system-wifi-device-summary dl > div {
+  display: grid;
+  gap: 3px;
+}
+
+.system-wifi-device-summary dt,
+.system-wifi-device-summary dd {
+  margin: 0;
+}
+
+.system-wifi-device-summary dt {
+  color: var(--muted-2);
+  font-size: 9.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.system-wifi-device-summary dd {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.system-wifi-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.system-wifi-list-panel {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+}
+
+.system-wifi-list-panel + .system-wifi-list-panel {
+  padding-left: 14px;
+  border-left: 1px solid var(--line-soft);
+}
+
+.system-wifi-subheader {
+  min-height: 48px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.system-wifi-subheader h4,
+.system-wifi-subheader p {
+  margin: 0;
+}
+
+.system-wifi-subheader h4 {
+  font-size: 12.5px;
+}
+
+.system-wifi-subheader p {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+.system-wifi-network-list,
+.system-wifi-profile-list {
+  display: grid;
+}
+
+.system-wifi-network-row,
+.system-wifi-profile-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 48px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.system-wifi-network-row > div:not(.system-wifi-row-actions),
+.system-wifi-profile-row > div:not(.system-wifi-row-actions) {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.system-wifi-network-row strong,
+.system-wifi-profile-row strong,
+.system-wifi-hotspot-bar strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.system-wifi-network-row > span:not(.management-status-pill) {
+  min-width: 36px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+
+.system-wifi-hotspot-bar {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto auto 32px 32px;
+  align-items: center;
+  gap: 9px;
+  min-height: 54px;
+  padding: 9px 11px;
+  border: 1px solid var(--line-soft);
+  border-left: 3px solid var(--line);
+  border-radius: 5px;
+  background: var(--channel-bg);
+}
+
+.system-wifi-hotspot-bar[data-active="true"] {
+  border-left-color: var(--green);
+}
+
+.system-wifi-hotspot-bar > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.system-wifi-modal-backdrop {
+  z-index: 96;
+}
+
+.system-wifi-dialog,
+.system-wifi-confirm-dialog {
+  width: min(600px, 100%);
+  max-height: min(720px, calc(100dvh - 36px));
+  border-top: 3px solid var(--accent);
+}
+
+.system-wifi-dialog form {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 18px 0;
+}
+
+.system-wifi-dialog form > label:not(.system-wifi-checkbox) {
+  display: grid;
+  gap: 6px;
+}
+
+.system-wifi-dialog form > label > span,
+.system-wifi-form-grid label > span,
+.system-wifi-form-fact > span {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.system-wifi-dialog input:not([type="checkbox"]),
+.system-wifi-dialog select {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--text);
+  background: var(--surface-strong);
+}
+
+.system-wifi-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.system-wifi-form-grid label {
+  display: grid;
+  gap: 6px;
+}
+
+.system-wifi-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.system-wifi-form-fact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: var(--channel-bg);
+}
+
+.system-wifi-risk,
+.system-wifi-confirm-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 14px;
+  border: 1px solid var(--warning-border);
+  border-radius: 5px;
+  color: var(--warning-text);
+  background: var(--warning-bg);
+}
+
+.system-wifi-risk h3,
+.system-wifi-risk p,
+.system-wifi-confirm-body p {
+  margin: 0;
+}
+
+.system-wifi-risk h3 {
+  font-size: 13px;
+}
+
+.system-wifi-risk p,
+.system-wifi-confirm-body p {
+  margin-top: 4px;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.system-wifi-dialog-actions,
+.system-wifi-confirm-dialog > footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 4px -18px 0;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line-soft);
+  background: var(--channel-bg);
+}
+
+.system-wifi-dialog-actions button,
+.system-wifi-confirm-dialog > footer button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--text);
+  background: var(--surface-strong);
+}
+
+.system-wifi-dialog-actions button.is-primary,
+.system-wifi-confirm-dialog > footer button.is-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.system-wifi-dialog-actions button.is-danger,
+.system-wifi-confirm-dialog > footer button.is-danger {
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+  background: var(--danger-bg);
+}
+
+.system-wifi-confirm-dialog {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.system-wifi-confirm-body {
+  margin: 16px 18px;
+}
+
+.system-wifi-confirm-dialog > footer {
+  margin: 0;
+}
+
 .management-resource-row {
   display: grid;
   gap: 8px;

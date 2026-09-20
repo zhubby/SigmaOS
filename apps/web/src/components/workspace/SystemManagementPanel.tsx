@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Activity,
@@ -14,7 +14,6 @@ import {
   Plus,
   RefreshCw,
   Route,
-  Settings,
   Trash2,
   Upload,
   X,
@@ -44,6 +43,7 @@ import {
   createStoragePool,
   type NetworkSummary,
   type NetworkTrafficSummary,
+  type WifiStatus,
   type StorageFilesystem,
   type StorageSummary,
   type StorageRaidLevel
@@ -62,6 +62,7 @@ import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
 import { calculateNetworkTrafficRate } from "../../lib/network-traffic.js";
 import { ManagementSkeletonBody, SkeletonBlock } from "./ManagementSkeleton.js";
+import { SystemWifiManagement } from "./SystemWifiManagement.js";
 
 type StatusTone = "ready" | "warning" | "offline" | "neutral";
 type GaugeTone = "ready" | "warning" | "danger" | "neutral";
@@ -133,10 +134,12 @@ interface DiskCapacityUsage {
 
 export function SystemNetworkManagementPanel({
   locale,
-  onNotifyError
+  onNotifyError,
+  onNotifySuccess
 }: {
   locale: SupportedLocale;
   onNotifyError: (message: string | null) => void;
+  onNotifySuccess: (message: string | null) => void;
 }) {
   const { t } = useTranslation();
   const translate = t as Translate;
@@ -145,6 +148,25 @@ export function SystemNetworkManagementPanel({
   const [error, setError] = useState<string | null>(null);
   const [selectedInterfaceId, setSelectedInterfaceId] = useState<string | null>(null);
   const reportedIssueSignature = useRef<string | null>(null);
+  const handleWifiStatus = useCallback((wifiStatus: WifiStatus) => {
+    setSummary((current) => current
+      ? {
+          ...current,
+          capabilities: {
+            ...current.capabilities,
+            backend: wifiStatus.backend,
+            helperReady: wifiStatus.helperReady,
+            canApplyConfiguration: wifiStatus.backend === "NetworkManager" && wifiStatus.helperReady,
+            canManageWifi: wifiStatus.backend === "NetworkManager" && wifiStatus.helperReady && wifiStatus.devices.length > 0,
+            canManageHotspot:
+              wifiStatus.backend === "NetworkManager" &&
+              wifiStatus.helperReady &&
+              wifiStatus.devices.some((device) => device.capabilities.accessPoint)
+          },
+          wifi: { ...wifiStatus, profiles: current.wifi.profiles }
+        }
+      : current);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -230,15 +252,6 @@ export function SystemNetworkManagementPanel({
           )}
           <button
             type="button"
-            disabled
-            aria-label={translate("workspace.management.actions.configure")}
-            title={translate("workspace.management.actions.systemIntegrationRequired")}
-          >
-            <Settings aria-hidden="true" size={15} />
-            <span>{translate("workspace.management.actions.configure")}</span>
-          </button>
-          <button
-            type="button"
             onClick={() => void refreshSummary()}
             disabled={loading}
             aria-busy={loading || undefined}
@@ -268,8 +281,13 @@ export function SystemNetworkManagementPanel({
               </p>
             </div>
             <dl className="management-fact-list">
-              <Fact label={t("workspace.management.network.facts.backend")} value="systemd-networkd" />
-              <Fact label={translate("workspace.management.network.facts.mode")} value={translate("workspace.management.values.readOnly")} />
+              <Fact label={t("workspace.management.network.facts.backend")} value={summary?.capabilities.backend ?? t("common.dash")} />
+              <Fact
+                label={translate("workspace.management.network.facts.mode")}
+                value={summary?.capabilities.canManageWifi
+                  ? translate("workspace.management.network.wifi.managedMode")
+                  : translate("workspace.management.values.readOnly")}
+              />
               <Fact
                 label={t("workspace.management.network.facts.defaultRoutes")}
                 value={formatLocaleNumber(summary?.metrics.defaultRoutes ?? 0, locale)}
@@ -287,6 +305,18 @@ export function SystemNetworkManagementPanel({
             <MetricCard key={metric.id} metric={metric} />
           ))}
         </div>
+
+        {summary ? (
+          <SystemWifiManagement
+            wifi={summary.wifi}
+            canManageWifi={summary.capabilities.canManageWifi}
+            canManageHotspot={summary.capabilities.canManageHotspot}
+            onStatus={handleWifiStatus}
+            onRefresh={refreshSummary}
+            onNotifySuccess={(message) => onNotifySuccess(message)}
+            onNotifyError={(message) => onNotifyError(message)}
+          />
+        ) : null}
 
         <NetworkTrafficMonitor interfaces={interfaces} locale={locale} t={translate} />
 

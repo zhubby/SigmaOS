@@ -101,7 +101,7 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("tmpfiles.d/sigmaos.conf");
     expect(tmpfiles).toContain("/run/sigmaos");
     expect(tmpfiles).toContain("/run/mdadm");
-    expect(control).toContain("Depends: nodejs (>= 20), sqlite3, tmux, adduser");
+    expect(control).toContain("Depends: nodejs (>= 20), sqlite3, tmux, adduser, network-manager, wpasupplicant, dnsmasq-base, wireless-regdb, iw");
     expect(control).toContain("mpv");
     expect(control).toContain("Suggests:");
     expect(control).toContain("git");
@@ -247,6 +247,7 @@ describe("native packaging artifacts", () => {
 
     expect(unit).toContain("User=root");
     expect(unit).toContain("StateDirectory=sigmaos/docker-daemon\n");
+    expect(unit).toContain("StateDirectory=sigmaos/network-manager\n");
     expect(unit).toContain("StateDirectoryMode=0700");
     expect(unit).not.toMatch(/^StateDirectory=sigmaos$/mu);
     expect(unit).not.toMatch(/^LogsDirectory=sigmaos$/mu);
@@ -256,7 +257,7 @@ describe("native packaging artifacts", () => {
     expect(unit).toContain("/run/mdadm");
     expect(unit).toContain("ProtectSystem=strict");
     expect(unit).toContain("ReadWritePaths=/etc/sigmaos");
-    expect(unit).toContain("/etc/fstab -/etc/docker -/etc/mdadm");
+    expect(unit).toContain("/etc/fstab -/etc/docker -/etc/NetworkManager/system-connections -/etc/mdadm");
     expect(unit).toContain("CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER");
     expect(unit).toContain("CAP_MKNOD");
     expect(unit).toContain("CAP_SYS_ADMIN");
@@ -265,9 +266,12 @@ describe("native packaging artifacts", () => {
     expect(apiUnit).toContain("User=sigmaos");
     expect(apiUnit).toContain("CapabilityBoundingSet=");
     expect(apiUnit).not.toContain("/etc/docker");
+    expect(apiUnit).not.toContain("/etc/NetworkManager");
     const postinst = await readPackagingFile("debian", "postinst");
     expect(postinst).toContain("install -d -o root -g root -m 0700 /var/lib/sigmaos/docker-daemon");
     expect(postinst).toContain("chown -R root:root /var/lib/sigmaos/docker-daemon");
+    expect(postinst).toContain("install -d -o root -g root -m 0700 /var/lib/sigmaos/network-manager");
+    expect(postinst).toContain("chown -R root:root /var/lib/sigmaos/network-manager");
   });
 
   it("ships an isolated user terminal broker", async () => {

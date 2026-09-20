@@ -15,6 +15,8 @@ if [ "$1" = "configure" ]; then
   chown -R sigmaos:sigmaos /var/lib/sigmaos
   install -d -o root -g root -m 0700 /var/lib/sigmaos/docker-daemon
   chown -R root:root /var/lib/sigmaos/docker-daemon
+  install -d -o root -g root -m 0700 /var/lib/sigmaos/network-manager
+  chown -R root:root /var/lib/sigmaos/network-manager
 
   SIGMAOS_LOCALE=${SIGMAOS_LOCALE:-C.UTF-8} \
     /usr/lib/sigmaos/scripts/sigmaos-configure-locale.sh
