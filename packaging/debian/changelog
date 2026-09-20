@@ -1,3 +1,9 @@
+sigmaos (0.5.0) unstable; urgency=medium
+
+  * Add Wi-Fi and hotspot management, persistent terminal sessions, and refined Agent navigation.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Sun, 20 Sep 2026 09:40:57 +0000
+
 sigmaos (0.4.3) unstable; urgency=medium
 
   * Unify button and control interaction feedback
