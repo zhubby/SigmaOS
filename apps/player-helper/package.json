@@ -1,6 +1,6 @@
 {
   "name": "@sigmaos/player-helper",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,6 +9,6 @@
     "build": "tsup --config tsup.config.ts"
   },
   "dependencies": {
-    "@sigmaos/shared": "0.5.0"
+    "@sigmaos/shared": "0.5.1"
   }
 }

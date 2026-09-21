@@ -1,3 +1,9 @@
+sigmaos (0.5.1) unstable; urgency=medium
+
+  * Add verified Tailscale CI/CD deployment for CM5 releases.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Mon, 21 Sep 2026 01:21:08 +0000
+
 sigmaos (0.5.0) unstable; urgency=medium
 
   * Add Wi-Fi and hotspot management, persistent terminal sessions, and refined Agent navigation.
