@@ -84,7 +84,9 @@ jobs:
             fakeroot \
             nodejs \
             npm \
-            rsync
+            rsync \
+            unzip \
+            zip
 
       - name: Build Debian package
         run: SIGMAOS_NPM_REGISTRY=https://registry.npmmirror.com packaging/scripts/build-deb.sh
@@ -147,7 +149,9 @@ jobs:
             git \
             nodejs \
             npm \
-            rsync
+            rsync \
+            unzip \
+            zip
 
       - name: Verify Node.js runtime
         run: |
