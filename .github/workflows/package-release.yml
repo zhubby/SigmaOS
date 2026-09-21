@@ -145,10 +145,15 @@ jobs:
             dpkg-dev \
             fakeroot \
             git \
+            nodejs \
+            npm \
             rsync
 
       - name: Verify Node.js runtime
-        run: node --version | grep -Eq '^v22\.'
+        run: |
+          [[ "$(command -v node)" == /usr/local/bin/node ]]
+          [[ "$(command -v npm)" == /usr/local/bin/npm ]]
+          node --version | grep -Eq '^v22\.'
 
       - name: Build Debian package
         run: SIGMAOS_NPM_REGISTRY=https://registry.npmmirror.com packaging/scripts/build-deb.sh
