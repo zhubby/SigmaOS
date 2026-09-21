@@ -48,7 +48,7 @@ export function PlayerControls({
       ) : null}
 
       <label className="hdmi-player-progress">
-        <span className="sr-only">{t("preview.hdmiPlayer.seek")}</span>
+        <span className="visually-hidden">{t("preview.hdmiPlayer.seek")}</span>
         <input
           type="range"
           min="0"
@@ -75,7 +75,7 @@ export function PlayerControls({
           <Square aria-hidden="true" size={14} />
         </button>
         <label className="hdmi-player-volume">
-          <span className="sr-only">{t("preview.hdmiPlayer.volume")}</span>
+          <span className="visually-hidden">{t("preview.hdmiPlayer.volume")}</span>
           {status.volume === 0 ? <VolumeX aria-hidden="true" size={15} /> : <Volume2 aria-hidden="true" size={15} />}
           <input type="range" min="0" max="100" step="1" value={status.volume} onChange={(event) => onCommand({ type: "set_volume", volume: Number(event.target.value) })} disabled={isError} />
         </label>

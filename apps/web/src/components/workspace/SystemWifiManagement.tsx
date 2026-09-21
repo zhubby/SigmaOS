@@ -406,7 +406,7 @@ export function SystemWifiManagement({
           <div className="system-wifi-toolbar">
             {wifi.devices.length > 1 ? (
               <label>
-                <span className="sr-only">{t("workspace.management.network.wifi.device")}</span>
+                <span className="visually-hidden">{t("workspace.management.network.wifi.device")}</span>
                 <select value={selectedDevice?.id ?? ""} onChange={(event) => setSelectedDeviceId(event.target.value)}>
                   {wifi.devices.map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}
                 </select>

@@ -165,7 +165,7 @@ export function DockerImageManagement({
           <div className="docker-image-toolbar">
             <label className="docker-image-search">
               <Search aria-hidden="true" size={14} />
-              <span className="sr-only">{t("workspace.management.docker.images.search")}</span>
+              <span className="visually-hidden">{t("workspace.management.docker.images.search")}</span>
               <input
                 type="search"
                 value={query}

@@ -8474,17 +8474,20 @@
 
 .docker-image-section {
   grid-column: 1 / -1;
+  container: docker-images / inline-size;
 }
 
 .docker-image-section-header {
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
 }
 
 .docker-image-toolbar {
-  display: flex;
-  flex: 0 1 auto;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) max-content max-content;
+  align-items: center;
+  justify-content: end;
   gap: 7px;
   min-width: 0;
 }
@@ -8495,7 +8498,7 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 32px;
+  height: 32px;
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 5px;
@@ -8516,7 +8519,8 @@
   grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
   width: min(240px, 100%);
-  min-height: 32px;
+  height: 32px;
+  box-sizing: border-box;
   padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 5px;
@@ -8530,13 +8534,47 @@
 }
 
 .docker-image-search input {
+  width: 100%;
   min-width: 0;
+  padding: 0;
   border: 0;
   outline: 0;
   color: var(--text);
   background: transparent;
   font: inherit;
   font-size: 11.5px;
+}
+
+@container docker-images (max-width: 760px) {
+  .docker-image-section-header {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .docker-image-toolbar {
+    grid-template-columns: minmax(160px, 1fr) max-content max-content;
+    justify-content: stretch;
+    width: 100%;
+  }
+
+  .docker-image-search {
+    width: 100%;
+  }
+}
+
+@container docker-images (max-width: 560px) {
+  .docker-image-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .docker-image-search {
+    grid-column: 1 / -1;
+  }
+
+  .docker-image-toolbar button {
+    width: 100%;
+    min-width: 0;
+  }
 }
 
 .docker-image-table {
@@ -8997,26 +9035,9 @@
 }
 
 @media (max-width: 560px) {
-  .docker-image-section-header,
   .docker-registry-list-heading {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .docker-image-toolbar {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    width: 100%;
-  }
-
-  .docker-image-search {
-    grid-column: 1 / -1;
-    width: 100%;
-  }
-
-  .docker-image-toolbar button {
-    width: 100%;
-    min-width: 0;
   }
 
   .docker-image-table,

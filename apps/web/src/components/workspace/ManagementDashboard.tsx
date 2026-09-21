@@ -220,10 +220,10 @@ export function ManagementDashboardGrid({
           ))}
         </Responsive>
       )}
-      <span className="sr-only" id={`${dashboard.dashboardId}-layout-instructions`}>
+      <span className="visually-hidden" id={`${dashboard.dashboardId}-layout-instructions`}>
         {t("workspace.management.layout.keyboardInstructions")}
       </span>
-      <span className="sr-only" role="status" aria-live="polite">{dashboard.announcement}</span>
+      <span className="visually-hidden" role="status" aria-live="polite">{dashboard.announcement}</span>
     </div>
   );
 }
