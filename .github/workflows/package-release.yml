@@ -306,8 +306,32 @@ jobs:
             --arg architecture "arm64" \
             --arg asset "$arm64_asset" \
             --arg sha256 "$arm64_sha256" \
-            '{repository, tag, version, commitSha, architecture, asset, sha256}' \
+            '{
+              repository: $repository,
+              tag: $tag,
+              version: $version,
+              commitSha: $commitSha,
+              architecture: $architecture,
+              asset: $asset,
+              sha256: $sha256
+            }' \
             > release-manifest.json
+
+          jq -e \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg tag "$GITHUB_REF_NAME" \
+            --arg version "${GITHUB_REF_NAME#v}" \
+            --arg commitSha "$GITHUB_SHA" \
+            --arg asset "$arm64_asset" \
+            --arg sha256 "$arm64_sha256" \
+            '.repository == $repository and
+             .tag == $tag and
+             .version == $version and
+             .commitSha == $commitSha and
+             .architecture == "arm64" and
+             .asset == $asset and
+             .sha256 == $sha256' \
+            release-manifest.json >/dev/null
           cat release-manifest.json
 
       - name: Upload CM5 release manifest
