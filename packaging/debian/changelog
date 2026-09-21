@@ -1,3 +1,9 @@
+sigmaos (0.6.0) unstable; urgency=medium
+
+  * Add customizable drag-and-resize layouts across management dashboards.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Mon, 21 Sep 2026 05:41:13 +0000
+
 sigmaos (0.5.1) unstable; urgency=medium
 
   * Add verified Tailscale CI/CD deployment for CM5 releases.
