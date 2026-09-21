@@ -437,6 +437,16 @@ export const en = {
     },
     management: {
       previewMode: "Static preview",
+      layout: {
+        edit: "Edit layout",
+        done: "Done",
+        reset: "Reset layout",
+        mobileReadOnly: "Layout editing is available when this panel is at least 620 px wide.",
+        dragHandle: "Move or resize {{title}}",
+        keyboardInstructions: "Use arrow keys to move this widget. Hold Shift while using arrow keys to resize it.",
+        moved: "Moved {{title}}.",
+        resized: "Resized {{title}}."
+      },
       actions: {
         label: "Management actions",
         disabledReason: "Backend integration is not connected yet.",
@@ -2322,6 +2332,16 @@ export const zhCN = {
     },
     management: {
       previewMode: "静态预览",
+      layout: {
+        edit: "编辑布局",
+        done: "完成",
+        reset: "恢复默认布局",
+        mobileReadOnly: "面板宽度达到 620 像素后才可编辑布局。",
+        dragHandle: "移动或缩放 {{title}}",
+        keyboardInstructions: "使用方向键移动组件；按住 Shift 并使用方向键可缩放组件。",
+        moved: "已移动 {{title}}。",
+        resized: "已缩放 {{title}}。"
+      },
       actions: {
         label: "管理操作",
         disabledReason: "后端集成尚未接入。",

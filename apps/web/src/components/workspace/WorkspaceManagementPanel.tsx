@@ -76,6 +76,11 @@ import { DockerImageManagement } from "./DockerImageManagement.js";
 import { DockerResourceStatus } from "./DockerResourceStatus.js";
 import { ManagementSkeletonBody, SkeletonBlock } from "./ManagementSkeleton.js";
 import {
+  ManagementDashboardControls,
+  ManagementDashboardGrid,
+  useManagementDashboard
+} from "./ManagementDashboard.js";
+import {
   dockerDaemonTone,
   parseDockerDaemonEvent,
   reconnectingDockerDaemonStatus
@@ -574,6 +579,7 @@ function VirtualMachineManagementPanel({
   onNotifyWarning: (message: string | null) => void;
 }) {
   const { t } = useTranslation();
+  const dashboard = useManagementDashboard("virtualMachines");
   const [summary, setSummary] = useState<VmSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -731,6 +737,7 @@ function VirtualMachineManagementPanel({
           ) : (
             <span className="management-status-pill" data-state={statusTone}>{vmHostStatusLabel(host?.status, false, t)}</span>
           )}
+          <ManagementDashboardControls dashboard={dashboard} disabled={loading} />
           <button
             type="button"
             onClick={() => void refresh()}
@@ -748,81 +755,65 @@ function VirtualMachineManagementPanel({
         </div>
       </header>
       <div className="management-body">
-        {loading ? <ManagementSkeletonBody tableColumns={7} tableRows={4} /> : <>
-        <section className="management-command-panel">
-          <div className="management-emblem" aria-hidden="true"><MonitorCog size={31} /></div>
-          <div className="management-command-copy">
-            <div><span className="management-status-pill" data-state={statusTone}>{host?.kvmAvailable ? "KVM" : t("workspace.management.virtualMachines.kvmMissing")}</span><h3>{host?.libvirtVersion ? `libvirt ${host.libvirtVersion}` : t("workspace.management.virtualMachines.hypervisor")}</h3><p>{host?.error ?? host?.issues?.[0] ?? t("workspace.management.virtualMachines.readyDetail")}</p></div>
-            <dl className="management-fact-list">
-              <div><dt>{t("workspace.management.virtualMachines.facts.storage")}</dt><dd>{host?.storagePath ?? "-"}</dd></div>
-              <div><dt>{t("workspace.management.virtualMachines.facts.network")}</dt><dd>{host?.networkName ?? "-"}</dd></div>
-              <div><dt>{t("workspace.management.virtualMachines.facts.qemu")}</dt><dd>{host?.qemuVersion ?? "-"}</dd></div>
-              <div><dt>{t("workspace.management.virtualMachines.facts.cpu")}</dt><dd>{host?.cpuCount ?? "-"}</dd></div>
-            </dl>
-          </div>
-        </section>
-        <div className="management-metric-grid">
-          <article className="management-metric" data-state="ready"><Server size={18} /><span>{t("workspace.management.virtualMachines.metrics.instances")}</span><strong>{summary?.metrics.total ?? 0}</strong><small>{summary?.metrics.running ?? 0} running</small></article>
-          <article className="management-metric" data-state="neutral"><Cpu size={18} /><span>{t("workspace.management.virtualMachines.metrics.vcpu")}</span><strong>{summary?.metrics.vcpu ?? 0}</strong><small>{t("workspace.management.virtualMachines.metrics.vcpuDetail")}</small></article>
-          <article className="management-metric" data-state="neutral"><Activity size={18} /><span>{t("workspace.management.virtualMachines.metrics.memory")}</span><strong>{formatBytes(summary?.metrics.memoryBytes ?? 0, "en")}</strong><small>{t("workspace.management.virtualMachines.metrics.memoryDetail")}</small></article>
-          <article className="management-metric" data-state={host?.status === "ready" ? "ready" : "warning"}><Network size={18} /><span>{t("workspace.management.virtualMachines.facts.network")}</span><strong>{summary?.networks.length ?? 0}</strong><small>{host?.networkName ?? "-"}</small></article>
-        </div>
-        <section className="management-section management-table-section">
-          <SectionHeader title={t("workspace.management.virtualMachines.instancesTitle")} description={t("workspace.management.virtualMachines.instancesDescription")} />
-          {error ? (
-            <p className="management-empty management-table-empty-state">{error}</p>
-          ) : summary?.instances.length ? (
-            <div className="management-table-wrap">
-              <table className="management-table management-table-virtualMachines">
-                <thead>
-                  <tr>
-                    <th>{t("workspace.management.columns.name")}</th>
-                    <th>{t("workspace.management.columns.status")}</th>
-                    <th>{t("workspace.management.columns.cpu")}</th>
-                    <th>{t("workspace.management.columns.memory")}</th>
-                    <th>{t("workspace.management.virtualMachines.columns.disk")}</th>
-                    <th>{t("workspace.management.columns.network")}</th>
-                    <th>{t("workspace.management.columns.actions")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {summary.instances.map((vm) => (
-                    <tr key={vm.id}>
-                      <td>{vm.name}</td>
-                      <td>
-                        <span className="management-row-status" data-state={vm.state === "running" ? "ready" : vm.state === "paused" ? "warning" : "offline"}>
-                          {vmStateLabel(vm.state, t)}
-                        </span>
-                      </td>
-                      <td>{vm.vcpu ?? "-"}</td>
-                      <td>{vm.memoryBytes ? formatBytes(vm.memoryBytes, "en") : "-"}</td>
-                      <td>{formatBytes(vm.disks.reduce((sum, disk) => sum + (disk.capacityBytes ?? 0), 0), "en")}</td>
-                      <td>{vm.networks.map((network) => network.name || network.source || "-").join(", ") || "-"}</td>
-                      <td>
-                        <VmInstanceActions
-                          vm={vm}
-                          pendingApproval={pendingVmApprovalForTarget(pendingApprovals, vm.name)}
-                          approvedConsole={approvedVmConsoleOperation(vm.name, vmOperations)}
-                          canMutate={canMutate}
-                          canConsole={canConsole}
-                          pendingAction={pendingAction}
-                          onRequest={request}
-                          onRequestConsole={requestConsole}
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="management-empty management-table-empty-state">
-              {host?.status === "unavailable" ? t("workspace.management.virtualMachines.unavailableDetail") : t("workspace.management.virtualMachines.noInstances")}
-            </p>
-          )}
-        </section>
-        <div className="management-lower-grid"><section className="management-section"><SectionHeader title={t("workspace.management.virtualMachines.poolsTitle")} description={t("workspace.management.virtualMachines.poolsDescription")} /><div className="management-workload-list">{summary?.storagePools.map((pool) => <article key={pool.name} className="management-workload"><HardDrive size={16} /><div><strong>{pool.name}</strong><span>{pool.path}</span></div><em data-state={pool.state === "running" || pool.state === "active" ? "ready" : "warning"}>{pool.state}</em><small>{formatBytes(pool.availableBytes ?? 0, "en")} free</small></article>) ?? null}{summary?.networks.map((network) => <article key={network.name} className="management-workload"><Network size={16} /><div><strong>{network.name}</strong><span>{network.mode}</span></div><em data-state={network.state === "active" ? "ready" : "offline"}>{network.state}</em><small>{network.mode}</small></article>) ?? null}</div></section></div>
-        </>}
+        {loading ? <ManagementSkeletonBody tableColumns={7} tableRows={4} /> : (
+          <ManagementDashboardGrid
+            dashboard={dashboard}
+            items={[
+              {
+                id: "overview",
+                title: String(t("workspace.management.virtualMachines.title")),
+                content: (
+                  <section className="management-command-panel">
+                    <div className="management-emblem" aria-hidden="true"><MonitorCog size={31} /></div>
+                    <div className="management-command-copy">
+                      <div><span className="management-status-pill" data-state={statusTone}>{host?.kvmAvailable ? "KVM" : t("workspace.management.virtualMachines.kvmMissing")}</span><h3>{host?.libvirtVersion ? `libvirt ${host.libvirtVersion}` : t("workspace.management.virtualMachines.hypervisor")}</h3><p>{host?.error ?? host?.issues?.[0] ?? t("workspace.management.virtualMachines.readyDetail")}</p></div>
+                      <dl className="management-fact-list">
+                        <div><dt>{t("workspace.management.virtualMachines.facts.storage")}</dt><dd>{host?.storagePath ?? "-"}</dd></div>
+                        <div><dt>{t("workspace.management.virtualMachines.facts.network")}</dt><dd>{host?.networkName ?? "-"}</dd></div>
+                        <div><dt>{t("workspace.management.virtualMachines.facts.qemu")}</dt><dd>{host?.qemuVersion ?? "-"}</dd></div>
+                        <div><dt>{t("workspace.management.virtualMachines.facts.cpu")}</dt><dd>{host?.cpuCount ?? "-"}</dd></div>
+                      </dl>
+                    </div>
+                  </section>
+                )
+              },
+              { id: "metric-instances", title: String(t("workspace.management.virtualMachines.metrics.instances")), content: <article className="management-metric" data-state="ready"><Server size={18} /><span>{t("workspace.management.virtualMachines.metrics.instances")}</span><strong>{summary?.metrics.total ?? 0}</strong><small>{summary?.metrics.running ?? 0} running</small></article> },
+              { id: "metric-vcpu", title: String(t("workspace.management.virtualMachines.metrics.vcpu")), content: <article className="management-metric" data-state="neutral"><Cpu size={18} /><span>{t("workspace.management.virtualMachines.metrics.vcpu")}</span><strong>{summary?.metrics.vcpu ?? 0}</strong><small>{t("workspace.management.virtualMachines.metrics.vcpuDetail")}</small></article> },
+              { id: "metric-memory", title: String(t("workspace.management.virtualMachines.metrics.memory")), content: <article className="management-metric" data-state="neutral"><Activity size={18} /><span>{t("workspace.management.virtualMachines.metrics.memory")}</span><strong>{formatBytes(summary?.metrics.memoryBytes ?? 0, "en")}</strong><small>{t("workspace.management.virtualMachines.metrics.memoryDetail")}</small></article> },
+              { id: "metric-network", title: String(t("workspace.management.virtualMachines.facts.network")), content: <article className="management-metric" data-state={host?.status === "ready" ? "ready" : "warning"}><Network size={18} /><span>{t("workspace.management.virtualMachines.facts.network")}</span><strong>{summary?.networks.length ?? 0}</strong><small>{host?.networkName ?? "-"}</small></article> },
+              {
+                id: "instances",
+                title: String(t("workspace.management.virtualMachines.instancesTitle")),
+                content: (
+                  <section className="management-section management-table-section">
+                    <SectionHeader title={t("workspace.management.virtualMachines.instancesTitle")} description={t("workspace.management.virtualMachines.instancesDescription")} />
+                    {error ? <p className="management-empty management-table-empty-state">{error}</p> : summary?.instances.length ? (
+                      <div className="management-table-wrap"><table className="management-table management-table-virtualMachines">
+                        <thead><tr><th>{t("workspace.management.columns.name")}</th><th>{t("workspace.management.columns.status")}</th><th>{t("workspace.management.columns.cpu")}</th><th>{t("workspace.management.columns.memory")}</th><th>{t("workspace.management.virtualMachines.columns.disk")}</th><th>{t("workspace.management.columns.network")}</th><th>{t("workspace.management.columns.actions")}</th></tr></thead>
+                        <tbody>{summary.instances.map((vm) => (
+                          <tr key={vm.id}>
+                            <td>{vm.name}</td><td><span className="management-row-status" data-state={vm.state === "running" ? "ready" : vm.state === "paused" ? "warning" : "offline"}>{vmStateLabel(vm.state, t)}</span></td><td>{vm.vcpu ?? "-"}</td><td>{vm.memoryBytes ? formatBytes(vm.memoryBytes, "en") : "-"}</td><td>{formatBytes(vm.disks.reduce((sum, disk) => sum + (disk.capacityBytes ?? 0), 0), "en")}</td><td>{vm.networks.map((network) => network.name || network.source || "-").join(", ") || "-"}</td>
+                            <td><VmInstanceActions vm={vm} pendingApproval={pendingVmApprovalForTarget(pendingApprovals, vm.name)} approvedConsole={approvedVmConsoleOperation(vm.name, vmOperations)} canMutate={canMutate} canConsole={canConsole} pendingAction={pendingAction} onRequest={request} onRequestConsole={requestConsole} /></td>
+                          </tr>
+                        ))}</tbody>
+                      </table></div>
+                    ) : <p className="management-empty management-table-empty-state">{host?.status === "unavailable" ? t("workspace.management.virtualMachines.unavailableDetail") : t("workspace.management.virtualMachines.noInstances")}</p>}
+                  </section>
+                )
+              },
+              {
+                id: "resources",
+                title: String(t("workspace.management.virtualMachines.poolsTitle")),
+                content: (
+                  <section className="management-section">
+                    <SectionHeader title={t("workspace.management.virtualMachines.poolsTitle")} description={t("workspace.management.virtualMachines.poolsDescription")} />
+                    <div className="management-workload-list">{summary?.storagePools.map((pool) => <article key={pool.name} className="management-workload"><HardDrive size={16} /><div><strong>{pool.name}</strong><span>{pool.path}</span></div><em data-state={pool.state === "running" || pool.state === "active" ? "ready" : "warning"}>{pool.state}</em><small>{formatBytes(pool.availableBytes ?? 0, "en")} free</small></article>) ?? null}{summary?.networks.map((network) => <article key={network.name} className="management-workload"><Network size={16} /><div><strong>{network.name}</strong><span>{network.mode}</span></div><em data-state={network.state === "active" ? "ready" : "offline"}>{network.state}</em><small>{network.mode}</small></article>) ?? null}</div>
+                  </section>
+                )
+              }
+            ]}
+          />
+        )}
       </div>
       {createOpen ? (
         <div className="management-dialog-backdrop" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setCreateOpen(false)}>
@@ -988,6 +979,7 @@ function DockerManagementPanel({
   onNotifyWarning: (message: string | null) => void;
 }) {
   const { t } = useTranslation();
+  const dashboard = useManagementDashboard("docker");
   const [summary, setSummary] = useState<DockerSummary | null>(null);
   const [daemonStatus, setDaemonStatus] = useState<DockerDaemonStatus | null>(null);
   const [daemonSettingsOpen, setDaemonSettingsOpen] = useState(false);
@@ -1275,6 +1267,7 @@ function DockerManagementPanel({
               {dockerStatusLabel(daemonStatus, loading, t)}
             </span>
           )}
+          <ManagementDashboardControls dashboard={dashboard} disabled={loading} />
           <button
             type="button"
             onClick={refreshSummary}
@@ -1298,8 +1291,14 @@ function DockerManagementPanel({
       </header>
 
       <div className="management-body">
-        {loading ? <ManagementSkeletonBody tableColumns={6} tableRows={4} variant="docker" /> : <>
-        <section className="management-command-panel">
+        {loading ? <ManagementSkeletonBody tableColumns={6} tableRows={4} variant="docker" /> : (
+          <ManagementDashboardGrid
+            dashboard={dashboard}
+            items={[
+              {
+                id: "overview",
+                title: String(t("workspace.management.docker.title")),
+                content: <section className="management-command-panel">
           <div className="management-emblem" aria-hidden="true">
             <Container size={31} />
           </div>
@@ -1342,22 +1341,26 @@ function DockerManagementPanel({
             </dl>
           </div>
         </section>
-
-        <div className="management-metric-grid">
-          {dockerMetrics(summary, locale, t).map((metric) => {
-            const MetricIcon = metric.Icon;
-            return (
-              <article key={metric.label} className="management-metric" data-state={metric.state}>
-                <MetricIcon aria-hidden="true" size={18} />
-                <span>{metric.label}</span>
-                <strong>{metric.value}</strong>
-                <small>{metric.detail}</small>
-              </article>
-            );
-          })}
-        </div>
-
-        <section className="management-section management-table-section">
+              },
+              ...dockerMetrics(summary, locale, t).map((metric) => {
+                const MetricIcon = metric.Icon;
+                return {
+                  id: metric.id,
+                  title: metric.label,
+                  content: (
+                    <article className="management-metric" data-state={metric.state}>
+                      <MetricIcon aria-hidden="true" size={18} />
+                      <span>{metric.label}</span>
+                      <strong>{metric.value}</strong>
+                      <small>{metric.detail}</small>
+                    </article>
+                  )
+                };
+              }),
+              {
+                id: "containers",
+                title: String(t("workspace.management.docker.containersTitle")),
+                content: <section className="management-section management-table-section">
           <SectionHeader
             title={t("workspace.management.docker.containersTitle")}
             description={t("workspace.management.docker.containersDescription")}
@@ -1406,24 +1409,39 @@ function DockerManagementPanel({
             <p className="management-empty management-table-empty-state">{dockerEmptyState(dockerEnabled, loading, t)}</p>
           )}
         </section>
-
-        <DockerImageManagement
-          images={summary?.images ?? []}
-          engineReady={canUseDocker}
-          engineError={summary?.engine.error ?? error}
-          locale={locale}
-          onRefreshSummary={refreshSummary}
-          onNotifySuccess={(message) => onNotifySuccess(message)}
-          onNotifyError={(message) => onNotifyError(message)}
-        />
-
-        <div className="docker-runtime-layout">
-          <DockerRuntimePressure summary={summary} history={pressureHistory} locale={locale} t={t} />
-          <DockerNetworkInventory summary={summary} locale={locale} t={t} />
-          <DockerStorageInventory summary={summary} t={t} />
-        </div>
-
-        <section className="management-section docker-compose-section">
+              },
+              {
+                id: "images",
+                title: String(t("workspace.management.docker.images.title")),
+                content: <DockerImageManagement
+                  images={summary?.images ?? []}
+                  engineReady={canUseDocker}
+                  engineError={summary?.engine.error ?? error}
+                  locale={locale}
+                  onRefreshSummary={refreshSummary}
+                  onNotifySuccess={(message) => onNotifySuccess(message)}
+                  onNotifyError={(message) => onNotifyError(message)}
+                />
+              },
+              {
+                id: "pressure",
+                title: String(t("workspace.management.docker.pressureTitle")),
+                content: <DockerRuntimePressure summary={summary} history={pressureHistory} locale={locale} t={t} />
+              },
+              {
+                id: "networks",
+                title: String(t("workspace.management.docker.networksTitle")),
+                content: <DockerNetworkInventory summary={summary} locale={locale} t={t} />
+              },
+              {
+                id: "storage",
+                title: String(t("workspace.management.docker.storageTitle")),
+                content: <DockerStorageInventory summary={summary} t={t} />
+              },
+              {
+                id: "compose",
+                title: String(t("workspace.management.docker.composeTitle")),
+                content: <section className="management-section docker-compose-section">
           <SectionHeader
             title={t("workspace.management.docker.composeTitle")}
             description={t("workspace.management.docker.composeDescription")}
@@ -1451,7 +1469,10 @@ function DockerManagementPanel({
             )}
           </div>
         </section>
-        </>}
+              }
+            ]}
+          />
+        )}
       </div>
 
       {logsState ? <DockerLogsDialog state={logsState} onClose={() => setLogsState(null)} /> : null}
@@ -1946,6 +1967,7 @@ function dockerMetrics(summary: DockerSummary | null, locale: SupportedLocale, t
   const metrics = summary?.metrics;
   return [
     {
+      id: "metric-containers",
       label: String(t("workspace.management.docker.metrics.containers")),
       value: metrics ? `${formatLocaleNumber(metrics.containers.running, locale)} / ${formatLocaleNumber(metrics.containers.total, locale)}` : "-",
       detail: String(t("workspace.management.docker.metrics.containersDetail")),
@@ -1953,6 +1975,7 @@ function dockerMetrics(summary: DockerSummary | null, locale: SupportedLocale, t
       Icon: Boxes
     },
     {
+      id: "metric-images",
       label: String(t("workspace.management.docker.metrics.images")),
       value: metrics ? formatLocaleNumber(metrics.images, locale) : "-",
       detail: String(t("workspace.management.docker.metrics.imagesDetail")),
@@ -1960,6 +1983,7 @@ function dockerMetrics(summary: DockerSummary | null, locale: SupportedLocale, t
       Icon: Box
     },
     {
+      id: "metric-networks",
       label: String(t("workspace.management.docker.metrics.networks")),
       value: metrics ? formatLocaleNumber(metrics.networks, locale) : "-",
       detail: String(t("workspace.management.docker.metrics.networksDetail")),
@@ -1967,6 +1991,7 @@ function dockerMetrics(summary: DockerSummary | null, locale: SupportedLocale, t
       Icon: Network
     },
     {
+      id: "metric-volumes",
       label: String(t("workspace.management.docker.metrics.volumes")),
       value: metrics ? formatLocaleNumber(metrics.volumes, locale) : "-",
       detail: String(t("workspace.management.docker.metrics.volumesDetail")),

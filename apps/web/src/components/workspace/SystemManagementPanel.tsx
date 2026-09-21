@@ -62,6 +62,11 @@ import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
 import { calculateNetworkTrafficRate } from "../../lib/network-traffic.js";
 import { ManagementSkeletonBody, SkeletonBlock } from "./ManagementSkeleton.js";
+import {
+  ManagementDashboardControls,
+  ManagementDashboardGrid,
+  useManagementDashboard
+} from "./ManagementDashboard.js";
 import { SystemWifiManagement } from "./SystemWifiManagement.js";
 
 type StatusTone = "ready" | "warning" | "offline" | "neutral";
@@ -143,6 +148,7 @@ export function SystemNetworkManagementPanel({
 }) {
   const { t } = useTranslation();
   const translate = t as Translate;
+  const dashboard = useManagementDashboard("network");
   const [summary, setSummary] = useState<NetworkSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -250,6 +256,7 @@ export function SystemNetworkManagementPanel({
               {systemStatusLabel(status, false, error, translate)}
             </span>
           )}
+          <ManagementDashboardControls dashboard={dashboard} disabled={loading} />
           <button
             type="button"
             onClick={() => void refreshSummary()}
@@ -265,144 +272,116 @@ export function SystemNetworkManagementPanel({
       </header>
 
       <div className="management-body">
-        {loading ? <ManagementSkeletonBody tableColumns={8} tableRows={4} /> : <>
-        <section className="management-command-panel">
-          <div className="management-emblem" aria-hidden="true">
-            <Network size={31} />
-          </div>
-          <div className="management-command-copy">
-            <div>
-              <span className="management-status-pill" data-state={systemStatusTone(status, loading, error)}>
-                {systemStatusLabel(status, loading, error, translate)}
-              </span>
-              <h3>{t("workspace.management.network.title")}</h3>
-              <p title={systemDiagnosticTitle(error, summary?.issues)}>
-                {networkStatusDetail(summary, loading, error, translate)}
-              </p>
-            </div>
-            <dl className="management-fact-list">
-              <Fact label={t("workspace.management.network.facts.backend")} value={summary?.capabilities.backend ?? t("common.dash")} />
-              <Fact
-                label={translate("workspace.management.network.facts.mode")}
-                value={summary?.capabilities.canManageWifi
-                  ? translate("workspace.management.network.wifi.managedMode")
-                  : translate("workspace.management.values.readOnly")}
-              />
-              <Fact
-                label={t("workspace.management.network.facts.defaultRoutes")}
-                value={formatLocaleNumber(summary?.metrics.defaultRoutes ?? 0, locale)}
-              />
-              <Fact
-                label={t("workspace.management.network.facts.interfaces")}
-                value={formatLocaleNumber(summary?.metrics.interfaces ?? 0, locale)}
-              />
-            </dl>
-          </div>
-        </section>
-
-        <div className="management-metric-grid">
-          {networkMetrics(summary, locale, translate).map((metric) => (
-            <MetricCard key={metric.id} metric={metric} />
-          ))}
-        </div>
-
-        {summary ? (
-          <SystemWifiManagement
-            wifi={summary.wifi}
-            canManageWifi={summary.capabilities.canManageWifi}
-            canManageHotspot={summary.capabilities.canManageHotspot}
-            onStatus={handleWifiStatus}
-            onRefresh={refreshSummary}
-            onNotifySuccess={(message) => onNotifySuccess(message)}
-            onNotifyError={(message) => onNotifyError(message)}
+        {loading ? <ManagementSkeletonBody tableColumns={8} tableRows={4} /> : (
+          <ManagementDashboardGrid
+            dashboard={dashboard}
+            items={[
+              {
+                id: "overview",
+                title: String(t("workspace.management.network.title")),
+                content: (
+                  <section className="management-command-panel">
+                    <div className="management-emblem" aria-hidden="true"><Network size={31} /></div>
+                    <div className="management-command-copy">
+                      <div>
+                        <span className="management-status-pill" data-state={systemStatusTone(status, loading, error)}>{systemStatusLabel(status, loading, error, translate)}</span>
+                        <h3>{t("workspace.management.network.title")}</h3>
+                        <p title={systemDiagnosticTitle(error, summary?.issues)}>{networkStatusDetail(summary, loading, error, translate)}</p>
+                      </div>
+                      <dl className="management-fact-list">
+                        <Fact label={t("workspace.management.network.facts.backend")} value={summary?.capabilities.backend ?? t("common.dash")} />
+                        <Fact label={translate("workspace.management.network.facts.mode")} value={summary?.capabilities.canManageWifi ? translate("workspace.management.network.wifi.managedMode") : translate("workspace.management.values.readOnly")} />
+                        <Fact label={t("workspace.management.network.facts.defaultRoutes")} value={formatLocaleNumber(summary?.metrics.defaultRoutes ?? 0, locale)} />
+                        <Fact label={t("workspace.management.network.facts.interfaces")} value={formatLocaleNumber(summary?.metrics.interfaces ?? 0, locale)} />
+                      </dl>
+                    </div>
+                  </section>
+                )
+              },
+              ...networkMetrics(summary, locale, translate).map((metric) => ({
+                id: `metric-${metric.id}`,
+                title: metric.label,
+                content: <MetricCard key={metric.id} metric={metric} />
+              })),
+              {
+                id: "wifi",
+                title: String(t("workspace.management.network.wifi.title")),
+                content: summary ? (
+                  <SystemWifiManagement
+                    wifi={summary.wifi}
+                    canManageWifi={summary.capabilities.canManageWifi}
+                    canManageHotspot={summary.capabilities.canManageHotspot}
+                    onStatus={handleWifiStatus}
+                    onRefresh={refreshSummary}
+                    onNotifySuccess={(message) => onNotifySuccess(message)}
+                    onNotifyError={(message) => onNotifyError(message)}
+                  />
+                ) : (
+                  <section className="management-section">
+                    <SectionHeader
+                      title={t("workspace.management.network.wifi.title")}
+                      description={t("workspace.management.network.wifi.description")}
+                    />
+                    <p className="management-empty">{error ?? t("workspace.management.network.loadError")}</p>
+                  </section>
+                )
+              },
+              {
+                id: "traffic",
+                title: String(t("workspace.management.network.traffic.title")),
+                content: <NetworkTrafficMonitor interfaces={interfaces} locale={locale} t={translate} />
+              },
+              {
+                id: "interfaces",
+                title: String(t("workspace.management.network.interfacesTitle")),
+                content: (
+                  <section className="management-section management-table-section">
+                    <SectionHeader title={t("workspace.management.network.interfacesTitle")} description={t("workspace.management.network.interfacesDescription")} />
+                    {interfaces.length ? (
+                      <div className="management-table-wrap">
+                        <table className="management-table management-table-network">
+                          <thead><tr><th>{t("workspace.management.columns.name")}</th><th>{t("workspace.management.columns.status")}</th><th>{t("workspace.management.network.columns.kind")}</th><th>{t("workspace.management.network.columns.addresses")}</th><th>{t("workspace.management.network.columns.mac")}</th><th>{t("workspace.management.network.columns.speed")}</th><th>{t("workspace.management.network.columns.mtu")}</th><th>{t("workspace.management.network.columns.defaultRoute")}</th></tr></thead>
+                          <tbody>{interfaces.map((networkInterface) => (
+                            <tr key={networkInterface.id}>
+                              <td title={networkInterface.name}><button type="button" className="network-interface-name-button" onClick={() => setSelectedInterfaceId(networkInterface.id)} aria-label={t("workspace.management.network.openInterfaceDetails", { name: networkInterface.name })}>{networkInterface.name}</button></td>
+                              <td><StatusIcon tone={networkInterfaceTone(networkInterface)} label={networkInterfaceStateLabel(networkInterface, translate)} /></td>
+                              <td>{translate(`workspace.management.network.kinds.${networkInterface.kind}`)}</td>
+                              <td title={formatAddresses(networkInterface)}>{formatAddresses(networkInterface)}</td>
+                              <td title={networkInterface.mac ?? t("common.dash")}>{networkInterface.mac ?? t("common.dash")}</td>
+                              <td>{formatSpeed(networkInterface.speedMbps, locale, translate)}</td>
+                              <td>{formatNullableNumber(networkInterface.mtu, locale, translate)}</td>
+                              <td>{networkInterface.hasDefaultRoute ? translate("common.yes") : translate("common.no")}</td>
+                            </tr>
+                          ))}</tbody>
+                        </table>
+                      </div>
+                    ) : <p className="management-empty management-table-empty-state">{t("workspace.management.network.noInterfaces")}</p>}
+                  </section>
+                )
+              },
+              {
+                id: "routes",
+                title: String(t("workspace.management.network.routesTitle")),
+                content: (
+                  <section className="management-section">
+                    <SectionHeader title={t("workspace.management.network.routesTitle")} description={t("workspace.management.network.routesDescription")} />
+                    <div className="management-workload-list">{routes.length ? routes.map((route, index) => <NetworkRouteRow key={`${route.destination}-${route.device}-${index}`} route={route} />) : <p className="management-empty">{t("workspace.management.network.noRoutes")}</p>}</div>
+                  </section>
+                )
+              },
+              {
+                id: "readiness",
+                title: String(t("workspace.management.network.readinessTitle")),
+                content: (
+                  <section className="management-section">
+                    <SectionHeader title={t("workspace.management.network.readinessTitle")} description={t("workspace.management.network.readinessDescription")} />
+                    <NetworkReadinessChart gauges={networkGauges(summary, locale, translate)} t={translate} />
+                  </section>
+                )
+              }
+            ]}
           />
-        ) : null}
-
-        <NetworkTrafficMonitor interfaces={interfaces} locale={locale} t={translate} />
-
-        <section className="management-section management-table-section">
-          <SectionHeader
-            title={t("workspace.management.network.interfacesTitle")}
-            description={t("workspace.management.network.interfacesDescription")}
-          />
-          {interfaces.length ? (
-            <div className="management-table-wrap">
-              <table className="management-table management-table-network">
-                <thead>
-                  <tr>
-                    <th>{t("workspace.management.columns.name")}</th>
-                    <th>{t("workspace.management.columns.status")}</th>
-                    <th>{t("workspace.management.network.columns.kind")}</th>
-                    <th>{t("workspace.management.network.columns.addresses")}</th>
-                    <th>{t("workspace.management.network.columns.mac")}</th>
-                    <th>{t("workspace.management.network.columns.speed")}</th>
-                    <th>{t("workspace.management.network.columns.mtu")}</th>
-                    <th>{t("workspace.management.network.columns.defaultRoute")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {interfaces.map((networkInterface) => (
-                    <tr key={networkInterface.id}>
-                      <td title={networkInterface.name}>
-                        <button
-                          type="button"
-                          className="network-interface-name-button"
-                          onClick={() => setSelectedInterfaceId(networkInterface.id)}
-                          aria-label={t("workspace.management.network.openInterfaceDetails", { name: networkInterface.name })}
-                        >
-                          {networkInterface.name}
-                        </button>
-                      </td>
-                      <td>
-                        <StatusIcon
-                          tone={networkInterfaceTone(networkInterface)}
-                          label={networkInterfaceStateLabel(networkInterface, translate)}
-                        />
-                      </td>
-                      <td>{translate(`workspace.management.network.kinds.${networkInterface.kind}`)}</td>
-                      <td title={formatAddresses(networkInterface)}>{formatAddresses(networkInterface)}</td>
-                      <td title={networkInterface.mac ?? t("common.dash")}>{networkInterface.mac ?? t("common.dash")}</td>
-                      <td>{formatSpeed(networkInterface.speedMbps, locale, translate)}</td>
-                      <td>{formatNullableNumber(networkInterface.mtu, locale, translate)}</td>
-                      <td>{networkInterface.hasDefaultRoute ? translate("common.yes") : translate("common.no")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="management-empty management-table-empty-state">
-              {loading ? t("common.states.loading") : t("workspace.management.network.noInterfaces")}
-            </p>
-          )}
-        </section>
-
-        <div className="management-lower-grid">
-          <section className="management-section">
-            <SectionHeader
-              title={t("workspace.management.network.routesTitle")}
-              description={t("workspace.management.network.routesDescription")}
-            />
-            <div className="management-workload-list">
-              {routes.length ? (
-                routes.map((route, index) => <NetworkRouteRow key={`${route.destination}-${route.device}-${index}`} route={route} />)
-              ) : (
-                <p className="management-empty">
-                  {loading ? t("common.states.loading") : t("workspace.management.network.noRoutes")}
-                </p>
-              )}
-            </div>
-          </section>
-
-          <section className="management-section">
-            <SectionHeader
-              title={t("workspace.management.network.readinessTitle")}
-              description={t("workspace.management.network.readinessDescription")}
-            />
-            <NetworkReadinessChart gauges={networkGauges(summary, locale, translate)} t={translate} />
-          </section>
-        </div>
-        </>}
+        )}
       </div>
 
       {selectedInterface ? (
@@ -433,6 +412,7 @@ export function SystemStorageManagementPanel({
 }) {
   const { t } = useTranslation();
   const translate = t as Translate;
+  const dashboard = useManagementDashboard("storage");
   const [summary, setSummary] = useState<StorageSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -667,6 +647,7 @@ export function SystemStorageManagementPanel({
               {systemStatusLabel(status, false, error, translate)}
             </span>
           )}
+          <ManagementDashboardControls dashboard={dashboard} disabled={loading} />
           <button
             type="button"
             onClick={openCreateModal}
@@ -692,125 +673,86 @@ export function SystemStorageManagementPanel({
       </header>
 
       <div className="management-body">
-        {loading ? <ManagementSkeletonBody tableColumns={7} tableRows={4} variant="storage" /> : <>
-        <section className="management-command-panel">
-          <div className="management-emblem" aria-hidden="true">
-            <Database size={31} />
-          </div>
-          <div className="management-command-copy">
-            <div>
-              <span className="management-status-pill" data-state={systemStatusTone(status, loading, error)}>
-                {systemStatusLabel(status, loading, error, translate)}
-              </span>
-              <h3>{t("workspace.management.storage.title")}</h3>
-              <p title={systemDiagnosticTitle(error, summary?.issues)}>
-                {storageStatusDetail(summary, loading, error, translate)}
-              </p>
-            </div>
-            <dl className="management-fact-list">
-              <Fact label={t("workspace.management.storage.facts.backend")} value="mdadm" />
-              <Fact label={translate("workspace.management.storage.facts.mode")} value={translate("workspace.management.storage.values.directApply")} />
-              <Fact
-                label={t("workspace.management.storage.facts.pools")}
-                value={formatLocaleNumber(summary?.metrics.pools ?? 0, locale)}
-              />
-              <Fact
-                label={t("workspace.management.storage.facts.arrays")}
-                value={formatLocaleNumber(summary?.metrics.arrays ?? 0, locale)}
-              />
-            </dl>
-          </div>
-        </section>
-
-        <div className="management-metric-grid">
-          {storageMetrics(summary, locale, translate).map((metric) => (
-            <MetricCard key={metric.id} metric={metric} />
-          ))}
-        </div>
-
-        <section className="management-section management-table-section">
-          <SectionHeader
-            title={t("workspace.management.storage.poolsTitle")}
-            description={t("workspace.management.storage.poolsDescription")}
+        {loading ? <ManagementSkeletonBody tableColumns={7} tableRows={4} variant="storage" /> : (
+          <ManagementDashboardGrid
+            dashboard={dashboard}
+            items={[
+              {
+                id: "overview",
+                title: String(t("workspace.management.storage.title")),
+                content: (
+                  <section className="management-command-panel">
+                    <div className="management-emblem" aria-hidden="true"><Database size={31} /></div>
+                    <div className="management-command-copy">
+                      <div>
+                        <span className="management-status-pill" data-state={systemStatusTone(status, loading, error)}>{systemStatusLabel(status, loading, error, translate)}</span>
+                        <h3>{t("workspace.management.storage.title")}</h3>
+                        <p title={systemDiagnosticTitle(error, summary?.issues)}>{storageStatusDetail(summary, loading, error, translate)}</p>
+                      </div>
+                      <dl className="management-fact-list">
+                        <Fact label={t("workspace.management.storage.facts.backend")} value="mdadm" />
+                        <Fact label={translate("workspace.management.storage.facts.mode")} value={translate("workspace.management.storage.values.directApply")} />
+                        <Fact label={t("workspace.management.storage.facts.pools")} value={formatLocaleNumber(summary?.metrics.pools ?? 0, locale)} />
+                        <Fact label={t("workspace.management.storage.facts.arrays")} value={formatLocaleNumber(summary?.metrics.arrays ?? 0, locale)} />
+                      </dl>
+                    </div>
+                  </section>
+                )
+              },
+              ...storageMetrics(summary, locale, translate).map((metric) => ({
+                id: `metric-${metric.id}`,
+                title: metric.label,
+                content: <MetricCard key={metric.id} metric={metric} />
+              })),
+              {
+                id: "pools",
+                title: String(t("workspace.management.storage.poolsTitle")),
+                content: (
+                  <section className="management-section management-table-section">
+                    <SectionHeader title={t("workspace.management.storage.poolsTitle")} description={t("workspace.management.storage.poolsDescription")} />
+                    {pools.length ? (
+                      <div className="management-table-wrap">
+                        <table className="management-table management-table-storage">
+                          <thead><tr><th>{t("workspace.management.columns.name")}</th><th>{t("workspace.management.columns.status")}</th><th>{t("workspace.management.storage.columns.raid")}</th><th>{t("workspace.management.storage.columns.usage")}</th><th>{t("workspace.management.storage.columns.mount")}</th><th>{t("workspace.management.storage.columns.members")}</th></tr></thead>
+                          <tbody>{pools.map((pool) => (
+                            <tr key={pool.id}>
+                              <td title={pool.name}><button type="button" className="storage-pool-name-button" onClick={() => openPoolDetails(pool)} aria-label={t("workspace.management.storage.openPoolDetails", { name: pool.name })}>{pool.name}</button></td>
+                              <td><StatusIcon tone={storagePoolTone(pool)} label={storagePoolStatusLabel(pool, translate)} /></td>
+                              <td title={pool.raidPath}>{pool.raidLevel ?? t("common.dash")}</td>
+                              <td>{formatStorageUsage(pool, locale, translate)}</td>
+                              <td title={pool.mountpoint ?? t("common.dash")}>{pool.mountpoint ?? t("common.dash")}</td>
+                              <td title={pool.memberDevices.join(", ")}>{pool.memberDevices.length}</td>
+                            </tr>
+                          ))}</tbody>
+                        </table>
+                      </div>
+                    ) : <p className="management-empty management-table-empty-state">{t("workspace.management.storage.noPools")}</p>}
+                  </section>
+                )
+              },
+              {
+                id: "disks",
+                title: String(t("workspace.management.storage.disksTitle")),
+                content: (
+                  <section className="management-section">
+                    <SectionHeader title={t("workspace.management.storage.disksTitle")} description={t("workspace.management.storage.disksDescription")} />
+                    <div className="management-workload-list">{disks.length ? disks.map((disk) => <StorageDiskRow key={disk.id} disk={disk} locale={locale} onOpen={() => openDiskDetails(disk)} />) : <p className="management-empty">{t("workspace.management.storage.noDisks")}</p>}</div>
+                  </section>
+                )
+              },
+              {
+                id: "health",
+                title: String(t("workspace.management.storage.healthTitle")),
+                content: (
+                  <section className="management-section">
+                    <SectionHeader title={t("workspace.management.storage.healthTitle")} description={t("workspace.management.storage.healthDescription")} />
+                    <StorageHealthChart summary={summary} locale={locale} t={translate} />
+                  </section>
+                )
+              }
+            ]}
           />
-          {pools.length ? (
-            <div className="management-table-wrap">
-              <table className="management-table management-table-storage">
-                <thead>
-                  <tr>
-                    <th>{t("workspace.management.columns.name")}</th>
-                    <th>{t("workspace.management.columns.status")}</th>
-                    <th>{t("workspace.management.storage.columns.raid")}</th>
-                    <th>{t("workspace.management.storage.columns.usage")}</th>
-                    <th>{t("workspace.management.storage.columns.mount")}</th>
-                    <th>{t("workspace.management.storage.columns.members")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pools.map((pool) => (
-                    <tr key={pool.id}>
-                      <td title={pool.name}>
-                        <button
-                          type="button"
-                          className="storage-pool-name-button"
-                          onClick={() => openPoolDetails(pool)}
-                          aria-label={t("workspace.management.storage.openPoolDetails", { name: pool.name })}
-                        >
-                          {pool.name}
-                        </button>
-                      </td>
-                      <td>
-                        <StatusIcon tone={storagePoolTone(pool)} label={storagePoolStatusLabel(pool, translate)} />
-                      </td>
-                      <td title={pool.raidPath}>{pool.raidLevel ?? t("common.dash")}</td>
-                      <td>{formatStorageUsage(pool, locale, translate)}</td>
-                      <td title={pool.mountpoint ?? t("common.dash")}>{pool.mountpoint ?? t("common.dash")}</td>
-                      <td title={pool.memberDevices.join(", ")}>{pool.memberDevices.length}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="management-empty management-table-empty-state">
-              {loading ? t("common.states.loading") : t("workspace.management.storage.noPools")}
-            </p>
-          )}
-        </section>
-
-        <div className="management-lower-grid">
-          <section className="management-section">
-            <SectionHeader
-              title={t("workspace.management.storage.disksTitle")}
-              description={t("workspace.management.storage.disksDescription")}
-            />
-            <div className="management-workload-list">
-              {disks.length ? (
-                disks.map((disk) => (
-                  <StorageDiskRow
-                    key={disk.id}
-                    disk={disk}
-                    locale={locale}
-                    onOpen={() => openDiskDetails(disk)}
-                  />
-                ))
-              ) : (
-                <p className="management-empty">
-                  {loading ? t("common.states.loading") : t("workspace.management.storage.noDisks")}
-                </p>
-              )}
-            </div>
-          </section>
-
-          <section className="management-section">
-            <SectionHeader
-              title={t("workspace.management.storage.healthTitle")}
-              description={t("workspace.management.storage.healthDescription")}
-            />
-            <StorageHealthChart summary={summary} locale={locale} t={translate} />
-          </section>
-        </div>
-        </>}
+        )}
       </div>
 
       {selectedPool ? (

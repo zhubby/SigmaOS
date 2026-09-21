@@ -434,153 +434,161 @@ export function SystemWifiManagement({
           </div>
         </header>
 
-        {error ? <p className="system-wifi-error" role="alert">{error}</p> : null}
-        {wifi.backend !== "NetworkManager" ? (
-          <div className="system-wifi-unavailable">
-            <AlertTriangle aria-hidden="true" size={18} />
-            <div>
-              <strong>{t("workspace.management.network.wifi.unavailableTitle")}</strong>
-              <p>{t("workspace.management.network.wifi.unavailableDescription", { backend: wifi.backend })}</p>
-            </div>
-          </div>
-        ) : !wifi.helperReady ? (
-          <div className="system-wifi-unavailable">
-            <AlertTriangle aria-hidden="true" size={18} />
-            <div>
-              <strong>{t("workspace.management.network.wifi.helperUnavailableTitle")}</strong>
-              <p>{t("workspace.management.network.wifi.helperUnavailableDescription")}</p>
-            </div>
-          </div>
-        ) : selectedDevice ? (
-          <>
-            <div className="system-wifi-device-summary">
-              <div className="system-wifi-device-icon" data-state={systemWifiDeviceTone(selectedDevice.state)}>
-                {selectedDevice.mode === "hotspot" ? <Radio aria-hidden="true" size={20} /> : <Wifi aria-hidden="true" size={20} />}
+        <div className="system-wifi-content">
+          {error ? <p className="system-wifi-error" role="alert">{error}</p> : null}
+          {wifi.backend !== "NetworkManager" ? (
+            <div className="system-wifi-unavailable">
+              <AlertTriangle aria-hidden="true" size={18} />
+              <div>
+                <strong>{t("workspace.management.network.wifi.unavailableTitle")}</strong>
+                <p>{t("workspace.management.network.wifi.unavailableDescription", { backend: wifi.backend })}</p>
               </div>
-              <div className="system-wifi-device-copy">
-                <span className="management-status-pill" data-state={systemWifiDeviceTone(selectedDevice.state)}>
-                  {reconnecting
-                    ? t("workspace.management.network.wifi.states.reconnecting")
-                    : t(`workspace.management.network.wifi.states.${selectedDevice.state}`)}
-                </span>
-                <strong>{selectedDevice.ssid ?? selectedDevice.name}</strong>
-                <small>
-                  {selectedDevice.driver ?? t("common.dash")} · {selectedDevice.mac ?? t("common.dash")}
-                  {selectedDevice.managementPath ? ` · ${t("workspace.management.network.wifi.managementPath")}` : ""}
-                </small>
-              </div>
-              <dl>
-                <div><dt>{t("workspace.management.network.wifi.signal")}</dt><dd>{selectedDevice.signal === null ? t("common.dash") : `${selectedDevice.signal}%`}</dd></div>
-                <div><dt>{t("workspace.management.network.wifi.channel")}</dt><dd>{selectedDevice.channel ?? t("common.dash")}</dd></div>
-                <div><dt>{t("workspace.management.network.wifi.mode")}</dt><dd>{t(`workspace.management.network.wifi.modes.${selectedDevice.mode}`)}</dd></div>
-              </dl>
-              {selectedDevice.activeConnectionId && selectedDevice.mode === "client" ? (
-                <button type="button" className="is-danger" onClick={requestDisconnect} disabled={busy}>
-                  <WifiOff aria-hidden="true" size={14} />
-                  <span>{t("workspace.management.network.wifi.disconnect")}</span>
-                </button>
-              ) : null}
             </div>
-
-            <div className="system-wifi-grid">
-              <section className="system-wifi-list-panel">
-                <div className="system-wifi-subheader">
-                  <div>
-                    <h4>{t("workspace.management.network.wifi.availableTitle")}</h4>
-                    <p>{scan ? t("workspace.management.network.wifi.scanTime", { time: new Date(scan.scannedAt).toLocaleTimeString() }) : t("workspace.management.network.wifi.scanPrompt")}</p>
+          ) : !wifi.helperReady ? (
+            <div className="system-wifi-unavailable">
+              <AlertTriangle aria-hidden="true" size={18} />
+              <div>
+                <strong>{t("workspace.management.network.wifi.helperUnavailableTitle")}</strong>
+                <p>{t("workspace.management.network.wifi.helperUnavailableDescription")}</p>
+              </div>
+            </div>
+          ) : selectedDevice ? (
+            <>
+              <div className="system-wifi-device-summary">
+                <div className="system-wifi-device-identity">
+                  <div className="system-wifi-device-icon" data-state={systemWifiDeviceTone(selectedDevice.state)}>
+                    {selectedDevice.mode === "hotspot" ? <Radio aria-hidden="true" size={20} /> : <Wifi aria-hidden="true" size={20} />}
+                  </div>
+                  <div className="system-wifi-device-copy">
+                    <div className="system-wifi-device-heading">
+                      <strong>{selectedDevice.ssid ?? selectedDevice.name}</strong>
+                      <span className="management-status-pill" data-state={systemWifiDeviceTone(selectedDevice.state)}>
+                        {reconnecting
+                          ? t("workspace.management.network.wifi.states.reconnecting")
+                          : t(`workspace.management.network.wifi.states.${selectedDevice.state}`)}
+                      </span>
+                    </div>
+                    <small>
+                      {selectedDevice.driver ?? t("common.dash")} · {selectedDevice.mac ?? t("common.dash")}
+                      {selectedDevice.managementPath ? ` · ${t("workspace.management.network.wifi.managementPath")}` : ""}
+                    </small>
                   </div>
                 </div>
-                {networks.length ? (
-                  <div className="system-wifi-network-list">
-                    {networks.map((network) => (
-                      <article key={network.id} className="system-wifi-network-row">
-                        <Signal aria-hidden="true" size={16} />
-                        <div>
-                          <strong>{network.ssid}</strong>
-                          <small>{t(`workspace.management.network.wifi.security.${network.security}`)} · {network.strongest.band} GHz · {network.strongest.channel}</small>
-                        </div>
-                        <span>{network.strongest.signal}%</span>
-                        <button
-                          type="button"
-                          onClick={() => openConnect(network)}
-                          disabled={busy || network.security === "unsupported" || network.strongest.active}
-                        >
-                          {network.strongest.active ? <Check aria-hidden="true" size={14} /> : <KeyRound aria-hidden="true" size={14} />}
-                          <span>{network.strongest.active ? t("workspace.management.network.wifi.current") : t("workspace.management.network.wifi.connect")}</span>
-                        </button>
-                      </article>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="management-empty">{scanning ? t("workspace.management.network.wifi.scanning") : t("workspace.management.network.wifi.noScan")}</p>
-                )}
-              </section>
-
-              <section className="system-wifi-list-panel">
-                <div className="system-wifi-subheader">
-                  <div>
-                    <h4>{t("workspace.management.network.wifi.savedTitle")}</h4>
-                    <p>{t("workspace.management.network.wifi.savedDescription")}</p>
-                  </div>
+                <div className="system-wifi-device-details">
+                  <dl>
+                    <div><dt>{t("workspace.management.network.wifi.signal")}</dt><dd>{selectedDevice.signal === null ? t("common.dash") : `${selectedDevice.signal}%`}</dd></div>
+                    <div><dt>{t("workspace.management.network.wifi.channel")}</dt><dd>{selectedDevice.channel ?? t("common.dash")}</dd></div>
+                    <div><dt>{t("workspace.management.network.wifi.mode")}</dt><dd>{t(`workspace.management.network.wifi.modes.${selectedDevice.mode}`)}</dd></div>
+                  </dl>
+                  {selectedDevice.activeConnectionId && selectedDevice.mode === "client" ? (
+                    <button type="button" className="is-danger" onClick={requestDisconnect} disabled={busy}>
+                      <WifiOff aria-hidden="true" size={14} />
+                      <span>{t("workspace.management.network.wifi.disconnect")}</span>
+                    </button>
+                  ) : null}
                 </div>
-                {profiles.length ? (
-                  <div className="system-wifi-profile-list">
-                    {profiles.map((profile) => (
-                      <article key={profile.id} className="system-wifi-profile-row">
-                        <Shield aria-hidden="true" size={15} />
-                        <div>
-                          <strong>{profile.ssid}</strong>
-                          <small>{profile.managed ? t("workspace.management.network.wifi.managed") : t("workspace.management.network.wifi.external")}</small>
-                        </div>
-                        <span className="management-status-pill" data-state={profile.active ? "ready" : "neutral"}>
-                          {profile.active ? t("workspace.management.network.wifi.current") : profile.autoconnect ? t("workspace.management.network.wifi.autoconnect") : t("workspace.management.network.wifi.saved")}
-                        </span>
-                        <div className="system-wifi-row-actions">
-                          {!profile.active ? (
-                            <button type="button" className="management-icon-action" onClick={() => connectSaved(profileNetwork(profile))} disabled={busy} aria-label={t("workspace.management.network.wifi.connect")} title={t("workspace.management.network.wifi.connect")}>
-                              <Wifi aria-hidden="true" size={14} />
+              </div>
+
+              <div className="system-wifi-grid">
+                <section className="system-wifi-list-panel">
+                  <div className="system-wifi-subheader">
+                    <div>
+                      <h4>{t("workspace.management.network.wifi.availableTitle")}</h4>
+                      <p>{scan ? t("workspace.management.network.wifi.scanTime", { time: new Date(scan.scannedAt).toLocaleTimeString() }) : t("workspace.management.network.wifi.scanPrompt")}</p>
+                    </div>
+                  </div>
+                  {networks.length ? (
+                    <div className="system-wifi-network-list">
+                      {networks.map((network) => (
+                        <article key={network.id} className="system-wifi-network-row">
+                          <Signal aria-hidden="true" size={16} />
+                          <div>
+                            <strong>{network.ssid}</strong>
+                            <small>{t(`workspace.management.network.wifi.security.${network.security}`)} · {network.strongest.band} GHz · {network.strongest.channel}</small>
+                          </div>
+                          <span>{network.strongest.signal}%</span>
+                          <button
+                            type="button"
+                            onClick={() => openConnect(network)}
+                            disabled={busy || network.security === "unsupported" || network.strongest.active}
+                          >
+                            {network.strongest.active ? <Check aria-hidden="true" size={14} /> : <KeyRound aria-hidden="true" size={14} />}
+                            <span>{network.strongest.active ? t("workspace.management.network.wifi.current") : t("workspace.management.network.wifi.connect")}</span>
+                          </button>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="management-empty">{scanning ? t("workspace.management.network.wifi.scanning") : t("workspace.management.network.wifi.noScan")}</p>
+                  )}
+                </section>
+
+                <section className="system-wifi-list-panel">
+                  <div className="system-wifi-subheader">
+                    <div>
+                      <h4>{t("workspace.management.network.wifi.savedTitle")}</h4>
+                      <p>{t("workspace.management.network.wifi.savedDescription")}</p>
+                    </div>
+                  </div>
+                  {profiles.length ? (
+                    <div className="system-wifi-profile-list">
+                      {profiles.map((profile) => (
+                        <article key={profile.id} className="system-wifi-profile-row">
+                          <Shield aria-hidden="true" size={15} />
+                          <div>
+                            <strong>{profile.ssid}</strong>
+                            <small>{profile.managed ? t("workspace.management.network.wifi.managed") : t("workspace.management.network.wifi.external")}</small>
+                          </div>
+                          <span className="management-status-pill" data-state={profile.active ? "ready" : "neutral"}>
+                            {profile.active ? t("workspace.management.network.wifi.current") : profile.autoconnect ? t("workspace.management.network.wifi.autoconnect") : t("workspace.management.network.wifi.saved")}
+                          </span>
+                          <div className="system-wifi-row-actions">
+                            {!profile.active ? (
+                              <button type="button" className="management-icon-action" onClick={() => connectSaved(profileNetwork(profile))} disabled={busy} aria-label={t("workspace.management.network.wifi.connect")} title={t("workspace.management.network.wifi.connect")}>
+                                <Wifi aria-hidden="true" size={14} />
+                              </button>
+                            ) : null}
+                            <button type="button" className="management-icon-action" onClick={() => editProfile(profile)} disabled={!profile.managed || busy} aria-label={t("common.actions.edit")} title={profile.managed ? t("common.actions.edit") : t("workspace.management.network.wifi.externalReadOnly")}>
+                              <Pencil aria-hidden="true" size={14} />
                             </button>
-                          ) : null}
-                          <button type="button" className="management-icon-action" onClick={() => editProfile(profile)} disabled={!profile.managed || busy} aria-label={t("common.actions.edit")} title={profile.managed ? t("common.actions.edit") : t("workspace.management.network.wifi.externalReadOnly")}>
-                            <Pencil aria-hidden="true" size={14} />
-                          </button>
-                          <button type="button" className="management-icon-action is-danger" onClick={() => forgetProfile(profile)} disabled={!profile.managed || busy} aria-label={t("workspace.management.network.wifi.forget")} title={profile.managed ? t("workspace.management.network.wifi.forget") : t("workspace.management.network.wifi.externalReadOnly")}>
-                            <Trash2 aria-hidden="true" size={14} />
-                          </button>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                ) : <p className="management-empty">{t("workspace.management.network.wifi.noProfiles")}</p>}
-              </section>
-            </div>
-
-            {hotspot ? (
-              <div className="system-wifi-hotspot-bar" data-active={hotspot.active || undefined}>
-                <Router aria-hidden="true" size={17} />
-                <div>
-                  <strong>{hotspot.ssid}</strong>
-                  <small>{hotspot.band === "auto" ? t("workspace.management.network.wifi.hotspot.autoBand") : `${hotspot.band} GHz`} · {hotspot.autostart ? t("workspace.management.network.wifi.hotspot.autostartOn") : t("workspace.management.network.wifi.hotspot.autostartOff")}</small>
-                </div>
-                <span className="management-status-pill" data-state={hotspot.active ? "ready" : "neutral"}>
-                  {hotspot.active ? t("workspace.management.network.wifi.hotspot.running") : t("workspace.management.network.wifi.hotspot.stopped")}
-                </span>
-                <button type="button" onClick={() => hotspotAction(hotspot.active ? "stop" : "start")} disabled={busy}>
-                  {hotspot.active ? <WifiOff aria-hidden="true" size={14} /> : <Radio aria-hidden="true" size={14} />}
-                  <span>{hotspot.active ? t("workspace.management.network.wifi.hotspot.stop") : t("workspace.management.network.wifi.hotspot.start")}</span>
-                </button>
-                <button type="button" className="management-icon-action" onClick={openHotspot} disabled={busy} aria-label={t("common.actions.edit")} title={t("common.actions.edit")}>
-                  <Settings aria-hidden="true" size={14} />
-                </button>
-                <button type="button" className="management-icon-action is-danger" onClick={() => hotspotAction("delete")} disabled={busy} aria-label={t("common.actions.delete")} title={t("common.actions.delete")}>
-                  <Trash2 aria-hidden="true" size={14} />
-                </button>
+                            <button type="button" className="management-icon-action is-danger" onClick={() => forgetProfile(profile)} disabled={!profile.managed || busy} aria-label={t("workspace.management.network.wifi.forget")} title={profile.managed ? t("workspace.management.network.wifi.forget") : t("workspace.management.network.wifi.externalReadOnly")}>
+                              <Trash2 aria-hidden="true" size={14} />
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : <p className="management-empty">{t("workspace.management.network.wifi.noProfiles")}</p>}
+                </section>
               </div>
-            ) : null}
-          </>
-        ) : (
-          <p className="management-empty">{t("workspace.management.network.wifi.noDevices")}</p>
-        )}
+
+              {hotspot ? (
+                <div className="system-wifi-hotspot-bar" data-active={hotspot.active || undefined}>
+                  <Router aria-hidden="true" size={17} />
+                  <div>
+                    <strong>{hotspot.ssid}</strong>
+                    <small>{hotspot.band === "auto" ? t("workspace.management.network.wifi.hotspot.autoBand") : `${hotspot.band} GHz`} · {hotspot.autostart ? t("workspace.management.network.wifi.hotspot.autostartOn") : t("workspace.management.network.wifi.hotspot.autostartOff")}</small>
+                  </div>
+                  <span className="management-status-pill" data-state={hotspot.active ? "ready" : "neutral"}>
+                    {hotspot.active ? t("workspace.management.network.wifi.hotspot.running") : t("workspace.management.network.wifi.hotspot.stopped")}
+                  </span>
+                  <button type="button" onClick={() => hotspotAction(hotspot.active ? "stop" : "start")} disabled={busy}>
+                    {hotspot.active ? <WifiOff aria-hidden="true" size={14} /> : <Radio aria-hidden="true" size={14} />}
+                    <span>{hotspot.active ? t("workspace.management.network.wifi.hotspot.stop") : t("workspace.management.network.wifi.hotspot.start")}</span>
+                  </button>
+                  <button type="button" className="management-icon-action" onClick={openHotspot} disabled={busy} aria-label={t("common.actions.edit")} title={t("common.actions.edit")}>
+                    <Settings aria-hidden="true" size={14} />
+                  </button>
+                  <button type="button" className="management-icon-action is-danger" onClick={() => hotspotAction("delete")} disabled={busy} aria-label={t("common.actions.delete")} title={t("common.actions.delete")}>
+                    <Trash2 aria-hidden="true" size={14} />
+                  </button>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <p className="management-empty">{t("workspace.management.network.wifi.noDevices")}</p>
+          )}
+        </div>
       </section>
 
       {connectDialog && selectedDevice ? (

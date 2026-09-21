@@ -42,6 +42,11 @@ import {
 } from "../../config/share-settings.js";
 import { formatDate, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
+import {
+  ManagementDashboardControls,
+  ManagementDashboardGrid,
+  useManagementDashboard
+} from "./ManagementDashboard.js";
 import { ManagementSkeletonBody, SkeletonBlock } from "./ManagementSkeleton.js";
 
 type StatusTone = "ready" | "warning" | "offline" | "neutral";
@@ -73,6 +78,7 @@ export function ShareManagementPanel({
   onNotifyWarning: (message: string | null) => void;
 }) {
   const { t } = useTranslation();
+  const dashboard = useManagementDashboard("shares");
   const [form, setForm] = useState<ShareSettingsFormState>(() => shareSettingsToForm(null, roots));
   const [summary, setSummary] = useState<ShareSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -357,6 +363,7 @@ export function ShareManagementPanel({
               {shareStatusLabel(summary, false, error, t)}
             </span>
           )}
+          <ManagementDashboardControls dashboard={dashboard} disabled={loading || submitting} />
           <button
             type="button"
             onClick={refreshShareData}
@@ -385,8 +392,14 @@ export function ShareManagementPanel({
       </header>
 
       <form id="share-management-form" className="management-body share-management-body" onSubmit={submitProposal}>
-        {loading ? <ManagementSkeletonBody tableColumns={5} tableRows={3} /> : <>
-        <section className="management-command-panel">
+        {loading ? <ManagementSkeletonBody tableColumns={5} tableRows={3} /> : (
+          <ManagementDashboardGrid
+            dashboard={dashboard}
+            items={[
+              {
+                id: "overview",
+                title: String(t("workspace.management.shares.commandTitle")),
+                content: <section className="management-command-panel">
           <div className="management-emblem" aria-hidden="true">
             <Share2 size={31} />
           </div>
@@ -422,39 +435,55 @@ export function ShareManagementPanel({
             </dl>
           </div>
         </section>
-
-        <div className="management-metric-grid">
-          <ShareMetric
-            Icon={Folder}
-            label={t("workspace.management.shares.metrics.shares")}
-            value={formatLocaleNumber(metrics.shares, locale)}
-            detail={t("workspace.management.shares.metrics.sharesDetail")}
-            state={metrics.shares > 0 ? "ready" : "neutral"}
-          />
-          <ShareMetric
-            Icon={Share2}
-            label={t("workspace.management.shares.metrics.protocols")}
-            value={formatLocaleNumber(metrics.enabledProtocols, locale)}
-            detail={t("workspace.management.shares.metrics.protocolsDetail")}
-            state={metrics.enabledProtocols > 0 ? "ready" : "neutral"}
-          />
-          <ShareMetric
-            Icon={Lock}
-            label={t("workspace.management.shares.metrics.authenticated")}
-            value={formatLocaleNumber(metrics.authenticatedProtocols, locale)}
-            detail={t("workspace.management.shares.metrics.authenticatedDetail")}
-            state={metrics.authenticatedProtocols > 0 ? "warning" : "neutral"}
-          />
-          <ShareMetric
-            Icon={CircleAlert}
-            label={t("workspace.management.shares.metrics.issues")}
-            value={formatLocaleNumber(serviceIssueCount, locale)}
-            detail={t("workspace.management.shares.metrics.issuesDetail")}
-            state={serviceIssueCount > 0 ? "warning" : "ready"}
-          />
-        </div>
-
-        <section className="management-section share-account-section">
+              },
+              {
+                id: "metric-shares",
+                title: String(t("workspace.management.shares.metrics.shares")),
+                content: <ShareMetric
+                  Icon={Folder}
+                  label={t("workspace.management.shares.metrics.shares")}
+                  value={formatLocaleNumber(metrics.shares, locale)}
+                  detail={t("workspace.management.shares.metrics.sharesDetail")}
+                  state={metrics.shares > 0 ? "ready" : "neutral"}
+                />
+              },
+              {
+                id: "metric-protocols",
+                title: String(t("workspace.management.shares.metrics.protocols")),
+                content: <ShareMetric
+                  Icon={Share2}
+                  label={t("workspace.management.shares.metrics.protocols")}
+                  value={formatLocaleNumber(metrics.enabledProtocols, locale)}
+                  detail={t("workspace.management.shares.metrics.protocolsDetail")}
+                  state={metrics.enabledProtocols > 0 ? "ready" : "neutral"}
+                />
+              },
+              {
+                id: "metric-authenticated",
+                title: String(t("workspace.management.shares.metrics.authenticated")),
+                content: <ShareMetric
+                  Icon={Lock}
+                  label={t("workspace.management.shares.metrics.authenticated")}
+                  value={formatLocaleNumber(metrics.authenticatedProtocols, locale)}
+                  detail={t("workspace.management.shares.metrics.authenticatedDetail")}
+                  state={metrics.authenticatedProtocols > 0 ? "warning" : "neutral"}
+                />
+              },
+              {
+                id: "metric-issues",
+                title: String(t("workspace.management.shares.metrics.issues")),
+                content: <ShareMetric
+                  Icon={CircleAlert}
+                  label={t("workspace.management.shares.metrics.issues")}
+                  value={formatLocaleNumber(serviceIssueCount, locale)}
+                  detail={t("workspace.management.shares.metrics.issuesDetail")}
+                  state={serviceIssueCount > 0 ? "warning" : "ready"}
+                />
+              },
+              {
+                id: "account",
+                title: String(t("workspace.management.shares.accountTitle")),
+                content: <section className="management-section share-account-section">
           <SectionHeader title={t("workspace.management.shares.accountTitle")} description={t("workspace.management.shares.accountDescription")} />
           <fieldset className="share-field-grid">
             <div className="share-form-field">
@@ -509,8 +538,11 @@ export function ShareManagementPanel({
             />
           </fieldset>
         </section>
-
-        <section className="management-section share-services-section">
+              },
+              {
+                id: "services",
+                title: String(t("workspace.management.shares.servicesTitle")),
+                content: <section className="management-section share-services-section">
           <SectionHeader title={t("workspace.management.shares.servicesTitle")} description={t("workspace.management.shares.servicesDescription")} />
           <div className="share-service-list">
             {SHARE_PROTOCOLS.map((protocol) => (
@@ -527,8 +559,11 @@ export function ShareManagementPanel({
             ))}
           </div>
         </section>
-
-        <section className="management-section share-directory-section">
+              },
+              {
+                id: "directories",
+                title: String(t("workspace.management.shares.directoriesTitle")),
+                content: <section className="management-section share-directory-section">
           <header className="management-section-header">
             <div>
               <h3>{t("workspace.management.shares.directoriesTitle")}</h3>
@@ -827,7 +862,10 @@ export function ShareManagementPanel({
             )}
           </div>
         </section>
-        </>}
+              }
+            ]}
+          />
+        )}
       </form>
     </section>
   );
