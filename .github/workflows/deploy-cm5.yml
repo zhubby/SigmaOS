@@ -228,6 +228,59 @@ jobs:
           [[ "$CM5_DEPLOY_USER" =~ ^[A-Za-z0-9._-]+$ ]]
           [[ "$CM5_DEPLOY_USER" != root ]]
 
+      - name: Verify GitHub OIDC identity
+        env:
+          TS_AUDIENCE: ${{ secrets.TS_AUDIENCE }}
+          TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          EXPECTED_SUBJECT: repo:${{ github.repository }}:environment:production
+        run: |
+          set -euo pipefail
+          : "${ACTIONS_ID_TOKEN_REQUEST_URL:?GitHub OIDC request URL is unavailable}"
+          : "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:?GitHub OIDC request token is unavailable}"
+          : "${TS_AUDIENCE:?production secret TS_AUDIENCE is required}"
+          : "${TS_OAUTH_CLIENT_ID:?production secret TS_OAUTH_CLIENT_ID is required}"
+
+          expected_audience="api.tailscale.com/$TS_OAUTH_CLIENT_ID"
+          [[ "$TS_AUDIENCE" == "$expected_audience" ]] || {
+            echo "TS_AUDIENCE does not match the configured Tailscale client ID" >&2
+            exit 1
+          }
+
+          token_response="$(curl --fail --silent --show-error \
+            --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$TS_AUDIENCE")"
+          oidc_token="$(jq -er '.value | select(type == "string" and length > 0)' <<<"$token_response")"
+
+          OIDC_TOKEN="$oidc_token" node <<'NODE'
+          const token = process.env.OIDC_TOKEN;
+          const expectedAudience = process.env.TS_AUDIENCE;
+          const expectedSubject = process.env.EXPECTED_SUBJECT;
+          const segments = token?.split(".") ?? [];
+          if (segments.length !== 3) {
+            throw new Error("GitHub returned an invalid OIDC token");
+          }
+
+          const claims = JSON.parse(Buffer.from(segments[1], "base64url").toString("utf8"));
+          console.log(JSON.stringify({
+            issuer: claims.iss,
+            subject: claims.sub,
+            audience: claims.aud,
+            repository: claims.repository,
+            environment: claims.environment,
+            workflowRef: claims.workflow_ref
+          }));
+
+          if (claims.iss !== "https://token.actions.githubusercontent.com") {
+            throw new Error(`unexpected GitHub OIDC issuer: ${claims.iss}`);
+          }
+          if (claims.sub !== expectedSubject) {
+            throw new Error(`unexpected GitHub OIDC subject: ${claims.sub}`);
+          }
+          if (claims.aud !== expectedAudience) {
+            throw new Error("GitHub OIDC audience does not match TS_AUDIENCE");
+          }
+          NODE
+
       - name: Connect to Tailscale
         uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4
         with:
