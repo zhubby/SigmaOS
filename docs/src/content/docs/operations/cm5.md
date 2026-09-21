@@ -77,6 +77,8 @@ curl -fsS http://127.0.0.1:3010/api/system/network
 
 CM5 不安装 GitHub self-hosted runner。生产升级由 GitHub-hosted ARM64 runner 构建，再由 Tailscale ephemeral node 通过 SSH 触发 CM5 上受限的部署 helper。CM5 不需要公网 IP 或端口转发，GitHub workflow 使用 Tailscale MagicDNS hostname 或 `100.x.y.z` 地址。
 
+完整的 Tailnet policy、OIDC trust credential、GitHub environment、发布命令和重试流程见[GitHub Actions 发布与 CM5 自动部署](/docs/operations/github-actions-release/)。本节只保留目标机 bootstrap。
+
 首次启用自动升级时，在本地控制台或现有维护 SSH 中执行：
 
 ```bash
