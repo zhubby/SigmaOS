@@ -1,4 +1,3 @@
-import http from "node:http";
 import path from "node:path";
 import type {
   StorageOperationProposal,
@@ -6,8 +5,9 @@ import type {
   StorageRaidLevel,
   SystemStorageSummary
 } from "@sigmaos/shared";
+import { HostdClient } from "./hostd-client.js";
 
-const STORAGE_HELPER_TIMEOUT_MS = 120_000;
+const HOSTD_TIMEOUT_MS = 120_000;
 const STORAGE_MOUNT_ROOT = "/srv/nas";
 const POOL_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/u;
 const RAID_MINIMUMS: Record<StorageRaidLevel, number> = {
@@ -129,50 +129,14 @@ export function buildStoragePoolDeleteProposal(
 }
 
 export async function applyStoragePoolOperation(
-  helperSocketPath: string,
+  hostdSocketPath: string,
   proposal: StorageOperationProposal
 ): Promise<Record<string, unknown>> {
-  const body = JSON.stringify(proposal);
-  return new Promise((resolve, reject) => {
-    const request = http.request(
-      {
-        socketPath: helperSocketPath,
-        path: "/storage-operation",
-        method: "POST",
-        timeout: STORAGE_HELPER_TIMEOUT_MS,
-        headers: {
-          "content-type": "application/json",
-          "content-length": Buffer.byteLength(body)
-        }
-      },
-      (response) => {
-        const chunks: Buffer[] = [];
-        response.on("data", (chunk: Buffer) => chunks.push(chunk));
-        response.on("end", () => {
-          const raw = Buffer.concat(chunks).toString("utf8");
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(raw) as unknown;
-          } catch {
-            reject(new Error("Invalid response from storage helper"));
-            return;
-          }
-          if ((response.statusCode ?? 500) >= 400) {
-            reject(new Error(storageHelperError(parsed) ?? "Storage helper request failed"));
-            return;
-          }
-          if (!isRecord(parsed)) {
-            reject(new Error("Invalid response from storage helper"));
-            return;
-          }
-          resolve(parsed);
-        });
-      }
-    );
-    request.on("timeout", () => request.destroy(new Error("Storage helper timed out")));
-    request.on("error", reject);
-    request.end(body);
-  });
+  return new HostdClient(hostdSocketPath).request(
+    "storage.operation",
+    proposal,
+    HOSTD_TIMEOUT_MS
+  );
 }
 
 function parseRaidLevel(value: string | undefined): StorageRaidLevel {
@@ -198,12 +162,4 @@ function normalizeMountRoot(value: string): string {
     throw new Error(`Storage pools must be mounted below ${STORAGE_MOUNT_ROOT}`);
   }
   return normalized;
-}
-
-function storageHelperError(value: unknown): string | null {
-  return isRecord(value) && typeof value.error === "string" ? value.error : null;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

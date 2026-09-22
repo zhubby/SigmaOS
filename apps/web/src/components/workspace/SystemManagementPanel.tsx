@@ -161,12 +161,12 @@ export function SystemNetworkManagementPanel({
           capabilities: {
             ...current.capabilities,
             backend: wifiStatus.backend,
-            helperReady: wifiStatus.helperReady,
-            canApplyConfiguration: wifiStatus.backend === "NetworkManager" && wifiStatus.helperReady,
-            canManageWifi: wifiStatus.backend === "NetworkManager" && wifiStatus.helperReady && wifiStatus.devices.length > 0,
+            hostdReady: wifiStatus.hostdReady,
+            canApplyConfiguration: wifiStatus.backend === "NetworkManager" && wifiStatus.hostdReady,
+            canManageWifi: wifiStatus.backend === "NetworkManager" && wifiStatus.hostdReady && wifiStatus.devices.length > 0,
             canManageHotspot:
               wifiStatus.backend === "NetworkManager" &&
-              wifiStatus.helperReady &&
+              wifiStatus.hostdReady &&
               wifiStatus.devices.some((device) => device.capabilities.accessPoint)
           },
           wifi: { ...wifiStatus, profiles: current.wifi.profiles }

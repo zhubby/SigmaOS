@@ -14,7 +14,7 @@ a Docker container.
 - `apps/worker`: agent job worker.
 - `apps/indexer`: SQLite/FTS NAS indexer.
 - `apps/scheduler`: scheduled maintenance, backup, and health jobs.
-- `apps/backup`, `apps/share-helper`, `apps/terminal-helper`: backup and host
+- `apps/backup`, `apps/hostd`, `apps/terminal-helper`: backup and host
   integration processes.
 - `packages/db`, `packages/nas-tools`, `packages/agent`, `packages/shared`:
   persistence, path-safe filesystem operations, agent routing, and shared
@@ -197,7 +197,7 @@ Use service status and journald, not only a single liveness request:
 ```bash
 sudo systemctl --failed
 sudo systemctl is-active sigmaos-api.service sigmaos-worker@1.service \
-  sigmaos-terminal-helper.service sigmaos-share-helper.service
+  sigmaos-terminal-helper.service sigmaos-hostd.service
 sudo systemctl list-timers 'sigmaos-*'
 sudo journalctl -u sigmaos-api.service -u sigmaos-worker@1.service -n 100 --no-pager
 curl -fsS http://127.0.0.1:3010/health
@@ -232,7 +232,7 @@ backup as well as the old package.
   changes.
 - Production API binds to loopback. Use the packaged Nginx proxy for LAN access;
   do not expose the unauthenticated local-only API directly to the internet.
-- Keep systemd hardening and service identities intact. `share-helper` is the
+- Keep systemd hardening and service identities intact. `hostd` is the
   constrained root helper; other runtime services should remain non-root.
 
 ## Frontend And UI

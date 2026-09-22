@@ -19,7 +19,7 @@ const server = await buildServer({
   db,
   buildInfo,
   system: {
-    commandRunner: createSystemCommandRunner(config.shares.helperSocketPath)
+    commandRunner: createSystemCommandRunner(config.hostd.socketPath)
   },
   terminal: createTerminalRuntime(config.terminal),
   player: createPlayerRuntime(config.player)

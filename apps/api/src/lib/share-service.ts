@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-import http from "node:http";
 import { promisify } from "node:util";
 import type {
   ShareApplyRequest,
@@ -14,12 +13,13 @@ import type {
   SystemCollectionIssue
 } from "@sigmaos/shared";
 import { SHARE_PROTOCOLS } from "@sigmaos/shared";
+import { HostdClient } from "./hostd-client.js";
 import type { SystemCommandRunner } from "./system-management.js";
 
 const execFileAsync = promisify(execFile);
 const COMMAND_TIMEOUT_MS = 5_000;
 const COMMAND_MAX_BUFFER = 512 * 1024;
-const SHARE_HELPER_TIMEOUT_MS = 30_000;
+const HOSTD_TIMEOUT_MS = 30_000;
 
 const PROTOCOL_SERVICES = {
   smb: ["smbd.service", "nmbd.service"],
@@ -29,12 +29,12 @@ const PROTOCOL_SERVICES = {
   dlna: ["minidlna.service"]
 } as const satisfies Record<ShareProtocol, readonly string[]>;
 
-export interface ShareHelperClient {
+export interface ShareHostdClient {
   apply(input: ShareApplyRequest): Promise<ShareApplyResult>;
 }
 
 export interface ShareManagementDependencies {
-  helper?: ShareHelperClient;
+  hostd?: ShareHostdClient;
   commandRunner?: SystemCommandRunner;
 }
 
@@ -56,44 +56,15 @@ class NodeCommandRunner implements SystemCommandRunner {
   }
 }
 
-export class HttpShareHelperClient implements ShareHelperClient {
-  constructor(private readonly socketPath: string) {}
+export class HostdShareClient implements ShareHostdClient {
+  private readonly client: HostdClient;
+
+  constructor(socketPath: string) {
+    this.client = new HostdClient(socketPath);
+  }
 
   apply(input: ShareApplyRequest): Promise<ShareApplyResult> {
-    const body = JSON.stringify(input);
-    return new Promise((resolve, reject) => {
-      const request = http.request(
-        {
-          socketPath: this.socketPath,
-          path: "/apply",
-          method: "POST",
-          timeout: SHARE_HELPER_TIMEOUT_MS,
-          headers: {
-            "content-type": "application/json",
-            "content-length": Buffer.byteLength(body)
-          }
-        },
-        (response) => {
-          const chunks: Buffer[] = [];
-          response.on("data", (chunk: Buffer) => chunks.push(chunk));
-          response.on("end", () => {
-            const raw = Buffer.concat(chunks).toString("utf8");
-            const parsed = parseJson(raw);
-            if ((response.statusCode ?? 500) >= 400) {
-              reject(new Error(errorFromResponse(parsed, raw)));
-              return;
-            }
-            resolve(parsed as ShareApplyResult);
-          });
-        }
-      );
-
-      request.on("timeout", () => {
-        request.destroy(new Error("Share helper timed out"));
-      });
-      request.on("error", reject);
-      request.end(body);
-    });
+    return this.client.request("shares.apply", input, HOSTD_TIMEOUT_MS);
   }
 }
 
@@ -157,8 +128,8 @@ export async function applyShareOperation(
     throw new Error("Unsupported share action");
   }
   const settings = shareSettingsFromOperation(operation);
-  const helper = dependencies.helper ?? new HttpShareHelperClient(settings.helperSocketPath);
-  const result = await helper.apply({
+  const hostd = dependencies.hostd ?? new HostdShareClient(config.hostd.socketPath);
+  const result = await hostd.apply({
     settings,
     roots: config.nasRoots
   });
@@ -166,7 +137,7 @@ export async function applyShareOperation(
     action: proposal.action,
     files: result.files,
     services: result.services,
-    helperAppliedAt: result.appliedAt
+    hostdAppliedAt: result.appliedAt
   };
 }
 
@@ -245,30 +216,11 @@ function normalizeServiceStatus(value: string): ShareProtocolServiceStatus {
   }
 }
 
-function parseJson(raw: string): unknown {
-  try {
-    return JSON.parse(raw) as unknown;
-  } catch {
-    return {};
-  }
-}
-
-function errorFromResponse(parsed: unknown, raw: string): string {
-  if (typeof parsed === "object" && parsed !== null && "error" in parsed) {
-    const error = (parsed as { error?: unknown }).error;
-    if (typeof error === "string") {
-      return safeShareMessage(error);
-    }
-  }
-  return safeShareMessage(raw || "Share helper request failed");
-}
-
 function isShareSettingsRecord(value: unknown): value is ShareSettingsRecord {
   return (
     typeof value === "object" &&
     value !== null &&
     typeof (value as { enabled?: unknown }).enabled === "boolean" &&
-    typeof (value as { helperSocketPath?: unknown }).helperSocketPath === "string" &&
     typeof (value as { account?: { username?: unknown } }).account?.username === "string" &&
     Array.isArray((value as { shares?: unknown }).shares)
   );

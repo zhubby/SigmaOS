@@ -67,7 +67,6 @@ export function defaultShareSettings(config: SigmaConfig): ShareSettingsRecord {
 export function toPublicShareSettings(settings: ShareSettingsRecord): PublicShareSettings {
   return {
     enabled: settings.enabled,
-    helperSocketPath: settings.helperSocketPath,
     account: {
       username: settings.account.username,
       passwordConfigured: Boolean(settings.account.password)
@@ -80,7 +79,6 @@ export function toPublicShareSettings(settings: ShareSettingsRecord): PublicShar
 export function shareSettingsToConfig(settings: ShareSettingsRecord): ShareConfig {
   return {
     enabled: settings.enabled,
-    helperSocketPath: settings.helperSocketPath,
     account: settings.account,
     shares: settings.shares
   };

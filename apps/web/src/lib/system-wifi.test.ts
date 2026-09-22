@@ -38,7 +38,7 @@ describe("system Wi-Fi helpers", () => {
       collectedAt: "2026-09-20T00:00:00.000Z",
       backend: "NetworkManager",
       radioEnabled: true,
-      helperReady: true,
+      hostdReady: true,
       devices: [],
       hotspots: []
     });

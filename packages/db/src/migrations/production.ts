@@ -283,5 +283,15 @@ export const productionMigrations: Migration[] = [
         SELECT RAISE(ABORT, 'active terminal tab must belong to root');
       END;
     `
+  },
+  {
+    id: "016_hostd_config",
+    sql: `
+      UPDATE system_settings
+      SET value_json = json_remove(value_json, '$.helperSocketPath')
+      WHERE key = 'share_settings'
+        AND json_valid(value_json)
+        AND json_type(value_json, '$.helperSocketPath') IS NOT NULL;
+    `
   }
 ];

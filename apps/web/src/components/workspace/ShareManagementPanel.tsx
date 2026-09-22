@@ -425,10 +425,6 @@ export function ShareManagementPanel({
                 </dd>
               </div>
               <div>
-                <dt>{t("workspace.management.shares.facts.helper")}</dt>
-                <dd title={form.helperSocketPath}>{form.helperSocketPath}</dd>
-              </div>
-              <div>
                 <dt>{t("workspace.management.shares.facts.updated")}</dt>
                 <dd>{settingsUpdatedAtLabel(form.updatedAt, locale, t)}</dd>
               </div>
@@ -516,16 +512,6 @@ export function ShareManagementPanel({
                     ? t("workspace.management.shares.passwordConfiguredPlaceholder")
                     : t("workspace.management.shares.passwordPlaceholder")
                 }
-              />
-            </label>
-            <label>
-              <span>{t("workspace.management.shares.fields.helperSocket")}</span>
-              <input
-                value={form.helperSocketPath}
-                onChange={(event) => {
-                  setForm((current) => ({ ...current, helperSocketPath: event.target.value }));
-                }}
-                placeholder="/run/sigmaos/share-helper.sock"
               />
             </label>
             <SwitchControl

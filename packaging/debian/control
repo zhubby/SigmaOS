@@ -2,7 +2,7 @@ Source: sigmaos
 Section: admin
 Priority: optional
 Maintainer: SigmaOS Maintainers <maintainers@sigmaos.local>
-Build-Depends: debhelper-compat (= 13), nodejs, npm
+Build-Depends: debhelper-compat (= 13), nodejs, npm, cargo, rustc
 Standards-Version: 4.7.0
 Homepage: https://sigmaos.local
 Rules-Requires-Root: no

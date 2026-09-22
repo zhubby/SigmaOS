@@ -56,7 +56,7 @@ fi
 
 rm -rf "$BUILD_DIR"
 install -d "$BUILD_DIR"
-rsync -a --exclude node_modules --exclude .git --exclude .sigmaos "$ROOT_DIR/" "$BUILD_DIR/"
+rsync -a --exclude node_modules --exclude target --exclude .git --exclude .sigmaos "$ROOT_DIR/" "$BUILD_DIR/"
 cd "$BUILD_DIR"
 cp -R packaging/debian debian
 dpkg-buildpackage -us -uc -b

@@ -38,7 +38,7 @@ SIGMAOS_TARGET_ARCH=arm64 \
 1. 用 `mmdebstrap` 创建最小 Debian rootfs；
 2. 下载并校验 Node.js tarball；
 3. 安装 SigmaOS `.deb`；
-4. 写入 Nginx 配置并启用 API、worker、helpers 和 timers；
+4. 写入 Nginx 配置并启用 API、worker、hostd、terminal/player helper 和 timers；
 5. 输出 `.sigmaos/appliance/sigmaos-rootfs-arm64.tar`。
 
 检查产物：

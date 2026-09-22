@@ -9,7 +9,7 @@ sidebar:
   order: 1
 ---
 
-生产部署使用 Debian package 和 Node.js 22，不把 SigmaOS 自身放入 Docker。API、worker、downloader、share-helper、terminal-helper 是常驻服务；indexer、scheduler、maintenance、health、backup 由 oneshot service 和 timer 驱动。
+生产部署使用 Debian package、Node.js 22 和 Rust `sigmaos-hostd`，不把 SigmaOS 自身放入 Docker。API、worker、downloader、hostd、terminal-helper 是常驻服务；indexer、scheduler、maintenance、health、backup 由 oneshot service 和 timer 驱动。
 
 Nginx 只反向代理到 loopback API。运行时路径主要是 `/usr/lib/sigmaos`、`/etc/sigmaos`、`/var/lib/sigmaos`、`/run/sigmaos` 和配置的 `/srv` roots。API 静态提供 React Web 与 `/docs/` 文档站。
 
@@ -29,7 +29,7 @@ findmnt /srv/nas
 
 ## 从源码构建 Debian 包
 
-在目标架构主机上执行构建，让 `better-sqlite3`、`node-pty` 等原生模块与运行环境一致：
+在目标架构主机上执行构建，让 Rust hostd、`better-sqlite3`、`node-pty` 等原生产物与运行环境一致。Rust 版本由 `rust-toolchain.toml` 固定为 1.95.0：
 
 ```bash
 npm ci
@@ -60,13 +60,13 @@ sudo SIGMAOS_TERMINAL_USER=<terminal-user> \
   ./packaging/scripts/install.sh
 ```
 
-脚本会安装 Node.js 22、构建并安装本架构 `.deb`，然后执行 `sigmaos-first-boot.sh`。首次初始化会创建 `/etc/sigmaos/config.toml`、`/var/lib/sigmaos`、`/srv/nas`、`/srv/iso` 和本地管理员记录。交互终端会询问管理员显示名与 NAS root；非交互运行可通过 `SIGMAOS_ADMIN_DISPLAY_NAME` 和 `SIGMAOS_NAS_ROOT_PATH` 提供值。
+脚本会安装 Node.js 22 和 Rust 1.95.0、构建并安装本架构 `.deb`，然后仅在新安装时执行 `sigmaos-first-boot.sh`。首次初始化会创建 `/etc/sigmaos/config.toml`、`/var/lib/sigmaos`、`/srv/nas`、`/srv/iso` 和本地管理员记录；升级会保留现有配置。交互终端会询问管理员显示名与 NAS root；非交互运行可通过 `SIGMAOS_ADMIN_DISPLAY_NAME` 和 `SIGMAOS_NAS_ROOT_PATH` 提供值。
 
 核心服务会被 `enable --now`：
 
 ```bash
 sudo systemctl status sigmaos-api.service sigmaos-worker@1.service sigmaos-downloader.service
-sudo systemctl status sigmaos-share-helper.service sigmaos-terminal-helper.service
+sudo systemctl status sigmaos-hostd.service sigmaos-terminal-helper.service
 ```
 
 索引、scheduler、maintenance、health 和 backup timers 默认只启用，不会在安装命令中立刻执行。需要立即刷新时运行：
@@ -94,6 +94,8 @@ curl -fsS http://127.0.0.1:3010/api/system/health
 
 升级前保留当前 `.deb`、`/etc/sigmaos/config.toml`、`/var/lib/sigmaos` 和数据库备份；先停止会访问 SQLite 或 NAS 的 timers：
 
+从旧版升级时，`postinst` 会把 `[shares].helper_socket_path` 迁移到 `[hostd].socket_path`，删除 SQLite share settings 中的 `helperSocketPath`，并停用已废弃的 `sigmaos-share-helper.service`。如果新旧 socket 配置同时存在，以 `[hostd]` 为准；修改 TOML 前会创建权限为 `0600` 的 `config.toml.pre-hostd.bak`，重复执行不会覆盖备份。
+
 ```bash
 sudo systemctl stop sigmaos-indexer.timer sigmaos-scheduler.timer \
   sigmaos-maintenance.timer sigmaos-health.timer \
@@ -109,7 +111,7 @@ sudo systemctl restart sigmaos-api.service sigmaos-worker@1.service
 
 公开仓库使用 GitHub-hosted runner 构建并发布双架构 Debian 包，再由独立 workflow 通过 Tailscale OIDC 临时节点连接 CM5。CM5 不运行 self-hosted runner，不需要公网 IP、端口转发、SSH 私钥或保存在 GitHub 中的主机密码。
 
-完整的一次性配置、tag 发布步骤、manifest 校验链、幂等重试和故障处理见[GitHub Actions 发布与 CM5 自动部署](/docs/operations/github-actions-release/)。自动部署只接受稳定的 `vX.Y.Z` tag；不要使用 `latest`、移动已发布 tag 或绕过 helper 的 checksum、版本与数据库回滚边界。
+完整的一次性配置、tag 发布步骤、manifest 校验链、幂等重试和故障处理见[GitHub Actions 发布与 CM5 自动部署](/docs/operations/github-actions-release/)。自动部署只接受稳定的 `vX.Y.Z` tag；不要使用 `latest`、移动已发布 tag 或绕过部署程序的 checksum、版本与数据库回滚边界。
 
 构建前先运行 `npm run version:check`。构建过程会在源码复制到 Debian staging 之前冻结 commit、tag/branch、构建时间、来源和 dirty 状态，并将 `/usr/lib/sigmaos/build-info.json` 随包安装。运行中的 API 通过 `/api/system/build-info` 暴露可公开的追溯字段，Web 设置的“版本”分类展示同一份信息。
 

@@ -40,13 +40,13 @@ describe("loadConfig", () => {
     });
     expect(config.shares).toMatchObject({
       enabled: false,
-      helperSocketPath: "/run/sigmaos/share-helper.sock",
       account: {
         username: "sigma-share",
         password: null
       },
       shares: []
     });
+    expect(config.hostd).toEqual({ socketPath: "/run/sigmaos/hostd.sock" });
     expect(config.terminal).toEqual({
       user: null,
       helperSocketPath: "/run/sigmaos/terminal-helper.sock",
@@ -180,6 +180,22 @@ describe("loadConfig", () => {
     });
   });
 
+  it("lets the hostd socket environment override the TOML value", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-config-"));
+    const configPath = path.join(tempDir, "config.toml");
+    await writeFile(configPath, `[hostd]\nsocket_path = "/tmp/toml-hostd.sock"\n`);
+
+    expect(loadConfig({ SIGMAOS_CONFIG: configPath } as NodeJS.ProcessEnv, tempDir).hostd).toEqual({
+      socketPath: "/tmp/toml-hostd.sock"
+    });
+    expect(loadConfig({
+      SIGMAOS_CONFIG: configPath,
+      SIGMAOS_HOSTD_SOCKET_PATH: "/run/override-hostd.sock"
+    } as NodeJS.ProcessEnv, tempDir).hostd).toEqual({
+      socketPath: "/run/override-hostd.sock"
+    });
+  });
+
   it("loads Docker settings from environment overrides", async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-config-"));
     const config = loadConfig(
@@ -246,9 +262,11 @@ describe("loadConfig", () => {
     await writeFile(
       configPath,
       `
+        [hostd]
+        socket_path = "/tmp/hostd.sock"
+
         [shares]
         enabled = true
-        helper_socket_path = "/tmp/share-helper.sock"
         account_username = "sigma-share"
 
         [[shares.items]]
@@ -288,9 +306,9 @@ describe("loadConfig", () => {
 
     const config = loadConfig({ SIGMAOS_CONFIG: configPath } as NodeJS.ProcessEnv, tempDir);
 
+    expect(config.hostd).toEqual({ socketPath: "/tmp/hostd.sock" });
     expect(config.shares).toMatchObject({
       enabled: true,
-      helperSocketPath: "/tmp/share-helper.sock",
       account: {
         username: "sigma-share",
         password: null

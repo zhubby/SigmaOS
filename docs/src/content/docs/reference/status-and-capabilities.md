@@ -15,7 +15,7 @@ Job 状态包括 `queued`、`running`、`waiting_approval`、`completed`、`fail
 
 ## 网络后端与无线能力
 
-接口、地址和路由始终来自内核 `ip` 数据；网络配置后端单独检测。NetworkManager 正常运行时，`canManageWifi` 要求 root helper 可用且至少存在一个无线设备；`canManageHotspot` 还要求设备声明 AP 能力。其他后端继续只读，界面不会把未知后端伪装为 `systemd-networkd`。
+接口、地址和路由始终来自内核 `ip` 数据；网络配置后端单独检测。NetworkManager 正常运行时，`canManageWifi` 要求 root `sigmaos-hostd` 可用且至少存在一个无线设备；`canManageHotspot` 还要求设备声明 AP 能力。其他后端继续只读，界面不会把未知后端伪装为 `systemd-networkd`。
 
 无线设备状态通过 `system.wifi.status` SSE 独立更新。SSE 断开时界面显示 `reconnecting`，不把旧状态当作实时状态。扫描是显式请求，保留 BSSID 级结果；界面按 SSID 和安全模式分组并默认使用最强 AP。
 

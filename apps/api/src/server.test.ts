@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { EventEmitter } from "node:events";
 import http from "node:http";
+import net from "node:net";
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -1075,7 +1076,7 @@ describe("API server", () => {
       network: {
         status: "partial",
         interfaces: [expect.objectContaining({ name: "eth0", state: "connected" })],
-        wifi: { backend: "unknown", helperReady: false, devices: [] },
+        wifi: { backend: "unknown", hostdReady: false, devices: [] },
         issues: [expect.objectContaining({ source: "Wi-Fi status" })]
       }
     });
@@ -1465,16 +1466,12 @@ describe("API server", () => {
   it("creates storage pools directly after explicit confirmation", async () => {
     const session = createSession(db, { rootId: "local" });
     const config = testConfig(tempDir);
-    const socketPath = path.join(tempDir, "storage-helper.sock");
-    config.shares.helperSocketPath = socketPath;
-    let helperProposal: unknown = null;
-    const helperServer = http.createServer(async (request, response) => {
-      const chunks: Buffer[] = [];
-      for await (const chunk of request) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-      }
-      helperProposal = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-      const body = JSON.stringify({
+    const socketPath = path.join(tempDir, "hostd.sock");
+    config.hostd.socketPath = socketPath;
+    let hostdProposal: unknown = null;
+    const hostdServer = await createHostdTestServer(socketPath, (request) => {
+      hostdProposal = request.payload;
+      return {
         action: "create_pool",
         name: "media",
         raidLevel: "1",
@@ -1483,11 +1480,8 @@ describe("API server", () => {
         mountpoint: "/srv/nas/media",
         mdDevice: "/dev/md/media",
         uuid: "11111111-2222-3333-4444-555555555555"
-      });
-      response.writeHead(200, { "content-type": "application/json", "content-length": Buffer.byteLength(body) });
-      response.end(body);
+      };
     });
-    await listenOnUnixSocket(helperServer, socketPath);
 
     const server = await buildServer({
       config,
@@ -1532,7 +1526,7 @@ describe("API server", () => {
       }
     });
     expect(proposed.json().approval).toBeUndefined();
-    expect(helperProposal).toMatchObject({ action: "create_pool", name: "media" });
+    expect(hostdProposal).toMatchObject({ action: "create_pool", name: "media" });
     expect(listPendingApprovals(db)).toHaveLength(0);
     expect(listOperationNotifications(db)).toMatchObject([
       { jobId: proposed.json().job.id, kind: "storage", status: "succeeded" }
@@ -1553,32 +1547,25 @@ describe("API server", () => {
     expect(unsafe.json()).toEqual({ error: expect.stringContaining("not present") });
 
     await server.close();
-    await closeHttpServer(helperServer);
+    await closeNetServer(hostdServer);
   });
 
   it("requires an exact pool confirmation before deleting a storage pool", async () => {
     const session = createSession(db, { rootId: "local" });
     const config = testConfig(tempDir);
-    const socketPath = path.join(tempDir, "storage-delete-helper.sock");
-    config.shares.helperSocketPath = socketPath;
-    let helperProposal: StorageOperationProposal | null = null;
-    const helperServer = http.createServer(async (request, response) => {
-      const chunks: Buffer[] = [];
-      for await (const chunk of request) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-      }
-      helperProposal = JSON.parse(Buffer.concat(chunks).toString("utf8")) as StorageOperationProposal;
-      const body = JSON.stringify({
+    const socketPath = path.join(tempDir, "hostd-delete.sock");
+    config.hostd.socketPath = socketPath;
+    let hostdProposal: StorageOperationProposal | null = null;
+    const hostdServer = await createHostdTestServer(socketPath, (request) => {
+      hostdProposal = request.payload as StorageOperationProposal;
+      return {
         action: "delete_pool",
         name: "storage",
         mountpoint: "/srv/storage",
         mdDevice: "/dev/md0",
         devices: ["/dev/sda1", "/dev/sdb1"]
-      });
-      response.writeHead(200, { "content-type": "application/json", "content-length": Buffer.byteLength(body) });
-      response.end(body);
+      };
     });
-    await listenOnUnixSocket(helperServer, socketPath);
 
     const server = await buildServer({
       config,
@@ -1649,7 +1636,7 @@ describe("API server", () => {
         approvalId: null
       }
     });
-    expect(helperProposal).toMatchObject({
+    expect(hostdProposal).toMatchObject({
       action: "delete_pool",
       name: "storage",
       mdDevice: "/dev/md0",
@@ -1657,22 +1644,18 @@ describe("API server", () => {
     });
 
     await server.close();
-    await closeHttpServer(helperServer);
+    await closeNetServer(hostdServer);
   });
 
-  it("applies an approved storage pool through the privileged helper", async () => {
+  it("applies an approved storage pool through hostd", async () => {
     const session = createSession(db, { rootId: "local" });
     const config = testConfig(tempDir);
-    const socketPath = path.join(tempDir, "storage-helper.sock");
-    config.shares.helperSocketPath = socketPath;
-    let helperProposal: unknown = null;
-    const helperServer = http.createServer(async (request, response) => {
-      const chunks: Buffer[] = [];
-      for await (const chunk of request) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-      }
-      helperProposal = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-      const body = JSON.stringify({
+    const socketPath = path.join(tempDir, "hostd.sock");
+    config.hostd.socketPath = socketPath;
+    let hostdProposal: unknown = null;
+    const hostdServer = await createHostdTestServer(socketPath, (request) => {
+      hostdProposal = request.payload;
+      return {
         action: "create_pool",
         name: "media",
         raidLevel: "1",
@@ -1681,11 +1664,8 @@ describe("API server", () => {
         mountpoint: "/srv/nas/media",
         mdDevice: "/dev/md/media",
         uuid: "11111111-2222-3333-4444-555555555555"
-      });
-      response.writeHead(200, { "content-type": "application/json", "content-length": Buffer.byteLength(body) });
-      response.end(body);
+      };
     });
-    await listenOnUnixSocket(helperServer, socketPath);
 
     const proposal: StorageOperationProposal = {
       action: "create_pool",
@@ -1717,12 +1697,12 @@ describe("API server", () => {
     });
 
     expect(approved.statusCode).toBe(202);
-    expect(helperProposal).toMatchObject({ action: "create_pool", name: "media" });
+    expect(hostdProposal).toMatchObject({ action: "create_pool", name: "media" });
     expect(getStorageOperationByApproval(db, approval.id)).toMatchObject({ status: "applied" });
     expect(getApproval(db, approval.id)?.status).toBe("applied");
     expect(getJob(db, job.id)?.status).toBe("completed");
     await server.close();
-    await closeHttpServer(helperServer);
+    await closeNetServer(hostdServer);
   });
 
   it("scopes SMART command failures to the affected disk", async () => {
@@ -1848,7 +1828,6 @@ describe("API server", () => {
     expect(response.json()).toMatchObject({
       settings: {
         enabled: false,
-        helperSocketPath: "/run/sigmaos/share-helper.sock",
         account: {
           username: "sigma-share",
           passwordConfigured: false
@@ -1863,12 +1842,12 @@ describe("API server", () => {
   it("creates share approvals and applies them only after approval", async () => {
     await mkdir(path.join(rootDir, "media"));
     const session = createSession(db, { rootId: "local" });
-    const helper = new FakeShareHelper();
+    const hostd = new FakeShareHostd();
     const server = await buildServer({
       config: testConfig(tempDir),
       db,
       shares: {
-        helper
+        hostd
       }
     });
 
@@ -1883,7 +1862,7 @@ describe("API server", () => {
 
     expect(proposed.statusCode).toBe(202);
     expect(proposed.json().message.role).toBe("system");
-    expect(helper.requests).toEqual([]);
+    expect(hostd.requests).toEqual([]);
     expect(getShareSettings(db)).toBeNull();
     expect(proposed.payload).not.toContain("secret");
     expect(proposed.json()).toMatchObject({
@@ -1918,9 +1897,9 @@ describe("API server", () => {
     });
 
     expect(approved.statusCode).toBe(202);
-    expect(helper.requests).toHaveLength(1);
-    expect(helper.requests[0]?.settings.account.password).toBe("secret");
-    expect(helper.requests[0]?.roots).toEqual([{ id: "local", name: "Local", path: rootDir }]);
+    expect(hostd.requests).toHaveLength(1);
+    expect(hostd.requests[0]?.settings.account.password).toBe("secret");
+    expect(hostd.requests[0]?.roots).toEqual([{ id: "local", name: "Local", path: rootDir }]);
     expect(getShareSettings(db)).toMatchObject({
       enabled: true,
       account: {
@@ -1953,16 +1932,16 @@ describe("API server", () => {
     await server.close();
   });
 
-  it("keeps saved share settings unchanged when helper application fails", async () => {
+  it("keeps saved share settings unchanged when hostd application fails", async () => {
     await mkdir(path.join(rootDir, "media"));
     const session = createSession(db, { rootId: "local" });
-    const helper = new FakeShareHelper();
-    helper.failApply = true;
+    const hostd = new FakeShareHostd();
+    hostd.failApply = true;
     const server = await buildServer({
       config: testConfig(tempDir),
       db,
       shares: {
-        helper
+        hostd
       }
     });
     const proposed = await server.inject({
@@ -2121,19 +2100,19 @@ describe("API server", () => {
     await server.close();
   });
 
-  it("returns 503 without exposing helper details when daemon configuration is unavailable", async () => {
+  it("returns 503 without exposing hostd details when daemon configuration is unavailable", async () => {
     const daemon = new FakeDockerDaemon();
-    daemon.getError = new DockerDaemonRequestError("helper token=private", 503);
+    daemon.getError = new DockerDaemonRequestError("hostd token=private", 503);
     const server = await buildServer({ config: testConfig(tempDir), db, docker: { daemon } });
 
     const response = await server.inject({ method: "GET", url: "/api/docker/daemon/config" });
 
     expect(response.statusCode).toBe(503);
-    expect(response.json()).toEqual({ error: "helper token: [redacted]" });
+    expect(response.json()).toEqual({ error: "hostd token: [redacted]" });
     await server.close();
   });
 
-  it("preserves helper conflict and rollback failure status codes", async () => {
+  it("preserves hostd conflict and rollback failure status codes", async () => {
     const daemon = new FakeDockerDaemon();
     daemon.updateError = new DockerDaemonRequestError("changed", 409);
     const server = await buildServer({ config: testConfig(tempDir), db, docker: { daemon } });
@@ -4487,7 +4466,7 @@ class FakeNetworkManager implements NetworkManagerRuntime {
     collectedAt: "2026-09-20T00:00:00.000Z",
     backend: "NetworkManager",
     radioEnabled: true,
-    helperReady: true,
+    hostdReady: true,
     devices: [
       {
         id: "wlan0",
@@ -4751,6 +4730,34 @@ async function closeHttpServer(server: http.Server): Promise<void> {
   });
 }
 
+async function createHostdTestServer(
+  socketPath: string,
+  respond: (request: Record<string, unknown>) => unknown
+): Promise<net.Server> {
+  const server = net.createServer((socket) => {
+    const chunks: Buffer[] = [];
+    socket.on("data", (chunk: Buffer) => chunks.push(chunk));
+    socket.on("end", () => {
+      const request = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+      socket.end(`${JSON.stringify({ version: 1, id: request.id, ok: true, result: respond(request) })}\n`);
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(socketPath, () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  return server;
+}
+
+async function closeNetServer(server: net.Server): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+}
+
 function testConfig(dataDir: string): SigmaConfig {
   return {
     dataDir,
@@ -4780,9 +4787,11 @@ function testConfig(dataDir: string): SigmaConfig {
       consoleShells: ["/bin/sh", "/bin/bash"],
       composeRoots: []
     },
+    hostd: {
+      socketPath: "/run/sigmaos/hostd.sock"
+    },
     shares: {
       enabled: false,
-      helperSocketPath: "/run/sigmaos/share-helper.sock",
       account: {
         username: "sigma-share",
         password: null
@@ -4810,7 +4819,6 @@ function testConfig(dataDir: string): SigmaConfig {
 function shareSettingsPayload(password: string) {
   return {
     enabled: true,
-    helperSocketPath: "/run/sigmaos/share-helper.sock",
     account: {
       username: "sigma-share",
       password
@@ -5058,7 +5066,7 @@ class FakeDockerEngine implements DockerEngineRuntime {
   }
 }
 
-class FakeShareHelper {
+class FakeShareHostd {
   requests: ShareApplyRequest[] = [];
   failApply = false;
 

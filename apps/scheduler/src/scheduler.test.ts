@@ -49,13 +49,13 @@ beforeEach(async () => {
     },
     shares: {
       enabled: false,
-      helperSocketPath: "/run/sigmaos/share-helper.sock",
       account: {
         username: "sigma-share",
         password: null
       },
       shares: []
     },
+    hostd: { socketPath: "/tmp/hostd.sock" },
     terminal: { user: "test-user", helperSocketPath: "/tmp/terminal-helper.sock" },
     player: { enabled: false, helperSocketPath: "/tmp/player-helper.sock", videoOutput: "drm", drmConnector: null, audioOutput: "alsa", audioDevice: null, hwdec: "auto-safe", user: "sigmaos" },
     nasRoots: [{ id: "local", name: "Local", path: rootDir }]

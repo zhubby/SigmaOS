@@ -20,7 +20,6 @@ describe("share settings form helpers", () => {
   it("hydrates public settings without exposing a password", () => {
     const settings: ShareSettings = {
       enabled: true,
-      helperSocketPath: "/run/sigmaos/share-helper.sock",
       account: {
         username: "sigma-share",
         passwordConfigured: true
@@ -95,7 +94,6 @@ describe("share settings form helpers", () => {
 
     const input = shareFormToInput({
       enabled: true,
-      helperSocketPath: "/run/sigmaos/share-helper.sock",
       account: {
         username: "sigma-share",
         password: "new-secret",
@@ -130,7 +128,6 @@ describe("share settings form helpers", () => {
     const issues = validateShareForm(
       {
         enabled: true,
-        helperSocketPath: "/run/sigmaos/share-helper.sock",
         account: {
           username: "sigma-share",
           password: "",

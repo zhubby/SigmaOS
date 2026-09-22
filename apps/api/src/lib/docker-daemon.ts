@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-import http from "node:http";
 import { promisify } from "node:util";
 import type {
   DockerDaemonConfigSnapshot,
@@ -8,10 +7,11 @@ import type {
   DockerDaemonStatus
 } from "@sigmaos/shared";
 import type { SystemCommandRunner } from "./system-management.js";
+import { HostdClient, HostdRequestError } from "./hostd-client.js";
 
 const execFileAsync = promisify(execFile);
 const COMMAND_TIMEOUT_MS = 5_000;
-const HELPER_TIMEOUT_MS = 35_000;
+const HOSTD_TIMEOUT_MS = 35_000;
 const MAX_CONFIG_BYTES = 256 * 1024;
 
 export interface DockerDaemonRuntime {
@@ -20,15 +20,15 @@ export interface DockerDaemonRuntime {
   updateConfig(input: DockerDaemonConfigUpdateInput): Promise<DockerDaemonConfigUpdateResult>;
 }
 
-export interface DockerDaemonHelperClient {
+export interface DockerDaemonHostdClient {
   read(): Promise<DockerDaemonConfigSnapshot>;
   update(input: DockerDaemonConfigUpdateInput): Promise<DockerDaemonConfigUpdateResult>;
 }
 
 export interface DockerDaemonRuntimeOptions {
   commandRunner?: SystemCommandRunner;
-  helper?: DockerDaemonHelperClient;
-  helperSocketPath: string;
+  hostd?: DockerDaemonHostdClient;
+  hostdSocketPath: string;
 }
 
 export class DockerDaemonRequestError extends Error {
@@ -60,8 +60,12 @@ class NodeDockerDaemonCommandRunner implements SystemCommandRunner {
   }
 }
 
-export class HttpDockerDaemonHelperClient implements DockerDaemonHelperClient {
-  constructor(private readonly socketPath: string) {}
+export class HostdDockerDaemonClient implements DockerDaemonHostdClient {
+  private readonly client: HostdClient;
+
+  constructor(socketPath: string) {
+    this.client = new HostdClient(socketPath);
+  }
 
   read(): Promise<DockerDaemonConfigSnapshot> {
     return this.request<DockerDaemonConfigSnapshot>({ action: "read" });
@@ -71,55 +75,28 @@ export class HttpDockerDaemonHelperClient implements DockerDaemonHelperClient {
     return this.request<DockerDaemonConfigUpdateResult>({ action: "update", input });
   }
 
-  private request<T>(payload: unknown): Promise<T> {
-    const body = JSON.stringify(payload);
-    return new Promise((resolve, reject) => {
-      const request = http.request(
-        {
-          socketPath: this.socketPath,
-          path: "/docker-daemon",
-          method: "POST",
-          timeout: HELPER_TIMEOUT_MS,
-          headers: {
-            "content-type": "application/json",
-            "content-length": Buffer.byteLength(body)
-          }
-        },
-        (response) => {
-          const chunks: Buffer[] = [];
-          response.on("data", (chunk: Buffer) => chunks.push(chunk));
-          response.on("end", () => {
-            const raw = Buffer.concat(chunks).toString("utf8");
-            const parsed = parseJson(raw);
-            const statusCode = response.statusCode ?? 500;
-            if (statusCode >= 400) {
-              reject(
-                new DockerDaemonRequestError(
-                  errorFromResponse(parsed),
-                  statusCode,
-                  updateResultFromResponse(parsed)
-                )
-              );
-              return;
-            }
-            resolve(parsed as T);
-          });
-        }
-      );
-      request.on("timeout", () => request.destroy(new Error("Docker daemon helper timed out")));
-      request.on("error", () => reject(new DockerDaemonRequestError("Docker daemon helper is unavailable", 503)));
-      request.end(body);
-    });
+  async request<T>(payload: unknown): Promise<T> {
+    try {
+      return await this.client.request("docker.daemon", payload, HOSTD_TIMEOUT_MS);
+    } catch (error) {
+      if (error instanceof HostdRequestError) {
+        const result = isRecord(error.details.result)
+          ? (error.details.result as unknown as DockerDaemonConfigUpdateResult)
+          : undefined;
+        throw new DockerDaemonRequestError(safeDockerDaemonMessage(error), error.statusCode, result);
+      }
+      throw new DockerDaemonRequestError("hostd is unavailable", 503);
+    }
   }
 }
 
 export class SystemDockerDaemonRuntime implements DockerDaemonRuntime {
   private readonly commandRunner: SystemCommandRunner;
-  private readonly helper: DockerDaemonHelperClient;
+  private readonly hostd: DockerDaemonHostdClient;
 
   constructor(options: DockerDaemonRuntimeOptions) {
     this.commandRunner = options.commandRunner ?? new NodeDockerDaemonCommandRunner();
-    this.helper = options.helper ?? new HttpDockerDaemonHelperClient(options.helperSocketPath);
+    this.hostd = options.hostd ?? new HostdDockerDaemonClient(options.hostdSocketPath);
   }
 
   getStatus(): Promise<DockerDaemonStatus> {
@@ -127,11 +104,11 @@ export class SystemDockerDaemonRuntime implements DockerDaemonRuntime {
   }
 
   getConfig(): Promise<DockerDaemonConfigSnapshot> {
-    return this.helper.read();
+    return this.hostd.read();
   }
 
   updateConfig(input: DockerDaemonConfigUpdateInput): Promise<DockerDaemonConfigUpdateResult> {
-    return this.helper.update(validateDockerDaemonConfigUpdate(input));
+    return this.hostd.update(validateDockerDaemonConfigUpdate(input));
   }
 }
 
@@ -242,26 +219,6 @@ export function safeDockerDaemonMessage(error: unknown): string {
 
 function nullable(value: string | undefined): string | null {
   return value ? value : null;
-}
-
-function parseJson(raw: string): unknown {
-  try {
-    return JSON.parse(raw) as unknown;
-  } catch {
-    return {};
-  }
-}
-
-function errorFromResponse(value: unknown): string {
-  return isRecord(value) && typeof value.error === "string"
-    ? safeDockerDaemonMessage(value.error)
-    : "Docker daemon helper request failed";
-}
-
-function updateResultFromResponse(value: unknown): DockerDaemonConfigUpdateResult | undefined {
-  return isRecord(value) && isRecord(value.result)
-    ? (value.result as unknown as DockerDaemonConfigUpdateResult)
-    : undefined;
 }
 
 function errorOutput(error: unknown, field: "stdout" | "stderr"): string {

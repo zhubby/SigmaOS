@@ -19,7 +19,7 @@ SigmaOS is under active v1 development. The file workspace, agent job pipeline, 
 The following surfaces are intentionally limited today:
 
 - Virtual machine management supports libvirt/QEMU host discovery and approval-gated lifecycle operations when the optional runtime is installed.
-- Network and storage management are observational; the API does not apply host configuration.
+- Network inspection remains available on every supported backend; NetworkManager Wi-Fi/hotspot changes and approved storage-pool operations are applied through `sigmaos-hostd` when their host dependencies are available.
 - OCR is reserved as an indexer hook but is not implemented.
 - Local restic backup is opt-in; after explicit repository initialization, daily/weekly services perform encrypted snapshots and staging-only restore.
 - The appliance builder produces a generic root filesystem tarball, not a board-specific boot image.
@@ -54,13 +54,13 @@ The following surfaces are intentionally limited today:
 - Read-only CPU, memory, process, runtime, storage, SMART, RAID, mount, and network reporting.
 - A local PTY terminal over WebSocket using a separately configured non-root host user (the API remains `sigmaos`).
 - Optional Docker Engine and Compose discovery, metrics, logs, lifecycle actions, direct container/volume/network creation, and one-time approved console sessions.
-- Approval-gated SMB, WebDAV, FTP, NFS, and DLNA share configuration through a separate privileged helper.
+- Approval-gated SMB, WebDAV, FTP, NFS, and DLNA share configuration through the privileged Rust `sigmaos-hostd` daemon.
 - English and Simplified Chinese UI, light/dark themes, preview limits, and editor font settings.
 
 ### Native appliance services
 
 - Debian package definitions for `amd64` and `arm64` release artifacts.
-- Hardened `systemd` units for the API, worker, indexer, scheduler, maintenance, and share helper.
+- Hardened `systemd` units for the API, worker, indexer, scheduler, maintenance, and `sigmaos-hostd`.
 - Timers for indexing every 30 minutes, scheduled reports every 6 hours, daily/weekly restic backups, health evaluation every 15 minutes, and daily maintenance.
 - A Debian Bookworm rootfs scaffold built with `mmdebstrap` and `systemd-nspawn`.
 
@@ -78,7 +78,7 @@ flowchart LR
   Tools["Path-safe NAS tools"]
   Roots[("Configured NAS roots")]
   Host["Linux, PTY, Docker socket"]
-  Helper["Privileged share helper"]
+  Hostd["Rust host integration daemon"]
 
   Browser -->|REST| API
   API -->|SSE events| Browser
@@ -95,8 +95,8 @@ flowchart LR
   API --> Host
   API -->|Unix socket| TerminalBroker[Terminal broker]
   TerminalBroker -->|PTY as configured user| Host
-  API -->|Unix socket| Helper
-  Helper --> Host
+  API -->|JSONL Unix socket| Hostd
+  Hostd --> Host
 ```
 
 The main runtime components are:
@@ -108,7 +108,7 @@ The main runtime components are:
 | `apps/worker` | Claims queued jobs, runs agent turns, persists events, and pauses work for approvals. |
 | `apps/indexer` | Walks NAS roots, hashes files, extracts bounded text, and maintains the FTS index. |
 | `apps/scheduler` | Generates duplicate, backup, provider, and health reports; checkpoints and optimizes SQLite. |
-| `apps/share-helper` | Applies approved host share configuration through a restricted Unix socket service. |
+| `apps/hostd` | Rust host integration daemon for approved shares, storage, Docker daemon, and NetworkManager changes. |
 | `apps/terminal-helper` | Runs WebSocket terminal PTYs as the configured non-root passwd user. |
 | `packages/agent` | Pi SDK integration, NAS-scoped tools, session persistence, and tool policy enforcement. |
 | `packages/db` | SQLite connection, migrations, repositories, job queue, approvals, operations, and FTS queries. |
@@ -136,7 +136,7 @@ SigmaOS currently assumes a trusted, single-user appliance. It has no multi-user
 - Approved file changes are audited. Trash uses a SigmaOS-managed quarantine area, and v1 never permanently deletes it during maintenance.
 - Docker management is disabled by default. Access to `/var/run/docker.sock` is effectively root-equivalent.
 - The local terminal is a real interactive login shell running through `apps/terminal-helper` as the configured non-root passwd user. The API service itself remains `sigmaos`; `NoNewPrivileges` on the broker prevents terminal `sudo` escalation.
-- Share changes are isolated in `apps/share-helper`, which writes allowlisted host configuration files and reloads allowlisted services.
+- Privileged host changes are isolated in Rust `apps/hostd`, which accepts versioned JSONL requests over an authenticated Unix socket and only performs allowlisted operations.
 
 Always configure at least one explicit NAS root. When no root is provided, the development fallback is the host filesystem root.
 
@@ -146,6 +146,7 @@ For application development:
 
 - Node.js 22 or newer
 - npm (the version bundled with Node.js 22 is supported)
+- Rust 1.95.0 (pinned by `rust-toolchain.toml`)
 - A compiler toolchain supported by the native `better-sqlite3` and `node-pty` dependencies when prebuilt binaries are unavailable
 
 Optional host tools enable additional features:
@@ -156,7 +157,7 @@ Optional host tools enable additional features:
 | Video transcoding | `ffmpeg` |
 | Archive extraction | `gzip`, `unzip`, `tar`, `bsdtar`, or `unrar` as appropriate |
 | Storage and network inspection | `ip`, `lsblk`, `findmnt`, `mdadm`, `smartctl` |
-| Share management | Samba, Apache WebDAV, vsftpd, NFS server, MiniDLNA, and the packaged share helper |
+| Share management | Samba, Apache WebDAV, vsftpd, NFS server, MiniDLNA, and the packaged `sigmaos-hostd` daemon |
 | Docker management | Docker Engine socket access and the Docker CLI for Compose actions; enable explicitly on an appliance |
 | Virtual machines | `libvirt-daemon-system`, `libvirt-clients`, `qemu-system-arm` and `qemu-efi-aarch64` (arm64) or `qemu-system-x86` (amd64), `qemu-utils`, `virtinst`, and `ipxe-qemu` |
 
@@ -229,9 +230,11 @@ compose_command = "docker"
 operation_timeout_ms = 120000
 console_shells = ["/bin/sh", "/bin/bash"]
 
+[hostd]
+socket_path = "/run/sigmaos/hostd.sock"
+
 [shares]
 enabled = false
-helper_socket_path = "/run/sigmaos/share-helper.sock"
 account_username = "sigma-share"
 
 [[nas_roots]]
@@ -300,7 +303,7 @@ For an `arm64` CM5 (or an `amd64` Debian host), run the host installer from a ch
 sudo SIGMAOS_NAS_ROOT_PATH=/srv/nas packaging/scripts/install.sh
 ```
 
-The installer checks the Debian architecture, switches Debian and Raspberry Pi APT entries to domestic mirrors, installs Node.js 22 from the verified Aliyun Node.js release mirror when needed, and configures npm to use `https://registry.npmmirror.com`. It then installs the native build toolchain, builds the package on the target host, and initializes the first-boot configuration. Building on the target keeps native `better-sqlite3` and `node-pty` binaries compatible with the board. It starts the SigmaOS API, worker, share-helper, terminal-helper, and an Nginx reverse proxy on port 80 by default; indexer, scheduler, maintenance, health, and backup timers are enabled for their scheduled runs. The API remains loopback-only and Nginx is the LAN entry point.
+The installer checks the Debian architecture, switches Debian and Raspberry Pi APT entries to domestic mirrors, installs Node.js 22 from the verified Aliyun Node.js release mirror when needed, installs the pinned Rust 1.95.0 toolchain through rustup, and configures npm to use `https://registry.npmmirror.com`. It then builds the package on the target host and initializes first-boot configuration only for a new installation. Building on the target keeps `sigmaos-hostd`, `better-sqlite3`, and `node-pty` compatible with the board. It starts the SigmaOS API, worker, hostd, terminal-helper, and an Nginx reverse proxy on port 80 by default; indexer, scheduler, maintenance, health, and backup timers are enabled for their scheduled runs. The API remains loopback-only and Nginx is the LAN entry point.
 
 The mirror defaults can be overridden for a private mirror or restored to another mirror with `SIGMAOS_APT_MIRROR`, `SIGMAOS_APT_SECURITY_MIRROR`, `SIGMAOS_RPI_MIRROR`, `SIGMAOS_NODE_MIRROR`, `SIGMAOS_NODE_VERSION`, and `SIGMAOS_NPM_REGISTRY`. The installer only rewrites known Debian/Raspberry Pi URIs, saves original source files under `/var/backups/sigmaos-apt`, preserves `signed-by`, suites, components, and unrelated sources, and disables any NodeSource entry after switching to the domestic Node.js binary distribution. To restore an original source, copy its backup from `/var/backups/sigmaos-apt` back to `/etc/apt/sources.list.d` (or uncomment the marked NodeSource line) before running the installer again with an explicit `SIGMAOS_NODE_MIRROR`.
 
@@ -318,9 +321,9 @@ Optional integrations are listed as Debian `Suggests` rather than hard dependenc
 apps/
   api/            Fastify API and host adapters
   backup/         Restic validate, backup, check, and staging restore CLI
+  hostd/          Rust privileged host integration daemon
   indexer/        NAS scanner and SQLite FTS indexer
   scheduler/      Reports and database maintenance
-  share-helper/   Privileged share configuration service
   web/            React/Vite user interface
   worker/         Agent job processor
 packages/

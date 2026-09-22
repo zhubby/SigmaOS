@@ -349,9 +349,12 @@ export interface ShareDefinitionConfig {
 
 export interface ShareConfig {
   enabled: boolean;
-  helperSocketPath: string;
   account: ShareAccountConfig;
   shares: ShareDefinitionConfig[];
+}
+
+export interface HostdConfig {
+  socketPath: string;
 }
 
 export interface TerminalConfig {
@@ -420,6 +423,7 @@ export interface SigmaConfig {
   };
   docker: DockerConfig;
   vm?: VmConfig;
+  hostd: HostdConfig;
   shares: ShareConfig;
   terminal: TerminalConfig;
   player: PlayerConfig;
@@ -723,7 +727,7 @@ export interface SystemWifiStatus {
   collectedAt: string;
   backend: SystemNetworkBackend;
   radioEnabled: boolean | null;
-  helperReady: boolean;
+  hostdReady: boolean;
   devices: SystemWifiDevice[];
   hotspots: SystemWifiHotspot[];
 }
@@ -807,7 +811,7 @@ export interface SystemNetworkSummary {
     canConfigureVlan: false;
     canManageWifi: boolean;
     canManageHotspot: boolean;
-    helperReady: boolean;
+    hostdReady: boolean;
   };
   metrics: {
     interfaces: number;

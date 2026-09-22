@@ -51,6 +51,16 @@ describe("release versioning", () => {
     expect(state.debianChangelog).toContain("* Add release traceability.");
   });
 
+  it("ignores non-npm directories matched by a workspace glob", async () => {
+    const state = await readVersionState(fixtureRoot);
+
+    expect(state.manifests.map(({ relativePath }) => relativePath)).toEqual([
+      "package.json",
+      "apps/api/package.json",
+      "packages/shared/package.json"
+    ]);
+  });
+
   it("does not write files during dry-run preparation", async () => {
     const before = await readFile(path.join(fixtureRoot, "package.json"), "utf8");
     const result = await prepareRelease(fixtureRoot, {
@@ -80,6 +90,7 @@ describe("release versioning", () => {
 async function writeFixture(root) {
   await Promise.all([
     mkdir(path.join(root, "apps/api"), { recursive: true }),
+    mkdir(path.join(root, "apps/hostd"), { recursive: true }),
     mkdir(path.join(root, "packages/shared"), { recursive: true }),
     mkdir(path.join(root, "packaging/debian"), { recursive: true }),
     mkdir(path.join(root, "packaging/appliance"), { recursive: true })

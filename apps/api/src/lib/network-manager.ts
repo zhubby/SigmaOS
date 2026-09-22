@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
 import { readlink } from "node:fs/promises";
-import http from "node:http";
 import path from "node:path";
 import { promisify } from "node:util";
 import type {
@@ -21,10 +20,11 @@ import type {
   SystemWifiSummary
 } from "@sigmaos/shared";
 import type { SystemCommandRunner } from "./system-management.js";
+import { HostdClient, HostdRequestError } from "./hostd-client.js";
 
 const execFileAsync = promisify(execFile);
 const COMMAND_TIMEOUT_MS = 5_000;
-const HELPER_TIMEOUT_MS = 35_000;
+const HOSTD_TIMEOUT_MS = 35_000;
 
 interface ManagedProfileInspection {
   id: string;
@@ -40,21 +40,21 @@ interface ManagedProfileInspection {
   revision: string;
 }
 
-interface HelperInspection {
+interface HostdInspection {
   profiles: ManagedProfileInspection[];
   recovery: Record<string, { restoreProfileId: string | null; hotspotProfileId: string }>;
 }
 
-interface HelperMutationResult {
+interface HostdMutationResult {
   rollback: SystemWifiOperationResult["rollback"];
   message: string | null;
 }
 
-export interface NetworkManagerHelperClient {
+export interface NetworkManagerHostdClient {
   ping(): Promise<boolean>;
-  inspect(): Promise<HelperInspection>;
+  inspect(): Promise<HostdInspection>;
   scan(input: SystemWifiScanInput): Promise<SystemWifiScanResult>;
-  mutate(payload: unknown): Promise<HelperMutationResult>;
+  mutate(payload: unknown): Promise<HostdMutationResult>;
 }
 
 export interface NetworkManagerRuntime {
@@ -74,8 +74,8 @@ export interface NetworkManagerRuntime {
 
 export interface SystemNetworkManagerRuntimeOptions {
   commandRunner?: SystemCommandRunner;
-  helper?: NetworkManagerHelperClient;
-  helperSocketPath: string;
+  hostd?: NetworkManagerHostdClient;
+  hostdSocketPath: string;
 }
 
 export class NetworkManagerRequestError extends Error {
@@ -99,15 +99,19 @@ class NodeNetworkCommandRunner implements SystemCommandRunner {
   }
 }
 
-export class HttpNetworkManagerHelperClient implements NetworkManagerHelperClient {
-  constructor(private readonly socketPath: string) {}
+export class HostdNetworkManagerClient implements NetworkManagerHostdClient {
+  private readonly client: HostdClient;
+
+  constructor(socketPath: string) {
+    this.client = new HostdClient(socketPath);
+  }
 
   async ping(): Promise<boolean> {
     await this.request({ action: "ping" });
     return true;
   }
 
-  inspect(): Promise<HelperInspection> {
+  inspect(): Promise<HostdInspection> {
     return this.request({ action: "inspect" });
   }
 
@@ -115,64 +119,38 @@ export class HttpNetworkManagerHelperClient implements NetworkManagerHelperClien
     return this.request({ action: "scan", input });
   }
 
-  mutate(payload: unknown): Promise<HelperMutationResult> {
+  mutate(payload: unknown): Promise<HostdMutationResult> {
     return this.request(payload);
   }
 
-  private request<T>(payload: unknown): Promise<T> {
-    const body = JSON.stringify(payload);
-    return new Promise((resolve, reject) => {
-      const request = http.request(
-        {
-          socketPath: this.socketPath,
-          path: "/network-manager",
-          method: "POST",
-          timeout: HELPER_TIMEOUT_MS,
-          headers: {
-            "content-type": "application/json",
-            "content-length": Buffer.byteLength(body)
-          }
-        },
-        (response) => {
-          const chunks: Buffer[] = [];
-          response.on("data", (chunk: Buffer) => chunks.push(chunk));
-          response.on("end", () => {
-            const parsed = parseJson(Buffer.concat(chunks).toString("utf8"));
-            const statusCode = response.statusCode ?? 500;
-            if (statusCode >= 400) {
-              const record = isRecord(parsed) ? parsed : {};
-              reject(
-                new NetworkManagerRequestError(
-                  typeof record.error === "string" ? safeNetworkManagerMessage(record.error) : "NetworkManager helper request failed",
-                  statusCode,
-                  validRollback(record.rollback) ? record.rollback : "not_required"
-                )
-              );
-              return;
-            }
-            resolve(parsed as T);
-          });
-        }
-      );
-      request.on("timeout", () => request.destroy(new Error("NetworkManager helper timed out")));
-      request.on("error", () => reject(new NetworkManagerRequestError("NetworkManager helper is unavailable", 503)));
-      request.end(body);
-    });
+  async request<T>(payload: unknown): Promise<T> {
+    try {
+      return await this.client.request("network.manager", payload, HOSTD_TIMEOUT_MS);
+    } catch (error) {
+      if (error instanceof HostdRequestError) {
+        throw new NetworkManagerRequestError(
+          safeNetworkManagerMessage(error),
+          error.statusCode,
+          validRollback(error.details.rollback) ? error.details.rollback : "not_required"
+        );
+      }
+      throw new NetworkManagerRequestError("hostd is unavailable", 503);
+    }
   }
 }
 
 export class SystemNetworkManagerRuntime implements NetworkManagerRuntime {
   private readonly commandRunner: SystemCommandRunner;
-  private readonly helper: NetworkManagerHelperClient;
+  private readonly hostd: NetworkManagerHostdClient;
 
   constructor(options: SystemNetworkManagerRuntimeOptions) {
     this.commandRunner = options.commandRunner ?? new NodeNetworkCommandRunner();
-    this.helper = options.helper ?? new HttpNetworkManagerHelperClient(options.helperSocketPath);
+    this.hostd = options.hostd ?? new HostdNetworkManagerClient(options.hostdSocketPath);
   }
 
   async getStatus(): Promise<SystemWifiStatus> {
     const [inspection, managementDevices] = await Promise.all([
-      this.helper.inspect().catch(() => null),
+      this.hostd.inspect().catch(() => null),
       collectDefaultRouteDevices(this.commandRunner)
     ]);
     return collectNetworkManagerStatus(this.commandRunner, inspection, managementDevices);
@@ -180,7 +158,7 @@ export class SystemNetworkManagerRuntime implements NetworkManagerRuntime {
 
   async getSummary(): Promise<SystemWifiSummary> {
     const [inspection, managementDevices] = await Promise.all([
-      this.helper.inspect().catch(() => null),
+      this.hostd.inspect().catch(() => null),
       collectDefaultRouteDevices(this.commandRunner)
     ]);
     const status = await collectNetworkManagerStatus(this.commandRunner, inspection, managementDevices);
@@ -191,7 +169,7 @@ export class SystemNetworkManagerRuntime implements NetworkManagerRuntime {
 
   async scan(input: SystemWifiScanInput): Promise<SystemWifiScanResult> {
     validateDevice(input.device);
-    const result = await this.helper.scan({ device: input.device });
+    const result = await this.hostd.scan({ device: input.device });
     const summary = await this.getSummary();
     return {
       ...result,
@@ -248,7 +226,7 @@ export class SystemNetworkManagerRuntime implements NetworkManagerRuntime {
   }
 
   private async mutate(payload: unknown): Promise<SystemWifiOperationResult> {
-    const result = await this.helper.mutate(payload);
+    const result = await this.hostd.mutate(payload);
     return {
       status: await this.getStatus(),
       rollback: result.rollback,
@@ -259,7 +237,7 @@ export class SystemNetworkManagerRuntime implements NetworkManagerRuntime {
 
 export async function collectNetworkManagerStatus(
   runner: SystemCommandRunner,
-  inspection: HelperInspection | null,
+  inspection: HostdInspection | null,
   managementDevices: Set<string> = new Set()
 ): Promise<SystemWifiStatus> {
   const collectedAt = new Date().toISOString();
@@ -318,7 +296,7 @@ export async function collectNetworkManagerStatus(
     collectedAt,
     backend: "NetworkManager",
     radioEnabled,
-    helperReady: inspection !== null,
+    hostdReady: inspection !== null,
     devices,
     hotspots: hotspots.map((profile) => ({
       device: profile.device ?? "",
@@ -371,7 +349,7 @@ export function safeNetworkManagerMessage(error: unknown): string {
 
 async function collectWifiProfiles(
   runner: SystemCommandRunner,
-  inspection: HelperInspection | null,
+  inspection: HostdInspection | null,
   devices: SystemWifiDevice[]
 ): Promise<SystemWifiProfile[]> {
   const output = await runner.run("nmcli", [
@@ -555,9 +533,9 @@ async function deviceDriver(device: string): Promise<string | null> {
 function unavailableWifiStatus(
   collectedAt: string,
   backend: SystemNetworkBackend,
-  helperReady: boolean
+  hostdReady: boolean
 ): SystemWifiStatus {
-  return { collectedAt, backend, radioEnabled: null, helperReady, devices: [], hotspots: [] };
+  return { collectedAt, backend, radioEnabled: null, hostdReady, devices: [], hotspots: [] };
 }
 
 function normalizeDeviceState(value: string, hotspot: boolean): SystemWifiDevice["state"] {
@@ -608,14 +586,6 @@ function splitNmcliLine(line: string): string[] {
   }
   fields.push(current);
   return fields;
-}
-
-function parseJson(value: string): unknown {
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    return {};
-  }
 }
 
 function numeric(value: unknown): number | null {

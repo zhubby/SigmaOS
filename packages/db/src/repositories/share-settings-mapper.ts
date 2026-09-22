@@ -19,7 +19,6 @@ export function normalizeShareSettings(
   const account = recordFrom(settings.account);
   return {
     enabled: normalizeBoolean(settings.enabled, false),
-    helperSocketPath: normalizeString(settings.helperSocketPath) ?? "/run/sigmaos/share-helper.sock",
     account: {
       username: normalizeString(account.username) ?? "sigma-share",
       password: normalizeNullableString(account.password)

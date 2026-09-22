@@ -17,6 +17,11 @@ PLAYER_ENABLED="${SIGMAOS_PLAYER_ENABLED:-${SIGMAOS_ENABLE_PLAYER:-0}}"
 PLAYER_USER="${SIGMAOS_PLAYER_USER:-sigmaos}"
 TERMINAL_USER="${SIGMAOS_TERMINAL_USER:-${SUDO_USER:-}}"
 
+if [ -e "$CONFIG_PATH" ] && [ "${SIGMAOS_FIRST_BOOT_FORCE:-0}" != "1" ]; then
+  printf "SigmaOS configuration already exists at %s; preserving it\n" "$CONFIG_PATH"
+  exit 0
+fi
+
 if [ -n "$TERMINAL_USER" ]; then
   case "$TERMINAL_USER" in
     *[!a-zA-Z0-9._-]*|root|sigmaos) printf "SIGMAOS_TERMINAL_USER must name a distinct non-root local user\n" >&2; exit 1 ;;
@@ -117,9 +122,11 @@ iso_roots = ["/srv/iso"]
 operation_timeout_ms = 120000
 console_mode = "serial"
 
+[hostd]
+socket_path = "/run/sigmaos/hostd.sock"
+
 [shares]
 enabled = false
-helper_socket_path = "/run/sigmaos/share-helper.sock"
 account_username = "sigma-share"
 
 [terminal]

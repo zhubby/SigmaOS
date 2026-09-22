@@ -1,7 +1,6 @@
 import { execFile } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import http from "node:http";
 import { promisify } from "node:util";
 import type {
   SystemCollectionIssue,
@@ -25,11 +24,12 @@ import type {
   SystemStorageSummary
 } from "@sigmaos/shared";
 import type { NetworkManagerRuntime } from "./network-manager.js";
+import { HostdClient, HostdRequestError } from "./hostd-client.js";
 
 const execFileAsync = promisify(execFile);
 const COMMAND_TIMEOUT_MS = 5_000;
 const COMMAND_MAX_BUFFER = 4 * 1024 * 1024;
-const STORAGE_HELPER_TIMEOUT_MS = 5_000;
+const HOSTD_TIMEOUT_MS = 5_000;
 
 export interface SystemCommandRunner {
   run(command: string, args: string[]): Promise<string>;
@@ -58,28 +58,29 @@ class NodeSystemCommandRunner implements SystemCommandRunner {
   }
 }
 
-export function createSystemCommandRunner(helperSocketPath?: string): SystemCommandRunner {
+export function createSystemCommandRunner(hostdSocketPath?: string): SystemCommandRunner {
   const fallback = new NodeSystemCommandRunner();
-  if (!helperSocketPath) {
+  if (!hostdSocketPath) {
     return fallback;
   }
-  return new HybridSystemCommandRunner(helperSocketPath, fallback);
+  return new HybridSystemCommandRunner(hostdSocketPath, fallback);
 }
 
 class HybridSystemCommandRunner implements SystemCommandRunner {
-  constructor(
-    private readonly helperSocketPath: string,
-    private readonly fallback: SystemCommandRunner
-  ) {}
+  private readonly client: HostdClient;
+
+  constructor(hostdSocketPath: string, private readonly fallback: SystemCommandRunner) {
+    this.client = new HostdClient(hostdSocketPath);
+  }
 
   async run(command: string, args: string[]): Promise<string> {
     if (command !== "mdadm" && command !== "smartctl") {
       return this.fallback.run(command, args);
     }
     try {
-      return await requestStorageHelper(this.helperSocketPath, command, args);
+      return await requestStorageHostd(this.client, command, args);
     } catch (error) {
-      if (isMissingStorageHelper(error)) {
+      if (isMissingHostd(error)) {
         return this.fallback.run(command, args);
       }
       throw error;
@@ -87,62 +88,25 @@ class HybridSystemCommandRunner implements SystemCommandRunner {
   }
 }
 
-function requestStorageHelper(
-  socketPath: string,
+async function requestStorageHostd(
+  client: HostdClient,
   command: "mdadm" | "smartctl",
   args: string[]
 ): Promise<string> {
-  const body = JSON.stringify({ command, args });
-  return new Promise((resolve, reject) => {
-    const request = http.request(
-      {
-        socketPath,
-        path: "/storage-command",
-        method: "POST",
-        timeout: STORAGE_HELPER_TIMEOUT_MS,
-        headers: {
-          "content-type": "application/json",
-          "content-length": Buffer.byteLength(body)
-        }
-      },
-      (response) => {
-        const chunks: Buffer[] = [];
-        response.on("data", (chunk: Buffer) => chunks.push(chunk));
-        response.on("end", () => {
-          const raw = Buffer.concat(chunks).toString("utf8");
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(raw) as unknown;
-          } catch {
-            reject(new Error("Invalid response from storage helper"));
-            return;
-          }
-          if ((response.statusCode ?? 500) >= 400) {
-            reject(new Error(storageHelperError(parsed) ?? "Storage helper request failed"));
-            return;
-          }
-          if (!isRecord(parsed) || typeof parsed.stdout !== "string") {
-            reject(new Error("Invalid response from storage helper"));
-            return;
-          }
-          resolve(parsed.stdout);
-        });
-      }
-    );
-
-    request.on("timeout", () => request.destroy(new Error("Storage helper timed out")));
-    request.on("error", reject);
-    request.end(body);
-  });
+  const result = await client.request<{ stdout: string }>(
+    "storage.command",
+    { command, args },
+    HOSTD_TIMEOUT_MS
+  );
+  if (!result || typeof result.stdout !== "string") {
+    throw new Error("Invalid response from hostd");
+  }
+  return result.stdout;
 }
 
-function isMissingStorageHelper(error: unknown): boolean {
-  const code = isRecord(error) && typeof error.code === "string" ? error.code : null;
+function isMissingHostd(error: unknown): boolean {
+  const code = error instanceof HostdRequestError ? error.socketCode : null;
   return code === "ENOENT" || code === "ECONNREFUSED" || code === "ENXIO";
-}
-
-function storageHelperError(value: unknown): string | null {
-  return isRecord(value) && typeof value.error === "string" ? value.error : null;
 }
 
 interface CommandResult<T> {
@@ -207,16 +171,16 @@ export async function collectSystemNetwork(
     status,
     capabilities: {
       backend: wifi.backend,
-      canApplyConfiguration: wifi.backend === "NetworkManager" && wifi.helperReady,
+      canApplyConfiguration: wifi.backend === "NetworkManager" && wifi.hostdReady,
       canConfigureBridge: false,
       canConfigureBond: false,
       canConfigureVlan: false,
-      canManageWifi: wifi.backend === "NetworkManager" && wifi.helperReady && wifi.devices.length > 0,
+      canManageWifi: wifi.backend === "NetworkManager" && wifi.hostdReady && wifi.devices.length > 0,
       canManageHotspot:
         wifi.backend === "NetworkManager" &&
-        wifi.helperReady &&
+        wifi.hostdReady &&
         wifi.devices.some((device) => device.capabilities.accessPoint),
-      helperReady: wifi.helperReady
+      hostdReady: wifi.hostdReady
     },
     metrics: {
       interfaces: interfaces.length,
@@ -236,7 +200,7 @@ function unavailableWifiSummary(): SystemNetworkSummary["wifi"] {
     collectedAt: new Date().toISOString(),
     backend: "unknown",
     radioEnabled: null,
-    helperReady: false,
+    hostdReady: false,
     devices: [],
     hotspots: [],
     profiles: []

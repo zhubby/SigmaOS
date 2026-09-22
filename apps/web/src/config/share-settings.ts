@@ -69,7 +69,6 @@ export interface ShareDefinitionFormState {
 
 export interface ShareSettingsFormState {
   enabled: boolean;
-  helperSocketPath: string;
   account: ShareAccountFormState;
   shares: ShareDefinitionFormState[];
   updatedAt: string;
@@ -107,7 +106,6 @@ const SHARE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/u;
 export function shareSettingsToForm(settings: ShareSettings | null, roots: NasRoot[] = []): ShareSettingsFormState {
   return {
     enabled: settings?.enabled ?? false,
-    helperSocketPath: settings?.helperSocketPath ?? "/run/sigmaos/share-helper.sock",
     account: {
       username: settings?.account.username ?? "sigma-share",
       password: "",
@@ -212,7 +210,6 @@ export function shareFormToInput(form: ShareSettingsFormState): ShareSettingsInp
 
   return {
     enabled: form.enabled,
-    helperSocketPath: form.helperSocketPath.trim() || "/run/sigmaos/share-helper.sock",
     account,
     shares: form.shares.map((share, index) => {
       const id = share.id.trim() || `share-${index + 1}`;

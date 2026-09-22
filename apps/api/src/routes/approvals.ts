@@ -219,7 +219,7 @@ export function registerApprovalRoutes(server: FastifyInstance, context: ApiRout
       }
 
       try {
-        const metadata = await applyStoragePoolOperation(config.shares.helperSocketPath, proposal);
+        const metadata = await applyStoragePoolOperation(config.hostd.socketPath, proposal);
         const applied = updateStorageOperationStatus(db, operation.id, "applied", {
           ...metadata,
           appliedAt: new Date().toISOString()

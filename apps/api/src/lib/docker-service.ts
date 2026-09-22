@@ -37,7 +37,7 @@ export async function collectDockerSummary(
   config: SigmaConfig,
   dependencies?: DockerRuntimeDependencies
 ): Promise<DockerSummary> {
-  const daemon = dependencies?.daemon ?? new SystemDockerDaemonRuntime({ helperSocketPath: config.shares.helperSocketPath });
+  const daemon = dependencies?.daemon ?? new SystemDockerDaemonRuntime({ hostdSocketPath: config.hostd.socketPath });
   const daemonStatus = await daemon.getStatus();
   if (!config.docker.enabled) {
     return dockerUnavailableSummary(config.docker, "disabled", null, daemonStatus);

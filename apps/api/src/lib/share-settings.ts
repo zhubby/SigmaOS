@@ -1,6 +1,5 @@
 import { stat } from "node:fs/promises";
 import net from "node:net";
-import path from "node:path";
 import { resolveSafeExistingPath } from "@sigmaos/nas-tools";
 import type {
   DlnaMediaType,
@@ -63,7 +62,6 @@ export async function normalizeShareSettingsInput(
 
   return {
     enabled: input?.enabled ?? existing.enabled,
-    helperSocketPath: normalizeHelperSocketPath(input?.helperSocketPath ?? existing.helperSocketPath),
     account: {
       username,
       password
@@ -71,14 +69,6 @@ export async function normalizeShareSettingsInput(
     shares,
     updatedAt: new Date().toISOString()
   };
-}
-
-function normalizeHelperSocketPath(value: string): string {
-  const socketPath = normalizeText(value) ?? "/run/sigmaos/share-helper.sock";
-  if (!path.isAbsolute(socketPath) || socketPath.includes("\0") || socketPath.includes("\n")) {
-    throw new Error("Share helper socket path must be an absolute path");
-  }
-  return socketPath;
 }
 
 async function normalizeShareDefinition(

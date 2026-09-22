@@ -1,4 +1,4 @@
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { access, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const INTERNAL_PACKAGE_PREFIX = "@sigmaos/";
@@ -174,7 +174,13 @@ async function discoverPackageManifests(repoRoot) {
     const entries = await readdir(path.join(repoRoot, workspaceRoot), { withFileTypes: true });
     for (const entry of entries) {
       if (entry.isDirectory()) {
-        manifestPaths.push(path.posix.join(workspaceRoot, entry.name, "package.json"));
+        const manifestPath = path.posix.join(workspaceRoot, entry.name, "package.json");
+        try {
+          await access(path.join(repoRoot, manifestPath));
+          manifestPaths.push(manifestPath);
+        } catch (error) {
+          if (error?.code !== "ENOENT") throw error;
+        }
       }
     }
   }

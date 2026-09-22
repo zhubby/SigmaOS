@@ -86,7 +86,7 @@ check: typecheck lint test ## Run typecheck, lint, and tests.
 ci: check build ## Run the full local verification suite.
 
 clean: ## Remove generated build and packaging artifacts.
-	rm -rf apps/*/dist packages/*/dist coverage .sigmaos/deb-build .sigmaos/appliance
+	rm -rf apps/*/dist packages/*/dist coverage target .sigmaos/deb-build .sigmaos/appliance
 
 deb: ## Build the Debian package artifacts.
 	./packaging/scripts/build-deb.sh

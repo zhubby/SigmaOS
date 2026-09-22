@@ -59,9 +59,11 @@ interface TomlConfig {
     operation_timeout_ms?: number;
     console_mode?: "serial";
   };
+  hostd?: {
+    socket_path?: string;
+  };
   shares?: {
     enabled?: boolean;
-    helper_socket_path?: string;
     account_username?: string;
     items?: Array<{
       id?: string;
@@ -204,12 +206,23 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
       composeRoots: loadDockerComposeRoots(env, fileConfig, workspaceRoot)
     },
     vm: loadVmConfig(env, fileConfig, workspaceRoot),
+    hostd: loadHostdConfig(env, fileConfig),
     shares: loadShareConfig(env, fileConfig),
     terminal: loadTerminalConfig(env, fileConfig),
     player: loadPlayerConfig(env, fileConfig),
     nasRoots,
     backup,
     health
+  };
+}
+
+function loadHostdConfig(env: NodeJS.ProcessEnv, fileConfig: TomlConfig): SigmaConfig["hostd"] {
+  const socketPath =
+    normalizeText(env.SIGMAOS_HOSTD_SOCKET_PATH) ??
+    normalizeText(fileConfig.hostd?.socket_path) ??
+    "/run/sigmaos/hostd.sock";
+  return {
+    socketPath: path.isAbsolute(socketPath) ? socketPath : "/run/sigmaos/hostd.sock"
   };
 }
 
@@ -407,10 +420,6 @@ function loadShareConfig(env: NodeJS.ProcessEnv, fileConfig: TomlConfig): ShareC
   const shares = fileConfig.shares;
   return {
     enabled: toBoolean(env.SIGMAOS_SHARES_ENABLED, shares?.enabled ?? false),
-    helperSocketPath:
-      normalizeText(env.SIGMAOS_SHARE_HELPER_SOCKET_PATH) ??
-      normalizeText(shares?.helper_socket_path) ??
-      "/run/sigmaos/share-helper.sock",
     account: {
       username:
         normalizeText(env.SIGMAOS_SHARE_ACCOUNT_USERNAME) ??

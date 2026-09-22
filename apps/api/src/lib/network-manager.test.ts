@@ -4,7 +4,7 @@ import {
   parseWifiScanOutput,
   safeNetworkManagerMessage,
   SystemNetworkManagerRuntime,
-  type NetworkManagerHelperClient
+  type NetworkManagerHostdClient
 } from "./network-manager.js";
 import type { SystemCommandRunner } from "./system-management.js";
 
@@ -32,7 +32,7 @@ describe("NetworkManager runtime", () => {
     expect(status).toMatchObject({
       backend: "NetworkManager",
       radioEnabled: true,
-      helperReady: true,
+      hostdReady: true,
       devices: [
         {
           name: "wlan0",
@@ -58,7 +58,7 @@ describe("NetworkManager runtime", () => {
     await expect(collectNetworkManagerStatus(runner, null)).resolves.toMatchObject({
       backend: "systemd-networkd",
       radioEnabled: null,
-      helperReady: false,
+      hostdReady: false,
       devices: []
     });
   });
@@ -77,14 +77,14 @@ describe("NetworkManager runtime", () => {
     ]);
   });
 
-  it("preserves helper string errors while redacting credentials", () => {
+  it("preserves hostd string errors while redacting credentials", () => {
     expect(safeNetworkManagerMessage("activation failed: password=top-secret")).toBe(
       "activation failed: password=[redacted]"
     );
   });
 
   it("marks matching scan results with saved profile ids", async () => {
-    const helper = new FakeHelper();
+    const hostd = new FakeHostd();
     const runner = new FakeRunner({
       "ip -j route": "[]",
       "nmcli --terse --escape yes --fields RUNNING,STATE,CONNECTIVITY,WIFI-HW,WIFI general":
@@ -97,7 +97,7 @@ describe("NetworkManager runtime", () => {
       "nmcli --terse --escape yes --fields NAME,UUID,TYPE,AUTOCONNECT,DEVICE,FILENAME connection show":
         `Home:${CLIENT_ID}:wifi:yes:--:/etc/NetworkManager/system-connections/sigmaos-home.nmconnection\n`
     });
-    const runtime = new SystemNetworkManagerRuntime({ commandRunner: runner, helper, helperSocketPath: "/unused" });
+    const runtime = new SystemNetworkManagerRuntime({ commandRunner: runner, hostd, hostdSocketPath: "/unused" });
 
     const result = await runtime.scan({ device: "wlan0" });
 
@@ -106,7 +106,7 @@ describe("NetworkManager runtime", () => {
 
   it("keeps disconnected devices disconnected and resolves external profile details", async () => {
     const externalId = "22345678-1234-4123-8123-123456789abc";
-    const helper = new FakeHelper([], {});
+    const hostd = new FakeHostd([], {});
     const runner = new FakeRunner({
       "ip -j route": "[]",
       "nmcli --terse --escape yes --fields RUNNING,STATE,CONNECTIVITY,WIFI-HW,WIFI general":
@@ -121,7 +121,7 @@ describe("NetworkManager runtime", () => {
       [`nmcli --get-values 802-11-wireless.ssid,802-11-wireless.mode,802-11-wireless-security.key-mgmt connection show uuid ${externalId}`]:
         "Home\ninfrastructure\nwpa-psk\n"
     });
-    const runtime = new SystemNetworkManagerRuntime({ commandRunner: runner, helper, helperSocketPath: "/unused" });
+    const runtime = new SystemNetworkManagerRuntime({ commandRunner: runner, hostd, hostdSocketPath: "/unused" });
 
     const summary = await runtime.getSummary();
 
@@ -148,7 +148,7 @@ class FakeRunner implements SystemCommandRunner {
   }
 }
 
-class FakeHelper implements NetworkManagerHelperClient {
+class FakeHostd implements NetworkManagerHostdClient {
   constructor(
     private readonly profiles = [managedProfile()],
     private readonly recovery: Record<string, { restoreProfileId: string | null; hotspotProfileId: string }> = {}

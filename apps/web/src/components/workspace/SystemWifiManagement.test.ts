@@ -9,7 +9,7 @@ const wifi: NetworkSummary["wifi"] = {
   collectedAt: "2026-09-21T00:00:00.000Z",
   backend: "NetworkManager",
   radioEnabled: true,
-  helperReady: true,
+  hostdReady: true,
   devices: [{
     id: "wlan0",
     name: "wlan0",

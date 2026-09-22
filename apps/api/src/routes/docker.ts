@@ -86,7 +86,7 @@ const DOCKER_DAEMON_HEARTBEAT_MS = 15_000;
 export function registerDockerRoutes(server: FastifyInstance, context: ApiRouteContext): void {
   const { config, db, docker } = context;
   const currentConfig = () => effectiveDockerConfig(config, getDockerSettings(db));
-  const daemon = docker?.daemon ?? new SystemDockerDaemonRuntime({ helperSocketPath: config.shares.helperSocketPath });
+  const daemon = docker?.daemon ?? new SystemDockerDaemonRuntime({ hostdSocketPath: config.hostd.socketPath });
 
   server.get("/api/docker/summary", async () => ({
     summary: await collectDockerSummary(currentConfig(), docker)

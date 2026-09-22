@@ -15,7 +15,7 @@ Agent 事件通过 session SSE stream 传递；terminal、Docker console 和 VM 
 
 ## Wi-Fi 与热点
 
-- `GET /api/system/network` 同时返回内核接口/路由和 NetworkManager 无线摘要。`capabilities.backend` 为 `NetworkManager`、`systemd-networkd` 或 `unknown`；只有 NetworkManager 与 helper 同时可用时才开放写操作。
+- `GET /api/system/network` 同时返回内核接口/路由和 NetworkManager 无线摘要。`capabilities.backend` 为 `NetworkManager`、`systemd-networkd` 或 `unknown`；只有 NetworkManager 与 hostd 同时可用时才开放写操作。
 - `POST /api/system/network/wifi/scan|connect|disconnect` 分别扫描、连接和断开；`PUT /api/system/network/wifi/radio` 切换全局 Wi-Fi radio。
 - `PATCH/DELETE /api/system/network/wifi/profiles/:id` 只允许修改或遗忘 SigmaOS 创建的 profile。外部 profile 可以通过 `connect` 使用，但更新或删除返回 `409`。
 - `PUT /api/system/network/wifi/hotspot` 保存 WPA2 热点；`POST .../hotspot/start|stop` 启停，`DELETE .../hotspot` 删除。热点使用 NetworkManager `ipv4.method=shared`，没有默认上行时仍提供本地网络。
@@ -23,7 +23,7 @@ Agent 事件通过 session SSE stream 传递；terminal、Docker console 和 VM 
 
 写请求最多 64 KiB。SSID 为 1–32 字节；Personal 密码为 8–63 个可打印字符或 64 位十六进制。首期新连接只支持开放、WPA2 Personal 和 WPA3 Personal；WEP、802.1X 和隐藏网络返回 `400`。管理链路切换及破坏性操作要求 `confirmed: true`，它表示 UI 已完成二次确认而不是身份认证。
 
-输入错误为 `400`，缺少设备/profile 为 `404`，外部配置或 revision 冲突为 `409`，NetworkManager 操作或恢复失败为 `502`，后端/helper/依赖不可用为 `503`。所有公开响应、日志和通知禁止包含 Wi-Fi 或热点密码。
+输入错误为 `400`，缺少设备/profile 为 `404`，外部配置或 revision 冲突为 `409`，NetworkManager 操作或恢复失败为 `502`，后端、hostd 或依赖不可用为 `503`。所有公开响应、日志和通知禁止包含 Wi-Fi 或热点密码。
 
 ## Terminal 标签与 WebSocket
 
@@ -46,7 +46,7 @@ Agent 事件通过 session SSE stream 传递；terminal、Docker console 和 VM 
 ## Docker daemon
 
 - `GET /api/docker/daemon/config` 返回固定路径、正文、内容 revision、文件是否存在和是否等待重启。
-- `PUT /api/docker/daemon/config` 接收 `content`、`expectedRevision`、`restart` 和 `confirmed`。正文最多 256 KiB；revision 冲突返回 `409`，JSON 或 dockerd 校验失败返回 `400`，helper 不可用返回 `503`，重启或回滚异常返回 `502` 并携带回滚结果。
+- `PUT /api/docker/daemon/config` 接收 `content`、`expectedRevision`、`restart` 和 `confirmed`。正文最多 256 KiB；revision 冲突返回 `409`，JSON 或 dockerd 校验失败返回 `400`，hostd 不可用返回 `503`，重启或回滚异常返回 `502` 并携带回滚结果。
 - `GET /api/docker/daemon/events` 是独立 SSE stream。连接后立即发送 `docker.daemon.status`，服务端每秒采样 `docker.service`、仅在状态变化时推送，并每 15 秒发送 heartbeat。客户端重连提示为 2 秒。
 
 配置正文、代理凭据和恢复基线不得写入日志或通知。`confirmed: true` 表示 UI 已完成二次确认，不是身份认证机制。

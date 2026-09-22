@@ -9,7 +9,8 @@ STATE_PATH="$BASE_DIR/current-release.json"
 LOCK_PATH=/run/lock/sigmaos-deploy.lock
 
 TIMERS='sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer sigmaos-health.timer sigmaos-backup-daily.timer sigmaos-backup-weekly.timer'
-WRITERS='sigmaos-indexer.service sigmaos-scheduler.service sigmaos-maintenance.service sigmaos-health.service sigmaos-backup-daily.service sigmaos-backup-weekly.service sigmaos-api.service sigmaos-worker@1.service sigmaos-downloader.service sigmaos-share-helper.service sigmaos-terminal-helper.service sigmaos-player-helper.service'
+WRITERS='sigmaos-indexer.service sigmaos-scheduler.service sigmaos-maintenance.service sigmaos-health.service sigmaos-backup-daily.service sigmaos-backup-weekly.service sigmaos-api.service sigmaos-worker@1.service sigmaos-downloader.service sigmaos-hostd.service sigmaos-terminal-helper.service sigmaos-player-helper.service'
+RETIRED_UNITS='sigmaos-share-helper.service'
 
 success=0
 work_dir=
@@ -122,7 +123,7 @@ wait_for_url() {
 
 verify_runtime() {
   log "checking SigmaOS services"
-  for unit in sigmaos-api.service sigmaos-worker@1.service sigmaos-downloader.service sigmaos-share-helper.service sigmaos-terminal-helper.service; do
+  for unit in sigmaos-api.service sigmaos-worker@1.service sigmaos-downloader.service sigmaos-hostd.service sigmaos-terminal-helper.service; do
     systemctl is-active --quiet "$unit" || die "service is not active: $unit"
   done
 
@@ -161,12 +162,12 @@ capture_failure() {
     # does not leave the appliance permanently stopped.
     if [ -n "$state_dir" ] && [ -d "$state_dir" ]; then
       systemctl daemon-reload >/dev/null 2>&1 || true
-      for unit in $WRITERS $TIMERS; do
+      for unit in $WRITERS $TIMERS $RETIRED_UNITS; do
         restore_unit_state "$unit" "$state_dir" >/dev/null 2>&1 || true
       done
     fi
     systemctl --failed --no-legend --plain > "$backup_path/failed-units.txt" 2>&1 || true
-    journalctl -u sigmaos-api.service -u sigmaos-worker@1.service -u sigmaos-share-helper.service -u sigmaos-terminal-helper.service -n 200 --no-pager > "$backup_path/services-journal.txt" 2>&1 || true
+    journalctl -u sigmaos-api.service -u sigmaos-worker@1.service -u sigmaos-hostd.service -u sigmaos-terminal-helper.service -n 200 --no-pager > "$backup_path/services-journal.txt" 2>&1 || true
   fi
   trap - EXIT
   exit "$status"
@@ -238,9 +239,15 @@ backup_path="$BACKUP_DIR/${manifest_tag}-${timestamp}"
 state_dir="$work_dir/systemd-state"
 install -d -o root -g root -m 0700 "$backup_path" "$state_dir"
 
-for unit in $TIMERS $WRITERS; do
+for unit in $TIMERS $WRITERS $RETIRED_UNITS; do
   record_unit_state "$unit" "$state_dir"
 done
+if [ -f "$state_dir/sigmaos-share-helper.service.enabled" ]; then
+  : > "$state_dir/sigmaos-hostd.service.enabled"
+fi
+if [ -f "$state_dir/sigmaos-share-helper.service.active" ]; then
+  : > "$state_dir/sigmaos-hostd.service.active"
+fi
 cp -a "$state_dir" "$backup_path/systemd-state"
 
 if [ -f "$STATE_PATH" ]; then
@@ -263,7 +270,7 @@ NODE
 fi
 
 log "stopping scheduled writers and services"
-for unit in $TIMERS $WRITERS; do
+for unit in $TIMERS $WRITERS $RETIRED_UNITS; do
   stop_unit "$unit"
 done
 

@@ -4,12 +4,16 @@ set -eu
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 ARCH=$(dpkg --print-architecture 2>/dev/null || true)
 NODE_MAJOR_REQUIRED=22
+RUST_VERSION_REQUIRED=1.95.0
 SIGMAOS_APT_MIRROR=${SIGMAOS_APT_MIRROR:-https://mirrors.aliyun.com/debian}
 SIGMAOS_APT_SECURITY_MIRROR=${SIGMAOS_APT_SECURITY_MIRROR:-https://mirrors.aliyun.com/debian-security}
 SIGMAOS_RPI_MIRROR=${SIGMAOS_RPI_MIRROR:-https://mirrors.aliyun.com/raspberrypi}
 SIGMAOS_NODE_MIRROR=${SIGMAOS_NODE_MIRROR:-https://mirrors.aliyun.com/nodejs-release}
 SIGMAOS_NODE_VERSION=${SIGMAOS_NODE_VERSION:-22.23.2}
 SIGMAOS_NPM_REGISTRY=${SIGMAOS_NPM_REGISTRY:-https://registry.npmmirror.com}
+SIGMAOS_RUSTUP_INIT_URL=${SIGMAOS_RUSTUP_INIT_URL:-https://sh.rustup.rs}
+SIGMAOS_CARGO_HOME=${SIGMAOS_CARGO_HOME:-/root/.cargo}
+SIGMAOS_RUSTUP_HOME=${SIGMAOS_RUSTUP_HOME:-/root/.rustup}
 SIGMAOS_APT_BACKUP_DIR=${SIGMAOS_APT_BACKUP_DIR:-/var/backups/sigmaos-apt}
 SIGMAOS_LOCALE=${SIGMAOS_LOCALE:-C.UTF-8}
 NGINX_ENABLED=${SIGMAOS_ENABLE_NGINX:-1}
@@ -20,6 +24,10 @@ PLAYER_USER=${SIGMAOS_PLAYER_USER:-sigmaos}
 TERMINAL_USER=${SIGMAOS_TERMINAL_USER:-${SUDO_USER:-}}
 DEBIAN_FRONTEND=noninteractive
 export DEBIAN_FRONTEND
+export CARGO_HOME="$SIGMAOS_CARGO_HOME"
+export RUSTUP_HOME="$SIGMAOS_RUSTUP_HOME"
+PATH="$CARGO_HOME/bin:$PATH"
+export PATH
 
 SIGMAOS_APT_MIRROR=${SIGMAOS_APT_MIRROR%/}
 SIGMAOS_APT_SECURITY_MIRROR=${SIGMAOS_APT_SECURITY_MIRROR%/}
@@ -108,6 +116,9 @@ esac
 [ -n "$SIGMAOS_NODE_MIRROR" ] || die "SIGMAOS_NODE_MIRROR must not be empty"
 [ -n "$SIGMAOS_NODE_VERSION" ] || die "SIGMAOS_NODE_VERSION must not be empty"
 [ -n "$SIGMAOS_NPM_REGISTRY" ] || die "SIGMAOS_NPM_REGISTRY must not be empty"
+[ -n "$SIGMAOS_RUSTUP_INIT_URL" ] || die "SIGMAOS_RUSTUP_INIT_URL must not be empty"
+[ -n "$SIGMAOS_CARGO_HOME" ] || die "SIGMAOS_CARGO_HOME must not be empty"
+[ -n "$SIGMAOS_RUSTUP_HOME" ] || die "SIGMAOS_RUSTUP_HOME must not be empty"
 [ -n "$SIGMAOS_APT_BACKUP_DIR" ] || die "SIGMAOS_APT_BACKUP_DIR must not be empty"
 [ -n "$SIGMAOS_LOCALE" ] || die "SIGMAOS_LOCALE must not be empty"
 [ -n "$TERMINAL_USER" ] || die "set SIGMAOS_TERMINAL_USER or run through sudo from a non-root user"
@@ -144,8 +155,22 @@ install_build_dependencies() {
     apt_install remove -y nodejs
   fi
   apt_install install -y --no-install-recommends \
-    ca-certificates curl build-essential debhelper dpkg-dev fakeroot rsync \
+    ca-certificates curl build-essential cargo rustc debhelper dpkg-dev fakeroot rsync \
     nodejs npm xz-utils
+}
+
+install_rust_toolchain() {
+  if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
+    log "installing rustup"
+    rustup_init=$(mktemp)
+    curl -fsSL "$SIGMAOS_RUSTUP_INIT_URL" -o "$rustup_init"
+    sh "$rustup_init" -y --profile minimal --default-toolchain "$RUST_VERSION_REQUIRED"
+    rm -f "$rustup_init"
+  fi
+  "$CARGO_HOME/bin/rustup" toolchain install "$RUST_VERSION_REQUIRED" --profile minimal
+  "$CARGO_HOME/bin/rustup" default "$RUST_VERSION_REQUIRED"
+  rustc --version | grep -Eq "^rustc ${RUST_VERSION_REQUIRED} " \
+    || die "Rust ${RUST_VERSION_REQUIRED} is required; found $(rustc --version 2>/dev/null || printf 'none')"
 }
 
 install_optional_runtime() {
@@ -241,8 +266,14 @@ fi
 
 node --version | grep -Eq '^v22\.' || die "Node.js 22 is required; found $(node --version 2>/dev/null || printf 'none')"
 install_build_dependencies
+install_rust_toolchain
 npm config set registry "$SIGMAOS_NPM_REGISTRY" --global
 install_optional_runtime
+
+SIGMAOS_CONFIG_EXISTS=0
+if [ -e /etc/sigmaos/config.toml ]; then
+  SIGMAOS_CONFIG_EXISTS=1
+fi
 
 log "building the native ${ARCH} Debian package"
 "$ROOT_DIR/packaging/scripts/build-deb.sh"
@@ -256,15 +287,20 @@ log "installing $DEB_PATH"
 # to replace an already-installed package from an earlier checkout revision.
 apt_install install -y --no-install-recommends --reinstall "$DEB_PATH"
 
-log "initializing SigmaOS configuration"
-SIGMAOS_ADMIN_DISPLAY_NAME=${SIGMAOS_ADMIN_DISPLAY_NAME:-SigmaOS Admin} \
-SIGMAOS_NAS_ROOT_PATH=${SIGMAOS_NAS_ROOT_PATH:-/srv/nas} \
-SIGMAOS_DOCKER_ENABLED="$DOCKER_ENABLED" \
-SIGMAOS_VM_ENABLED="$VM_ENABLED" \
-SIGMAOS_PLAYER_ENABLED="$PLAYER_ENABLED" \
-SIGMAOS_PLAYER_USER="$PLAYER_USER" \
-SIGMAOS_TERMINAL_USER="$TERMINAL_USER" \
-  /usr/lib/sigmaos/scripts/sigmaos-first-boot.sh
+if [ "$SIGMAOS_CONFIG_EXISTS" = "0" ]; then
+  log "initializing SigmaOS configuration"
+  SIGMAOS_FIRST_BOOT_FORCE=1 \
+  SIGMAOS_ADMIN_DISPLAY_NAME=${SIGMAOS_ADMIN_DISPLAY_NAME:-SigmaOS Admin} \
+  SIGMAOS_NAS_ROOT_PATH=${SIGMAOS_NAS_ROOT_PATH:-/srv/nas} \
+  SIGMAOS_DOCKER_ENABLED="$DOCKER_ENABLED" \
+  SIGMAOS_VM_ENABLED="$VM_ENABLED" \
+  SIGMAOS_PLAYER_ENABLED="$PLAYER_ENABLED" \
+  SIGMAOS_PLAYER_USER="$PLAYER_USER" \
+  SIGMAOS_TERMINAL_USER="$TERMINAL_USER" \
+    /usr/lib/sigmaos/scripts/sigmaos-first-boot.sh
+else
+  log "preserving existing SigmaOS configuration"
+fi
 
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload
@@ -283,7 +319,7 @@ if command -v systemctl >/dev/null 2>&1; then
     ensure_vm_network
   fi
   systemctl enable --now \
-    sigmaos-share-helper.service \
+    sigmaos-hostd.service \
     sigmaos-terminal-helper.service \
     sigmaos-api.service \
     sigmaos-worker@1.service \

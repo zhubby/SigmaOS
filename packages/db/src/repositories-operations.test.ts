@@ -36,7 +36,6 @@ describe("operation repositories", () => {
 
     const saved = saveShareSettings(db, {
       enabled: true,
-      helperSocketPath: "/run/sigmaos/share-helper.sock",
       account: {
         username: "sigma-share",
         password: "secret"
@@ -162,7 +161,6 @@ describe("operation repositories", () => {
     });
     const settings = {
       enabled: true,
-      helperSocketPath: "/run/sigmaos/share-helper.sock",
       account: {
         username: "sigma-share",
         password: "secret"

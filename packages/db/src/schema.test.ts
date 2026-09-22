@@ -46,8 +46,43 @@ describe("SQLite schema migrations", () => {
       "012_docker_resource_create",
       "013_download_tasks",
       "014_operation_notifications",
-      "015_terminal_tabs"
+      "015_terminal_tabs",
+      "016_hostd_config"
     ]);
+  });
+
+  it("removes the legacy helper socket from persisted share settings", () => {
+    const databasePath = path.join(tempDir, "hostd-config.sqlite");
+    const current = openSigmaDb(databasePath);
+    current.prepare(
+      `INSERT INTO system_settings (key, value_json, updated_at)
+       VALUES ('share_settings', ?, ?)`
+    ).run(
+      JSON.stringify({
+        enabled: true,
+        helperSocketPath: "/run/sigmaos/share-helper.sock",
+        account: { username: "share", password: null },
+        shares: []
+      }),
+      new Date().toISOString()
+    );
+    current.prepare("DELETE FROM schema_migrations WHERE id = '016_hostd_config'").run();
+    current.close();
+
+    const migrated = openSigmaDb(databasePath);
+    try {
+      const value = migrated
+        .prepare("SELECT value_json FROM system_settings WHERE key = 'share_settings'")
+        .pluck()
+        .get() as string;
+      expect(JSON.parse(value)).toEqual({
+        enabled: true,
+        account: { username: "share", password: null },
+        shares: []
+      });
+    } finally {
+      migrated.close();
+    }
   });
 
   it("preserves Docker operations and console foreign keys when adding resource creation", () => {
@@ -138,6 +173,12 @@ describe("SQLite schema migrations", () => {
       );
       INSERT INTO schema_migrations (id, applied_at)
       VALUES ('001_initial', '${now}'), ('002_nas_roots_enabled', '${now}'), ('003_system_settings', '${now}'), ('004_pi_sessions_and_tool_approvals', '${now}');
+
+      CREATE TABLE system_settings (
+        key TEXT PRIMARY KEY,
+        value_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
 
       CREATE TABLE nas_roots (
         id TEXT PRIMARY KEY,

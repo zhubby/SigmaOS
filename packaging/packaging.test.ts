@@ -1,9 +1,13 @@
-import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
+const execFileAsync = promisify(execFile);
 
 describe("native packaging artifacts", () => {
   it("defines hardened systemd services and timers", async () => {
@@ -37,7 +41,7 @@ describe("native packaging artifacts", () => {
     await expect(readPackagingFile("systemd", "sigmaos-downloader.service")).resolves.toContain(
       "RequiresMountsFor=/srv/nas"
     );
-    await expect(readPackagingFile("systemd", "sigmaos-share-helper.service")).resolves.toContain(
+    await expect(readPackagingFile("systemd", "sigmaos-hostd.service")).resolves.toContain(
       "After=network-online.target local-fs.target systemd-tmpfiles-setup.service"
     );
     await expect(readPackagingFile("systemd", "sigmaos-player-helper.service")).resolves.toContain(
@@ -73,7 +77,7 @@ describe("native packaging artifacts", () => {
     const tmpfiles = await readPackagingFile("tmpfiles.d", "sigmaos.conf");
 
     expect(install).toContain("usr/lib/sigmaos/apps/api/dist/");
-    expect(install).toContain("usr/lib/sigmaos/apps/share-helper/dist/");
+    expect(install).toContain("target/release/sigmaos-hostd usr/lib/sigmaos/bin/");
     expect(install).toContain("usr/lib/sigmaos/apps/terminal-helper/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/worker/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/indexer/dist/");
@@ -130,7 +134,10 @@ describe("native packaging artifacts", () => {
     expect(firstBoot).toContain("SIGMAOS_TERMINAL_USER");
     expect(firstBoot).toContain("[[nas_roots]]");
     expect(firstBoot).toContain("[model]");
+    expect(firstBoot).toContain("[hostd]");
     expect(firstBoot).toContain("[shares]");
+    expect(firstBoot).toContain('[ -e "$CONFIG_PATH" ]');
+    expect(firstBoot).toContain('SIGMAOS_FIRST_BOOT_FORCE:-0');
     expect(manifest).toContain("nodejs");
     expect(manifest).toContain("sqlite3");
     expect(manifest).toContain("tmux");
@@ -138,7 +145,8 @@ describe("native packaging artifacts", () => {
     expect(manifest).toContain("docker-cli");
     expect(manifest).toContain("nginx.service");
     expect(manifest).toContain("git");
-    expect(manifest).toContain("sigmaos-share-helper.service");
+    expect(manifest).toContain("sigmaos-hostd.service");
+    expect(manifest).not.toContain("sigmaos-share-helper.service");
     expect(manifest).toContain("sigmaos-terminal-helper.service");
     expect(manifest).toContain("sigmaos-downloader.service");
     expect(manifest).toContain("sigmaos-player-helper.service");
@@ -168,6 +176,23 @@ describe("native packaging artifacts", () => {
     expect(buildImage).not.toContain("sigmaos_0.1.0");
     expect(firstBoot).toContain("password_file = \"/etc/sigmaos/restic-password\"");
     expect(firstBoot).not.toContain("restic-password\" =");
+    await expect(readPackagingFile("systemd", "sigmaos-share-helper.service")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("preserves an existing first-boot configuration", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-first-boot-"));
+    const configPath = path.join(tempDir, "config.toml");
+    const sentinel = "# operator-owned configuration\n";
+    await writeFile(configPath, sentinel);
+
+    try {
+      await execFileAsync("sh", [path.join(repoRoot, "packaging/scripts/sigmaos-first-boot.sh")], {
+        env: { ...process.env, SIGMAOS_CONFIG: configPath }
+      });
+      await expect(readFile(configPath, "utf8")).resolves.toBe(sentinel);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("ships an ARM-friendly host installer", async () => {
@@ -178,6 +203,7 @@ describe("native packaging artifacts", () => {
     const control = await readPackagingFile("debian", "control");
     const postinst = await readPackagingFile("debian", "postinst");
     const firstBoot = await readPackagingFile("scripts", "sigmaos-first-boot.sh");
+    const releaseWorkflow = await readRepoFile(".github", "workflows", "package-release.yml");
 
     expect(installer).toContain("dpkg --print-architecture");
     expect(installer).toContain("SIGMAOS_APT_MIRROR");
@@ -187,6 +213,8 @@ describe("native packaging artifacts", () => {
     expect(installer).toContain("mirrors.aliyun.com/nodejs-release");
     expect(installer).toContain("SHASUMS256.txt");
     expect(installer).toContain("SIGMAOS_NPM_REGISTRY");
+    expect(installer).toContain("SIGMAOS_RUSTUP_INIT_URL");
+    expect(installer).toContain("RUST_VERSION_REQUIRED=1.95.0");
     expect(installer).toContain("SIGMAOS_APT_BACKUP_DIR");
     expect(installer).toContain("/var/backups/sigmaos-apt");
     expect(installer).toContain("mirrors.aliyun.com/debian");
@@ -195,6 +223,10 @@ describe("native packaging artifacts", () => {
     expect(installer).not.toContain("deb.nodesource.com/node_22.x");
     expect(installer).toContain("packaging/scripts/build-deb.sh");
     expect(installer).toContain("sigmaos-first-boot.sh");
+    expect(installer).toContain("SIGMAOS_CONFIG_EXISTS=0");
+    expect(installer).toContain("[ -e /etc/sigmaos/config.toml ]");
+    expect(installer).toContain('if [ "$SIGMAOS_CONFIG_EXISTS" = "0" ]; then');
+    expect(installer).not.toContain("SIGMAOS_EXISTING_INSTALL");
     expect(installer).toContain("SIGMAOS_ENABLE_NGINX");
     expect(installer).toContain("SIGMAOS_ENABLE_DOCKER");
     expect(installer).toContain("docker-cli");
@@ -222,13 +254,17 @@ describe("native packaging artifacts", () => {
     expect(buildDeb).toContain("SIGMAOS_BUILD_COMMIT_SHA");
     expect(buildDeb).toContain("SIGMAOS_BUILD_DIRTY");
     expect(buildDeb).toContain("SIGMAOS_BUILD_SOURCE");
+    expect(buildDeb).toContain("--exclude target");
     expect(rules).toContain("npm ci --registry");
-    expect(control).toContain("Build-Depends: debhelper-compat (= 13), nodejs, npm");
+    expect(control).toContain("Build-Depends: debhelper-compat (= 13), nodejs, npm, cargo, rustc");
     expect(control).toContain("Depends: nodejs (>= 20)");
     expect(control).toContain("qemu-efi-aarch64");
     expect(control).toContain("ipxe-qemu");
     expect(postinst).toContain("-m 0711 /var/lib/sigmaos/vmstore");
     expect(firstBoot).toContain("-m 0711 \"$DATA_DIR/vmstore\"");
+    expect(releaseWorkflow).not.toContain("dtolnay/rust-toolchain@1.95.0");
+    expect(releaseWorkflow.match(/uses: dtolnay\/rust-toolchain@[0-9a-f]{40}/gu)).toHaveLength(3);
+    expect(releaseWorkflow.match(/toolchain: 1\.95\.0/gu)).toHaveLength(3);
   });
 
   it("ships a loopback API reverse proxy for LAN access", async () => {
@@ -244,8 +280,8 @@ describe("native packaging artifacts", () => {
     expect(nginxScript).toContain("ln -sfn");
   });
 
-  it("ships a constrained root helper for host share configuration", async () => {
-    const unit = await readPackagingFile("systemd", "sigmaos-share-helper.service");
+  it("ships a constrained native host daemon", async () => {
+    const unit = await readPackagingFile("systemd", "sigmaos-hostd.service");
 
     expect(unit).toContain("User=root");
     expect(unit).toContain("StateDirectory=sigmaos/docker-daemon\n");
@@ -255,11 +291,17 @@ describe("native packaging artifacts", () => {
     expect(unit).not.toMatch(/^LogsDirectory=sigmaos$/mu);
     expect(unit).not.toContain("RuntimeDirectory=sigmaos");
     expect(unit).toContain("systemd-tmpfiles-setup.service");
-    expect(unit).toContain("share-helper.sock");
+    expect(unit).toContain("Environment=SIGMAOS_CONFIG=/etc/sigmaos/config.toml");
+    expect(unit).not.toContain("SIGMAOS_HOSTD_SOCKET_PATH=");
+    expect(unit).toContain("ExecStart=/usr/lib/sigmaos/bin/sigmaos-hostd");
+    expect(unit).not.toContain("/node");
+    expect(unit).toContain("TimeoutStopSec=180");
     expect(unit).toContain("/run/mdadm");
     expect(unit).toContain("ProtectSystem=strict");
-    expect(unit).toContain("ReadWritePaths=/etc/sigmaos");
-    expect(unit).toContain("/etc/fstab -/etc/docker -/etc/NetworkManager/system-connections -/etc/mdadm");
+    expect(unit).toContain("ReadWritePaths=/etc /run/sigmaos /run/mdadm /srv/nas");
+    expect(unit).toContain("ReadWritePaths=-/var/lib/samba/private /var/lib/sigmaos/docker-daemon /var/lib/sigmaos/network-manager");
+    expect(unit).not.toMatch(/ReadWritePaths=.*(?:^|\s)\/var\/lib\/sigmaos(?:\s|$)/mu);
+    expect(unit).not.toContain("/var/log/sigmaos");
     expect(unit).toContain("CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER");
     expect(unit).toContain("CAP_MKNOD");
     expect(unit).toContain("CAP_SYS_ADMIN");
@@ -270,6 +312,14 @@ describe("native packaging artifacts", () => {
     expect(apiUnit).not.toContain("/etc/docker");
     expect(apiUnit).not.toContain("/etc/NetworkManager");
     const postinst = await readPackagingFile("debian", "postinst");
+    expect(postinst).toContain("sigmaos-hostd migrate-config");
+    expect(postinst).toContain("systemctl disable --now sigmaos-share-helper.service");
+    expect(postinst.indexOf("sigmaos-hostd migrate-config")).toBeLessThan(
+      postinst.indexOf("systemctl disable --now sigmaos-share-helper.service")
+    );
+    expect(postinst.indexOf("systemctl disable --now sigmaos-share-helper.service")).toBeLessThan(
+      postinst.indexOf("systemctl enable sigmaos-hostd.service")
+    );
     expect(postinst).toContain("install -d -o root -g root -m 0700 /var/lib/sigmaos/docker-daemon");
     expect(postinst).toContain("chown -R root:root /var/lib/sigmaos/docker-daemon");
     expect(postinst).toContain("install -d -o root -g root -m 0700 /var/lib/sigmaos/network-manager");
@@ -305,6 +355,10 @@ describe("native packaging artifacts", () => {
     expect(deploy).toContain("tar -C /var/lib -czf");
     expect(deploy).toContain("systemctl daemon-reload");
     expect(deploy).toContain("restore_unit_state \"$unit\" \"$state_dir\"");
+    expect(deploy).toContain('state_dir/sigmaos-share-helper.service.enabled');
+    expect(deploy).toContain('state_dir/sigmaos-hostd.service.enabled');
+    expect(deploy).toContain('state_dir/sigmaos-share-helper.service.active');
+    expect(deploy).toContain('state_dir/sigmaos-hostd.service.active');
     expect(deploy).toContain("package.deb must be a regular file");
     expect(deploy).toContain("/api/roots/readiness");
     expect(deploy).toContain("/api/system/build-info");
@@ -318,4 +372,8 @@ describe("native packaging artifacts", () => {
 
 function readPackagingFile(...segments: string[]): Promise<string> {
   return readFile(path.join(repoRoot, "packaging", ...segments), "utf8");
+}
+
+function readRepoFile(...segments: string[]): Promise<string> {
+  return readFile(path.join(repoRoot, ...segments), "utf8");
 }

@@ -21,7 +21,8 @@ flowchart LR
   Downloader --> Tools
   Indexer[Indexer] -->|扫描与增量写入| DB
   Scheduler[Scheduler / backup / health] --> DB
-  API -->|Unix socket| Helpers[Terminal / share helpers]
+  API -->|JSONL Unix socket| Hostd[Rust hostd]
+  API -->|Unix socket| Terminal[Terminal helper]
   Tools --> NAS[Configured NAS roots]
 ```
 

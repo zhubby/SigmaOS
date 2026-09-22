@@ -788,7 +788,6 @@ export const en = {
           username: "Username",
           password: "Password",
           clearPassword: "Clear saved password",
-          helperSocket: "Helper socket",
           shareName: "Name",
           shareId: "ID",
           root: "NAS root",
@@ -811,7 +810,6 @@ export const en = {
         facts: {
           account: "Account",
           password: "Password",
-          helper: "Helper",
           updated: "Updated"
         },
         metrics: {
@@ -960,8 +958,8 @@ export const en = {
           noDevices: "No wireless adapters are available.",
           unavailableTitle: "Wi-Fi management is unavailable",
           unavailableDescription: "The active backend is {{backend}}. NetworkManager is required for Wi-Fi changes.",
-          helperUnavailableTitle: "Privileged network helper is unavailable",
-          helperUnavailableDescription: "Wireless state remains visible, but configuration changes are disabled.",
+          hostdUnavailableTitle: "Host integration service is unavailable",
+          hostdUnavailableDescription: "Wireless state remains visible, but configuration changes are disabled.",
           managementPath: "management path",
           signal: "Signal",
           channel: "Channel",
@@ -2683,7 +2681,6 @@ export const zhCN = {
           username: "用户名",
           password: "密码",
           clearPassword: "清除已保存密码",
-          helperSocket: "Helper socket",
           shareName: "名称",
           shareId: "ID",
           root: "NAS root",
@@ -2706,7 +2703,6 @@ export const zhCN = {
         facts: {
           account: "账号",
           password: "密码",
-          helper: "Helper",
           updated: "更新"
         },
         metrics: {
@@ -2855,8 +2851,8 @@ export const zhCN = {
           noDevices: "没有可用的无线网卡。",
           unavailableTitle: "Wi-Fi 管理不可用",
           unavailableDescription: "当前网络后端为 {{backend}}，Wi-Fi 配置需要 NetworkManager。",
-          helperUnavailableTitle: "特权网络 helper 不可用",
-          helperUnavailableDescription: "仍可查看无线状态，但配置操作已禁用。",
+          hostdUnavailableTitle: "宿主机集成服务不可用",
+          hostdUnavailableDescription: "仍可查看无线状态，但配置操作已禁用。",
           managementPath: "管理链路",
           signal: "信号",
           channel: "信道",

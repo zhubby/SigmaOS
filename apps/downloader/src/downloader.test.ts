@@ -104,10 +104,10 @@ function testConfig(dataDir: string, root: string): SigmaConfig {
     },
     shares: {
       enabled: false,
-      helperSocketPath: "/tmp/share.sock",
       account: { username: "share", password: null },
       shares: []
     },
+    hostd: { socketPath: "/tmp/hostd.sock" },
     terminal: { user: "test-user", helperSocketPath: "/tmp/terminal-helper.sock" },
     player: {
       enabled: false,

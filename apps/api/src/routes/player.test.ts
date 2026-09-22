@@ -131,7 +131,8 @@ function testConfig(root: string, enabled: boolean): SigmaConfig {
     admin: { displayName: "Test", authMode: "local-only" },
     model: { provider: "pi", piCommand: "pi", localEndpoint: null },
     docker: { enabled: false, socketPath: "/var/run/docker.sock", composeCommand: "docker", operationTimeoutMs: 1000, consoleShells: [], composeRoots: [] },
-    shares: { enabled: false, helperSocketPath: "/tmp/share.sock", account: { username: "share", password: null }, shares: [] },
+    hostd: { socketPath: "/tmp/hostd.sock" },
+    shares: { enabled: false, account: { username: "share", password: null }, shares: [] },
     terminal: { user: "test-user", helperSocketPath: "/tmp/terminal-helper.sock" },
     player: { enabled, helperSocketPath: "/tmp/player-helper.sock", videoOutput: "drm", drmConnector: null, audioOutput: "alsa", audioDevice: null, hwdec: "auto-safe", user: "sigmaos" },
     nasRoots: [{ id: "local", name: "Local", path: root }]

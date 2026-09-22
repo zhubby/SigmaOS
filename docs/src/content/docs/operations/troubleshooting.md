@@ -4,7 +4,7 @@ description: API、静态资源、terminal、timer、indexer、backup 和 SQLite
 type: operation
 status: current
 audience: [operator]
-sourceOfTruth: [apps/api/src/routes/health-status.ts, apps/api/src/lib/docker-daemon.ts, apps/api/src/lib/network-manager.ts, apps/share-helper/src/helper.ts, apps/share-helper/src/network-manager.ts, packaging/systemd/sigmaos-api.service, packaging/systemd/sigmaos-indexer.service, apps/api/src/web-static.ts]
+sourceOfTruth: [apps/api/src/routes/health-status.ts, apps/api/src/lib/docker-daemon.ts, apps/api/src/lib/network-manager.ts, apps/hostd/src/docker_daemon.rs, apps/hostd/src/network_manager.rs, packaging/systemd/sigmaos-hostd.service, packaging/systemd/sigmaos-api.service, packaging/systemd/sigmaos-indexer.service, apps/api/src/web-static.ts]
 sidebar:
   order: 4
 ---
@@ -15,31 +15,43 @@ sidebar:
 
 ## 服务目录所有权与启动顺序
 
-root share-helper 只声明 `StateDirectory=sigmaos/docker-daemon` 和 `StateDirectory=sigmaos/network-manager`（均为 `0700 root:root`），不声明共享的 `StateDirectory=sigmaos` 或 `LogsDirectory=sigmaos`。否则 systemd 启动 root helper 时可能重设共享父目录及子文件的所有权，导致非 root API/worker 无法打开 SQLite。不要用反复递归 chown 或赋予 API root 权限掩盖问题。
+root hostd 只声明 `StateDirectory=sigmaos/docker-daemon` 和 `StateDirectory=sigmaos/network-manager`（均为 `0700 root:root`），不声明共享的 `StateDirectory=sigmaos` 或 `LogsDirectory=sigmaos`，`ReadWritePaths` 也不得包含 `/var/lib/sigmaos` 父目录或 `/var/log/sigmaos`。否则 hostd 可能改动共享状态，或 systemd 在启动时重设父目录及子文件的所有权，导致非 root API/worker 无法打开 SQLite。动态共享账号需要 `useradd` 原子更新账号数据库，因此 unit 会显式放行 `/etc`；Samba 凭据只额外放行 `/var/lib/samba/private`。不要用反复递归 chown 或赋予 API root 权限掩盖问题。
 
 ```bash
-sudo systemctl show sigmaos-share-helper.service -p StateDirectory -p StateDirectoryMode -p LogsDirectory
+sudo systemctl show sigmaos-hostd.service -p StateDirectory -p StateDirectoryMode -p LogsDirectory
 sudo stat -c '%U:%G %a %n' /var/lib/sigmaos /var/lib/sigmaos/docker-daemon /var/lib/sigmaos/network-manager /var/log/sigmaos
-sudo systemctl cat sigmaos-share-helper.service
+sudo systemctl cat sigmaos-hostd.service
 ```
 
 共享父目录保持 `sigmaos:sigmaos`，Docker 与 NetworkManager 恢复子目录保持 `root:root 700`。升级后检查现有 drop-in 不得重新引入共享父目录声明。CM5 上已有的 `deployment-state.conf` 如设置相同的嵌套目录，可保留；恢复文件无需迁移。修复权限前停止 timers 和所有数据库写入进程，先保存一致备份；仅修复核实错误的目标，不改变恢复材料权限。
 
-在维护窗口分别验证 helper→API/worker 和 API/worker→helper 两种启动顺序，以及 helper 单独重启后 API 仍可访问数据库。查看 `Permission denied`、`SQLITE_CANTOPEN` 和重启计数；不能只检查一次 `/health`。设备重启验收须另行安排，不能用服务重启代替。
+在维护窗口分别验证 hostd→API/worker 和 API/worker→hostd 两种启动顺序，以及 hostd 单独重启后 API 仍可访问数据库。查看 `Permission denied`、`SQLITE_CANTOPEN` 和重启计数；不能只检查一次 `/health`。设备重启验收须另行安排，不能用服务重启代替。
+
+## 下载目录权限
+
+下载服务以 `sigmaos` 用户运行。新建存储池挂载后会将池根目录归属设为 `sigmaos:sigmaos`，但已有存储池及其子目录的所有权不会自动更改。若下载任务报 `EACCES`，先确认实际挂载和目标目录权限：
+
+```bash
+findmnt -T /srv/nas/pool1/Downloads
+namei -l /srv/nas/pool1/Downloads
+sudo -u sigmaos test -w /srv/nas/pool1/Downloads
+```
+
+仅在确认目标目录应由 SigmaOS 管理后，针对报错的目录修复所有权，例如 `sudo chown sigmaos:sigmaos /srv/nas/pool1/Downloads`。不要递归更改整个存储池或绕过挂载检查；如果目录由共享用户管理，应先核对共享访问策略，再为 `sigmaos` 授予所需的目录写入权限。修复后在下载面板重试失败任务。
 
 ## Wi-Fi 与热点
 
-界面显示只读或没有无线设备时，先区分后端、radio、驱动与 helper：
+界面显示只读或没有无线设备时，先区分后端、radio、驱动与 hostd：
 
 ```bash
 nmcli -t -f RUNNING,STATE,CONNECTIVITY,WIFI-HW,WIFI general
 nmcli device status
 iw dev
-sudo systemctl status NetworkManager.service sigmaos-share-helper.service --no-pager
-sudo journalctl -u NetworkManager.service -u sigmaos-share-helper.service -n 100 --no-pager
+sudo systemctl status NetworkManager.service sigmaos-hostd.service --no-pager
+sudo journalctl -u NetworkManager.service -u sigmaos-hostd.service -n 100 --no-pager
 ```
 
-非 NetworkManager 主机不会自动迁移。`wlan0` 为 unmanaged 时检查 NetworkManager 配置和已有 Netplan renderer，不要直接删除外部 profile。扫描失败但状态可读通常表示 helper、radio 或权限异常；确认 `/run/sigmaos/share-helper.sock`、unit 的 `/etc/NetworkManager/system-connections` 写路径以及 `iw` 是否安装。
+非 NetworkManager 主机不会自动迁移。`wlan0` 为 unmanaged 时检查 NetworkManager 配置和已有 Netplan renderer，不要直接删除外部 profile。扫描失败但状态可读通常表示 hostd、radio 或权限异常；确认 `/run/sigmaos/hostd.sock`、unit 的 `/etc/NetworkManager/system-connections` 写路径以及 `iw` 是否安装。
 
 热点启动失败时，检查 `/var/lib/sigmaos/network-manager/state.json` 和 NetworkManager journal。该文件只记录待恢复 profile UUID，不含密码；不要手工编辑正在使用的状态。若自动恢复失败，使用 `nmcli connection up uuid <uuid> ifname <device>` 恢复，确认客户端连接后再移除对应状态。Wi-Fi/热点密码位于 root-only `.nmconnection` 文件中，不要把文件正文复制到日志或工单。
 
@@ -55,7 +67,7 @@ sudo journalctl -u NetworkManager.service -u sigmaos-share-helper.service -n 100
 
 ```bash
 sudo systemctl show docker.service -p LoadState -p ActiveState -p SubState -p Result
-sudo journalctl -u docker.service -u sigmaos-share-helper.service -n 100 --no-pager
+sudo journalctl -u docker.service -u sigmaos-hostd.service -n 100 --no-pager
 sudo dockerd --validate --config-file /etc/docker/daemon.json
 curl -fsS http://127.0.0.1:3010/api/docker/summary
 ```

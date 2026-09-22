@@ -416,7 +416,7 @@ export function SystemWifiManagement({
               type="button"
               className="management-icon-action"
               onClick={toggleRadio}
-              disabled={unavailable || !wifi.helperReady || busy}
+              disabled={unavailable || !wifi.hostdReady || busy}
               aria-pressed={wifi.radioEnabled === true}
               aria-label={wifi.radioEnabled ? t("workspace.management.network.wifi.disableRadio") : t("workspace.management.network.wifi.enableRadio")}
               title={wifi.radioEnabled ? t("workspace.management.network.wifi.disableRadio") : t("workspace.management.network.wifi.enableRadio")}
@@ -444,12 +444,12 @@ export function SystemWifiManagement({
                 <p>{t("workspace.management.network.wifi.unavailableDescription", { backend: wifi.backend })}</p>
               </div>
             </div>
-          ) : !wifi.helperReady ? (
+          ) : !wifi.hostdReady ? (
             <div className="system-wifi-unavailable">
               <AlertTriangle aria-hidden="true" size={18} />
               <div>
-                <strong>{t("workspace.management.network.wifi.helperUnavailableTitle")}</strong>
-                <p>{t("workspace.management.network.wifi.helperUnavailableDescription")}</p>
+                <strong>{t("workspace.management.network.wifi.hostdUnavailableTitle")}</strong>
+                <p>{t("workspace.management.network.wifi.hostdUnavailableDescription")}</p>
               </div>
             </div>
           ) : selectedDevice ? (

@@ -48,7 +48,7 @@ sudo SIGMAOS_TERMINAL_USER=<terminal-user> \
 
 ```bash
 sudo systemctl is-active sigmaos-api.service sigmaos-worker@1.service
-sudo systemctl is-active sigmaos-terminal-helper.service sigmaos-share-helper.service
+sudo systemctl is-active sigmaos-terminal-helper.service sigmaos-hostd.service
 sudo systemctl list-timers 'sigmaos-*'
 curl -fsS http://127.0.0.1:3010/health
 curl -fsS http://127.0.0.1:3010/api/roots/readiness
@@ -57,7 +57,7 @@ curl -fsS http://127.0.0.1:3010/api/system/health
 
 然后从浏览器验证 Web 和 `/docs/`，选择 NAS root，打开终端，上传一个小文件，执行一次索引并确认 `/api/indexer/status` 有完成记录。不要只以 systemd 的 `active` 判断 oneshot 任务成功；请查看对应 journal 和数据库状态。
 
-share-helper 的 root 状态目录应为 `/var/lib/sigmaos/docker-daemon` 和 `/var/lib/sigmaos/network-manager`，不能声明共享父目录或共享 LogsDirectory。父目录和数据库仍由 `sigmaos` 使用，两个恢复子目录为 `root:root 0700`。现有相同配置的 host drop-in 可保留，升级后检查实际合并 unit；在维护窗口按两种启动顺序验证，并观察 helper 重启是否影响 API/worker。详见[目录所有权排查](/docs/operations/troubleshooting/#服务目录所有权与启动顺序)。
+hostd 的 root 状态目录应为 `/var/lib/sigmaos/docker-daemon` 和 `/var/lib/sigmaos/network-manager`，不能声明共享父目录或共享 LogsDirectory。父目录和数据库仍由 `sigmaos` 使用，两个恢复子目录为 `root:root 0700`。现有相同配置的 host drop-in 可保留，升级后检查实际合并 unit；在维护窗口按两种启动顺序验证，并观察 hostd 重启是否影响 API/worker。详见[目录所有权排查](/docs/operations/troubleshooting/#服务目录所有权与启动顺序)。
 
 CM5 无线验收先确认设备与驱动，再通过页面操作。推荐保留 `eth0` 作为独立管理链路：
 
@@ -65,7 +65,7 @@ CM5 无线验收先确认设备与驱动，再通过页面操作。推荐保留 
 nmcli general status
 nmcli device status
 iw dev wlan0 info
-sudo journalctl -u NetworkManager.service -u sigmaos-share-helper.service -n 100 --no-pager
+sudo journalctl -u NetworkManager.service -u sigmaos-hostd.service -n 100 --no-pager
 curl -fsS http://127.0.0.1:3010/api/system/network
 ```
 
@@ -167,12 +167,12 @@ CM5 的 0.3.0 初次 RustFS 冒烟中，运行版本为 `1.0.0-rc.6`：S3 `http:
 
 ## 部署后观察与回滚触发
 
-由执行部署的运维人员在维护窗口内，分别在启动后、helper 重启后以及串行任务结束后检查：
+由执行部署的运维人员在维护窗口内，分别在启动后、hostd 重启后以及串行任务结束后检查：
 
 ```bash
 sudo systemctl --failed
-sudo systemctl show sigmaos-api.service sigmaos-worker@1.service sigmaos-share-helper.service -p NRestarts -p ExecMainStatus
-sudo journalctl -u sigmaos-api.service -u sigmaos-worker@1.service -u sigmaos-share-helper.service --since '15 minutes ago' --no-pager
+sudo systemctl show sigmaos-api.service sigmaos-worker@1.service sigmaos-hostd.service -p NRestarts -p ExecMainStatus
+sudo journalctl -u sigmaos-api.service -u sigmaos-worker@1.service -u sigmaos-hostd.service --since '15 minutes ago' --no-pager
 curl -fsS http://127.0.0.1:3010/api/docker/summary
 curl -fsS http://127.0.0.1:3010/api/backup/status
 ```

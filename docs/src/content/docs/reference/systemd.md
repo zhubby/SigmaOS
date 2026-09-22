@@ -9,7 +9,7 @@ sidebar:
   order: 3
 ---
 
-核心服务默认以 `sigmaos` 身份运行并使用 `ProtectSystem=strict`、`NoNewPrivileges=yes` 和资源上限。share-helper 是唯一的 root helper；terminal-helper 通过 drop-in 绑定非 root 终端用户；downloader 只写 `/var/lib/sigmaos`、日志和配置的 `/srv/nas` roots。
+核心服务默认以 `sigmaos` 身份运行并使用 `ProtectSystem=strict`、`NoNewPrivileges=yes` 和资源上限。`sigmaos-hostd` 是唯一的 root daemon；为原子创建可配置的 Unix 共享账号，它显式放行 `/etc` 和 Samba 私有密码库，但不放行 `/var/lib/sigmaos` 共享父目录或 `/var/log/sigmaos`。terminal-helper 通过 drop-in 绑定非 root 终端用户；downloader 只写 `/var/lib/sigmaos`、日志和配置的 `/srv/nas` roots。
 
 Indexer 每 30 分钟运行，scheduler 每 6 小时，health 每 15 分钟，maintenance 每日，backup daily/weekly 分别按日历运行。oneshot 任务完成后显示 `inactive (dead)` 是正常状态，成功与否要看退出码和 journal。
 

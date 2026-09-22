@@ -24,7 +24,7 @@ const WIFI_HEARTBEAT_MS = 15_000;
 export function registerSystemRoutes(server: FastifyInstance, { buildInfo, config, system }: ApiRouteContext): void {
   const networkManager = system?.networkManager ?? new SystemNetworkManagerRuntime({
     ...(system?.commandRunner ? { commandRunner: system.commandRunner } : {}),
-    helperSocketPath: config.shares.helperSocketPath
+    hostdSocketPath: config.hostd.socketPath
   });
   const systemDependencies = { ...system, networkManager };
 
@@ -218,7 +218,7 @@ export async function streamWifiEvents(
         collectedAt: new Date().toISOString(),
         backend: "unknown",
         radioEnabled: null,
-        helperReady: false,
+        hostdReady: false,
         devices: [],
         hotspots: []
       };
@@ -245,7 +245,7 @@ function wifiStatusSignature(status: SystemWifiStatus): string {
   return JSON.stringify({
     backend: status.backend,
     radioEnabled: status.radioEnabled,
-    helperReady: status.helperReady,
+    hostdReady: status.hostdReady,
     devices: status.devices,
     hotspots: status.hotspots
   });

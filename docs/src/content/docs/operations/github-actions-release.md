@@ -197,9 +197,9 @@ helper 用 `flock` 阻止并发执行，并在离开可写 staging 后重新校�
 - 正常升级会保存原 service/timer 状态，停止 SQLite/NAS writers，备份 `/etc/sigmaos` 和 `/var/lib/sigmaos`，再执行 `dpkg -i`。
 - 安装后只恢复升级前实际启用或运行的服务与 timers，并执行完整运行时检查。
 
-成功记录写入 `/var/lib/sigmaos-deploy/current-release.json`，已验证包保存在 `/var/lib/sigmaos-deploy/releases/<tag>/`。升级失败时，备份、旧包引用和诊断日志保留在 `/var/lib/sigmaos-deploy/backups/<tag>-<timestamp>/`，helper 会尽力恢复此前的 systemd 状态。
+成功记录写入 `/var/lib/sigmaos-deploy/current-release.json`，已验证包保存在 `/var/lib/sigmaos-deploy/releases/<tag>/`。升级失败时，备份、旧包引用和诊断日志保留在 `/var/lib/sigmaos-deploy/backups/<tag>-<timestamp>/`，部署程序会尽力恢复此前的 systemd 状态。
 
-helper 不自动回滚 Debian 包或数据库 migration。schema 变化后的回滚必须使用与旧包匹配的状态备份，不能只重新安装旧 `.deb`。
+部署程序不自动回滚 Debian 包或数据库 migration。schema 变化后的回滚必须使用与旧包匹配的状态备份，不能只重新安装旧 `.deb`。
 
 ## 观察、验证与手动重试
 
@@ -217,7 +217,7 @@ gh run watch <run-id> --exit-status
 sudo systemctl --failed
 sudo systemctl is-active \
   sigmaos-api.service sigmaos-worker@1.service \
-  sigmaos-downloader.service sigmaos-share-helper.service \
+  sigmaos-downloader.service sigmaos-hostd.service \
   sigmaos-terminal-helper.service
 curl -fsS http://127.0.0.1:3010/health
 curl -fsS http://127.0.0.1:3010/api/roots/readiness

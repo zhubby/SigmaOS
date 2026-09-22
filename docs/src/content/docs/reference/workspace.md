@@ -16,5 +16,5 @@ sidebar:
 | `apps/worker` | agent job claim 与事件持久化 |
 | `apps/indexer` | NAS 扫描与 FTS5 索引 |
 | `apps/scheduler` / `apps/backup` | 报告、维护、restic |
-| `apps/share-helper` / `apps/terminal-helper` | 隔离的宿主机能力 |
+| `apps/hostd` / `apps/terminal-helper` | Rust 特权宿主机操作与非 root 终端隔离 |
 | `packages/db` / `nas-tools` / `agent` / `shared` | 共享持久化、安全、agent 和配置契约 |

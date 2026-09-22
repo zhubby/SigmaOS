@@ -14,7 +14,7 @@ units = [
   "sigmaos-api.service",
   "sigmaos-terminal-helper.service",
   "sigmaos-player-helper.service",
-  "sigmaos-share-helper.service",
+  "sigmaos-hostd.service",
   "sigmaos-worker@1.service",
   "sigmaos-downloader.service",
   "sigmaos-indexer.timer",

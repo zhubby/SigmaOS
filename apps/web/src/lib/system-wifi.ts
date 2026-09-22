@@ -57,7 +57,7 @@ export function parseSystemWifiStatus(value: string): SystemWifiStatus | null {
       parsed.backend !== "unknown"
     ) return null;
     if (parsed.radioEnabled !== null && typeof parsed.radioEnabled !== "boolean") return null;
-    if (typeof parsed.helperReady !== "boolean" || typeof parsed.collectedAt !== "string") return null;
+    if (typeof parsed.hostdReady !== "boolean" || typeof parsed.collectedAt !== "string") return null;
     return parsed as unknown as SystemWifiStatus;
   } catch {
     return null;
