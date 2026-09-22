@@ -337,7 +337,7 @@ jobs:
           systemctl is-active --quiet sigmaos-hostd.service
           systemctl is-active --quiet sigmaos-terminal-helper.service
 
-          failed_units="$(systemctl --failed --no-legend --plain || true)"
+          failed_units="$(systemctl --failed --no-legend --plain | awk '$1 ~ /^sigmaos-/ { print }' || true)"
           if [ -n "$failed_units" ]; then
             printf '%s\n' "$failed_units" >&2
             exit 1

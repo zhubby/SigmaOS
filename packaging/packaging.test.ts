@@ -221,6 +221,7 @@ describe("native packaging artifacts", () => {
     const postinst = await readPackagingFile("debian", "postinst");
     const firstBoot = await readPackagingFile("scripts", "sigmaos-first-boot.sh");
     const releaseWorkflow = await readRepoFile(".github", "workflows", "package-release.yml");
+    const deployWorkflow = await readRepoFile(".github", "workflows", "deploy-cm5.yml");
 
     expect(installer).toContain("dpkg --print-architecture");
     expect(installer).toContain("SIGMAOS_APT_MIRROR");
@@ -288,6 +289,8 @@ describe("native packaging artifacts", () => {
     expect(releaseWorkflow.match(/uses: dtolnay\/rust-toolchain@[0-9a-f]{40}/gu)).toHaveLength(3);
     expect(releaseWorkflow.match(/toolchain: 1\.95\.0/gu)).toHaveLength(3);
     expect(releaseWorkflow).toMatch(/package-arm64:[\s\S]*?apt-get install[\s\S]*?\n\s+acl \\/u);
+    expect(deployWorkflow).not.toContain('failed_units="$(systemctl --failed --no-legend --plain || true)"');
+    expect(deployWorkflow).toContain("awk '$1 ~ /^sigmaos-/ { print }'");
   });
 
   it("ships a loopback API reverse proxy for LAN access", async () => {
