@@ -272,6 +272,8 @@ describe("native packaging artifacts", () => {
     expect(buildDeb).toContain("SIGMAOS_BUILD_SOURCE");
     expect(buildDeb).toContain("--exclude target");
     expect(rules).toContain("npm ci --registry");
+    expect(rules).toContain("override_dh_strip:");
+    expect(rules).toContain("dh_strip --exclude=.bare");
     expect(control).toContain("Build-Depends: debhelper-compat (= 13), nodejs, npm, cargo, rustc");
     expect(control).toContain("Depends: nodejs (>= 20)");
     expect(control).toContain("qemu-efi-aarch64");

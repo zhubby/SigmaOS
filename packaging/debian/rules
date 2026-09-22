@@ -16,6 +16,12 @@ override_dh_auto_test:
 override_dh_auto_install:
 	:
 
+# Archiver's Bare runtime dependencies bundle prebuilt .bare files for several
+# foreign platforms. They are already stripped and cannot be processed by the
+# target architecture's objcopy.
+override_dh_strip:
+	dh_strip --exclude=.bare
+
 # Services are started by the installer after first-boot configuration. Timers
 # and units must not be enabled implicitly by debhelper during package install.
 override_dh_installsystemd:
