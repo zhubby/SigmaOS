@@ -177,6 +177,7 @@ trap capture_failure EXIT HUP INT TERM
 
 [ "$(id -u)" -eq 0 ] || die "must run as root"
 command -v node >/dev/null 2>&1 || die "Node.js is required"
+command -v apt-get >/dev/null 2>&1 || die "apt-get is required"
 command -v dpkg-deb >/dev/null 2>&1 || die "dpkg-deb is required"
 command -v flock >/dev/null 2>&1 || die "flock is required"
 command -v systemctl >/dev/null 2>&1 || die "systemd is required"
@@ -278,7 +279,7 @@ tar -C /etc -czf "$backup_path/config.tgz" sigmaos
 tar -C /var/lib -czf "$backup_path/state.tgz" sigmaos
 
 log "installing $manifest_tag"
-dpkg -i "$work_dir/package.deb"
+DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-remove "$work_dir/package.deb"
 systemctl daemon-reload
 
 for unit in $WRITERS $TIMERS; do

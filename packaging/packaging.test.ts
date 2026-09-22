@@ -117,6 +117,8 @@ describe("native packaging artifacts", () => {
     expect(tmpfiles).toContain("/run/mdadm");
     expect(tmpfiles).toContain("d /run/samba 0755 root root -");
     expect(control).toContain("Depends: nodejs (>= 20), sqlite3, tmux, acl, adduser, network-manager, wpasupplicant, dnsmasq-base, wireless-regdb, iw");
+    expect(control).not.toMatch(/^Depends:.*libheif-examples/m);
+    expect(control).toContain("Recommends: libheif-examples");
     expect(control).toContain("Build-Depends: debhelper-compat (= 13), nodejs, npm, cargo, rustc, acl");
     expect(control).toContain("mpv");
     expect(control).toContain("libheif-examples");
@@ -398,6 +400,9 @@ describe("native packaging artifacts", () => {
     expect(deploy).toContain("refusing to downgrade");
     expect(deploy).toContain("tar -C /etc -czf");
     expect(deploy).toContain("tar -C /var/lib -czf");
+    expect(deploy).toContain('command -v apt-get >/dev/null 2>&1 || die "apt-get is required"');
+    expect(deploy).toContain('apt-get install --yes --no-remove "$work_dir/package.deb"');
+    expect(deploy).not.toContain('dpkg -i "$work_dir/package.deb"');
     expect(deploy).toContain("systemctl daemon-reload");
     expect(deploy).toContain("restore_unit_state \"$unit\" \"$state_dir\"");
     expect(deploy).toContain('state_dir/sigmaos-share-helper.service.enabled');
