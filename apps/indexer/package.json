@@ -1,6 +1,6 @@
 {
   "name": "@sigmaos/indexer",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "type": "module",
   "exports": {
     ".": "./src/indexer.ts"
@@ -13,8 +13,8 @@
     "build": "cd ../.. && tsup apps/indexer/src/index.ts --format esm --platform node --target node22 --external=better-sqlite3 --out-dir apps/indexer/dist"
   },
   "dependencies": {
-    "@sigmaos/db": "0.7.0",
-    "@sigmaos/nas-tools": "0.7.0",
-    "@sigmaos/shared": "0.7.0"
+    "@sigmaos/db": "0.7.1",
+    "@sigmaos/nas-tools": "0.7.1",
+    "@sigmaos/shared": "0.7.1"
   }
 }

@@ -1,3 +1,9 @@
+sigmaos (0.7.1) unstable; urgency=medium
+
+  * Fix ARM64 packaging dependencies and exclude foreign Bare prebuilds from Debian stripping.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Tue, 22 Sep 2026 17:21:08 +0000
+
 sigmaos (0.7.0) unstable; urgency=medium
 
   * Add storage-backed photo library with indexing, uploads, exports, cached previews, and approval-gated management.
