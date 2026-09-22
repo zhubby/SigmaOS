@@ -235,9 +235,7 @@ export function StorageFilePickerDialog({
         parentPath: currentPath,
         name
       });
-      setCreateFolderOpen(false);
-      setCreateFolderName("");
-      await loadDirectory();
+      onCancel();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : String(nextError));
     } finally {

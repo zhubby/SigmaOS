@@ -58,6 +58,7 @@ export function PhotoLibraryPanel({
   selectedStoragePoolId,
   selectedRootId,
   sessionId,
+  approvalRefreshKey,
   locale,
   onRequestCreateFolder,
   onWorkQueuesChanged,
@@ -69,6 +70,7 @@ export function PhotoLibraryPanel({
   selectedStoragePoolId: string;
   selectedRootId: string;
   sessionId: string | null;
+  approvalRefreshKey: string;
   locale: SupportedLocale;
   onRequestCreateFolder?: (input: {
     rootId: string;
@@ -143,7 +145,7 @@ export function PhotoLibraryPanel({
 
   useEffect(() => {
     void loadLibrary();
-  }, [loadLibrary]);
+  }, [approvalRefreshKey, loadLibrary]);
 
   useEffect(() => {
     if (!settings) return undefined;

@@ -1232,6 +1232,7 @@ export function WorkspacePane({
               selectedStoragePoolId={selectedStoragePoolId}
               selectedRootId={selectedRootId}
               sessionId={sessionId}
+              approvalRefreshKey={pendingApprovals.map((approval) => approval.id).join(",")}
               locale={locale}
               {...(onRequestCreateFolderAt ? { onRequestCreateFolder: onRequestCreateFolderAt } : {})}
               onWorkQueuesChanged={onWorkQueuesChanged}
