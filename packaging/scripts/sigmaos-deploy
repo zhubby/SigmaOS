@@ -9,7 +9,8 @@ STATE_PATH="$BASE_DIR/current-release.json"
 LOCK_PATH=/run/lock/sigmaos-deploy.lock
 
 TIMERS='sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer sigmaos-health.timer sigmaos-backup-daily.timer sigmaos-backup-weekly.timer'
-WRITERS='sigmaos-indexer.service sigmaos-scheduler.service sigmaos-maintenance.service sigmaos-health.service sigmaos-backup-daily.service sigmaos-backup-weekly.service sigmaos-api.service sigmaos-worker@1.service sigmaos-photo-worker.service sigmaos-downloader.service sigmaos-hostd.service sigmaos-terminal-helper.service sigmaos-player-helper.service'
+RUNTIME_SERVICES='sigmaos-hostd.service sigmaos-terminal-helper.service sigmaos-api.service sigmaos-worker@1.service sigmaos-photo-worker.service sigmaos-downloader.service'
+WRITERS="sigmaos-indexer.service sigmaos-scheduler.service sigmaos-maintenance.service sigmaos-health.service sigmaos-backup-daily.service sigmaos-backup-weekly.service $RUNTIME_SERVICES sigmaos-player-helper.service"
 RETIRED_UNITS='sigmaos-share-helper.service'
 
 success=0
@@ -121,6 +122,12 @@ wait_for_url() {
   return 1
 }
 
+activate_runtime() {
+  log "enabling and restarting SigmaOS services"
+  systemctl enable $RUNTIME_SERVICES
+  systemctl restart $RUNTIME_SERVICES
+}
+
 verify_runtime() {
   log "checking SigmaOS services"
   for unit in sigmaos-api.service sigmaos-worker@1.service sigmaos-photo-worker.service sigmaos-downloader.service sigmaos-hostd.service sigmaos-terminal-helper.service; do
@@ -153,10 +160,41 @@ if (build.version !== expectedVersion || build.commitSha?.toLowerCase() !== expe
 NODE
 }
 
+record_release() {
+  release_tag=$1
+  release_version=$2
+  release_commit_sha=$3
+  release_path="$RELEASE_DIR/$release_tag"
+  rm -rf "$release_path"
+  install -d -o root -g root -m 0700 "$release_path"
+  cp -p "$work_dir/package.deb" "$release_path/package.deb"
+  cp -p "$work_dir/release-manifest.json" "$release_path/release-manifest.json"
+  cat > "$STATE_PATH" <<EOF
+{"tag":"$release_tag","version":"$release_version","commitSha":"$release_commit_sha","packagePath":"$release_path/package.deb","manifestPath":"$release_path/release-manifest.json","deployedAt":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+EOF
+  chown root:root "$STATE_PATH"
+  chmod 0600 "$STATE_PATH"
+}
+
+capture_runtime_diagnostics() {
+  diagnostics_path=$1
+  systemctl status $RUNTIME_SERVICES --no-pager --full > "$diagnostics_path/services-status.txt" 2>&1 || true
+  systemctl --failed --no-legend --plain > "$diagnostics_path/failed-units.txt" 2>&1 || true
+  journalctl -u sigmaos-api.service -u sigmaos-worker@1.service -u sigmaos-photo-worker.service -u sigmaos-downloader.service -u sigmaos-hostd.service -u sigmaos-terminal-helper.service -n 200 --no-pager > "$diagnostics_path/services-journal.txt" 2>&1 || true
+
+  log "service status at failure:" >&2
+  cat "$diagnostics_path/services-status.txt" >&2
+  log "failed units at failure:" >&2
+  cat "$diagnostics_path/failed-units.txt" >&2
+  log "recent service journal at failure:" >&2
+  cat "$diagnostics_path/services-journal.txt" >&2
+}
+
 capture_failure() {
   status=$?
   if [ "$success" -eq 0 ] && [ -n "$backup_path" ]; then
     log "upgrade failed; backup retained at $backup_path" >&2
+    capture_runtime_diagnostics "$backup_path"
     # dpkg may fail after the package has been unpacked. Restore the exact
     # service/timer state captured before the upgrade so a failed deployment
     # does not leave the appliance permanently stopped.
@@ -166,8 +204,6 @@ capture_failure() {
         restore_unit_state "$unit" "$state_dir" >/dev/null 2>&1 || true
       done
     fi
-    systemctl --failed --no-legend --plain > "$backup_path/failed-units.txt" 2>&1 || true
-    journalctl -u sigmaos-api.service -u sigmaos-worker@1.service -u sigmaos-photo-worker.service -u sigmaos-hostd.service -u sigmaos-terminal-helper.service -n 200 --no-pager > "$backup_path/services-journal.txt" 2>&1 || true
   fi
   trap - EXIT
   exit "$status"
@@ -226,11 +262,14 @@ if [ "$installed_status" = "install ok installed" ]; then
   if [ "$manifest_version" = "$installed_version" ]; then
     installed_commit=$(build_commit /usr/lib/sigmaos/build-info.json 2>/dev/null || true)
     [ "$installed_commit" = "$(printf '%s' "$manifest_commit_sha" | tr '[:upper:]' '[:lower:]')" ] || die "same package version has a different commit"
-    log "version $manifest_version is already installed; verifying runtime only"
+    log "version $manifest_version is already installed; recovering runtime and release state"
+    activate_runtime
     verify_runtime
     verify_build_info "$manifest_version" "$manifest_commit_sha"
+    record_release "$manifest_tag" "$manifest_version" "$manifest_commit_sha"
     success=1
     rm -rf "$work_dir"
+    log "recovered $manifest_tag successfully"
     exit 0
   fi
 fi
@@ -286,19 +325,11 @@ for unit in $WRITERS $TIMERS; do
   restore_unit_state "$unit" "$state_dir"
 done
 
+activate_runtime
 verify_runtime
 verify_build_info "$manifest_version" "$manifest_commit_sha"
 
-release_path="$RELEASE_DIR/$manifest_tag"
-rm -rf "$release_path"
-install -d -o root -g root -m 0700 "$release_path"
-cp -p "$work_dir/package.deb" "$release_path/package.deb"
-cp -p "$work_dir/release-manifest.json" "$release_path/release-manifest.json"
-cat > "$STATE_PATH" <<EOF
-{"tag":"$manifest_tag","version":"$manifest_version","commitSha":"$manifest_commit_sha","packagePath":"$release_path/package.deb","manifestPath":"$release_path/release-manifest.json","deployedAt":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
-EOF
-chown root:root "$STATE_PATH"
-chmod 0600 "$STATE_PATH"
+record_release "$manifest_tag" "$manifest_version" "$manifest_commit_sha"
 
 success=1
 rm -rf "$work_dir"

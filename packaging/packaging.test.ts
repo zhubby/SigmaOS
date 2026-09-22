@@ -405,6 +405,13 @@ describe("native packaging artifacts", () => {
     expect(deploy).not.toContain('dpkg -i "$work_dir/package.deb"');
     expect(deploy).toContain("systemctl daemon-reload");
     expect(deploy).toContain("restore_unit_state \"$unit\" \"$state_dir\"");
+    expect(deploy).toContain("activate_runtime");
+    expect(deploy).toContain("systemctl restart $RUNTIME_SERVICES");
+    expect(deploy).toContain('version $manifest_version is already installed; recovering runtime and release state');
+    expect(deploy).toContain('record_release "$manifest_tag" "$manifest_version" "$manifest_commit_sha"');
+    expect(deploy).toContain('capture_runtime_diagnostics "$backup_path"');
+    expect(deploy).toContain('cat "$diagnostics_path/services-status.txt" >&2');
+    expect(deploy).toContain('cat "$diagnostics_path/services-journal.txt" >&2');
     expect(deploy).toContain('state_dir/sigmaos-share-helper.service.enabled');
     expect(deploy).toContain('state_dir/sigmaos-hostd.service.enabled');
     expect(deploy).toContain('state_dir/sigmaos-share-helper.service.active');
