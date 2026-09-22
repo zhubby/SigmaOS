@@ -22,6 +22,11 @@ override_dh_auto_install:
 override_dh_strip:
 	dh_strip --exclude=.bare
 
+# Dependency analysis must likewise ignore foreign Bare prebuilds and musl
+# fallbacks that npm installs alongside the host glibc binaries.
+override_dh_shlibdeps:
+	dh_shlibdeps --exclude=.bare --exclude=linuxmusl
+
 # Services are started by the installer after first-boot configuration. Timers
 # and units must not be enabled implicitly by debhelper during package install.
 override_dh_installsystemd:
