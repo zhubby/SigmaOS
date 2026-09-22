@@ -1,3 +1,9 @@
+sigmaos (0.7.4) unstable; urgency=medium
+
+  * Recover required services and expose deployment diagnostics after failed upgrades.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Tue, 22 Sep 2026 18:47:37 +0000
+
 sigmaos (0.7.3) unstable; urgency=medium
 
   * Recover CM5 upgrades when optional HEIF tooling is not preinstalled.
