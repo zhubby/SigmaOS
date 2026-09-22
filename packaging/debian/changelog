@@ -1,3 +1,9 @@
+sigmaos (0.7.7) unstable; urgency=medium
+
+  * Fix photo folder approvals and enable HEIC processing.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Tue, 22 Sep 2026 21:20:25 +0000
+
 sigmaos (0.7.6) unstable; urgency=medium
 
   * Preserve the archiver runtime module boundary and smoke-test the production API bundle.
