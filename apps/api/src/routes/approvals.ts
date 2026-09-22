@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import {
   appendEvent,
   createTrashEntry,
+  enqueuePhotoJob,
   getDockerSettings,
   getApproval,
   getDockerOperationByApproval,
@@ -10,6 +11,7 @@ import {
   getStorageOperationByApproval,
   getVmOperationByApproval,
   getNasRoot,
+  getPhotoLibrarySettings,
   listDockerRegistryCredentials,
   listPendingApprovals,
   recordAppliedOperation,
@@ -300,6 +302,17 @@ export function registerApprovalRoutes(server: FastifyInstance, context: ApiRout
     }
 
     const applied: ReturnType<typeof recordAppliedOperation>[] = [];
+    const enqueuePhotoRefreshIfNeeded = (): void => {
+      const photoSettings = getPhotoLibrarySettings(db);
+      if (!photoSettings || !fileOperationProposals(approval).some((proposal) =>
+        proposal.rootId === photoSettings.rootId &&
+        proposal.storagePoolId === photoSettings.storagePoolId &&
+        [proposal.sourcePath, proposal.targetPath].some((candidate) =>
+          candidate ? isPathWithin(photoSettings.path, candidate) : false
+        )
+      )) return;
+      enqueuePhotoJob(db, { settings: photoSettings, kind: "full_scan", path: photoSettings.path });
+    };
     try {
       for (const proposal of fileOperationProposals(approval)) {
         const root = getNasRoot(db, proposal.rootId);
@@ -347,6 +360,7 @@ export function registerApprovalRoutes(server: FastifyInstance, context: ApiRout
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (applied.length) enqueuePhotoRefreshIfNeeded();
       updateApprovalStatus(db, approval.id, "failed", ["approved"]);
       updateJobStatus(db, approval.jobId, "failed", message, ["waiting_approval"]);
       appendEvent(db, {
@@ -361,6 +375,7 @@ export function registerApprovalRoutes(server: FastifyInstance, context: ApiRout
     }
 
     updateApprovalStatus(db, approval.id, "applied", ["approved"]);
+    enqueuePhotoRefreshIfNeeded();
     updateJobStatus(db, approval.jobId, "completed", null, ["waiting_approval"]);
     appendEvent(db, {
       sessionId: approval.sessionId,
@@ -524,6 +539,15 @@ export function registerApprovalRoutes(server: FastifyInstance, context: ApiRout
       status: "rejected"
     });
   });
+}
+
+function isPathWithin(parentPath: string, candidatePath: string): boolean {
+  const relativePath = path.relative(parentPath, candidatePath);
+  return relativePath === "" || (
+    relativePath !== ".." &&
+    !relativePath.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relativePath)
+  );
 }
 
 function getErrorStatusCode(error: unknown, fallback: number): number {

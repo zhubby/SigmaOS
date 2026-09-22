@@ -14,7 +14,7 @@ The project is an npm workspaces monorepo written in strict TypeScript. Its prod
 
 ## Project status
 
-SigmaOS is under active v1 development. The file workspace, agent job pipeline, approvals, indexing, Docker controls, share configuration, Debian packaging, and scheduled maintenance paths are implemented.
+SigmaOS is under active v1 development. The file and photo workspaces, agent job pipeline, approvals, indexing, Docker controls, share configuration, Debian packaging, and scheduled maintenance paths are implemented.
 
 The following surfaces are intentionally limited today:
 
@@ -49,6 +49,13 @@ The following surfaces are intentionally limited today:
 - Approval records for dangerous Pi tool calls before execution.
 - A model-free, read-only local fallback for development and testing.
 
+### Photo library
+
+- Bind one directory on a mounted storage pool and index JPEG, PNG, WebP, GIF, HEIC, and HEIF recursively.
+- Build a chronological EXIF-first timeline with cached WebP thumbnails and previews.
+- Upload with SHA-256 duplicate detection, view metadata, download originals or ZIP selections, and request approval-gated batch move/trash operations.
+- Run immediate and periodic scans in a dedicated non-root photo worker without following symbolic links.
+
 ### Host management
 
 - Read-only CPU, memory, process, runtime, storage, SMART, RAID, mount, and network reporting.
@@ -72,6 +79,7 @@ flowchart LR
   API["Fastify API"]
   DB[("SQLite WAL + FTS5")]
   Worker["Agent worker"]
+  PhotoWorker["Photo worker"]
   Agent["Pi agent runtime"]
   Indexer["Filesystem indexer"]
   Scheduler["Scheduler / maintenance"]
@@ -86,6 +94,8 @@ flowchart LR
   API <--> DB
   Worker <--> DB
   Worker --> Agent
+  PhotoWorker <--> DB
+  PhotoWorker --> Roots
   Agent --> Tools
   API --> Tools
   Tools <--> Roots
@@ -106,6 +116,7 @@ The main runtime components are:
 | `apps/web` | React 19 workspace UI, previews, settings, activity, and management panels. |
 | `apps/api` | REST API, SSE event feed, WebSocket terminals, static production UI, and approved operation execution. |
 | `apps/worker` | Claims queued jobs, runs agent turns, persists events, and pauses work for approvals. |
+| `apps/photo-worker` | Claims photo jobs, extracts metadata, and generates hash-addressed image derivatives. |
 | `apps/indexer` | Walks NAS roots, hashes files, extracts bounded text, and maintains the FTS index. |
 | `apps/scheduler` | Generates duplicate, backup, provider, and health reports; checkpoints and optimizes SQLite. |
 | `apps/hostd` | Rust host integration daemon for approved shares, storage, Docker daemon, and NetworkManager changes. |
@@ -155,6 +166,7 @@ Optional host tools enable additional features:
 | --- | --- |
 | Git status | `git` |
 | Video transcoding | `ffmpeg` |
+| HEIC/HEIF photos | `libheif-examples` (`heif-convert`) |
 | Archive extraction | `gzip`, `unzip`, `tar`, `bsdtar`, or `unrar` as appropriate |
 | Storage and network inspection | `ip`, `lsblk`, `findmnt`, `mdadm`, `smartctl` |
 | Share management | Samba, Apache WebDAV, vsftpd, NFS server, MiniDLNA, and the packaged `sigmaos-hostd` daemon |
@@ -175,7 +187,7 @@ npm run dev
 
 Open [http://127.0.0.1:5173](http://127.0.0.1:5173). Vite proxies `/api`, `/health`, and WebSocket traffic to the API at `127.0.0.1:3010`.
 
-`npm run dev` starts the API, agent worker, and web UI. The indexer and scheduled tasks remain explicit during development:
+`npm run dev` starts the API, agent worker, photo worker, downloader, and web UI. The indexer and scheduled tasks remain explicit during development:
 
 ```bash
 npm run index

@@ -67,6 +67,11 @@ import type {
   VmVideoModel,
   PlayerStatus as SharedPlayerStatus,
   OperationNotificationRecord as SharedOperationNotification,
+  PhotoAssetRecord as SharedPhotoAsset,
+  PhotoJobRecord as SharedPhotoJob,
+  PhotoLibrarySettingsRecord as SharedPhotoLibrarySettings,
+  PhotoLibraryStatus as SharedPhotoLibraryStatus,
+  PhotoTimelinePage as SharedPhotoTimelinePage,
   TerminalTab as SharedTerminalTab,
   TerminalTabState as SharedTerminalTabState
 } from "@sigmaos/shared";
@@ -116,6 +121,11 @@ export interface ReadinessResponse { roots: RootReadiness[]; }
 export type SystemHealth = SystemHealthSummary;
 export type DownloadTask = SharedDownloadTask;
 export type DownloadSettings = PublicDownloadSettings;
+export type PhotoAsset = SharedPhotoAsset;
+export type PhotoJob = SharedPhotoJob;
+export type PhotoLibrarySettings = SharedPhotoLibrarySettings;
+export type PhotoLibraryStatus = SharedPhotoLibraryStatus;
+export type PhotoTimelinePage = SharedPhotoTimelinePage;
 export type TerminalTab = SharedTerminalTab;
 export type TerminalTabState = SharedTerminalTabState;
 export type VmSummary = PublicVmSummary;
@@ -373,6 +383,11 @@ export interface FileProposalResult {
   message: AgentMessage;
   job: Job;
   approval: PendingApproval;
+}
+
+export interface PhotoExportResult {
+  url: string;
+  expiresAt: string | null;
 }
 
 export interface UploadProgress {
@@ -969,6 +984,71 @@ export async function getFiles(rootId: string, currentPath: string, storagePoolI
   const response = await fetch(`/api/files?${params.toString()}`);
   await ensureOk(response);
   return (await response.json()) as FileListing;
+}
+
+export async function getPhotoLibrarySettings(): Promise<PhotoLibrarySettings | null> {
+  const response = await fetch("/api/photos/settings");
+  await ensureOk(response);
+  return ((await response.json()) as { settings: PhotoLibrarySettings | null }).settings;
+}
+
+export async function savePhotoLibrarySettings(input: {
+  rootId: string;
+  storagePoolId: string;
+  path: string;
+}): Promise<{ settings: PhotoLibrarySettings; job: PhotoJob }> {
+  const response = await fetch("/api/photos/settings", jsonRequest("PUT", input));
+  await ensureOk(response);
+  return (await response.json()) as { settings: PhotoLibrarySettings; job: PhotoJob };
+}
+
+export async function getPhotoTimeline(cursor?: string | null, limit = 60): Promise<PhotoTimelinePage> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+  const response = await fetch(`/api/photos?${params.toString()}`);
+  await ensureOk(response);
+  return (await response.json()) as PhotoTimelinePage;
+}
+
+export async function getPhotoLibraryStatus(): Promise<PhotoLibraryStatus> {
+  const response = await fetch("/api/photos/status");
+  await ensureOk(response);
+  return ((await response.json()) as { status: PhotoLibraryStatus }).status;
+}
+
+export async function requestPhotoScan(): Promise<PhotoJob> {
+  const response = await fetch("/api/photos/scans", { method: "POST" });
+  await ensureOk(response);
+  return ((await response.json()) as { job: PhotoJob }).job;
+}
+
+export async function uploadPhoto(file: File, directory?: string): Promise<{ path: string; operation: FileOperation }> {
+  const params = new URLSearchParams({ name: file.name });
+  if (directory) params.set("directory", directory);
+  const response = await fetch(`/api/photos/upload?${params.toString()}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: file
+  });
+  await ensureOk(response);
+  return (await response.json()) as { path: string; operation: FileOperation };
+}
+
+export async function proposePhotoOperation(input: {
+  sessionId: string;
+  assetIds: string[];
+  operation: "move" | "trash";
+  targetDirectory?: string;
+}): Promise<FileProposalResult> {
+  const response = await fetch("/api/photos/proposals", jsonRequest("POST", input));
+  await ensureOk(response);
+  return (await response.json()) as FileProposalResult;
+}
+
+export async function createPhotoExport(assetIds: string[]): Promise<PhotoExportResult> {
+  const response = await fetch("/api/photos/exports", jsonRequest("POST", { assetIds }));
+  await ensureOk(response);
+  return (await response.json()) as PhotoExportResult;
 }
 
 export async function getDownloads(): Promise<DownloadTask[]> {

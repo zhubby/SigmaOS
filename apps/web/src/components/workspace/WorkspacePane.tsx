@@ -15,6 +15,7 @@ import {
   FolderPlus,
   GitBranch,
   HardDrive,
+  Images,
   MessageSquarePlus,
   MonitorPlay,
   MonitorCog,
@@ -51,12 +52,13 @@ import {
 import { WorkspaceManagementPanel, type ManagementPanelId } from "./WorkspaceManagementPanel.js";
 import { LocalTerminalPanel } from "./LocalTerminalPanel.js";
 import { HttpDownloaderPanel } from "./HttpDownloaderPanel.js";
+import { PhotoLibraryPanel } from "./PhotoLibraryPanel.js";
 import { FileListSkeleton, SkeletonBlock } from "./ManagementSkeleton.js";
 import type { CodeFontSettings } from "../../lib/editor-settings.js";
 import type { ResolvedTheme } from "../../lib/theme-settings.js";
 
 const EPOCH_DATE = new Date(0).toISOString();
-type WorkspacePanelId = "files" | "terminal" | "downloads" | ManagementPanelId;
+type WorkspacePanelId = "files" | "photos" | "terminal" | "downloads" | ManagementPanelId;
 
 const WORKSPACE_PANELS = [
   {
@@ -64,6 +66,12 @@ const WORKSPACE_PANELS = [
     labelKey: "workspace.panels.files",
     shortLabelKey: "workspace.panels.filesShort",
     Icon: Files
+  },
+  {
+    id: "photos",
+    labelKey: "workspace.panels.photos",
+    shortLabelKey: "workspace.panels.photosShort",
+    Icon: Images
   },
   {
     id: "terminal",
@@ -1214,6 +1222,19 @@ export function WorkspacePane({
               onOpenDirectory={onOpenDownloadedDirectory}
               onOpenStorage={() => selectPanel("storage")}
               {...(onRequestCreateFolderAt ? { onRequestCreateFolder: onRequestCreateFolderAt } : {})}
+              onNotifyError={onNotifyError}
+              onNotifySuccess={onNotifySuccess}
+              onNotifyWarning={onNotifyWarning}
+            />
+          ) : activePanel === "photos" ? (
+            <PhotoLibraryPanel
+              pools={storagePools}
+              selectedStoragePoolId={selectedStoragePoolId}
+              selectedRootId={selectedRootId}
+              sessionId={sessionId}
+              locale={locale}
+              {...(onRequestCreateFolderAt ? { onRequestCreateFolder: onRequestCreateFolderAt } : {})}
+              onWorkQueuesChanged={onWorkQueuesChanged}
               onNotifyError={onNotifyError}
               onNotifySuccess={onNotifySuccess}
               onNotifyWarning={onNotifyWarning}

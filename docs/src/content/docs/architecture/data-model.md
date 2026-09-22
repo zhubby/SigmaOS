@@ -9,6 +9,6 @@ sidebar:
   order: 4
 ---
 
-SQLite 是唯一持久化存储，开启 WAL、foreign keys 和 5 秒 busy timeout。表按身份与 roots、sessions/jobs/events、approvals/operations、indexed files/FTS/trash、readiness/index history、backup、health alerts 和 execution locks 分组。
+SQLite 是唯一持久化存储，开启 WAL、foreign keys 和 5 秒 busy timeout。表按身份与 roots、sessions/jobs/events、approvals/operations、indexed files/FTS/trash、照片资源/任务、readiness/index history、backup、health alerts 和 execution locks 分组。
 
-迁移由有序 ID 驱动，首次打开数据库时逐个事务执行并记录到 `schema_migrations`。应用、worker、indexer、scheduler 和 backup 都使用同一连接初始化路径，但通过 execution lock 和 systemd 调度避免互相覆盖。
+迁移由有序 ID 驱动，首次打开数据库时逐个事务执行并记录到 `schema_migrations`。应用、worker、photo-worker、indexer、scheduler 和 backup 都使用同一连接初始化路径；photo job 使用独立租约，其他周期任务通过 execution lock 和 systemd 调度避免互相覆盖。

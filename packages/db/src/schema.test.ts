@@ -47,7 +47,9 @@ describe("SQLite schema migrations", () => {
       "013_download_tasks",
       "014_operation_notifications",
       "015_terminal_tabs",
-      "016_hostd_config"
+      "016_hostd_config",
+      "017_photo_library",
+      "018_photo_upload_reservations"
     ]);
   });
 

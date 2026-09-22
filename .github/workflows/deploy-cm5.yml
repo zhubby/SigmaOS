@@ -332,6 +332,7 @@ jobs:
 
           systemctl is-active --quiet sigmaos-api.service
           systemctl is-active --quiet sigmaos-worker@1.service
+          systemctl is-active --quiet sigmaos-photo-worker.service
           systemctl is-active --quiet sigmaos-downloader.service
           systemctl is-active --quiet sigmaos-hostd.service
           systemctl is-active --quiet sigmaos-terminal-helper.service

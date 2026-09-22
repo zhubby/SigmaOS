@@ -13,6 +13,19 @@ sidebar:
 
 `SQLITE_BUSY` 通常表示 oneshot 任务并发；应停止相关 timers，确认任务退出后串行运行。静态页面停在 Loading 时，先确认 API 提供当前 Web asset，且不存在的 `/assets/*` 没有被 SPA fallback 返回。
 
+## 照片扫描与 HEIC
+
+照片面板长时间停在 queued/scanning 或出现 degraded 时，先检查 worker、库状态和目录挂载：
+
+```bash
+sudo systemctl status sigmaos-photo-worker.service --no-pager
+sudo journalctl -u sigmaos-photo-worker.service -n 100 --no-pager
+curl -fsS http://127.0.0.1:3010/api/photos/status
+command -v heif-convert
+```
+
+`offline` 表示照片设置对应的 root、storage pool 或目录当前不可用；先恢复相同挂载，不要把其他目录挂到原路径伪装成照片库。单个 HEIC/HEIF 失败时确认 `libheif-examples` 已安装并验证源文件；JPEG/PNG 等全部失败时检查 `/var/lib/sigmaos/photos` 与照片目录对 `sigmaos` 用户的读写权限。完整遍历失败不会清理未确认的旧资源。
+
 ## 服务目录所有权与启动顺序
 
 root hostd 只声明 `StateDirectory=sigmaos/docker-daemon` 和 `StateDirectory=sigmaos/network-manager`（均为 `0700 root:root`），不声明共享的 `StateDirectory=sigmaos` 或 `LogsDirectory=sigmaos`，`ReadWritePaths` 也不得包含 `/var/lib/sigmaos` 父目录或 `/var/log/sigmaos`。否则 hostd 可能改动共享状态，或 systemd 在启动时重设父目录及子文件的所有权，导致非 root API/worker 无法打开 SQLite。动态共享账号需要 `useradd` 原子更新账号数据库，因此 unit 会显式放行 `/etc`；Samba 的 `smbpasswd` 还需要 `/run/samba`、`/var/lib/samba`、`/var/cache/samba` 和 `/var/log/samba` 可写。不要用反复递归 chown 或赋予 API root 权限掩盖问题。

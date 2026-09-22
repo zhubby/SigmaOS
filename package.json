@@ -9,7 +9,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run build:metadata && concurrently -n api,worker,downloader,web -c blue,green,cyan,magenta \"npm run dev -w @sigmaos/api\" \"npm run dev -w @sigmaos/worker\" \"npm run dev -w @sigmaos/downloader\" \"npm run dev -w @sigmaos/web\"",
+    "dev": "npm run build:metadata && concurrently -n api,worker,photos,downloader,web -c blue,green,yellow,cyan,magenta \"npm run dev -w @sigmaos/api\" \"npm run dev -w @sigmaos/worker\" \"npm run dev -w @sigmaos/photo-worker\" \"npm run dev -w @sigmaos/downloader\" \"npm run dev -w @sigmaos/web\"",
     "index": "npm run once -w @sigmaos/indexer",
     "backup": "npm run dev -w @sigmaos/backup",
     "schedule": "npm run dev -w @sigmaos/scheduler",

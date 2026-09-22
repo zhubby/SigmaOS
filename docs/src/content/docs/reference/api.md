@@ -4,14 +4,25 @@ description: API 传输面、端点分组和稳定契约。
 type: reference
 status: current
 audience: [developer]
-sourceOfTruth: [apps/api/src/routes/index.ts, apps/api/src/routes/files.ts, apps/api/src/routes/sessions.ts, apps/api/src/routes/downloads.ts, apps/api/src/routes/docker.ts, apps/api/src/routes/system.ts, apps/api/src/routes/terminal.ts, apps/api/src/lib/docker-daemon.ts, apps/api/src/lib/docker-registry.ts, apps/api/src/lib/network-manager.ts, apps/web/src/api.ts]
+sourceOfTruth: [apps/api/src/routes/index.ts, apps/api/src/routes/files.ts, apps/api/src/routes/photos.ts, apps/api/src/routes/sessions.ts, apps/api/src/routes/downloads.ts, apps/api/src/routes/docker.ts, apps/api/src/routes/system.ts, apps/api/src/routes/terminal.ts, apps/api/src/lib/docker-daemon.ts, apps/api/src/lib/docker-registry.ts, apps/api/src/lib/network-manager.ts, apps/web/src/api.ts]
 sidebar:
   order: 2
 ---
 
-REST 路由按 roots、files/search、sessions/jobs/events、approvals/operations、indexer/readiness/health、backup、settings、system、storage、shares、Docker、VM 和 terminal 分组。
+REST 路由按 roots、files/search、photos、sessions/jobs/events、approvals/operations、indexer/readiness/health、backup、settings、system、storage、shares、Docker、VM 和 terminal 分组。
 
 Agent 事件通过 session SSE stream 传递；terminal、Docker console 和 VM console 使用 WebSocket。写操作的 approval 要求以 route 实现和 `packages/shared/src/types.ts` 为准；本页不复制易漂移的完整 JSON schema。
+
+## 照片库
+
+- `GET/PUT /api/photos/settings` 读取或设置唯一照片库。设置请求必须携带 `rootId`、`storagePoolId` 和池内现有目录；变更后旧索引失效并排队完整扫描。
+- `GET /api/photos` 使用不透明 cursor 返回按 `takenAt DESC, id DESC` 稳定排序的页面；`GET /api/photos/status` 返回 `unconfigured/queued/scanning/ready/degraded/offline` 状态，`POST /api/photos/scans` 排队手动扫描。
+- `GET /api/photos/:id/thumbnail|preview|original` 只解析当前照片库中的资源。缩略图和预览来自 data directory 的 hash-addressed WebP cache；GIF preview 保留动画原文件。
+- `PUT /api/photos/upload` 使用 `application/octet-stream`，查询参数传文件名和可选目录。服务端限制 512 MiB、原子发布并按 SHA-256 拒绝当前库中的重复内容。
+- `POST /api/photos/exports` 为单张原图或最多 100 张照片的短时 ZIP 创建下载地址；ZIP token 使用一次后失效。
+- `POST /api/photos/proposals` 为最多 100 张照片创建一组 move 或 trash 文件提案。目标必须仍在照片库内，执行前继续走现有 approval，不提供绕过入口。
+
+JPEG、PNG、WebP、GIF、HEIC 和 HEIF 由照片 worker 处理。原图、GIF 预览和文件变更每次访问都重新经过 root、storage pool、挂载、遍历和 symlink 校验；当前配置版本的缓存 WebP 缩略图与预览可以在存储池离线时继续读取。不要把索引记录当成原文件存在性的授权依据。
 
 ## Wi-Fi 与热点
 

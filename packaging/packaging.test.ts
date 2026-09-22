@@ -14,6 +14,7 @@ describe("native packaging artifacts", () => {
     const serviceNames = [
       "sigmaos-api.service",
       "sigmaos-worker@.service",
+      "sigmaos-photo-worker.service",
       "sigmaos-downloader.service",
       "sigmaos-indexer.service",
       "sigmaos-scheduler.service",
@@ -80,6 +81,7 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("target/release/sigmaos-hostd usr/lib/sigmaos/bin/");
     expect(install).toContain("usr/lib/sigmaos/apps/terminal-helper/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/worker/dist/");
+    expect(install).toContain("usr/lib/sigmaos/apps/photo-worker/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/indexer/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/backup/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/scheduler/dist/");
@@ -117,6 +119,7 @@ describe("native packaging artifacts", () => {
     expect(control).toContain("Depends: nodejs (>= 20), sqlite3, tmux, acl, adduser, network-manager, wpasupplicant, dnsmasq-base, wireless-regdb, iw");
     expect(control).toContain("Build-Depends: debhelper-compat (= 13), nodejs, npm, cargo, rustc, acl");
     expect(control).toContain("mpv");
+    expect(control).toContain("libheif-examples");
     expect(control).toContain("Suggests:");
     expect(control).toContain("git");
     expect(control).toContain("ffmpeg");
@@ -158,12 +161,15 @@ describe("native packaging artifacts", () => {
     expect(manifest).not.toContain("sigmaos-share-helper.service");
     expect(manifest).toContain("sigmaos-terminal-helper.service");
     expect(manifest).toContain("sigmaos-downloader.service");
+    expect(manifest).toContain("sigmaos-photo-worker.service");
     expect(manifest).toContain("sigmaos-player-helper.service");
     expect(manifest).toContain("mpv");
     expect(manifest).toContain("samba");
     expect(buildImage).toMatch(/--include=.*(^|,)git(,|\\|\s)/s);
     expect(buildImage).toMatch(/--include=.*(^|,)samba(,|\\|\s)/s);
     expect(manifest).toContain("tesseract-ocr");
+    expect(manifest).toContain("libheif-examples");
+    expect(buildImage).toContain("libheif-examples");
     expect(manifest).toContain("mdadm");
     expect(manifest).toContain("btrfs-progs");
     expect(manifest).toContain("smartmontools");

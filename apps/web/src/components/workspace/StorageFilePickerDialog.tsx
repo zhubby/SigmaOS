@@ -37,6 +37,9 @@ export function StorageFilePickerDialog({
   initialPoolId,
   locale,
   mode = "iso",
+  directoryPurpose = "downloads",
+  initialPath,
+  boundaryPath,
   onCancel,
   onSelect,
   onRequestCreateFolder
@@ -45,6 +48,9 @@ export function StorageFilePickerDialog({
   initialPoolId: string;
   locale: SupportedLocale;
   mode?: "iso" | "directory";
+  directoryPurpose?: "downloads" | "photoLibrary" | "photoMove";
+  initialPath?: string;
+  boundaryPath?: string;
   onCancel: () => void;
   onSelect: (selection: StorageFileSelection) => void;
   onRequestCreateFolder?: (input: {
@@ -59,7 +65,7 @@ export function StorageFilePickerDialog({
   const initialPool = availablePools.find((pool) => pool.id === initialPoolId) ?? availablePools[0] ?? null;
   const [selectedPoolId, setSelectedPoolId] = useState(initialPool?.id ?? "");
   const selectedPool = availablePools.find((pool) => pool.id === selectedPoolId) ?? null;
-  const [currentPath, setCurrentPath] = useState(initialPool?.path ?? ".");
+  const [currentPath, setCurrentPath] = useState(initialPath ?? initialPool?.path ?? ".");
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [selection, setSelection] = useState<FileEntry | null>(null);
   const [loading, setLoading] = useState(false);
@@ -69,6 +75,33 @@ export function StorageFilePickerDialog({
   const [createFolderSubmitting, setCreateFolderSubmitting] = useState(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const loadRequestId = useRef(0);
+  const directoryCopy = directoryPurpose === "photoLibrary"
+    ? {
+        eyebrow: t("workspace.photos.libraryDirectory"),
+        title: t("workspace.photos.libraryPickerTitle"),
+        description: t("workspace.photos.libraryPickerDescription"),
+        list: t("workspace.photos.directoryPickerList"),
+        empty: t("workspace.photos.directoryPickerEmpty"),
+        select: t("workspace.photos.useLibraryDirectory")
+      }
+    : directoryPurpose === "photoMove"
+      ? {
+          eyebrow: t("workspace.photos.moveDestination"),
+          title: t("workspace.photos.movePickerTitle"),
+          description: t("workspace.photos.movePickerDescription"),
+          list: t("workspace.photos.directoryPickerList"),
+          empty: t("workspace.photos.directoryPickerEmpty"),
+          select: t("workspace.photos.useMoveDestination")
+        }
+      : {
+          eyebrow: t("workspace.downloads.targetDirectory"),
+          title: t("workspace.downloads.directoryPickerTitle"),
+          description: t("workspace.downloads.directoryPickerDescription"),
+          list: t("workspace.downloads.directoryPickerList"),
+          empty: t("workspace.downloads.directoryPickerEmpty"),
+          select: t("workspace.downloads.selectCurrentDirectory")
+        };
+  const pickerRootPath = boundaryPath && selectedPool?.id === initialPool?.id ? boundaryPath : selectedPool?.path ?? ".";
 
   const loadDirectory = useCallback(async () => {
     if (!selectedPool) {
@@ -121,7 +154,7 @@ export function StorageFilePickerDialog({
     return () => document.removeEventListener("keydown", closeOnEscape);
   }, [onCancel]);
 
-  const breadcrumbs = selectedPool ? pickerBreadcrumbs(selectedPool.path, currentPath) : [];
+  const breadcrumbs = selectedPool ? pickerBreadcrumbs(pickerRootPath, currentPath) : [];
 
   function changePool(poolId: string) {
     const pool = availablePools.find((candidate) => candidate.id === poolId);
@@ -233,17 +266,17 @@ export function StorageFilePickerDialog({
             <div>
               <span className="eyebrow">
                 {mode === "directory"
-                  ? t("workspace.downloads.targetDirectory")
+                  ? directoryCopy.eyebrow
                   : t("workspace.management.virtualMachines.createIsoSource")}
               </span>
               <h3 id="storage-file-picker-title">
                 {mode === "directory"
-                  ? t("workspace.downloads.directoryPickerTitle")
+                  ? directoryCopy.title
                   : t("workspace.management.virtualMachines.isoPickerTitle")}
               </h3>
               <p>
                 {mode === "directory"
-                  ? t("workspace.downloads.directoryPickerDescription")
+                  ? directoryCopy.description
                   : t("workspace.management.virtualMachines.isoPickerDescription")}
               </p>
             </div>
@@ -300,10 +333,10 @@ export function StorageFilePickerDialog({
           <section className="storage-file-picker-browser">
             <div className="storage-file-picker-toolbar">
               <div className="storage-file-picker-location">
-                <span>{mode === "directory" ? t("workspace.downloads.targetDirectory") : t("workspace.management.virtualMachines.isoPickerFiles")}</span>
+                <span>{mode === "directory" ? directoryCopy.eyebrow : t("workspace.management.virtualMachines.isoPickerFiles")}</span>
                 <nav className="storage-file-picker-breadcrumbs" aria-label={t("workspace.breadcrumbs")}>
                   {selectedPool ? (
-                    <button type="button" onClick={() => openDirectory(selectedPool.path)}>
+                    <button type="button" onClick={() => openDirectory(pickerRootPath)}>
                       <HardDrive aria-hidden="true" size={13} />
                       <span>{selectedPool.name}</span>
                     </button>
@@ -344,8 +377,8 @@ export function StorageFilePickerDialog({
                 <button
                   type="button"
                   className="storage-file-picker-up"
-                  onClick={() => selectedPool && openDirectory(parentPickerPath(selectedPool.path, currentPath))}
-                  disabled={!selectedPool || currentPath === selectedPool.path || loading}
+                  onClick={() => selectedPool && openDirectory(parentPickerPath(pickerRootPath, currentPath))}
+                  disabled={!selectedPool || currentPath === pickerRootPath || loading}
                   title={t("common.actions.up")}
                   aria-label={t("common.actions.up")}
                 >
@@ -358,7 +391,7 @@ export function StorageFilePickerDialog({
               className="storage-file-picker-list"
               role="listbox"
               aria-label={mode === "directory"
-                ? t("workspace.downloads.directoryPickerList")
+                ? directoryCopy.list
                 : t("workspace.management.virtualMachines.isoPickerFiles")}
             >
               {loading ? (
@@ -373,7 +406,7 @@ export function StorageFilePickerDialog({
               ) : entries.length === 0 ? (
                 <div className="storage-file-picker-state">
                   {mode === "directory" ? <Folder aria-hidden="true" size={19} /> : <Disc3 aria-hidden="true" size={19} />}
-                  <span>{mode === "directory" ? t("workspace.downloads.directoryPickerEmpty") : t("workspace.management.virtualMachines.isoPickerEmpty")}</span>
+                  <span>{mode === "directory" ? directoryCopy.empty : t("workspace.management.virtualMachines.isoPickerEmpty")}</span>
                 </div>
               ) : (
                 entries.map((entry) => {
@@ -417,7 +450,7 @@ export function StorageFilePickerDialog({
           <div>
             <button type="button" onClick={onCancel}>{t("common.actions.cancel")}</button>
             <button type="button" className="vm-create-submit" onClick={confirmSelection} disabled={mode === "iso" && !selection}>
-              {mode === "directory" ? t("workspace.downloads.selectCurrentDirectory") : t("workspace.management.virtualMachines.isoPickerSelect")}
+              {mode === "directory" ? directoryCopy.select : t("workspace.management.virtualMachines.isoPickerSelect")}
             </button>
           </div>
         </footer>

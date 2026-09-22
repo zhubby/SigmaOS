@@ -9,7 +9,7 @@ STATE_PATH="$BASE_DIR/current-release.json"
 LOCK_PATH=/run/lock/sigmaos-deploy.lock
 
 TIMERS='sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer sigmaos-health.timer sigmaos-backup-daily.timer sigmaos-backup-weekly.timer'
-WRITERS='sigmaos-indexer.service sigmaos-scheduler.service sigmaos-maintenance.service sigmaos-health.service sigmaos-backup-daily.service sigmaos-backup-weekly.service sigmaos-api.service sigmaos-worker@1.service sigmaos-downloader.service sigmaos-hostd.service sigmaos-terminal-helper.service sigmaos-player-helper.service'
+WRITERS='sigmaos-indexer.service sigmaos-scheduler.service sigmaos-maintenance.service sigmaos-health.service sigmaos-backup-daily.service sigmaos-backup-weekly.service sigmaos-api.service sigmaos-worker@1.service sigmaos-photo-worker.service sigmaos-downloader.service sigmaos-hostd.service sigmaos-terminal-helper.service sigmaos-player-helper.service'
 RETIRED_UNITS='sigmaos-share-helper.service'
 
 success=0
@@ -123,7 +123,7 @@ wait_for_url() {
 
 verify_runtime() {
   log "checking SigmaOS services"
-  for unit in sigmaos-api.service sigmaos-worker@1.service sigmaos-downloader.service sigmaos-hostd.service sigmaos-terminal-helper.service; do
+  for unit in sigmaos-api.service sigmaos-worker@1.service sigmaos-photo-worker.service sigmaos-downloader.service sigmaos-hostd.service sigmaos-terminal-helper.service; do
     systemctl is-active --quiet "$unit" || die "service is not active: $unit"
   done
 
@@ -167,7 +167,7 @@ capture_failure() {
       done
     fi
     systemctl --failed --no-legend --plain > "$backup_path/failed-units.txt" 2>&1 || true
-    journalctl -u sigmaos-api.service -u sigmaos-worker@1.service -u sigmaos-hostd.service -u sigmaos-terminal-helper.service -n 200 --no-pager > "$backup_path/services-journal.txt" 2>&1 || true
+    journalctl -u sigmaos-api.service -u sigmaos-worker@1.service -u sigmaos-photo-worker.service -u sigmaos-hostd.service -u sigmaos-terminal-helper.service -n 200 --no-pager > "$backup_path/services-journal.txt" 2>&1 || true
   fi
   trap - EXIT
   exit "$status"

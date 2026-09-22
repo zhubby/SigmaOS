@@ -90,6 +90,77 @@ export interface DownloadSettingsRecord {
 
 export type PublicDownloadSettings = DownloadSettingsRecord;
 
+export type PhotoTakenAtSource = "exif" | "file_mtime";
+export type PhotoAssetStatus = "ready" | "failed";
+export type PhotoJobKind = "full_scan" | "path_refresh";
+export type PhotoJobStatus = "queued" | "running" | "completed" | "failed";
+
+export interface PhotoLibrarySettingsRecord {
+  rootId: string;
+  storagePoolId: string;
+  path: string;
+  updatedAt: string;
+}
+
+export interface PhotoAssetRecord {
+  id: string;
+  rootId: string;
+  storagePoolId: string;
+  path: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  mtimeMs: number;
+  contentHash: string | null;
+  width: number | null;
+  height: number | null;
+  orientation: number | null;
+  takenAt: string;
+  takenAtSource: PhotoTakenAtSource;
+  thumbnailKey: string | null;
+  previewKey: string | null;
+  status: PhotoAssetStatus;
+  error: string | null;
+  indexedAt: string;
+}
+
+export interface PhotoTimelinePage {
+  photos: PhotoAssetRecord[];
+  nextCursor: string | null;
+}
+
+export interface PhotoJobRecord {
+  id: string;
+  kind: PhotoJobKind;
+  status: PhotoJobStatus;
+  rootId: string;
+  storagePoolId: string;
+  path: string;
+  libraryUpdatedAt: string;
+  scanned: number;
+  processed: number;
+  failed: number;
+  currentPath: string | null;
+  error: string | null;
+  workerId: string | null;
+  leaseExpiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface PhotoLibraryStatus {
+  state: "unconfigured" | "queued" | "scanning" | "ready" | "degraded" | "offline";
+  total: number;
+  failed: number;
+  scanned: number;
+  processed: number;
+  currentPath: string | null;
+  error: string | null;
+  updatedAt: string | null;
+}
+
 export type GitFileStatus = "tracked" | "staged" | "modified" | "untracked" | "conflicted";
 
 export interface GitStatusSummary {

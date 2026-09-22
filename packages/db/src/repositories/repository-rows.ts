@@ -19,6 +19,10 @@ import type {
   OperationNotificationStatus,
   PendingApprovalKind,
   RootReadinessStatus,
+  PhotoAssetStatus,
+  PhotoJobKind,
+  PhotoJobStatus,
+  PhotoTakenAtSource,
   ShareOperationAction,
   ShareOperationStatus,
   StorageOperationStatus
@@ -230,6 +234,50 @@ export type DbDownloadTaskRow = {
   finished_at: string | null;
   last_progress_at: string | null;
   file_operation_id: string | null;
+};
+
+export type DbPhotoAssetRow = {
+  id: string;
+  root_id: string;
+  storage_pool_id: string;
+  path: string;
+  name: string;
+  mime_type: string;
+  size_bytes: number;
+  mtime_ms: number;
+  content_hash: string | null;
+  width: number | null;
+  height: number | null;
+  orientation: number | null;
+  taken_at: string;
+  taken_at_source: PhotoTakenAtSource;
+  thumbnail_key: string | null;
+  preview_key: string | null;
+  status: PhotoAssetStatus;
+  error: string | null;
+  library_updated_at: string;
+  indexed_at: string;
+};
+
+export type DbPhotoJobRow = {
+  id: string;
+  kind: PhotoJobKind;
+  status: PhotoJobStatus;
+  root_id: string;
+  storage_pool_id: string;
+  path: string;
+  library_updated_at: string;
+  scanned: number;
+  processed: number;
+  failed: number;
+  current_path: string | null;
+  error: string | null;
+  worker_id: string | null;
+  lease_expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
 };
 
 export type DbDockerOperationRow = {

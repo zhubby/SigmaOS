@@ -293,5 +293,82 @@ export const productionMigrations: Migration[] = [
         AND json_valid(value_json)
         AND json_type(value_json, '$.helperSocketPath') IS NOT NULL;
     `
+  },
+  {
+    id: "017_photo_library",
+    sql: `
+      CREATE TABLE IF NOT EXISTS photo_assets (
+        id TEXT PRIMARY KEY,
+        root_id TEXT NOT NULL REFERENCES nas_roots(id) ON DELETE CASCADE,
+        storage_pool_id TEXT NOT NULL,
+        path TEXT NOT NULL,
+        name TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+        mtime_ms INTEGER NOT NULL CHECK (mtime_ms >= 0),
+        content_hash TEXT,
+        width INTEGER CHECK (width IS NULL OR width > 0),
+        height INTEGER CHECK (height IS NULL OR height > 0),
+        orientation INTEGER,
+        taken_at TEXT NOT NULL,
+        taken_at_source TEXT NOT NULL CHECK (taken_at_source IN ('exif', 'file_mtime')),
+        thumbnail_key TEXT,
+        preview_key TEXT,
+        status TEXT NOT NULL CHECK (status IN ('ready', 'failed')),
+        error TEXT,
+        library_updated_at TEXT NOT NULL,
+        indexed_at TEXT NOT NULL,
+        UNIQUE(root_id, storage_pool_id, path)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_photo_assets_timeline
+        ON photo_assets(library_updated_at, status, taken_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_photo_assets_content_hash
+        ON photo_assets(library_updated_at, content_hash)
+        WHERE content_hash IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS photo_jobs (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL CHECK (kind IN ('full_scan', 'path_refresh')),
+        status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed')),
+        root_id TEXT NOT NULL REFERENCES nas_roots(id) ON DELETE CASCADE,
+        storage_pool_id TEXT NOT NULL,
+        path TEXT NOT NULL,
+        library_updated_at TEXT NOT NULL,
+        scanned INTEGER NOT NULL DEFAULT 0 CHECK (scanned >= 0),
+        processed INTEGER NOT NULL DEFAULT 0 CHECK (processed >= 0),
+        failed INTEGER NOT NULL DEFAULT 0 CHECK (failed >= 0),
+        current_path TEXT,
+        error TEXT,
+        worker_id TEXT,
+        lease_expires_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_photo_jobs_status_created_at
+        ON photo_jobs(status, created_at);
+      CREATE INDEX IF NOT EXISTS idx_photo_jobs_library_created_at
+        ON photo_jobs(library_updated_at, created_at DESC);
+    `
+  },
+  {
+    id: "018_photo_upload_reservations",
+    sql: `
+      CREATE TABLE IF NOT EXISTS photo_upload_reservations (
+        id TEXT PRIMARY KEY,
+        library_updated_at TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        path TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(library_updated_at, content_hash),
+        UNIQUE(library_updated_at, path)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_photo_upload_reservations_created_at
+        ON photo_upload_reservations(library_updated_at, created_at);
+    `
   }
 ];

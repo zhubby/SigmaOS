@@ -11,7 +11,7 @@ sidebar:
 
 Job 状态包括 `queued`、`running`、`waiting_approval`、`completed`、`failed`、`cancelled`；approval 包括 `pending`、`approved`、`rejected`、`expired`、`applied`、`failed`；文件 operation 记录 proposed、applied、rolled_back、failed。
 
-当前已实现文件浏览、预览、上传、编辑、归档检查、搜索、agent、approval、trash/restore、Docker/VM/share/terminal 控制、NetworkManager Wi-Fi/热点控制、indexer、restic backup 和健康 API。OCR、实时 watcher、永久删除以及静态地址、DNS、bridge、bond、VLAN 等通用网络写配置仍不支持。
+当前已实现文件浏览、预览、上传、编辑、归档检查、搜索、照片时间线与基础管理、agent、approval、trash/restore、Docker/VM/share/terminal 控制、NetworkManager Wi-Fi/热点控制、indexer、restic backup 和健康 API。照片人脸识别、地图、智能搜索、手动相册、分享链接、编辑、RAW 与视频，及 OCR、实时 watcher、永久删除、静态地址、DNS、bridge、bond、VLAN 等通用网络写配置仍不支持。
 
 ## 网络后端与无线能力
 

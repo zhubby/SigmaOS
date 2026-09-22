@@ -319,9 +319,10 @@ if command -v systemctl >/dev/null 2>&1; then
     sigmaos-terminal-helper.service \
     sigmaos-api.service \
     sigmaos-worker@1.service \
+    sigmaos-photo-worker.service \
     sigmaos-downloader.service
   systemctl restart sigmaos-hostd.service sigmaos-terminal-helper.service \
-    sigmaos-api.service sigmaos-worker@1.service sigmaos-downloader.service
+    sigmaos-api.service sigmaos-worker@1.service sigmaos-photo-worker.service sigmaos-downloader.service
   if [ "$PLAYER_ENABLED" = "1" ]; then
     systemctl enable --now sigmaos-player-helper.service
   fi

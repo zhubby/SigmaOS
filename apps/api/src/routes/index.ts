@@ -21,6 +21,7 @@ import { registerTerminalRoutes } from "./terminal.js";
 import { registerVmRoutes } from "./vms.js";
 import { registerPlayerRoutes } from "./player.js";
 import { registerDownloadRoutes } from "./downloads.js";
+import { registerPhotoRoutes } from "./photos.js";
 
 export function registerApiRoutes(server: FastifyInstance, context: ApiRouteContext): void {
   registerHealthRoutes(server, context);
@@ -44,4 +45,5 @@ export function registerApiRoutes(server: FastifyInstance, context: ApiRouteCont
   registerVmRoutes(server, context);
   registerPlayerRoutes(server, context);
   registerDownloadRoutes(server, context);
+  registerPhotoRoutes(server, context);
 }
