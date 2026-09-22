@@ -281,6 +281,7 @@ describe("native packaging artifacts", () => {
     expect(releaseWorkflow).not.toContain("dtolnay/rust-toolchain@1.95.0");
     expect(releaseWorkflow.match(/uses: dtolnay\/rust-toolchain@[0-9a-f]{40}/gu)).toHaveLength(3);
     expect(releaseWorkflow.match(/toolchain: 1\.95\.0/gu)).toHaveLength(3);
+    expect(releaseWorkflow).toMatch(/package-arm64:[\s\S]*?apt-get install[\s\S]*?\n\s+acl \\/u);
   });
 
   it("ships a loopback API reverse proxy for LAN access", async () => {
