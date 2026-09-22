@@ -1,3 +1,9 @@
+sigmaos (0.7.6) unstable; urgency=medium
+
+  * Preserve the archiver runtime module boundary and smoke-test the production API bundle.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Tue, 22 Sep 2026 20:05:56 +0000
+
 sigmaos (0.7.5) unstable; urgency=medium
 
   * Scope failed-unit checks to SigmaOS and retain diagnostics for recovery retries.
