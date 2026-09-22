@@ -1,6 +1,6 @@
 {
   "name": "@sigmaos/scheduler",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "type": "module",
   "exports": {
     ".": "./src/scheduler.ts"
@@ -12,7 +12,7 @@
     "build": "cd ../.. && tsup apps/scheduler/src/index.ts --format esm --platform node --target node22 --external=better-sqlite3 --out-dir apps/scheduler/dist"
   },
   "dependencies": {
-    "@sigmaos/db": "0.7.4",
-    "@sigmaos/shared": "0.7.4"
+    "@sigmaos/db": "0.7.5",
+    "@sigmaos/shared": "0.7.5"
   }
 }
