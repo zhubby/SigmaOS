@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use crate::error::HostdError;
@@ -55,49 +55,78 @@ pub fn render_webdav(
     htpasswd: &Path,
 ) -> Result<String, HostdError> {
     let mut lines = header("Apache WebDAV");
+    lines.extend([
+        "ServerRoot /etc/apache2".to_owned(),
+        "ServerName localhost".to_owned(),
+        "PidFile /run/sigmaos-webdav/apache2.pid".to_owned(),
+        "User www-data".to_owned(),
+        "Group www-data".to_owned(),
+        "ErrorLog /run/sigmaos-webdav/error.log".to_owned(),
+        "LogLevel warn".to_owned(),
+        "IncludeOptional /etc/apache2/mods-enabled/*.load".to_owned(),
+        "<IfModule !dav_module>".to_owned(),
+        "  LoadModule dav_module /usr/lib/apache2/modules/mod_dav.so".to_owned(),
+        "</IfModule>".to_owned(),
+        "<IfModule !dav_fs_module>".to_owned(),
+        "  LoadModule dav_fs_module /usr/lib/apache2/modules/mod_dav_fs.so".to_owned(),
+        "</IfModule>".to_owned(),
+        "IncludeOptional /etc/apache2/mods-enabled/*.conf".to_owned(),
+        "DavLockDB /run/sigmaos-webdav/DavLock".to_owned(),
+        "<Directory />".to_owned(),
+        "  Require all denied".to_owned(),
+        "</Directory>".to_owned(),
+    ]);
     if !settings.enabled {
-        lines.extend([
-            "# Sharing is disabled in SigmaOS.".to_owned(),
-            String::new(),
-        ]);
+        lines.push(String::new());
         return Ok(lines.join("\n"));
     }
+    let mut by_port = BTreeMap::<u16, Vec<&ResolvedShare<'_>>>::new();
     for resolved in shares
         .iter()
         .filter(|item| item.share.protocols.webdav.enabled)
     {
-        let share = resolved.share;
-        let path = apache_text(&resolved.absolute_path.to_string_lossy())?;
-        let prefix = apache_text(&share.protocols.webdav.path_prefix)?;
-        lines.push(format!("Listen {}", share.protocols.webdav.port));
-        lines.push(format!("<VirtualHost *:{}>", share.protocols.webdav.port));
-        lines.push(format!("  Alias \"{prefix}\" \"{path}\""));
-        lines.push(format!("  <Directory \"{path}\">"));
-        lines.extend([
-            "    DAV On".to_owned(),
-            "    Options Indexes FollowSymLinks".to_owned(),
-            "    AllowOverride None".to_owned(),
-        ]);
-        if !share.protocols.webdav.allow_guest {
+        by_port
+            .entry(resolved.share.protocols.webdav.port)
+            .or_default()
+            .push(resolved);
+    }
+    for (port, resolved_shares) in by_port {
+        lines.push(format!("Listen {port}"));
+        lines.push(format!("<VirtualHost *:{port}>"));
+        for resolved in resolved_shares {
+            let share = resolved.share;
+            let path = apache_text(&resolved.absolute_path.to_string_lossy())?;
+            let prefix = apache_text(&share.protocols.webdav.path_prefix)?;
+            lines.push(format!("  Alias \"{prefix}\" \"{path}\""));
+            lines.push(format!("  <Directory \"{path}\">"));
             lines.extend([
-                "    AuthType Basic".to_owned(),
-                format!("    AuthName \"{}\"", apache_text(&share.name)?),
-                format!(
-                    "    AuthUserFile \"{}\"",
-                    apache_text(&htpasswd.to_string_lossy())?
-                ),
-                "    Require valid-user".to_owned(),
+                "    DAV On".to_owned(),
+                "    Options Indexes".to_owned(),
+                "    AllowOverride None".to_owned(),
             ]);
-        }
-        lines.push("  </Directory>".to_owned());
-        if share.protocols.webdav.read_only {
-            lines.extend([
-                format!("  <Location \"{prefix}\">"),
-                "    <LimitExcept GET HEAD OPTIONS PROPFIND>".to_owned(),
-                "      Require all denied".to_owned(),
-                "    </LimitExcept>".to_owned(),
-                "  </Location>".to_owned(),
-            ]);
+            if share.protocols.webdav.allow_guest {
+                lines.push("    Require all granted".to_owned());
+            } else {
+                lines.extend([
+                    "    AuthType Basic".to_owned(),
+                    format!("    AuthName \"{}\"", apache_text(&share.name)?),
+                    format!(
+                        "    AuthUserFile \"{}\"",
+                        apache_text(&htpasswd.to_string_lossy())?
+                    ),
+                    "    Require valid-user".to_owned(),
+                ]);
+            }
+            lines.push("  </Directory>".to_owned());
+            if share.protocols.webdav.read_only {
+                lines.extend([
+                    format!("  <Location \"{prefix}\">"),
+                    "    <LimitExcept GET HEAD OPTIONS PROPFIND>".to_owned(),
+                    "      Require all denied".to_owned(),
+                    "    </LimitExcept>".to_owned(),
+                    "  </Location>".to_owned(),
+                ]);
+            }
         }
         lines.extend(["</VirtualHost>".to_owned(), String::new()]);
     }
@@ -122,11 +151,29 @@ pub fn render_ftp(
         return Ok(lines.join("\n"));
     };
     let ftp = &resolved.share.protocols.ftp;
+    let guest_writes = ftp.allow_guest && !ftp.read_only;
     lines.extend([
         "listen=YES".to_owned(),
         "listen_ipv6=NO".to_owned(),
         format!("listen_port={}", ftp.port),
-        "anonymous_enable=NO".to_owned(),
+        format!(
+            "anonymous_enable={}",
+            if ftp.allow_guest { "YES" } else { "NO" }
+        ),
+        format!("anon_root={}", resolved.absolute_path.display()),
+        format!(
+            "anon_upload_enable={}",
+            if guest_writes { "YES" } else { "NO" }
+        ),
+        format!(
+            "anon_mkdir_write_enable={}",
+            if guest_writes { "YES" } else { "NO" }
+        ),
+        format!(
+            "anon_other_write_enable={}",
+            if guest_writes { "YES" } else { "NO" }
+        ),
+        "anon_world_readable_only=NO".to_owned(),
         "local_enable=YES".to_owned(),
         format!("write_enable={}", if ftp.read_only { "NO" } else { "YES" }),
         "chroot_local_user=YES".to_owned(),
@@ -151,6 +198,26 @@ pub fn render_nfs(
     settings: &ShareSettings,
     shares: &[ResolvedShare<'_>],
 ) -> Result<String, HostdError> {
+    let identity = if settings.enabled
+        && shares
+            .iter()
+            .any(|item| item.share.protocols.nfs.enabled && !item.share.protocols.nfs.read_only)
+    {
+        let user = nix::unistd::User::from_name("sigmaos-nfs")
+            .map_err(|error| HostdError::unavailable(error.to_string()))?
+            .ok_or_else(|| HostdError::validation("NFS identity sigmaos-nfs does not exist"))?;
+        Some((user.uid.as_raw(), user.gid.as_raw()))
+    } else {
+        None
+    };
+    render_nfs_with_identity(settings, shares, identity)
+}
+
+pub(super) fn render_nfs_with_identity(
+    settings: &ShareSettings,
+    shares: &[ResolvedShare<'_>],
+    identity: Option<(u32, u32)>,
+) -> Result<String, HostdError> {
     let mut lines = header("NFS exports");
     if !settings.enabled {
         lines.extend([
@@ -164,17 +231,30 @@ pub fn render_nfs(
         .filter(|item| item.share.protocols.nfs.enabled)
     {
         let nfs = &resolved.share.protocols.nfs;
+        if !nfs.read_only && !nfs.root_squash {
+            return Err(HostdError::validation(
+                "Writable NFS shares require root squashing",
+            ));
+        }
         let path = safe_inline(&resolved.absolute_path.to_string_lossy())?.replace(' ', "\\040");
+        let identity = if nfs.read_only {
+            String::new()
+        } else {
+            let (uid, gid) = identity
+                .ok_or_else(|| HostdError::validation("NFS identity sigmaos-nfs does not exist"))?;
+            format!(",all_squash,anonuid={uid},anongid={gid}")
+        };
         for cidr in &nfs.allowed_cidrs {
             lines.push(format!(
-                "{path} {}({},sync,subtree_check,{})",
+                "{path} {}({},sync,subtree_check,{}{})",
                 safe_inline(cidr)?,
                 if nfs.read_only { "ro" } else { "rw" },
                 if nfs.root_squash {
                     "root_squash"
                 } else {
                     "no_root_squash"
-                }
+                },
+                identity
             ));
         }
     }

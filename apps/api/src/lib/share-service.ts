@@ -19,11 +19,11 @@ import type { SystemCommandRunner } from "./system-management.js";
 const execFileAsync = promisify(execFile);
 const COMMAND_TIMEOUT_MS = 5_000;
 const COMMAND_MAX_BUFFER = 512 * 1024;
-const HOSTD_TIMEOUT_MS = 30_000;
+const HOSTD_TIMEOUT_MS = 1_800_000;
 
 const PROTOCOL_SERVICES = {
   smb: ["smbd.service", "nmbd.service"],
-  webdav: ["apache2.service"],
+  webdav: ["sigmaos-webdav.service"],
   ftp: ["vsftpd.service"],
   nfs: ["nfs-server.service"],
   dlna: ["minidlna.service"]

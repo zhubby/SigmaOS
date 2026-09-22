@@ -36,8 +36,7 @@ SIGMAOS_NPM_REGISTRY=https://registry.npmmirror.com \
 若系统 Node.js 版本不满足要求，可让安装脚本下载并校验 Node.js 22.23.2：
 
 ```bash
-sudo SIGMAOS_TERMINAL_USER=<terminal-user> \
-  SIGMAOS_NAS_ROOT_PATH=/srv/nas \
+sudo SIGMAOS_NAS_ROOT_PATH=/srv/nas \
   SIGMAOS_ENABLE_NGINX=1 \
   ./packaging/scripts/install.sh
 ```

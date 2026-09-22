@@ -21,7 +21,10 @@ ProtectSystem=strict
 ProtectHome=read-only
 # Dynamic share accounts require useradd to atomically replace passwd/shadow files.
 ReadWritePaths=/etc /run/sigmaos /run/mdadm /srv/nas
-ReadWritePaths=-/var/lib/samba/private /var/lib/sigmaos/docker-daemon /var/lib/sigmaos/network-manager
+# smbpasswd needs Samba's lock, state, cache, and log directories to initialize its databases.
+ReadWritePaths=-/run/samba -/var/lib/samba -/var/cache/samba -/var/log/samba
+ReadWritePaths=-/var/lib/sigmaos/docker-daemon /var/lib/sigmaos/network-manager
+ReadWritePaths=/var/backups/sigmaos-permissions
 NoNewPrivileges=yes
 PrivateTmp=yes
 CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_MKNOD CAP_SYS_ADMIN CAP_SYS_RAWIO

@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::error::HostdError;
 
 const BACKUP_SUFFIX: &str = ".pre-hostd.bak";
+const TERMINAL_BACKUP_SUFFIX: &str = ".pre-terminal.bak";
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct ConfigMigrationOutcome {
@@ -73,6 +74,37 @@ pub fn migrate_config(path: &Path) -> Result<ConfigMigrationOutcome, HostdError>
 
     let metadata = fs::metadata(path)?;
     let backup_path = backup_path(path);
+    create_backup(&backup_path, &original)?;
+    replace_atomically(path, document.to_string().as_bytes(), &metadata)?;
+    Ok(ConfigMigrationOutcome {
+        changed: true,
+        backup_path: Some(backup_path),
+    })
+}
+
+pub fn migrate_terminal_config(path: &Path) -> Result<ConfigMigrationOutcome, HostdError> {
+    let original = fs::read(path)?;
+    let text = std::str::from_utf8(&original)
+        .map_err(|_| HostdError::validation("SigmaOS configuration is not UTF-8"))?;
+    let mut document = text
+        .parse::<DocumentMut>()
+        .map_err(|_| HostdError::validation("SigmaOS configuration is invalid TOML"))?;
+    if !document.contains_key("terminal") {
+        document.insert("terminal", Item::Table(Table::new()));
+    }
+    let terminal = document
+        .get_mut("terminal")
+        .and_then(Item::as_table_mut)
+        .ok_or_else(|| HostdError::validation("[terminal] must be a TOML table"))?;
+    if terminal.get("user").and_then(Item::as_str) == Some("sigmaos") {
+        return Ok(ConfigMigrationOutcome {
+            changed: false,
+            backup_path: None,
+        });
+    }
+    terminal.insert("user", value("sigmaos"));
+    let metadata = fs::metadata(path)?;
+    let backup_path = PathBuf::from(format!("{}{}", path.display(), TERMINAL_BACKUP_SUFFIX));
     create_backup(&backup_path, &original)?;
     replace_atomically(path, document.to_string().as_bytes(), &metadata)?;
     Ok(ConfigMigrationOutcome {
@@ -161,6 +193,26 @@ fn sync_parent(path: &Path) -> Result<(), HostdError> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn migrates_terminal_identity_once_and_backs_up_original() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let original = "# keep\n[terminal]\nuser = \"operator\"\nmax_sessions = 4\n";
+        fs::write(&path, original).unwrap();
+        let outcome = migrate_terminal_config(&path).unwrap();
+        assert!(outcome.changed);
+        assert_eq!(
+            fs::read_to_string(outcome.backup_path.unwrap()).unwrap(),
+            original
+        );
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains("user = \"sigmaos\"")
+        );
+        assert!(!migrate_terminal_config(&path).unwrap().changed);
+    }
 
     #[test]
     fn migrates_the_legacy_socket_and_preserves_surrounding_content() {

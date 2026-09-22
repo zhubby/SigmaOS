@@ -15,7 +15,7 @@ sidebar:
 
 ## 服务目录所有权与启动顺序
 
-root hostd 只声明 `StateDirectory=sigmaos/docker-daemon` 和 `StateDirectory=sigmaos/network-manager`（均为 `0700 root:root`），不声明共享的 `StateDirectory=sigmaos` 或 `LogsDirectory=sigmaos`，`ReadWritePaths` 也不得包含 `/var/lib/sigmaos` 父目录或 `/var/log/sigmaos`。否则 hostd 可能改动共享状态，或 systemd 在启动时重设父目录及子文件的所有权，导致非 root API/worker 无法打开 SQLite。动态共享账号需要 `useradd` 原子更新账号数据库，因此 unit 会显式放行 `/etc`；Samba 凭据只额外放行 `/var/lib/samba/private`。不要用反复递归 chown 或赋予 API root 权限掩盖问题。
+root hostd 只声明 `StateDirectory=sigmaos/docker-daemon` 和 `StateDirectory=sigmaos/network-manager`（均为 `0700 root:root`），不声明共享的 `StateDirectory=sigmaos` 或 `LogsDirectory=sigmaos`，`ReadWritePaths` 也不得包含 `/var/lib/sigmaos` 父目录或 `/var/log/sigmaos`。否则 hostd 可能改动共享状态，或 systemd 在启动时重设父目录及子文件的所有权，导致非 root API/worker 无法打开 SQLite。动态共享账号需要 `useradd` 原子更新账号数据库，因此 unit 会显式放行 `/etc`；Samba 的 `smbpasswd` 还需要 `/run/samba`、`/var/lib/samba`、`/var/cache/samba` 和 `/var/log/samba` 可写。不要用反复递归 chown 或赋予 API root 权限掩盖问题。
 
 ```bash
 sudo systemctl show sigmaos-hostd.service -p StateDirectory -p StateDirectoryMode -p LogsDirectory

@@ -9,7 +9,7 @@ sidebar:
   order: 6
 ---
 
-`sigmaos-hostd` 是 Rust root daemon，默认只在 `/run/sigmaos/hostd.sock` 接受版本化 JSONL 单请求，并验证 Unix peer UID。systemd unit 与 API 共同读取 `/etc/sigmaos/config.toml` 的 `[hostd].socket_path`，不会用 unit 环境变量覆盖迁移后的路径；自定义路径若超出 `/run/sigmaos`，还必须同步调整 unit 的 `ReadWritePaths`。操作名、命令、参数和配置目标均使用 allowlist；共享路径只能引用 hostd 自己从配置读取的 NAS roots，客户端携带的 root 只用于一致性校验。API 仍以 `sigmaos` 用户运行。terminal-helper 以配置的非 root 用户运行 tmux，并通过 attach PTY 提供终端。session 名称由 NAS root 和标签 ID 稳定生成，因此 API 或 WebSocket 重连只会重新 attach，不会重复创建 shell；tmux socket 位于终端用户 home 下。
+`sigmaos-hostd` 是 Rust root daemon，默认只在 `/run/sigmaos/hostd.sock` 接受版本化 JSONL 单请求，并验证 Unix peer UID。systemd unit 与 API 共同读取 `/etc/sigmaos/config.toml` 的 `[hostd].socket_path`，不会用 unit 环境变量覆盖迁移后的路径；自定义路径若超出 `/run/sigmaos`，还必须同步调整 unit 的 `ReadWritePaths`。操作名、命令、参数和配置目标均使用 allowlist；共享路径只能引用 hostd 自己从配置读取的 NAS roots，客户端携带的 root 只用于一致性校验。API 和 terminal-helper 均以 `sigmaos` 运行；terminal-helper 在 `/var/lib/sigmaos-terminal` 保存 tmux 状态，并通过 attach PTY 提供终端。session 名称由 NAS root 和标签 ID 稳定生成，因此 API 或 WebSocket 重连只会重新 attach，不会重复创建 shell。终端与 API 共用 UID，不能把 systemd 路径屏蔽视为二者之间的安全隔离。
 
 API 在已登记标签的 broker `open` 请求中发送可选的 `persistent: true`。terminal-helper 把该状态写入 tmux session 的 `@sigmaos_persistent` 选项；空闲 reaper 和容量淘汰都会跳过这些 session。未携带标记的旧客户端 session 继续按配置的空闲时间回收。整机上所有持久与非持久 session 共同受 `terminal.maxSessions` 限制，容量不足时只可淘汰非持久 session。
 
@@ -19,9 +19,11 @@ API 通过 Unix socket 调用 hostd 和 terminal-helper；浏览器永远不直�
 
 ## 共享账号与 systemd 写边界
 
-共享账号名可配置，因此应用凭据时 hostd 可能调用 `useradd`，原子更新 `/etc/passwd`、`/etc/shadow`、`/etc/group` 及其锁和备份文件；只放行几个现有文件会让首次创建账号失败。hostd unit 在 `ProtectSystem=strict` 下显式放行 `/etc`，并单独放行 Samba 的 `/var/lib/samba/private` 密码库。请求仍只能写代码中固定的 SigmaOS 配置文件，账号名经过 system-safe 校验，命令与参数由 hostd 组装，客户端不能提交路径或任意命令。
+共享账号名可配置，因此应用凭据时 hostd 可能调用 `useradd`，原子更新 `/etc/passwd`、`/etc/shadow`、`/etc/group` 及其锁和备份文件；只放行几个现有文件会让首次创建账号失败。hostd unit 在 `ProtectSystem=strict` 下显式放行 `/etc`；`smbpasswd` 还需要 Samba 的 `/run/samba` 锁目录、`/var/lib/samba` 状态库、`/var/cache/samba` 缓存和 `/var/log/samba` 日志目录，tmpfiles 在 hostd 启动前创建 `/run/samba`。请求仍只能写代码中固定的 SigmaOS 配置文件，账号名经过 system-safe 校验，命令与参数由 hostd 组装，客户端不能提交路径或任意命令。
 
 hostd 不获得 `/var/lib/sigmaos` 共享父目录或 `/var/log/sigmaos` 的写权限；Docker 与 NetworkManager 恢复材料只写各自的 root-only `StateDirectory` 子目录。`/etc` 是这里最宽的剩余边界，部署时应把 hostd socket、peer UID 校验和 approval 流程视为同一条安全边界。
+
+共享配置由 hostd 渲染，但协议服务必须显式读取：Samba 使用保留原 `/etc/samba/smb.conf` 的包装配置并导入 SigmaOS share，vsftpd 与 MiniDLNA 的 systemd drop-in 指向各自托管配置。WebDAV 由独立的非 root `sigmaos-webdav.service` 启动，在配置的高端口监听，不启动默认占用 80 端口的 Apache；其配置可由 `www-data` 读取，DAV 锁只写入独立 RuntimeDirectory。NFS 由 `nfs-server.service` 加载 `/etc/exports.d/sigmaos.exports`。不要以 systemd 的 active 代替协议客户端实际读写验收。
 
 ## Docker daemon 配置边界
 

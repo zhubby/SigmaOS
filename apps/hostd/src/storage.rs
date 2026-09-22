@@ -166,6 +166,17 @@ async fn create_pool(
             None,
         )
         .await?;
+        run_checked(
+            runner,
+            "setfacl",
+            &[
+                "-m",
+                "u:sigmaos:rwx,d:u:sigmaos:rwx",
+                &actual_mountpoint.to_string_lossy(),
+            ],
+            None,
+        )
+        .await?;
         let uuid = run_checked(
             runner,
             "blkid",
@@ -604,6 +615,15 @@ mod tests {
             })
             .unwrap();
         assert!(chown_index > mount_index);
+        assert!(
+            calls
+                .iter()
+                .position(|(command, args)| command == "setfacl"
+                    && args
+                        .iter()
+                        .any(|arg| arg == "u:sigmaos:rwx,d:u:sigmaos:rwx"))
+                .is_some_and(|index| index > chown_index)
+        );
         assert!(calls.iter().any(|(command, args)| command == "systemctl"
             && args.contains(&"srv-nas-data.mount".to_owned())));
     }
@@ -682,39 +702,41 @@ mod tests {
 
     #[tokio::test]
     async fn rolls_back_if_the_mounted_pool_cannot_be_made_writable() {
-        let temp = TempDir::new().unwrap();
-        let options = options(&temp);
-        fs::create_dir_all(&options.mount_root).await.unwrap();
-        fs::create_dir_all(&options.sys_block_path).await.unwrap();
-        fs::write(&options.fstab_path, "# fstab\n").await.unwrap();
-        let runner = FakeRunner {
-            fail_command: Some("chown".to_owned()),
-            ..FakeRunner::default()
-        };
-        let payload = serde_json::json!({
-            "action": "create_pool", "name": "data", "raidLevel": "1",
-            "devices": ["/dev/sda", "/dev/sdb"], "filesystem": "ext4",
-            "mountpoint": "/srv/nas/data", "risk": "high"
-        });
+        for failure in ["chown", "setfacl"] {
+            let temp = TempDir::new().unwrap();
+            let options = options(&temp);
+            fs::create_dir_all(&options.mount_root).await.unwrap();
+            fs::create_dir_all(&options.sys_block_path).await.unwrap();
+            fs::write(&options.fstab_path, "# fstab\n").await.unwrap();
+            let runner = FakeRunner {
+                fail_command: Some(failure.to_owned()),
+                ..FakeRunner::default()
+            };
+            let payload = serde_json::json!({
+                "action": "create_pool", "name": "data", "raidLevel": "1",
+                "devices": ["/dev/sda", "/dev/sdb"], "filesystem": "ext4",
+                "mountpoint": "/srv/nas/data", "risk": "high"
+            });
 
-        assert!(
-            operation_with_options(payload, &runner, &options)
-                .await
-                .is_err()
-        );
-        assert_eq!(
-            fs::read_to_string(&options.fstab_path).await.unwrap(),
-            "# fstab\n"
-        );
-        assert!(!options.mount_root.join("data").exists());
-        assert!(
-            runner
-                .calls
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|(command, _)| command == "umount")
-        );
+            assert!(
+                operation_with_options(payload, &runner, &options)
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                fs::read_to_string(&options.fstab_path).await.unwrap(),
+                "# fstab\n"
+            );
+            assert!(!options.mount_root.join("data").exists());
+            assert!(
+                runner
+                    .calls
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|(command, _)| command == "umount")
+            );
+        }
     }
 
     #[tokio::test]

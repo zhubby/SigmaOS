@@ -1,3 +1,4 @@
+mod acl;
 mod credentials;
 mod files;
 mod model;
@@ -10,7 +11,7 @@ use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use crate::command::{CommandRunner, run_checked};
+use crate::command::{CommandRunner, DEFAULT_COMMAND_TIMEOUT, DEFAULT_OUTPUT_LIMIT, run_checked};
 use crate::config::ConfiguredNasRoot;
 use crate::error::HostdError;
 
@@ -79,7 +80,16 @@ async fn apply_with_options(
         .iter()
         .map(|service| {
             let action = if services.iter().any(|enabled| enabled == service) {
-                "reload-or-restart"
+                if *service == "vsftpd.service" {
+                    "restart"
+                } else {
+                    "reload-or-restart"
+                }
+            } else if matches!(
+                *service,
+                "sigmaos-webdav.service" | "vsftpd.service" | "minidlna.service"
+            ) {
+                "stop"
             } else {
                 "try-reload-or-restart"
             };
@@ -88,6 +98,7 @@ async fn apply_with_options(
         .collect::<Vec<_>>();
     let snapshot = snapshot_files(files.iter().map(|(path, _)| path.as_path())).await?;
     let mut attempted_services = Vec::new();
+    let mut acl_transaction = None;
 
     let operation = async {
         apply_credentials(
@@ -97,20 +108,66 @@ async fn apply_with_options(
             &options.credential_group,
         )
         .await?;
+        acl_transaction = Some(acl::prepare(runner, options, &request.settings, &resolved).await?);
         for (path, content) in &files {
-            write_managed_file(path, content, &options.managed_roots).await?;
+            let mode = if path == &options.paths.webdav_site || path == &options.paths.dlna_config {
+                0o644
+            } else {
+                0o640
+            };
+            write_managed_file(path, content, &options.managed_roots, mode).await?;
         }
         for (service, action) in &service_actions {
-            attempted_services.push((service.clone(), *action));
+            let state = runner
+                .run(
+                    "systemctl",
+                    &["is-active".to_owned(), service.clone()],
+                    None,
+                    DEFAULT_COMMAND_TIMEOUT,
+                    DEFAULT_OUTPUT_LIMIT,
+                )
+                .await?;
+            let was_active = state.success && state.stdout.trim() == "active";
+            if !matches!(*action, "reload-or-restart" | "restart") && !was_active {
+                continue;
+            }
+            attempted_services.push((service.clone(), was_active));
             run_checked(runner, "systemctl", &[*action, service.as_str()], None).await?;
+        }
+        if let Some(transaction) = &acl_transaction {
+            acl::command(runner, options, "commit", None, Some(transaction)).await?;
         }
         Ok::<(), HostdError>(())
     }
     .await;
     if let Err(error) = operation {
         restore_files(&snapshot).await;
-        for (service, action) in attempted_services.iter().rev() {
-            let _ = run_checked(runner, "systemctl", &[*action, service.as_str()], None).await;
+        let rollback_error = if let Some(transaction) = &acl_transaction {
+            acl::command(runner, options, "rollback", None, Some(transaction))
+                .await
+                .err()
+        } else {
+            None
+        };
+        for (service, was_active) in attempted_services.iter().rev() {
+            let action = if *was_active {
+                if service == "vsftpd.service" {
+                    "restart"
+                } else {
+                    "reload-or-restart"
+                }
+            } else {
+                "stop"
+            };
+            let _ = run_checked(runner, "systemctl", &[action, service.as_str()], None).await;
+        }
+        if let Some(rollback_error) = rollback_error {
+            return Err(HostdError::operation_failed(format!(
+                "{}; ACL rollback failed: {} (backup: {})",
+                error.message,
+                rollback_error.message,
+                acl_transaction.unwrap_or_default()
+            )));
         }
         return Err(error);
     }
@@ -129,10 +186,7 @@ async fn apply_with_options(
 
 fn services_for_settings(settings: &ShareSettings) -> Vec<String> {
     if !settings.enabled {
-        return ALL_SERVICES
-            .iter()
-            .map(|service| (*service).to_owned())
-            .collect();
+        return Vec::new();
     }
     let mut services = BTreeSet::new();
     for share in &settings.shares {
@@ -140,7 +194,7 @@ fn services_for_settings(settings: &ShareSettings) -> Vec<String> {
             services.extend(["smbd.service", "nmbd.service"]);
         }
         if share.protocols.webdav.enabled {
-            services.insert("apache2.service");
+            services.insert("sigmaos-webdav.service");
         }
         if share.protocols.ftp.enabled {
             services.insert("vsftpd.service");
@@ -176,6 +230,7 @@ mod tests {
     struct FakeRunner {
         calls: Mutex<Vec<CommandCall>>,
         fail_service: Option<String>,
+        missing_user: bool,
     }
 
     #[async_trait]
@@ -196,9 +251,14 @@ mod tests {
             let success = self
                 .fail_service
                 .as_ref()
-                .is_none_or(|service| !args.contains(service));
+                .is_none_or(|service| !args.contains(service))
+                && !(command == "id" && self.missing_user);
             Ok(crate::command::CommandOutput {
-                stdout: String::new(),
+                stdout: if args.first().is_some_and(|action| action == "is-active") {
+                    "active\n".to_owned()
+                } else {
+                    String::new()
+                },
                 stderr: if success {
                     String::new()
                 } else {
@@ -245,6 +305,8 @@ mod tests {
             },
             credential_group: "sigmaos".to_owned(),
             managed_roots: vec![etc],
+            acl_script: temp.path().join("share-acl.mjs"),
+            acl_state: temp.path().join("share-acl.json"),
         }
     }
 
@@ -286,6 +348,30 @@ mod tests {
                 & 0o777,
             0o640
         );
+        assert_eq!(
+            fs::metadata(&options.paths.webdav_site)
+                .await
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o644
+        );
+        assert_eq!(
+            fs::metadata(&options.paths.dlna_config)
+                .await
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o644
+        );
+        let webdav = fs::read_to_string(&options.paths.webdav_site)
+            .await
+            .unwrap();
+        assert!(webdav.contains("PidFile /run/sigmaos-webdav/apache2.pid"));
+        assert!(webdav.contains("ErrorLog /run/sigmaos-webdav/error.log"));
+        assert!(webdav.contains("LoadModule dav_fs_module"));
         let nfs = fs::read_to_string(&options.paths.nfs_exports)
             .await
             .unwrap();
@@ -295,6 +381,72 @@ mod tests {
             .unwrap();
         assert!(dlna.contains("media_dir=A,"));
         assert!(dlna.contains("network_interface=eth0"));
+        let calls = runner.calls.lock().unwrap();
+        let (_, _, Some(input)) = calls
+            .iter()
+            .find(|(command, args, _)| {
+                command == "node" && args.get(1).is_some_and(|action| action == "prepare")
+            })
+            .unwrap()
+        else {
+            panic!("share ACL prepare was not called");
+        };
+        let grants: Value = serde_json::from_slice(input).unwrap();
+        let grants = grants["grants"].as_array().unwrap();
+        assert!(
+            grants
+                .iter()
+                .any(|grant| grant["principal"] == "sigma_share"
+                    && grant["access"] == "write"
+                    && grant["scope"] == "tree")
+        );
+        assert!(
+            grants
+                .iter()
+                .any(|grant| grant["principal"] == "www-data" && grant["access"] == "read")
+        );
+        assert!(
+            grants
+                .iter()
+                .any(|grant| grant["principal"] == "minidlna" && grant["access"] == "read")
+        );
+        assert!(!grants.iter().any(|grant| {
+            grant["path"]
+                .as_str()
+                .is_some_and(|path| path.ends_with("/other"))
+        }));
+        assert!(
+            calls.iter().any(|(command, args, _)| command == "systemctl"
+                && args == &["restart", "vsftpd.service"])
+        );
+    }
+
+    #[tokio::test]
+    async fn restarts_ftp_again_after_a_later_service_fails() {
+        let temp = TempDir::new().unwrap();
+        fs::create_dir_all(temp.path().join("nas/media"))
+            .await
+            .unwrap();
+        let request = fixture(&temp.path().join("nas"));
+        let options = test_options(&temp);
+        let runner = FakeRunner {
+            fail_service: Some("nfs-server.service".to_owned()),
+            ..FakeRunner::default()
+        };
+        assert!(
+            apply_with_options(&request, &runner, &options, &configured_roots(&request))
+                .await
+                .is_err()
+        );
+        let calls = runner.calls.lock().unwrap();
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|(command, args, _)| command == "systemctl"
+                    && args == &["restart", "vsftpd.service"])
+                .count(),
+            2
+        );
     }
 
     #[tokio::test]
@@ -312,7 +464,7 @@ mod tests {
             .await
             .unwrap();
         let runner = FakeRunner {
-            fail_service: Some("apache2.service".to_owned()),
+            fail_service: Some("sigmaos-webdav.service".to_owned()),
             ..FakeRunner::default()
         };
         assert!(
@@ -328,6 +480,8 @@ mod tests {
         );
         assert!(!options.paths.webdav_site.exists());
         let calls = runner.calls.lock().unwrap();
+        assert!(calls.iter().any(|(command, args, _)| command == "node"
+            && args.get(1).is_some_and(|action| action == "rollback")));
         assert_eq!(
             calls
                 .iter()
@@ -336,6 +490,156 @@ mod tests {
                 })
                 .count(),
             2
+        );
+    }
+
+    #[tokio::test]
+    async fn restores_the_previous_webdav_mode_after_a_failed_apply() {
+        let temp = TempDir::new().unwrap();
+        fs::create_dir_all(temp.path().join("nas/media"))
+            .await
+            .unwrap();
+        let request = fixture(&temp.path().join("nas"));
+        let options = test_options(&temp);
+        fs::create_dir_all(options.paths.webdav_site.parent().unwrap())
+            .await
+            .unwrap();
+        fs::write(&options.paths.webdav_site, "previous\n")
+            .await
+            .unwrap();
+        fs::set_permissions(
+            &options.paths.webdav_site,
+            std::fs::Permissions::from_mode(0o600),
+        )
+        .await
+        .unwrap();
+        let runner = FakeRunner {
+            fail_service: Some("sigmaos-webdav.service".to_owned()),
+            ..FakeRunner::default()
+        };
+
+        assert!(
+            apply_with_options(&request, &runner, &options, &configured_roots(&request))
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            fs::read_to_string(&options.paths.webdav_site)
+                .await
+                .unwrap(),
+            "previous\n"
+        );
+        assert_eq!(
+            fs::metadata(&options.paths.webdav_site)
+                .await
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+
+    #[tokio::test]
+    async fn serves_multiple_webdav_paths_on_a_single_port() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("nas");
+        fs::create_dir_all(root.join("media")).await.unwrap();
+        fs::create_dir_all(root.join("second")).await.unwrap();
+        let mut request = fixture(&root);
+        let mut second = request.settings.shares[0].clone();
+        second.id = "second".to_owned();
+        second.path = "second".into();
+        second.protocols.webdav.path_prefix = "/shares/second".to_owned();
+        request.settings.shares.push(second);
+        let resolved = validation::resolve_shares(&request.settings, &configured_roots(&request))
+            .await
+            .unwrap();
+        let webdav = render_webdav(
+            &request.settings,
+            &resolved,
+            Path::new("/etc/sigmaos/shares.htpasswd"),
+        )
+        .unwrap();
+
+        assert_eq!(webdav.matches("Listen 8088").count(), 1);
+        assert_eq!(webdav.matches("<VirtualHost *:8088>").count(), 1);
+        assert!(webdav.contains("Alias \"/shares/media\""));
+        assert!(webdav.contains("Alias \"/shares/second\""));
+        request.settings.shares[0].protocols.webdav.allow_guest = true;
+        let resolved = validation::resolve_shares(&request.settings, &configured_roots(&request))
+            .await
+            .unwrap();
+        assert!(
+            render_webdav(
+                &request.settings,
+                &resolved,
+                Path::new("/etc/sigmaos/shares.htpasswd")
+            )
+            .unwrap()
+            .contains("Require all granted")
+        );
+    }
+
+    #[tokio::test]
+    async fn grants_ftp_guest_access_only_when_enabled_and_respects_read_only() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("nas");
+        fs::create_dir_all(root.join("media")).await.unwrap();
+        let mut request = fixture(&root);
+        let roots = configured_roots(&request);
+        let resolved = validation::resolve_shares(&request.settings, &roots)
+            .await
+            .unwrap();
+        let ftp = render_ftp(
+            &request.settings,
+            &resolved,
+            Path::new("/etc/pam.d/vsftpd-sigmaos"),
+        )
+        .unwrap();
+        assert!(ftp.contains("anonymous_enable=NO"));
+        assert!(
+            !acl::grants_for(&request.settings, &resolved)
+                .unwrap()
+                .iter()
+                .any(|grant| grant.principal == "ftp")
+        );
+
+        request.settings.shares[0].protocols.ftp.allow_guest = true;
+        let resolved = validation::resolve_shares(&request.settings, &roots)
+            .await
+            .unwrap();
+        let ftp = render_ftp(
+            &request.settings,
+            &resolved,
+            Path::new("/etc/pam.d/vsftpd-sigmaos"),
+        )
+        .unwrap();
+        assert!(ftp.contains("anonymous_enable=YES"));
+        assert!(ftp.contains("anon_upload_enable=NO"));
+        assert!(
+            acl::grants_for(&request.settings, &resolved)
+                .unwrap()
+                .iter()
+                .any(|grant| grant.principal == "ftp" && grant.access == "read")
+        );
+
+        request.settings.shares[0].protocols.ftp.read_only = false;
+        let resolved = validation::resolve_shares(&request.settings, &roots)
+            .await
+            .unwrap();
+        let ftp = render_ftp(
+            &request.settings,
+            &resolved,
+            Path::new("/etc/pam.d/vsftpd-sigmaos"),
+        )
+        .unwrap();
+        assert!(ftp.contains("anon_upload_enable=YES"));
+        assert!(
+            acl::grants_for(&request.settings, &resolved)
+                .unwrap()
+                .iter()
+                .any(|grant| grant.principal == "ftp" && grant.access == "write")
         );
     }
 
@@ -362,8 +666,92 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|(command, args, _)| {
-                    command == "systemctl" && args == &["try-reload-or-restart", "vsftpd.service"]
+                    command == "systemctl" && args == &["stop", "vsftpd.service"]
                 })
+        );
+    }
+
+    #[tokio::test]
+    async fn global_disable_stops_sigmaos_owned_protocol_services() {
+        let temp = TempDir::new().unwrap();
+        fs::create_dir_all(temp.path().join("nas/media"))
+            .await
+            .unwrap();
+        let mut request = fixture(&temp.path().join("nas"));
+        request.settings.enabled = false;
+        let runner = FakeRunner::default();
+
+        let result = apply_with_options(
+            &request,
+            &runner,
+            &test_options(&temp),
+            &configured_roots(&request),
+        )
+        .await
+        .unwrap();
+
+        assert!(result.services.is_empty());
+        let calls = runner.calls.lock().unwrap();
+        for service in [
+            "sigmaos-webdav.service",
+            "vsftpd.service",
+            "minidlna.service",
+        ] {
+            assert!(
+                calls
+                    .iter()
+                    .any(|(command, args, _)| command == "systemctl" && args == &["stop", service])
+            );
+            assert!(
+                !calls.iter().any(|(command, args, _)| command == "systemctl"
+                    && args == &["reload-or-restart", service])
+            );
+        }
+        assert!(calls.iter().any(|(command, args, _)| command == "systemctl"
+            && args == &["try-reload-or-restart", "nfs-server.service"]));
+    }
+
+    #[tokio::test]
+    async fn rejects_writable_nfs_without_root_squashing() {
+        let temp = TempDir::new().unwrap();
+        fs::create_dir_all(temp.path().join("nas/media"))
+            .await
+            .unwrap();
+        let mut request = fixture(&temp.path().join("nas"));
+        request.settings.shares[0].protocols.nfs.read_only = false;
+        request.settings.shares[0].protocols.nfs.root_squash = false;
+        let runner = FakeRunner::default();
+        assert!(
+            apply_with_options(
+                &request,
+                &runner,
+                &test_options(&temp),
+                &configured_roots(&request)
+            )
+            .await
+            .is_err()
+        );
+        assert!(runner.calls.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn maps_writable_nfs_clients_to_a_restricted_identity() {
+        let temp = TempDir::new().unwrap();
+        fs::create_dir_all(temp.path().join("nas/media"))
+            .await
+            .unwrap();
+        let mut request = fixture(&temp.path().join("nas"));
+        request.settings.shares[0].protocols.nfs.read_only = false;
+        let roots = configured_roots(&request);
+        let resolved = validation::resolve_shares(&request.settings, &roots)
+            .await
+            .unwrap();
+        let exports =
+            render::render_nfs_with_identity(&request.settings, &resolved, Some((801, 802)))
+                .unwrap();
+        assert!(
+            exports
+                .contains("rw,sync,subtree_check,root_squash,all_squash,anonuid=801,anongid=802")
         );
     }
 
@@ -397,6 +785,32 @@ mod tests {
                 && input
                     .as_deref()
                     .is_some_and(|input| input.windows(10).any(|part| part == b"top-secret"))
+        }));
+    }
+
+    #[tokio::test]
+    async fn creates_a_share_login_with_an_existing_private_home_path() {
+        let temp = TempDir::new().unwrap();
+        let mut request = fixture(temp.path());
+        request.settings.account.password = Some("fixture-secret".to_owned());
+        let runner = FakeRunner {
+            missing_user: true,
+            ..FakeRunner::default()
+        };
+        credentials::apply_credentials(
+            &request.settings,
+            &test_options(&temp).paths,
+            &runner,
+            "sigmaos",
+        )
+        .await
+        .unwrap();
+        let calls = runner.calls.lock().unwrap();
+        assert!(calls.iter().any(|(command, args, _)| {
+            command == "useradd"
+                && args
+                    .windows(2)
+                    .any(|pair| pair == ["--home-dir", "/var/lib/sigmaos-share"])
         }));
     }
 

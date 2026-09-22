@@ -42,7 +42,7 @@ enabled = false
 account_username = "sigma-share"
 
 [terminal]
-user = ""
+user = "sigmaos"
 helper_socket_path = "/run/sigmaos/terminal-helper.sock"
 session_idle_timeout_ms = 1800000
 connect_timeout_ms = 10000

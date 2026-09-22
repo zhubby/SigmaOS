@@ -999,32 +999,32 @@ function protocolIcon(protocol: ShareProtocol, size: number) {
   return <Icon aria-hidden="true" size={size} />;
 }
 
-function shareStatusTone(summary: ShareSummary | null, loading: boolean, error: string | null): StatusTone {
+export function shareStatusTone(summary: ShareSummary | null, loading: boolean, error: string | null): StatusTone {
   if (loading) {
     return "neutral";
   }
-  if (error || (summary?.issues.length ?? 0) > 0) {
+  if ((error && !summary) || (summary?.issues.length ?? 0) > 0) {
     return "warning";
   }
   return summary?.enabled ? "ready" : "neutral";
 }
 
-function shareStatusLabel(summary: ShareSummary | null, loading: boolean, error: string | null, t: Translate): string {
+export function shareStatusLabel(summary: ShareSummary | null, loading: boolean, error: string | null, t: Translate): string {
   if (loading) {
     return t("common.states.loading");
   }
-  if (error) {
+  if (error && !summary) {
     return t("common.states.unavailable");
   }
   return summary?.enabled ? t("workspace.management.shares.states.enabled") : t("workspace.management.shares.states.disabled");
 }
 
-function shareStatusDetail(summary: ShareSummary | null, loading: boolean, error: string | null, t: Translate): string {
+export function shareStatusDetail(summary: ShareSummary | null, loading: boolean, error: string | null, t: Translate): string {
   if (loading) {
     return t("workspace.management.shares.loading");
   }
-  if (error) {
-    return t("workspace.management.shares.disabledDetail");
+  if (error && !summary) {
+    return error;
   }
   if (!summary?.enabled) {
     return t("workspace.management.shares.disabledDetail");

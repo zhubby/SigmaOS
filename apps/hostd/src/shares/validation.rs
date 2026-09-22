@@ -50,6 +50,7 @@ pub(super) async fn resolve_shares<'a>(
         resolved.push(ResolvedShare {
             share,
             absolute_path,
+            root_path: real_root,
         });
     }
     Ok(resolved)
@@ -105,6 +106,14 @@ pub(super) fn validate_request(request: &ShareApplyRequest) -> Result<(), HostdE
         if share.protocols.nfs.enabled && share.protocols.nfs.allowed_cidrs.is_empty() {
             return Err(HostdError::validation(
                 "Enabled NFS shares require at least one allowed CIDR",
+            ));
+        }
+        if share.protocols.nfs.enabled
+            && !share.protocols.nfs.read_only
+            && !share.protocols.nfs.root_squash
+        {
+            return Err(HostdError::validation(
+                "Writable NFS shares require root squashing",
             ));
         }
         for cidr in &share.protocols.nfs.allowed_cidrs {

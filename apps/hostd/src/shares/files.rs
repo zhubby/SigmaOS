@@ -13,6 +13,7 @@ pub(super) async fn write_managed_file(
     path: &Path,
     content: &str,
     roots: &[PathBuf],
+    mode: u32,
 ) -> Result<(), HostdError> {
     let path = normalize_path(path);
     if !roots
@@ -29,10 +30,10 @@ pub(super) async fn write_managed_file(
         .parent()
         .ok_or_else(|| HostdError::validation("Managed path has no parent"))?;
     fs::create_dir_all(parent).await?;
-    replace_file(&path, content.as_bytes()).await
+    replace_file(&path, content.as_bytes(), mode).await
 }
 
-async fn replace_file(path: &Path, content: &[u8]) -> Result<(), HostdError> {
+async fn replace_file(path: &Path, content: &[u8], mode: u32) -> Result<(), HostdError> {
     let parent = path
         .parent()
         .ok_or_else(|| HostdError::validation("Managed path has no parent"))?;
@@ -47,12 +48,12 @@ async fn replace_file(path: &Path, content: &[u8]) -> Result<(), HostdError> {
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
-            .mode(0o640)
+            .mode(mode)
             .open(&temp)
             .await?;
         file.write_all(content).await?;
         file.flush().await?;
-        file.set_permissions(std::fs::Permissions::from_mode(0o640))
+        file.set_permissions(std::fs::Permissions::from_mode(mode))
             .await?;
         file.sync_all().await?;
         drop(file);
@@ -67,9 +68,15 @@ async fn replace_file(path: &Path, content: &[u8]) -> Result<(), HostdError> {
     result
 }
 
+pub(super) struct FileSnapshot {
+    path: PathBuf,
+    content: Option<Vec<u8>>,
+    mode: u32,
+}
+
 pub(super) async fn snapshot_files<'a>(
     paths: impl Iterator<Item = &'a Path>,
-) -> Result<Vec<(PathBuf, Option<Vec<u8>>)>, HostdError> {
+) -> Result<Vec<FileSnapshot>, HostdError> {
     let mut snapshot = Vec::new();
     for path in paths {
         let content = match fs::read(path).await {
@@ -77,19 +84,33 @@ pub(super) async fn snapshot_files<'a>(
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(error.into()),
         };
-        snapshot.push((path.to_owned(), content));
+        let mode = if content.is_some() {
+            fs::metadata(path).await?.permissions().mode() & 0o777
+        } else {
+            0o640
+        };
+        snapshot.push(FileSnapshot {
+            path: path.to_owned(),
+            content,
+            mode,
+        });
     }
     Ok(snapshot)
 }
 
-pub(super) async fn restore_files(snapshot: &[(PathBuf, Option<Vec<u8>>)]) {
-    for (path, content) in snapshot {
+pub(super) async fn restore_files(snapshot: &[FileSnapshot]) {
+    for FileSnapshot {
+        path,
+        content,
+        mode,
+    } in snapshot
+    {
         match content {
             Some(content) => {
                 if let Some(parent) = path.parent() {
                     let _ = fs::create_dir_all(parent).await;
                 }
-                let _ = replace_file(path, content).await;
+                let _ = replace_file(path, content, *mode).await;
             }
             None => {
                 if fs::remove_file(path).await.is_ok() {

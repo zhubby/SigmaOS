@@ -21,7 +21,7 @@ DOCKER_ENABLED=${SIGMAOS_ENABLE_DOCKER:-0}
 VM_ENABLED=${SIGMAOS_ENABLE_VM:-0}
 PLAYER_ENABLED=${SIGMAOS_ENABLE_PLAYER:-0}
 PLAYER_USER=${SIGMAOS_PLAYER_USER:-sigmaos}
-TERMINAL_USER=${SIGMAOS_TERMINAL_USER:-${SUDO_USER:-}}
+TERMINAL_USER=${SIGMAOS_TERMINAL_USER:-sigmaos}
 DEBIAN_FRONTEND=noninteractive
 export DEBIAN_FRONTEND
 export CARGO_HOME="$SIGMAOS_CARGO_HOME"
@@ -121,11 +121,7 @@ esac
 [ -n "$SIGMAOS_RUSTUP_HOME" ] || die "SIGMAOS_RUSTUP_HOME must not be empty"
 [ -n "$SIGMAOS_APT_BACKUP_DIR" ] || die "SIGMAOS_APT_BACKUP_DIR must not be empty"
 [ -n "$SIGMAOS_LOCALE" ] || die "SIGMAOS_LOCALE must not be empty"
-[ -n "$TERMINAL_USER" ] || die "set SIGMAOS_TERMINAL_USER or run through sudo from a non-root user"
-case "$TERMINAL_USER" in
-  *[!a-zA-Z0-9._-]*|root|sigmaos) die "SIGMAOS_TERMINAL_USER must name a distinct non-root local user" ;;
-esac
-getent passwd "$TERMINAL_USER" >/dev/null || die "terminal user does not exist: $TERMINAL_USER"
+[ "$TERMINAL_USER" = sigmaos ] || die "SIGMAOS_TERMINAL_USER must be sigmaos"
 
 case "$NGINX_ENABLED" in
   0|1) ;;
@@ -324,6 +320,8 @@ if command -v systemctl >/dev/null 2>&1; then
     sigmaos-api.service \
     sigmaos-worker@1.service \
     sigmaos-downloader.service
+  systemctl restart sigmaos-hostd.service sigmaos-terminal-helper.service \
+    sigmaos-api.service sigmaos-worker@1.service sigmaos-downloader.service
   if [ "$PLAYER_ENABLED" = "1" ]; then
     systemctl enable --now sigmaos-player-helper.service
   fi

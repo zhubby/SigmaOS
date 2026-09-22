@@ -98,6 +98,12 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("packaging/scripts/sigmaos-nginx.sh usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/scripts/sigmaos-configure-locale.sh usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/scripts/sigmaos-refresh-terminal.sh usr/lib/sigmaos/scripts/");
+    expect(install).toContain("packaging/scripts/sigmaos-nas-acl.sh usr/lib/sigmaos/scripts/");
+    expect(install).toContain("packaging/scripts/sigmaos-share-acl.mjs usr/lib/sigmaos/scripts/");
+    expect(install).toContain("packaging/etc/samba.conf usr/share/sigmaos/");
+    expect(install).toContain("packaging/systemd/smbd.service.d/sigmaos.conf lib/systemd/system/smbd.service.d/");
+    expect(install).toContain("packaging/systemd/vsftpd.service.d/sigmaos.conf lib/systemd/system/vsftpd.service.d/");
+    expect(install).toContain("packaging/systemd/minidlna.service.d/sigmaos.conf lib/systemd/system/minidlna.service.d/");
     expect(install).toContain("packaging/scripts/sigmaos-refresh-player.sh usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/scripts/sigmaos-deploy-bootstrap.sh usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/scripts/sigmaos-deploy usr/lib/sigmaos/scripts/");
@@ -107,7 +113,9 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("tmpfiles.d/sigmaos.conf");
     expect(tmpfiles).toContain("/run/sigmaos");
     expect(tmpfiles).toContain("/run/mdadm");
-    expect(control).toContain("Depends: nodejs (>= 20), sqlite3, tmux, adduser, network-manager, wpasupplicant, dnsmasq-base, wireless-regdb, iw");
+    expect(tmpfiles).toContain("d /run/samba 0755 root root -");
+    expect(control).toContain("Depends: nodejs (>= 20), sqlite3, tmux, acl, adduser, network-manager, wpasupplicant, dnsmasq-base, wireless-regdb, iw");
+    expect(control).toContain("Build-Depends: debhelper-compat (= 13), nodejs, npm, cargo, rustc, acl");
     expect(control).toContain("mpv");
     expect(control).toContain("Suggests:");
     expect(control).toContain("git");
@@ -132,6 +140,7 @@ describe("native packaging artifacts", () => {
     expect(firstBoot).toContain("SIGMAOS_DOCKER_ENABLED");
     expect(firstBoot).toContain("SIGMAOS_VM_ENABLED");
     expect(firstBoot).toContain("SIGMAOS_TERMINAL_USER");
+    expect(firstBoot).not.toContain('chown -R sigmaos:sigmaos "$DATA_DIR" "$NAS_ROOT_PATH"');
     expect(firstBoot).toContain("[[nas_roots]]");
     expect(firstBoot).toContain("[model]");
     expect(firstBoot).toContain("[hostd]");
@@ -231,7 +240,8 @@ describe("native packaging artifacts", () => {
     expect(installer).toContain("SIGMAOS_ENABLE_DOCKER");
     expect(installer).toContain("docker-cli");
     expect(installer).toContain("SIGMAOS_ENABLE_VM");
-    expect(installer).toContain("SIGMAOS_TERMINAL_USER");
+    expect(installer).toContain("TERMINAL_USER=${SIGMAOS_TERMINAL_USER:-sigmaos}");
+    expect(installer).not.toContain("${SUDO_USER:-}");
     expect(installer).toContain("SIGMAOS_LOCALE");
     expect(localeScript).toContain("AcceptEnv");
     expect(localeScript).toContain("LC_*");
@@ -299,7 +309,8 @@ describe("native packaging artifacts", () => {
     expect(unit).toContain("/run/mdadm");
     expect(unit).toContain("ProtectSystem=strict");
     expect(unit).toContain("ReadWritePaths=/etc /run/sigmaos /run/mdadm /srv/nas");
-    expect(unit).toContain("ReadWritePaths=-/var/lib/samba/private /var/lib/sigmaos/docker-daemon /var/lib/sigmaos/network-manager");
+    expect(unit).toContain("ReadWritePaths=-/run/samba -/var/lib/samba -/var/cache/samba -/var/log/samba");
+    expect(unit).toContain("ReadWritePaths=-/var/lib/sigmaos/docker-daemon /var/lib/sigmaos/network-manager");
     expect(unit).not.toMatch(/ReadWritePaths=.*(?:^|\s)\/var\/lib\/sigmaos(?:\s|$)/mu);
     expect(unit).not.toContain("/var/log/sigmaos");
     expect(unit).toContain("CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER");
@@ -324,6 +335,26 @@ describe("native packaging artifacts", () => {
     expect(postinst).toContain("chown -R root:root /var/lib/sigmaos/docker-daemon");
     expect(postinst).toContain("install -d -o root -g root -m 0700 /var/lib/sigmaos/network-manager");
     expect(postinst).toContain("chown -R root:root /var/lib/sigmaos/network-manager");
+    expect(postinst).toContain("install -d -o root -g root -m 0755 /var/lib/sigmaos-share");
+    expect(postinst).toContain("usermod --home /var/lib/sigmaos-share sigma-share");
+  });
+
+  it("loads managed shares through each protocol's actual service entrypoint", async () => {
+    const samba = await readPackagingFile("etc", "samba.conf");
+    const smbd = await readPackagingFile("systemd", "smbd.service.d", "sigmaos.conf");
+    const vsftpd = await readPackagingFile("systemd", "vsftpd.service.d", "sigmaos.conf");
+    const minidlna = await readPackagingFile("systemd", "minidlna.service.d", "sigmaos.conf");
+    const webdav = await readPackagingFile("systemd", "sigmaos-webdav.service");
+
+    expect(samba).not.toContain("include = /etc/samba/smb.conf\n");
+    expect(samba).toContain("map to guest = Bad User");
+    expect(samba).toContain("include = /etc/samba/smb.conf.d/sigmaos-shares.conf");
+    expect(smbd).toContain("--configfile=/usr/share/sigmaos/samba.conf");
+    expect(vsftpd).toContain("/etc/vsftpd.d/sigmaos-shares.conf");
+    expect(minidlna).toContain("-f /etc/minidlna.d/sigmaos.conf");
+    expect(webdav).toContain("User=www-data");
+    expect(webdav).toContain("-f /etc/apache2/sites-available/sigmaos-webdav.conf");
+    expect(webdav).toContain("RuntimeDirectory=sigmaos-webdav");
   });
 
   it("ships an isolated user terminal broker", async () => {
@@ -336,12 +367,15 @@ describe("native packaging artifacts", () => {
     expect(unit).toContain("terminal-helper.sock");
     expect(unit).toContain("CapabilityBoundingSet=");
     expect(unit).toContain("InaccessiblePaths=/etc/sigmaos /var/lib/sigmaos /var/log/sigmaos");
-    expect(unit).toContain("ReadWritePaths=/run/sigmaos /srv/nas");
+    expect(unit).toContain("ReadWritePaths=/run/sigmaos /srv/nas /var/lib/sigmaos-terminal");
+    expect(unit).toContain("KillMode=control-group");
     expect(refresh).toContain("User=%s\\n");
     expect(refresh).toContain("WorkingDirectory=%s\\n");
-    expect(refresh).toContain("BindPaths=%s\\n");
+    expect(refresh).not.toContain("BindPaths=%s\\n");
     expect(refresh).toContain("SIGMAOS_TERMINAL_HELPER_SOCKET_PATH");
-    expect(refresh).toContain("root terminal user is not allowed");
+    expect(refresh).toContain("terminal user must be sigmaos");
+    expect(await readPackagingFile("scripts", "sigmaos-nas-acl.sh")).toContain("findmnt -rn --mountpoint");
+    expect(await readPackagingFile("scripts", "sigmaos-nas-acl.sh")).toContain("getfacl --absolute-names");
   });
 
   it("ships a constrained CM5 deployment helper", async () => {

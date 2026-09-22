@@ -10,24 +10,10 @@ DROPIN_PATH="$DROPIN_DIR/identity.conf"
   exit 1
 }
 
-terminal_user=${SIGMAOS_TERMINAL_USER:-}
+terminal_user=${SIGMAOS_TERMINAL_USER:-sigmaos}
 helper_socket_path=${SIGMAOS_TERMINAL_HELPER_SOCKET_PATH:-/run/sigmaos/terminal-helper.sock}
 session_idle_timeout_ms=${SIGMAOS_TERMINAL_SESSION_IDLE_TIMEOUT_MS:-1800000}
 max_sessions=${SIGMAOS_TERMINAL_MAX_SESSIONS:-32}
-if [ -z "$terminal_user" ] && [ -f "$CONFIG_PATH" ]; then
-  terminal_user=$(awk '
-    $0 == "[terminal]" { in_terminal = 1; next }
-    in_terminal && /^\[/ { in_terminal = 0 }
-    in_terminal && $0 ~ /^[[:space:]]*user[[:space:]]*=/ {
-      value = $0
-      sub(/^[[:space:]]*user[[:space:]]*=[[:space:]]*/, "", value)
-      sub(/[[:space:]]+#.*$/, "", value)
-      gsub(/^"|"[[:space:]]*$/, "", value)
-      print value
-      exit
-    }
-  ' "$CONFIG_PATH")
-fi
 if [ -f "$CONFIG_PATH" ] && [ -z "${SIGMAOS_TERMINAL_HELPER_SOCKET_PATH:-}" ]; then
   helper_socket_path=$(awk '
     $0 == "[terminal]" { in_terminal = 1; next }
@@ -74,10 +60,10 @@ if [ -f "$CONFIG_PATH" ] && [ -z "${SIGMAOS_TERMINAL_MAX_SESSIONS:-}" ]; then
   max_sessions=${max_sessions:-32}
 fi
 
-if [ -z "$terminal_user" ]; then
-  rm -f "$DROPIN_PATH"
-  exit 0
-fi
+[ "$terminal_user" = sigmaos ] || {
+  printf 'sigmaos-terminal: terminal user must be sigmaos\n' >&2
+  exit 1
+}
 
 case "$helper_socket_path" in
   /*)
@@ -88,9 +74,6 @@ case "$helper_socket_path" in
   *) printf 'sigmaos-terminal: helper socket path must be absolute\n' >&2; exit 1 ;;
 esac
 
-case "$terminal_user" in
-  *[!a-zA-Z0-9._-]*|root|sigmaos) printf 'sigmaos-terminal: invalid terminal user\n' >&2; exit 1 ;;
-esac
 case "$session_idle_timeout_ms" in ''|*[!0-9]*) printf 'sigmaos-terminal: invalid session idle timeout\n' >&2; exit 1 ;; esac
 [ "$session_idle_timeout_ms" -gt 0 ] || { printf 'sigmaos-terminal: session idle timeout must be positive\n' >&2; exit 1; }
 case "$max_sessions" in ''|*[!0-9]*) printf 'sigmaos-terminal: invalid maximum session count\n' >&2; exit 1 ;; esac
@@ -110,6 +93,14 @@ case "$home" in /*) ;; *) printf 'sigmaos-terminal: user home must be absolute\n
 case "$shell" in /*) ;; *) printf 'sigmaos-terminal: user shell must be absolute\n' >&2; exit 1 ;; esac
 [ -d "$home" ] || { printf 'sigmaos-terminal: home is not a directory: %s\n' "$home" >&2; exit 1; }
 [ -x "$shell" ] || { printf 'sigmaos-terminal: shell is not executable: %s\n' "$shell" >&2; exit 1; }
+[ "$shell" != /usr/sbin/nologin ] && [ "$shell" != /bin/false ] || {
+  printf 'sigmaos-terminal: sigmaos requires an interactive shell\n' >&2
+  exit 1
+}
+[ "$home" = /var/lib/sigmaos-terminal ] || {
+  printf 'sigmaos-terminal: unexpected sigmaos home: %s\n' "$home" >&2
+  exit 1
+}
 getent group sigmaos >/dev/null || { printf 'sigmaos-terminal: sigmaos group does not exist\n' >&2; exit 1; }
 
 nas_paths=$(awk '
@@ -137,7 +128,6 @@ trap 'rm -f "$tmp_path"' EXIT HUP INT TERM
   printf 'Environment=SIGMAOS_TERMINAL_MAX_SESSIONS=%s\n' "$max_sessions"
   printf 'Environment=HOME=%s\n' "$home"
   printf 'WorkingDirectory=%s\n' "$home"
-  printf 'BindPaths=%s\n' "$home"
   printf 'ReadWritePaths=%s\n' "$home"
   printf '%s\n' "$nas_paths" | while IFS= read -r nas_path; do
     [ -n "$nas_path" ] && printf 'ReadWritePaths=%s\n' "$nas_path"

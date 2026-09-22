@@ -15,7 +15,7 @@ pub(super) const DEFAULT_MANAGED_ROOTS: &[&str] = &[
 pub(super) const ALL_SERVICES: &[&str] = &[
     "smbd.service",
     "nmbd.service",
-    "apache2.service",
+    "sigmaos-webdav.service",
     "vsftpd.service",
     "nfs-server.service",
     "minidlna.service",
@@ -51,14 +51,18 @@ pub struct ShareOptions {
     pub paths: SharePaths,
     pub credential_group: String,
     pub managed_roots: Vec<PathBuf>,
+    pub acl_script: PathBuf,
+    pub acl_state: PathBuf,
 }
 
 impl Default for ShareOptions {
     fn default() -> Self {
         Self {
             paths: SharePaths::default(),
-            credential_group: "sigmaos".to_owned(),
+            credential_group: "www-data".to_owned(),
             managed_roots: DEFAULT_MANAGED_ROOTS.iter().map(PathBuf::from).collect(),
+            acl_script: "/usr/lib/sigmaos/scripts/sigmaos-share-acl.mjs".into(),
+            acl_state: "/etc/sigmaos/share-acl.json".into(),
         }
     }
 }
@@ -136,6 +140,7 @@ pub struct WebDavConfig {
 pub struct FtpConfig {
     pub enabled: bool,
     pub read_only: bool,
+    pub allow_guest: bool,
     pub port: u16,
     pub passive_port_start: u16,
     pub passive_port_end: u16,
@@ -164,6 +169,7 @@ pub struct DlnaConfig {
 pub struct ResolvedShare<'a> {
     pub share: &'a ShareDefinition,
     pub absolute_path: PathBuf,
+    pub root_path: PathBuf,
 }
 
 #[derive(Debug, Serialize)]

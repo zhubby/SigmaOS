@@ -376,7 +376,15 @@ mod tests {
         let _ = client.write_all(frame).await;
         let _ = client.shutdown().await;
         let mut response = Vec::new();
-        client.read_to_end(&mut response).await.unwrap();
+        match client.read_to_end(&mut response).await {
+            Ok(_) => {}
+            Err(error)
+                if error.kind() == std::io::ErrorKind::ConnectionReset && !response.is_empty() =>
+            {
+                // Linux can reset a denied socket after sending the response without reading its request.
+            }
+            Err(error) => panic!("hostd response read failed: {error}"),
+        }
         serde_json::from_slice(&response).unwrap()
     }
 

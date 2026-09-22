@@ -47,8 +47,8 @@ for both `amd64` and `arm64`, and runs the docs Playwright smoke job.
 - Build Debian packages with `packaging/scripts/build-deb.sh` or `make deb`;
   build native modules on the target architecture and keep `.deb`, `.changes`,
   and `.buildinfo` artifacts.
-- `packaging/scripts/install.sh` mutates a Debian host. It requires root,
-  `amd64`/`arm64`, and an existing non-root `SIGMAOS_TERMINAL_USER`. Review
+- `packaging/scripts/install.sh` mutates a Debian host. It requires root and
+  `amd64`/`arm64`; the terminal always runs as the internal `sigmaos` user. Review
   mirror settings before it changes APT sources. Nginx defaults on; Docker and
   VM support default off.
 - `packaging/appliance/build-image.sh` consumes an already built `.deb` and

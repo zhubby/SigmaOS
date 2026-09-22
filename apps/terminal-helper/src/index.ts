@@ -28,8 +28,8 @@ const sessionIdleTimeoutMs = positiveEnv("SIGMAOS_TERMINAL_SESSION_IDLE_TIMEOUT_
 const maxSessions = positiveEnv("SIGMAOS_TERMINAL_MAX_SESSIONS", TERMINAL_BROKER_MAX_SESSIONS);
 const activeSessions = new Set<BrokerConnection>();
 
-if (!configuredUser) {
-  throw new Error("SIGMAOS_TERMINAL_USER must be configured");
+if (configuredUser !== "sigmaos") {
+  throw new Error("SIGMAOS_TERMINAL_USER must be sigmaos");
 }
 
 const account = await resolveAccount(configuredUser);
@@ -435,7 +435,6 @@ async function resolveAccount(name: string): Promise<Account> {
   const home = fields[5];
   const shell = fields[6];
   if (
-    name === "sigmaos" ||
     name === "root" ||
     fields[0] !== name ||
     !Number.isInteger(uid) ||

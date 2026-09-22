@@ -15,22 +15,17 @@ DOCKER_ENABLED="${SIGMAOS_DOCKER_ENABLED:-0}"
 VM_ENABLED="${SIGMAOS_VM_ENABLED:-0}"
 PLAYER_ENABLED="${SIGMAOS_PLAYER_ENABLED:-${SIGMAOS_ENABLE_PLAYER:-0}}"
 PLAYER_USER="${SIGMAOS_PLAYER_USER:-sigmaos}"
-TERMINAL_USER="${SIGMAOS_TERMINAL_USER:-${SUDO_USER:-}}"
+TERMINAL_USER="${SIGMAOS_TERMINAL_USER:-sigmaos}"
 
 if [ -e "$CONFIG_PATH" ] && [ "${SIGMAOS_FIRST_BOOT_FORCE:-0}" != "1" ]; then
   printf "SigmaOS configuration already exists at %s; preserving it\n" "$CONFIG_PATH"
   exit 0
 fi
 
-if [ -n "$TERMINAL_USER" ]; then
-  case "$TERMINAL_USER" in
-    *[!a-zA-Z0-9._-]*|root|sigmaos) printf "SIGMAOS_TERMINAL_USER must name a distinct non-root local user\n" >&2; exit 1 ;;
-  esac
-  getent passwd "$TERMINAL_USER" >/dev/null || {
-    printf "terminal user does not exist: %s\n" "$TERMINAL_USER" >&2
-    exit 1
-  }
-fi
+[ "$TERMINAL_USER" = sigmaos ] || {
+  printf "SIGMAOS_TERMINAL_USER must be sigmaos\n" >&2
+  exit 1
+}
 
 case "$DOCKER_ENABLED" in
   0|1) ;;
@@ -172,7 +167,7 @@ backup_stale_ms = 93600000
 EOF_CONFIG
 
 if id sigmaos >/dev/null 2>&1; then
-  chown -R sigmaos:sigmaos "$DATA_DIR" "$NAS_ROOT_PATH"
+  chown -R sigmaos:sigmaos "$DATA_DIR"
   chown sigmaos:sigmaos "$CONFIG_PATH"
 fi
 

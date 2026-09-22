@@ -149,11 +149,10 @@ and service activation.
 ### Host installer
 
 `packaging/scripts/install.sh` is a host-mutating operation. It must run as
-root on Debian-family `amd64`/`arm64`, with an existing non-root terminal user:
+root on Debian-family `amd64`/`arm64`. The terminal identity is always `sigmaos`:
 
 ```bash
-sudo SIGMAOS_TERMINAL_USER=<user> \
-  SIGMAOS_NAS_ROOT_PATH=/srv/nas \
+sudo SIGMAOS_NAS_ROOT_PATH=/srv/nas \
   ./packaging/scripts/install.sh
 ```
 

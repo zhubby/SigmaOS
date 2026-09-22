@@ -19,10 +19,16 @@ packaging/scripts/sigmaos-nginx.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-configure-locale.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-refresh-groups.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-refresh-terminal.sh usr/lib/sigmaos/scripts/
+packaging/scripts/sigmaos-nas-acl.sh usr/lib/sigmaos/scripts/
+packaging/scripts/sigmaos-share-acl.mjs usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-refresh-player.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-deploy-bootstrap.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-deploy usr/lib/sigmaos/scripts/
 packaging/nginx/sigmaos.conf usr/share/sigmaos/nginx/
+packaging/etc/samba.conf usr/share/sigmaos/
 packaging/systemd/*.service lib/systemd/system/
 packaging/systemd/*.timer lib/systemd/system/
+packaging/systemd/smbd.service.d/sigmaos.conf lib/systemd/system/smbd.service.d/
+packaging/systemd/vsftpd.service.d/sigmaos.conf lib/systemd/system/vsftpd.service.d/
+packaging/systemd/minidlna.service.d/sigmaos.conf lib/systemd/system/minidlna.service.d/
 packaging/tmpfiles.d/sigmaos.conf usr/lib/tmpfiles.d/

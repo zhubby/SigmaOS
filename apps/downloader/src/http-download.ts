@@ -1,9 +1,12 @@
 import { constants as fsConstants } from "node:fs";
+import { execFile } from "node:child_process";
 import { link, lstat, open, statfs, unlink, type FileHandle } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
+import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Transform } from "node:stream";
+import { promisify } from "node:util";
 import type { DownloadTaskRecord } from "@sigmaos/shared";
 import {
   getDownloadTask,
@@ -18,6 +21,7 @@ import { parseDownloadUrl, resolvePublicAddress } from "./network.js";
 const MAX_REDIRECTS = 5;
 const HEADER_TIMEOUT_MS = 30_000;
 const IDLE_TIMEOUT_MS = 60_000;
+const execFileAsync = promisify(execFile);
 
 export class DownloadInterrupted extends Error {
   constructor(readonly status: "paused" | "cancelled") {
@@ -110,6 +114,7 @@ export async function downloadTaskToFile(input: {
     response.response.destroy(error instanceof Error ? error : undefined);
     throw error;
   }
+  const partialIdentity = await outputHandle.stat();
   const output = outputHandle.createWriteStream();
   const leaseTimer = setInterval(() => {
     const latest = getDownloadTask(input.db, input.task.id);
@@ -197,6 +202,7 @@ export async function downloadTaskToFile(input: {
     if (input.signal?.aborted) {
       return;
     }
+    await preparePublishedFile(input.partialAbsolutePath, partialIdentity.dev, partialIdentity.ino, receivedBytes);
     await publishPartialFile(input.partialAbsolutePath, input.targetAbsolutePath);
     published = true;
     input.db.transaction(() => {
@@ -440,6 +446,12 @@ async function openPartialFile(
       throw new Error("Download partial file changed while opening");
     }
   }
+  try {
+    await handle.chmod(0o600);
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    throw error;
+  }
   return handle;
 }
 
@@ -467,6 +479,37 @@ async function publishPartialFile(partialPath: string, targetPath: string): Prom
   } catch (error) {
     await unlinkIfExists(targetPath);
     throw error;
+  }
+}
+
+async function preparePublishedFile(filePath: string, device: number, inode: number, expectedSize: number): Promise<void> {
+  const handle = await open(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  try {
+    const file = await handle.stat();
+    if (!file.isFile() || file.dev !== device || file.ino !== inode || file.size !== expectedSize) {
+      throw new Error("Download partial file changed before publication");
+    }
+    const serviceGid = process.getgid?.();
+    if (serviceGid !== undefined && file.gid !== serviceGid) {
+      await handle.chown(file.uid, serviceGid);
+    }
+    if (process.platform === "linux") {
+      const { stdout } = await execFileAsync("getfacl", ["-c", "-d", "--", path.dirname(filePath)], { timeout: 10_000 });
+      const namedEntries = stdout.split("\n")
+        .filter((line) => /^(user|group):[^:]+:[rwx-]{3}$/u.test(line));
+      if (namedEntries.length > 0) {
+        await execFileAsync("setfacl", ["-m", namedEntries.join(","), "--", `/proc/${process.pid}/fd/${handle.fd}`],
+          { timeout: 10_000 });
+      }
+    }
+    await handle.chmod(0o660);
+    const published = await handle.stat();
+    const named = await lstat(filePath);
+    if (published.dev !== named.dev || published.ino !== named.ino || !named.isFile()) {
+      throw new Error("Download partial file changed while setting publication permissions");
+    }
+  } finally {
+    await handle.close();
   }
 }
 

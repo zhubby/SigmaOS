@@ -15,13 +15,12 @@ Nginx 只反向代理到 loopback API。运行时路径主要是 `/usr/lib/sigma
 
 ## 安装前检查
 
-安装脚本支持 Debian 系的 `amd64` 和 `arm64`，必须由 root 执行，并要求一个已经存在的非 root 终端用户。生产 NAS 应先挂载到 `/srv` 下的路径；脚本默认使用 `/srv/nas`，默认不启用 Docker、VM 和 restic backup。
+安装脚本支持 Debian 系的 `amd64` 和 `arm64`，必须由 root 执行。SigmaOS 终端固定使用由包管理的 `sigmaos` 身份，不依赖宿主机登录用户。生产 NAS 应先挂载到 `/srv` 下的路径；脚本默认使用 `/srv/nas`，默认不启用 Docker、VM 和 restic backup。
 
 确认：
 
 ```bash
 dpkg --print-architecture
-id <terminal-user>
 findmnt /srv/nas
 ```
 
@@ -45,22 +44,20 @@ npm run build
 最小安装示例：
 
 ```bash
-sudo SIGMAOS_TERMINAL_USER=<terminal-user> \
-  ./packaging/scripts/install.sh
+sudo ./packaging/scripts/install.sh
 ```
 
 常用开关：
 
 ```bash
-sudo SIGMAOS_TERMINAL_USER=<terminal-user> \
-  SIGMAOS_ENABLE_NGINX=1 \
+sudo SIGMAOS_ENABLE_NGINX=1 \
   SIGMAOS_ENABLE_DOCKER=0 \
   SIGMAOS_ENABLE_VM=0 \
   SIGMAOS_NAS_ROOT_PATH=/srv/nas \
   ./packaging/scripts/install.sh
 ```
 
-脚本会安装 Node.js 22 和 Rust 1.95.0、构建并安装本架构 `.deb`，然后仅在新安装时执行 `sigmaos-first-boot.sh`。首次初始化会创建 `/etc/sigmaos/config.toml`、`/var/lib/sigmaos`、`/srv/nas`、`/srv/iso` 和本地管理员记录；升级会保留现有配置。交互终端会询问管理员显示名与 NAS root；非交互运行可通过 `SIGMAOS_ADMIN_DISPLAY_NAME` 和 `SIGMAOS_NAS_ROOT_PATH` 提供值。
+脚本会安装 Node.js 22 和 Rust 1.95.0、构建并安装本架构 `.deb`，然后仅在新安装时执行 `sigmaos-first-boot.sh`。首次初始化会创建 `/etc/sigmaos/config.toml`、`/var/lib/sigmaos`、`/srv/nas`、`/srv/iso` 和本地管理员记录；升级会保留其他配置，把旧终端身份迁移为 `sigmaos`，并保存 `config.toml.pre-terminal.bak`。终端家目录为 `/var/lib/sigmaos-terminal`，旧 tmux shell 会在升级时退出，但标签仍可重新连接并创建 shell。
 
 核心服务会被 `enable --now`：
 
@@ -92,17 +89,37 @@ curl -fsS http://127.0.0.1:3010/api/system/health
 
 ## 升级与回滚
 
-升级前保留当前 `.deb`、`/etc/sigmaos/config.toml`、`/var/lib/sigmaos` 和数据库备份；先停止会访问 SQLite 或 NAS 的 timers：
-
-从旧版升级时，`postinst` 会把 `[shares].helper_socket_path` 迁移到 `[hostd].socket_path`，删除 SQLite share settings 中的 `helperSocketPath`，并停用已废弃的 `sigmaos-share-helper.service`。如果新旧 socket 配置同时存在，以 `[hostd]` 为准；修改 TOML 前会创建权限为 `0600` 的 `config.toml.pre-hostd.bak`，重复执行不会覆盖备份。
+升级前保留当前 `.deb`、`/etc/sigmaos/config.toml`、`/var/lib/sigmaos` 和数据库备份；先暂停会访问 SQLite 或 NAS 的服务与 timers。完成包安装后，先确认挂载、运行 ACL 预览和迁移，最后再启动服务：
 
 ```bash
 sudo systemctl stop sigmaos-indexer.timer sigmaos-scheduler.timer \
   sigmaos-maintenance.timer sigmaos-health.timer \
   sigmaos-backup-daily.timer sigmaos-backup-weekly.timer
+sudo systemctl stop sigmaos-downloader.service sigmaos-worker@1.service \
+  sigmaos-api.service sigmaos-terminal-helper.service sigmaos-hostd.service
 sudo dpkg -i .sigmaos/sigmaos_<version>_<arch>.deb
 sudo systemctl daemon-reload
-sudo systemctl restart sigmaos-api.service sigmaos-worker@1.service
+findmnt /srv/nas/pool1
+```
+
+安装新包不等于修复旧池权限。升级后、重启下载器及开放文件写入前，逐池执行：
+
+```bash
+sudo /usr/lib/sigmaos/scripts/sigmaos-nas-acl.sh --check --pool /srv/nas/pool1
+sudo /usr/lib/sigmaos/scripts/sigmaos-nas-acl.sh --apply --pool /srv/nas/pool1
+```
+
+对其他已挂载池分别执行；自定义 NAS root 还需传入 `--root <configured-root>`。工具只处理已挂载、没有嵌套挂载的池，保留现有所有者并为 `sigmaos` 增加访问和默认 ACL；属于 `sigmaos` 的私有文件无需新增 ACL，仍保持原有 mask。只读快照、ACL 不支持或路径失败会明确报错。预览会检查已有 ACL mask；若新增授权可能放宽其他身份的有效权限，会拒绝整池迁移，须先逐路径审查，不能强行放宽 mask。每次成功进入 `--apply` 阶段都会将原 ACL 保存于输出所示的 `/var/backups/sigmaos-permissions/acl.*/acl.dump`，应先查明原因，再在停止写入的状态下以 `setfacl --restore=<exact-backup-path>` 回滚；不要对旧池运行递归 `chown`。
+
+共享服务只在启用的共享路径获得 ACL。hostd 应用共享设置时备份受影响路径的 ACL，服务重载失败会恢复；可写 NFS 客户端被映射为 `sigmaos-nfs`，不继承客户端 UID。
+
+从旧版升级时，`postinst` 会把 `[shares].helper_socket_path` 迁移到 `[hostd].socket_path`，删除 SQLite share settings 中的 `helperSocketPath`，并停用已废弃的 `sigmaos-share-helper.service`。如果新旧 socket 配置同时存在，以 `[hostd]` 为准；修改 TOML 前会创建权限为 `0600` 的 `config.toml.pre-hostd.bak`，重复执行不会覆盖备份。完成 ACL 验证后启动服务：
+
+```bash
+sudo systemctl start sigmaos-hostd.service sigmaos-terminal-helper.service \
+  sigmaos-api.service sigmaos-worker@1.service sigmaos-downloader.service
+sudo systemctl --failed
+sudo journalctl -u sigmaos-hostd.service -u sigmaos-terminal-helper.service -n 100 --no-pager
 ```
 
 确认新版本通过验收后再重新启用 timers。降级只能恢复程序包，迁移脚本没有通用的数据库反向迁移；若新版本已改变 schema，应使用升级前的 SQLite 备份和对应版本包一起恢复。

@@ -1,4 +1,5 @@
 import http from "node:http";
+import { execFileSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -62,6 +63,7 @@ describe("HTTP download runtime", () => {
     });
 
     await expect(readFile(path.join(root, "file.bin"))).resolves.toEqual(payload);
+    expect((await stat(path.join(root, "file.bin"))).mode & 0o777).toBe(0o660);
     await expect(stat(path.join(root, ".file.bin.part"))).rejects.toMatchObject({ code: "ENOENT" });
     expect(getDownloadTask(db!, task.id)).toMatchObject({
       status: "completed",
@@ -76,6 +78,9 @@ describe("HTTP download runtime", () => {
     const payload = Buffer.from("hello world");
     const root = await setup();
     await writeFile(path.join(root, ".file.bin.part"), payload.subarray(0, 5));
+    if (process.platform === "linux") {
+      execFileSync("setfacl", ["-m", "d:u:nobody:rwX", root]);
+    }
     let rangeHeader: string | undefined;
     let ifRangeHeader: string | undefined;
     server = http.createServer((request, response) => {
@@ -116,6 +121,11 @@ describe("HTTP download runtime", () => {
     expect(rangeHeader).toBe("bytes=5-");
     expect(ifRangeHeader).toBe("\"v1\"");
     await expect(readFile(path.join(root, "file.bin"), "utf8")).resolves.toBe("hello world");
+    expect((await stat(path.join(root, "file.bin"))).mode & 0o777).toBe(0o660);
+    if (process.platform === "linux") {
+      expect(execFileSync("getfacl", ["-c", "--", path.join(root, "file.bin")], { encoding: "utf8" }))
+        .toMatch(/user:nobody:rwx\s+#effective:rw-/u);
+    }
     expect(getDownloadTask(db!, task.id)?.status).toBe("completed");
     expect(claimed?.id).toBe(task.id);
   });
@@ -218,6 +228,7 @@ describe("HTTP download runtime", () => {
     expect(getDownloadTask(db!, task.id)?.status).toBe("queued");
     await expect(stat(path.join(root, "file.bin"))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(path.join(root, ".file.bin.part"), "utf8")).resolves.toContain("partial-");
+    expect((await stat(path.join(root, ".file.bin.part"))).mode & 0o777).toBe(0o600);
   });
 
   it("aborts promptly while preserving a running task and partial file", async () => {

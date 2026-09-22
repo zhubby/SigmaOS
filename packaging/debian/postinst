@@ -8,6 +8,16 @@ if [ "$1" = "configure" ]; then
   if ! id sigmaos >/dev/null 2>&1; then
     adduser --system --ingroup sigmaos --home /var/lib/sigmaos --no-create-home sigmaos
   fi
+  if ! id sigmaos-nfs >/dev/null 2>&1; then
+    adduser --system --no-create-home --disabled-login --shell /usr/sbin/nologin sigmaos-nfs
+  fi
+  usermod --home /var/lib/sigmaos-terminal --shell /bin/bash sigmaos
+  install -d -o sigmaos -g sigmaos -m 0700 /var/lib/sigmaos-terminal
+  install -d -o root -g root -m 0700 /var/backups/sigmaos-permissions
+  install -d -o root -g root -m 0755 /var/lib/sigmaos-share
+  if id sigma-share >/dev/null 2>&1; then
+    usermod --home /var/lib/sigmaos-share sigma-share
+  fi
 
   install -d -o sigmaos -g sigmaos -m 0750 /var/lib/sigmaos /var/lib/sigmaos/trash /var/lib/sigmaos/reports /var/lib/sigmaos/pi-sessions
   install -d -o sigmaos -g sigmaos -m 0711 /var/lib/sigmaos/vmstore
