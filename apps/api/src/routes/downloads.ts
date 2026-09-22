@@ -1,4 +1,5 @@
-import { lstat, stat, unlink } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { access, lstat, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import {
@@ -64,6 +65,15 @@ export function registerDownloadRoutes(server: FastifyInstance, { db, system }: 
       if (!directoryStat.isDirectory()) {
         reply.status(400).send({ error: "Download target directory must be a directory" });
         return;
+      }
+      try {
+        await access(directory.realPath, fsConstants.W_OK | fsConstants.X_OK);
+      } catch (error) {
+        if (isPermissionError(error)) {
+          reply.status(403).send({ error: "Download target directory is not writable" });
+          return;
+        }
+        throw error;
       }
 
       const normalizedDirectory = directory.relativePath;
@@ -368,8 +378,7 @@ function sendDownloadError(reply: FastifyReply, error: unknown): void {
     reply.status(error.statusCode).send({ error: error.message });
     return;
   }
-  const code = (error as NodeJS.ErrnoException).code;
-  if (code === "EACCES" || code === "EPERM") {
+  if (isPermissionError(error)) {
     reply.status(403).send({ error: "Download target is not accessible" });
     return;
   }
@@ -378,4 +387,9 @@ function sendDownloadError(reply: FastifyReply, error: unknown): void {
     return;
   }
   reply.status(400).send({ error: error instanceof Error ? error.message : String(error) });
+}
+
+function isPermissionError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "EACCES" || code === "EPERM";
 }

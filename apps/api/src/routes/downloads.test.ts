@@ -1,10 +1,18 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ensureNasRoots, openSigmaDb, type SigmaDatabase } from "@sigmaos/db";
 import type { SigmaConfig } from "@sigmaos/shared";
 import { buildServer } from "../server.js";
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...fs,
+    access: vi.fn((...args: Parameters<typeof fs.access>) => fs.access(...args))
+  };
+});
 
 const poolId = "/dev/md/test-pool";
 let tempDir: string | null = null;
@@ -142,6 +150,32 @@ describe("download API", () => {
     expect(response.statusCode).toBe(409);
     await app.close();
   });
+
+  it("rejects a directory the downloader cannot write before queuing", async () => {
+    const { app, root } = await setup();
+    const directory = path.join(root, "Downloads");
+    await mkdir(directory);
+    vi.mocked(access).mockRejectedValueOnce(Object.assign(new Error("Permission denied"), { code: "EACCES" }));
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/downloads",
+        payload: {
+          url: "https://example.com/file.zip",
+          rootId: "local",
+          storagePoolId: poolId,
+          targetDirectory: "Downloads",
+          fileName: "file.zip"
+        }
+      });
+      expect(response.statusCode).toBe(403);
+      expect(response.json().error).toMatch(/writ/i);
+      const tasks = await app.inject({ method: "GET", url: "/api/downloads" });
+      expect(tasks.json().tasks).toEqual([]);
+    } finally {
+      await app.close();
+    }
+  });
 });
 
 async function setup(): Promise<{
@@ -167,7 +201,8 @@ function testConfig(root: string): SigmaConfig {
     admin: { displayName: "Test", authMode: "local-only" },
     model: { provider: "pi", piCommand: "pi", localEndpoint: null },
     docker: { enabled: false, socketPath: "/var/run/docker.sock", composeCommand: "docker", operationTimeoutMs: 1000, consoleShells: [], composeRoots: [] },
-    shares: { enabled: false, helperSocketPath: "/tmp/share.sock", account: { username: "share", password: null }, shares: [] },
+    hostd: { socketPath: "/tmp/hostd.sock" },
+    shares: { enabled: false, account: { username: "share", password: null }, shares: [] },
     terminal: { user: "test-user", helperSocketPath: "/tmp/terminal-helper.sock" },
     player: { enabled: false, helperSocketPath: "/tmp/player-helper.sock", videoOutput: "drm", drmConnector: null, audioOutput: "alsa", audioDevice: null, hwdec: "auto-safe", user: "sigmaos" },
     nasRoots: [{ id: "local", name: "Local", path: root }]
