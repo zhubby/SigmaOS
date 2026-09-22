@@ -1,3 +1,9 @@
+sigmaos (0.7.2) unstable; urgency=medium
+
+  * Fix Debian dependency analysis for foreign Bare and musl prebuilds.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Tue, 22 Sep 2026 17:33:54 +0000
+
 sigmaos (0.7.1) unstable; urgency=medium
 
   * Fix ARM64 packaging dependencies and exclude foreign Bare prebuilds from Debian stripping.

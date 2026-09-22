@@ -1,6 +1,6 @@
 {
   "name": "@sigmaos/terminal-helper",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,7 +8,7 @@
     "build": "tsup --config tsup.config.ts"
   },
   "dependencies": {
-    "@sigmaos/shared": "0.7.1",
+    "@sigmaos/shared": "0.7.2",
     "node-pty": "^1.1.0"
   }
 }
