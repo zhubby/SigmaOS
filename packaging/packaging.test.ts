@@ -116,9 +116,9 @@ describe("native packaging artifacts", () => {
     expect(tmpfiles).toContain("/run/sigmaos");
     expect(tmpfiles).toContain("/run/mdadm");
     expect(tmpfiles).toContain("d /run/samba 0755 root root -");
-    expect(control).toContain("Depends: nodejs (>= 20), sqlite3, tmux, acl, adduser, network-manager, wpasupplicant, dnsmasq-base, wireless-regdb, iw");
-    expect(control).not.toMatch(/^Depends:.*libheif-examples/m);
-    expect(control).toContain("Recommends: libheif-examples");
+    expect(control).toContain("Depends: nodejs (>= 20), sqlite3, tmux, acl, adduser, network-manager, wpasupplicant, dnsmasq-base, wireless-regdb, iw, libheif-examples");
+    expect(control).toMatch(/^Depends:.*libheif-examples/m);
+    expect(control).not.toContain("Recommends: libheif-examples");
     expect(control).toContain("Build-Depends: debhelper-compat (= 13), nodejs, npm, cargo, rustc, acl");
     expect(control).toContain("mpv");
     expect(control).toContain("libheif-examples");
