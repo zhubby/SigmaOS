@@ -1,3 +1,9 @@
+sigmaos (0.7.0) unstable; urgency=medium
+
+  * Add storage-backed photo library with indexing, uploads, exports, cached previews, and approval-gated management.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Tue, 22 Sep 2026 16:55:41 +0000
+
 sigmaos (0.6.0) unstable; urgency=medium
 
   * Add customizable drag-and-resize layouts across management dashboards.
