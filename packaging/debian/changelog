@@ -1,3 +1,9 @@
+sigmaos (0.7.3) unstable; urgency=medium
+
+  * Recover CM5 upgrades when optional HEIF tooling is not preinstalled.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Tue, 22 Sep 2026 18:09:39 +0000
+
 sigmaos (0.7.2) unstable; urgency=medium
 
   * Fix Debian dependency analysis for foreign Bare and musl prebuilds.
