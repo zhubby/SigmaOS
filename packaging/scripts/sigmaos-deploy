@@ -333,7 +333,10 @@ state_paths=sigmaos
 tar -C /var/lib -czf "$backup_path/state.tgz" $state_paths
 
 log "installing $manifest_tag"
-DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-remove "$work_dir/package.deb"
+DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-remove \
+  -o Dpkg::Options::=--force-confdef \
+  -o Dpkg::Options::=--force-confold \
+  "$work_dir/package.deb"
 systemctl daemon-reload
 
 for unit in $WRITERS $TIMERS; do

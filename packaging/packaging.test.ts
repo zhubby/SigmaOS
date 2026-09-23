@@ -422,7 +422,9 @@ describe("native packaging artifacts", () => {
     expect(deploy).toContain("tar -C /etc -czf");
     expect(deploy).toContain("tar -C /var/lib -czf");
     expect(deploy).toContain('command -v apt-get >/dev/null 2>&1 || die "apt-get is required"');
-    expect(deploy).toContain('apt-get install --yes --no-remove "$work_dir/package.deb"');
+    expect(deploy).toContain("apt-get install --yes --no-remove");
+    expect(deploy).toContain("Dpkg::Options::=--force-confdef");
+    expect(deploy).toContain("Dpkg::Options::=--force-confold");
     expect(deploy).not.toContain('dpkg -i "$work_dir/package.deb"');
     expect(deploy).toContain("systemctl daemon-reload");
     expect(deploy).toContain("restore_unit_state \"$unit\" \"$state_dir\"");
