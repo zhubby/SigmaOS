@@ -991,14 +991,6 @@
   overflow: hidden;
 }
 
-.downloads-header {
-  min-height: 78px;
-}
-
-.downloads-header-actions {
-  flex-wrap: wrap;
-}
-
 .download-header-stat {
   display: grid;
   gap: 1px;
@@ -1021,8 +1013,7 @@
 }
 
 .download-create-button {
-  min-width: 132px;
-  min-height: 32px;
+  color: var(--accent-soft-text);
 }
 
 .download-create-button:disabled {
@@ -1031,6 +1022,26 @@
   background: var(--subtle-bg);
   cursor: not-allowed;
   opacity: 1;
+}
+
+.downloads-toolbar-meta,
+.downloads-summary {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.downloads-toolbar-meta {
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.downloads-summary {
+  gap: 2px;
+}
+
+.downloads-summary .download-header-stat:first-child {
+  border-left: 0;
 }
 
 .downloads-toolbar {
@@ -1855,16 +1866,56 @@
   font-size: 12.5px;
 }
 
+.panel-header-status {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 1px;
+  color: var(--neutral-status-text);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.panel-header-status > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-header-status-dot {
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 13%, transparent);
+}
+
+.panel-header-status[data-state="ready"] {
+  color: var(--success-text);
+}
+
+.panel-header-status[data-state="warning"] {
+  color: var(--warning-text);
+}
+
+.panel-header-status[data-state="offline"] {
+  color: var(--danger-text);
+}
+
 .management-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
-.management-actions > button,
-.management-actions > .docker-create-menu > button,
+.panel-header-action,
 .management-row-action {
   display: inline-flex;
   align-items: center;
@@ -1880,9 +1931,26 @@
   white-space: nowrap;
 }
 
-.management-actions > button,
-.management-actions > .docker-create-menu > button {
-  padding: 0 10px;
+.panel-header-action {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
+}
+
+.panel-header-action:hover:not(:disabled),
+.panel-header-action:focus-visible {
+  border-color: var(--line);
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.panel-header-action:active:not(:disabled) {
+  background: var(--surface-strong);
+}
+
+.panel-header-action.is-danger:not(:disabled) {
+  color: var(--danger-text);
 }
 
 .management-layout-controls {
@@ -1892,29 +1960,12 @@
   min-width: 0;
 }
 
-.management-layout-controls button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 32px;
-  padding: 0 10px;
-  border: 1px solid var(--line-soft);
-  border-radius: 5px;
-  color: var(--muted);
-  background: var(--surface);
-  font-size: 11.5px;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
 .management-layout-controls button[aria-pressed="true"] {
   border-color: var(--accent);
   color: var(--text);
 }
 
-.management-actions > button:disabled,
-.management-actions > .docker-create-menu > button:disabled,
+.panel-header-action:disabled,
 .management-row-action:disabled {
   opacity: 0.64;
 }
@@ -6505,7 +6556,7 @@
   }
 
   .workspace-share-management .management-actions {
-    justify-content: flex-start;
+    justify-content: flex-end;
     flex-wrap: wrap;
   }
 

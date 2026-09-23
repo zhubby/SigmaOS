@@ -15,6 +15,7 @@ sourceOfTruth:
   - apps/web/src/styles/interactions.css
   - apps/web/src/components/chat/ChatPane.tsx
   - apps/web/src/components/workspace/ManagementDashboard.tsx
+  - apps/web/src/components/workspace/PanelHeader.tsx
   - apps/web/src/components/workspace/WorkspacePane.tsx
   - apps/web/src/components/workspace/PhotoLibraryPanel.tsx
 sidebar:
@@ -141,6 +142,10 @@ SigmaOS 是运行在个人 Linux NAS 上的本地运维工作台，不是营销�
 
 Workspace 是操作工作区，不是装饰性资源卡片。文件列表、预览、终端、下载、Docker、VM、网络、存储和共享面板应共享相同的标题、工具栏、状态和错误处理语言。
 
+- 面板页头左侧固定展示图标、eyebrow、标题和副标题；右侧操作区使用 `PanelHeaderActions`，只放直接操作，不混入统计数据或状态。
+- 页头操作统一使用 `32px` 方形图标按钮和 `5px` 圆角，不显示按钮文字；每个按钮必须同时提供本地化的 `aria-label` 和 `title`。忙碌状态替换图标但不能改变按钮尺寸。
+- 页头状态使用状态点加短文本，放在标题信息内；不得把状态做成胶囊并塞入操作区。成功、警告和失败仍须同时通过文字与语义色表达。
+- 窄屏下页头允许上下堆叠，操作区保持右对齐；不能缩小点击区域、挤压标题或产生横向滚动。
 - 文件列表使用稳定的网格列：名称、操作、大小、修改时间；排序按钮是可访问的真实按钮。
 - 文件操作集中在操作列，按钮组右侧保留可感知间距，不能贴住 `SIZE` 或时间列。
 - 行 hover、选中、禁用和键盘 focus 必须有区别；危险操作使用危险语义而不是单纯改变图标。

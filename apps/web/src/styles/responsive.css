@@ -125,17 +125,6 @@
   }
 }
 
-@container workspace-stage (max-width: 620px) {
-  .management-layout-controls button {
-    width: 34px;
-    padding: 0;
-  }
-
-  .management-layout-controls button span {
-    display: none;
-  }
-}
-
 @container system-wifi-section (max-width: 760px) {
   .system-wifi-device-summary {
     grid-template-columns: minmax(0, 1fr);
@@ -731,14 +720,7 @@
   }
 
   .management-actions {
-    justify-content: flex-start;
-    overflow: auto;
-    padding-bottom: 2px;
-  }
-
-  .downloads-header-actions {
-    flex-wrap: wrap;
-    overflow: visible;
+    justify-content: flex-end;
   }
 
   .download-task-row {
@@ -779,19 +761,14 @@
     overflow-x: auto;
   }
 
+  .downloads-toolbar-meta {
+    justify-content: space-between;
+    width: 100%;
+  }
+
   .download-header-stat {
     min-width: 50px;
     padding: 0 6px;
-  }
-
-  .download-create-button span {
-    display: none;
-  }
-
-  .download-create-button {
-    width: 34px;
-    min-width: 34px;
-    padding: 0;
   }
 
   .download-target-control {
@@ -1022,10 +999,6 @@
     gap: 4px;
   }
 
-  .workspace-terminal-actions .management-status-pill {
-    display: none;
-  }
-
   .approval-card {
     grid-template-columns: 36px minmax(0, 1fr);
   }
@@ -1081,16 +1054,6 @@
     font-size: 18px;
   }
 
-  .management-actions > button,
-  .management-actions > .docker-create-menu > button,
-  .management-layout-controls button {
-    width: 34px;
-    padding: 0;
-  }
-
-  .management-actions > button span,
-  .management-actions > .docker-create-menu > button span,
-  .management-layout-controls button span,
   .management-row-action span {
     display: none;
   }

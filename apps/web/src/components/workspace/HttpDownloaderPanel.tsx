@@ -23,6 +23,7 @@ import {
 } from "../../api.js";
 import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
+import { PanelHeaderAction, PanelHeaderActions } from "./PanelHeader.js";
 import { StorageFilePickerDialog, type StorageFilePickerPool, type StorageFileSelection } from "./StorageFilePickerDialog.js";
 
 export type HttpDownloaderPool = StorageFilePickerPool;
@@ -272,39 +273,26 @@ export function HttpDownloaderPanel({
             <p>{t("workspace.downloads.description")}</p>
           </div>
         </div>
-        <div className="management-actions downloads-header-actions">
-          <div className="download-header-stat">
-            <strong>{formatLocaleNumber(activeCount, locale)}</strong>
-            <span>{t("workspace.downloads.active")}</span>
-          </div>
-          <div className="download-header-stat">
-            <strong>{formatLocaleNumber(queueCount, locale)}</strong>
-            <span>{t("workspace.downloads.queued")}</span>
-          </div>
-          <div className="download-header-stat">
-            <strong>{formatBytes(totalSpeed, locale)}/s</strong>
-            <span>{t("workspace.downloads.speed")}</span>
-          </div>
-          <button
+        <PanelHeaderActions label={t("workspace.management.actions.label")} className="downloads-header-actions">
+          <PanelHeaderAction
+            label={t(storagePoolsLoading ? "workspace.downloads.loadingStoragePools" : "workspace.downloads.newDownload")}
+            tooltip={storagePoolsLoading
+              ? t("workspace.downloads.loadingStoragePools")
+              : mountedPools.length
+                ? t("workspace.downloads.newDownload")
+                : t("workspace.downloads.configureStoragePool")}
             type="button"
-            className="primary-button download-create-button"
+            className="download-create-button"
             onClick={openCreateDialog}
             disabled={storagePoolsLoading}
             aria-busy={storagePoolsLoading || undefined}
-            aria-label={t(storagePoolsLoading ? "workspace.downloads.loadingStoragePools" : "workspace.downloads.newDownload")}
             data-state={storagePoolsLoading ? "loading" : mountedPools.length ? "ready" : "needs-storage"}
-            title={storagePoolsLoading
-              ? t("workspace.downloads.loadingStoragePools")
-              : mountedPools.length
-                ? undefined
-                : t("workspace.downloads.configureStoragePool")}
           >
             {storagePoolsLoading
-              ? <LoaderCircle className="is-spinning" aria-hidden="true" size={15} />
-              : <Plus aria-hidden="true" size={15} />}
-            <span>{t(storagePoolsLoading ? "workspace.downloads.loadingStoragePools" : "workspace.downloads.newDownload")}</span>
-          </button>
-        </div>
+              ? <LoaderCircle className="is-spinning" aria-hidden="true" size={16} />
+              : <Plus aria-hidden="true" size={17} />}
+          </PanelHeaderAction>
+        </PanelHeaderActions>
       </header>
 
       <div className="downloads-toolbar">
@@ -322,10 +310,26 @@ export function HttpDownloaderPanel({
             </button>
           ))}
         </div>
-        <span className={`downloads-connection${connected ? "" : " is-disconnected"}`}>
-          {connected ? <span className="downloads-connection-dot" aria-hidden="true" /> : <WifiOff aria-hidden="true" size={14} />}
-          {connected ? t("workspace.downloads.connected") : t("workspace.downloads.disconnected")}
-        </span>
+        <div className="downloads-toolbar-meta">
+          <div className="downloads-summary" aria-label={t("workspace.downloads.title")}>
+            <div className="download-header-stat">
+              <strong>{formatLocaleNumber(activeCount, locale)}</strong>
+              <span>{t("workspace.downloads.active")}</span>
+            </div>
+            <div className="download-header-stat">
+              <strong>{formatLocaleNumber(queueCount, locale)}</strong>
+              <span>{t("workspace.downloads.queued")}</span>
+            </div>
+            <div className="download-header-stat">
+              <strong>{formatBytes(totalSpeed, locale)}/s</strong>
+              <span>{t("workspace.downloads.speed")}</span>
+            </div>
+          </div>
+          <span className={`downloads-connection${connected ? "" : " is-disconnected"}`}>
+            {connected ? <span className="downloads-connection-dot" aria-hidden="true" /> : <WifiOff aria-hidden="true" size={14} />}
+            {connected ? t("workspace.downloads.connected") : t("workspace.downloads.disconnected")}
+          </span>
+        </div>
       </div>
 
       <div className="downloads-list">

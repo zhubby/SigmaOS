@@ -74,7 +74,7 @@ import { DockerCreateDialogs } from "./DockerCreateDialogs.js";
 import { DockerDaemonSettingsDialog } from "./DockerDaemonSettingsDialog.js";
 import { DockerImageManagement } from "./DockerImageManagement.js";
 import { DockerResourceStatus } from "./DockerResourceStatus.js";
-import { ManagementSkeletonBody, SkeletonBlock } from "./ManagementSkeleton.js";
+import { ManagementSkeletonBody } from "./ManagementSkeleton.js";
 import {
   ManagementDashboardControls,
   ManagementDashboardGrid,
@@ -90,6 +90,7 @@ import {
   type StorageFilePickerPool,
   type StorageFileSelection
 } from "./StorageFilePickerDialog.js";
+import { PanelHeaderAction, PanelHeaderActions, PanelHeaderStatus } from "./PanelHeader.js";
 
 export type ManagementPanelId = "docker" | "virtualMachines" | "network" | "storage" | "shares";
 
@@ -437,28 +438,28 @@ export function WorkspaceManagementPanel({
             <span className="eyebrow">{t(config.eyebrowKey)}</span>
             <h2>{t(config.titleKey)}</h2>
             <p>{t(config.descriptionKey)}</p>
+            <PanelHeaderStatus
+              label={String(t("workspace.management.previewMode"))}
+              tone={config.statusState}
+            />
           </div>
         </div>
-        <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
-          <span className="management-status-pill" data-state={config.statusState}>
-            {t("workspace.management.previewMode")}
-          </span>
+        <PanelHeaderActions label={String(t("workspace.management.actions.label"))}>
           {config.actions.map((action) => {
             const ActionIcon = action.Icon;
             return (
-              <button
+              <PanelHeaderAction
                 key={action.labelKey}
+                label={String(t(action.labelKey))}
+                tooltip={String(t("workspace.management.actions.disabledReason"))}
                 type="button"
                 disabled
-                title={t("workspace.management.actions.disabledReason")}
-                aria-label={t(action.labelKey)}
               >
-                <ActionIcon aria-hidden="true" size={15} />
-                <span>{t(action.labelKey)}</span>
-              </button>
+                <ActionIcon aria-hidden="true" size={17} />
+              </PanelHeaderAction>
             );
           })}
-        </div>
+        </PanelHeaderActions>
       </header>
 
       <div className="management-body">
@@ -729,30 +730,28 @@ function VirtualMachineManagementPanel({
             <span className="eyebrow">{t("workspace.management.virtualMachines.eyebrow")}</span>
             <h2>{t("workspace.management.virtualMachines.title")}</h2>
             <p>{t("workspace.management.virtualMachines.description")}</p>
+            <PanelHeaderStatus
+              label={vmHostStatusLabel(host?.status, loading, t)}
+              tone={loading ? "neutral" : statusTone}
+              busy={loading}
+            />
           </div>
         </div>
-        <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
-          {loading ? (
-            <SkeletonBlock className="management-skeleton-status" width="66px" />
-          ) : (
-            <span className="management-status-pill" data-state={statusTone}>{vmHostStatusLabel(host?.status, false, t)}</span>
-          )}
+        <PanelHeaderActions label={t("workspace.management.actions.label")}>
           <ManagementDashboardControls dashboard={dashboard} disabled={loading} />
-          <button
+          <PanelHeaderAction
+            label={t("common.actions.refresh")}
             type="button"
             onClick={() => void refresh()}
             disabled={loading}
-            aria-label={t("common.actions.refresh")}
-            title={t("common.actions.refresh")}
-          ><RefreshCw aria-hidden="true" size={15} /><span>{t("common.actions.refresh")}</span></button>
-          <button
+          ><RefreshCw aria-hidden="true" size={17} /></PanelHeaderAction>
+          <PanelHeaderAction
+            label={t("workspace.management.virtualMachines.create")}
             type="button"
             onClick={openCreateVm}
             disabled={!canMutate}
-            aria-label={t("workspace.management.virtualMachines.create")}
-            title={t("workspace.management.virtualMachines.create")}
-          ><Play aria-hidden="true" size={15} /><span>{t("workspace.management.virtualMachines.create")}</span></button>
-        </div>
+          ><Play aria-hidden="true" size={17} /></PanelHeaderAction>
+        </PanelHeaderActions>
       </header>
       <div className="management-body">
         {loading ? <ManagementSkeletonBody tableColumns={7} tableRows={4} /> : (
@@ -1257,37 +1256,42 @@ function DockerManagementPanel({
             <span className="eyebrow">{t("workspace.management.docker.eyebrow")}</span>
             <h2>{t("workspace.management.docker.title")}</h2>
             <p>{t("workspace.management.docker.description")}</p>
+            <PanelHeaderStatus
+              label={dockerStatusLabel(daemonStatus, loading, t)}
+              tone={loading && !daemonStatus ? "neutral" : daemonStatus ? dockerDaemonTone(daemonStatus.state) : "neutral"}
+              busy={loading}
+            />
           </div>
         </div>
-        <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
-          {loading && !daemonStatus ? (
-            <SkeletonBlock className="management-skeleton-status" width="66px" />
-          ) : (
-            <span className="management-status-pill" data-state={daemonStatus ? dockerDaemonTone(daemonStatus.state) : "neutral"}>
-              {dockerStatusLabel(daemonStatus, loading, t)}
-            </span>
-          )}
+        <PanelHeaderActions label={t("workspace.management.actions.label")}>
           <ManagementDashboardControls dashboard={dashboard} disabled={loading} />
-          <button
+          <PanelHeaderAction
+            label={t("common.actions.refresh")}
             type="button"
             onClick={refreshSummary}
             disabled={loading}
             aria-busy={loading || undefined}
-            aria-label={t("common.actions.refresh")}
-            title={t("common.actions.refresh")}
           >
-            {loading ? <LoaderCircle aria-hidden="true" size={15} /> : <RefreshCw aria-hidden="true" size={15} />}
-            <span>{t("common.actions.refresh")}</span>
-          </button>
+            {loading ? <LoaderCircle className="is-spinning" aria-hidden="true" size={16} /> : <RefreshCw aria-hidden="true" size={17} />}
+          </PanelHeaderAction>
           <div className={`docker-create-menu${createMenuOpen ? " is-open" : ""}`} ref={createMenuRef}>
-            <button type="button" aria-haspopup="menu" aria-expanded={createMenuOpen} aria-controls="docker-create-menu-items" onClick={() => setCreateMenuOpen((open) => !open)} disabled={!canUseDocker || Boolean(pendingAction) || !sessionId} title={t("workspace.management.docker.create.actions.openMenu")}><Plus aria-hidden="true" size={15} /><span>{t("workspace.management.docker.create.actions.create")}</span></button>
+            <PanelHeaderAction
+              label={t("workspace.management.docker.create.actions.create")}
+              tooltip={t("workspace.management.docker.create.actions.openMenu")}
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={createMenuOpen}
+              aria-controls="docker-create-menu-items"
+              onClick={() => setCreateMenuOpen((open) => !open)}
+              disabled={!canUseDocker || Boolean(pendingAction) || !sessionId}
+            ><Plus aria-hidden="true" size={17} /></PanelHeaderAction>
             <div className="docker-create-menu-items" id="docker-create-menu-items" role="menu">
               <button type="button" role="menuitem" onClick={() => { setCreateMenuOpen(false); setCreateKind("container"); }} disabled={!canUseDocker || Boolean(pendingAction) || !sessionId}>{t("workspace.management.docker.create.kinds.container")}</button>
               <button type="button" role="menuitem" onClick={() => { setCreateMenuOpen(false); setCreateKind("volume"); }} disabled={!canUseDocker || Boolean(pendingAction) || !sessionId}>{t("workspace.management.docker.create.kinds.volume")}</button>
               <button type="button" role="menuitem" onClick={() => { setCreateMenuOpen(false); setCreateKind("network"); }} disabled={!canUseDocker || Boolean(pendingAction) || !sessionId}>{t("workspace.management.docker.create.kinds.network")}</button>
             </div>
           </div>
-        </div>
+        </PanelHeaderActions>
       </header>
 
       <div className="management-body">

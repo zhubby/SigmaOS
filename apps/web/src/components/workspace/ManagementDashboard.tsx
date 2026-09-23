@@ -24,6 +24,7 @@ import {
   type ManagementDashboardId,
   type ManagementDashboardLayouts
 } from "../../lib/management-dashboard-layout.js";
+import { PanelHeaderAction } from "./PanelHeader.js";
 
 export interface ManagementDashboardItem {
   id: string;
@@ -115,41 +116,35 @@ export function ManagementDashboardControls({
     <div className="management-layout-controls">
       {dashboard.editing ? (
         <>
-          <button
+          <PanelHeaderAction
+            label={t("workspace.management.layout.reset")}
             type="button"
             onClick={dashboard.reset}
             disabled={unavailable}
-            title={t("workspace.management.layout.reset")}
-            aria-label={t("workspace.management.layout.reset")}
           >
-            <RotateCcw aria-hidden="true" size={15} />
-            <span>{t("workspace.management.layout.reset")}</span>
-          </button>
-          <button
+            <RotateCcw aria-hidden="true" size={16} />
+          </PanelHeaderAction>
+          <PanelHeaderAction
+            label={t("workspace.management.layout.done")}
             type="button"
-            className="is-primary"
             onClick={() => dashboard.setEditing(false)}
             disabled={unavailable}
-            title={t("workspace.management.layout.done")}
-            aria-label={t("workspace.management.layout.done")}
             aria-pressed="true"
           >
-            <Check aria-hidden="true" size={15} />
-            <span>{t("workspace.management.layout.done")}</span>
-          </button>
+            <Check aria-hidden="true" size={16} />
+          </PanelHeaderAction>
         </>
       ) : (
-        <button
+        <PanelHeaderAction
+          label={t("workspace.management.layout.edit")}
+          tooltip={unavailableTitle}
           type="button"
           onClick={() => dashboard.setEditing(true)}
           disabled={unavailable}
-          title={unavailableTitle}
-          aria-label={unavailableTitle}
           aria-pressed="false"
         >
-          <PanelsTopLeft aria-hidden="true" size={15} />
-          <span>{t("workspace.management.layout.edit")}</span>
-        </button>
+          <PanelsTopLeft aria-hidden="true" size={16} />
+        </PanelHeaderAction>
       )}
     </div>
   );

@@ -61,12 +61,13 @@ import {
 import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
 import { calculateNetworkTrafficRate } from "../../lib/network-traffic.js";
-import { ManagementSkeletonBody, SkeletonBlock } from "./ManagementSkeleton.js";
+import { ManagementSkeletonBody } from "./ManagementSkeleton.js";
 import {
   ManagementDashboardControls,
   ManagementDashboardGrid,
   useManagementDashboard
 } from "./ManagementDashboard.js";
+import { PanelHeaderAction, PanelHeaderActions, PanelHeaderStatus } from "./PanelHeader.js";
 import { SystemWifiManagement } from "./SystemWifiManagement.js";
 
 type StatusTone = "ready" | "warning" | "offline" | "neutral";
@@ -246,29 +247,25 @@ export function SystemNetworkManagementPanel({
             <span className="eyebrow">{t("workspace.management.network.eyebrow")}</span>
             <h2>{t("workspace.management.network.title")}</h2>
             <p>{t("workspace.management.network.description")}</p>
+            <PanelHeaderStatus
+              label={systemStatusLabel(status, loading, error, translate)}
+              tone={loading ? "neutral" : systemStatusTone(status, false, error)}
+              busy={loading}
+            />
           </div>
         </div>
-        <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
-          {loading ? (
-            <SkeletonBlock className="management-skeleton-status" width="66px" />
-          ) : (
-            <span className="management-status-pill" data-state={systemStatusTone(status, false, error)}>
-              {systemStatusLabel(status, false, error, translate)}
-            </span>
-          )}
+        <PanelHeaderActions label={t("workspace.management.actions.label")}>
           <ManagementDashboardControls dashboard={dashboard} disabled={loading} />
-          <button
+          <PanelHeaderAction
+            label={t("common.actions.refresh")}
             type="button"
             onClick={() => void refreshSummary()}
             disabled={loading}
             aria-busy={loading || undefined}
-            aria-label={t("common.actions.refresh")}
-            title={t("common.actions.refresh")}
           >
-            {loading ? <LoaderCircle aria-hidden="true" size={15} /> : <RefreshCw aria-hidden="true" size={15} />}
-            <span>{t("common.actions.refresh")}</span>
-          </button>
-        </div>
+            {loading ? <LoaderCircle className="is-spinning" aria-hidden="true" size={16} /> : <RefreshCw aria-hidden="true" size={17} />}
+          </PanelHeaderAction>
+        </PanelHeaderActions>
       </header>
 
       <div className="management-body">
@@ -637,39 +634,33 @@ export function SystemStorageManagementPanel({
             <span className="eyebrow">{t("workspace.management.storage.eyebrow")}</span>
             <h2>{t("workspace.management.storage.title")}</h2>
             <p>{t("workspace.management.storage.description")}</p>
+            <PanelHeaderStatus
+              label={systemStatusLabel(status, loading, error, translate)}
+              tone={loading ? "neutral" : systemStatusTone(status, false, error)}
+              busy={loading}
+            />
           </div>
         </div>
-        <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
-          {loading ? (
-            <SkeletonBlock className="management-skeleton-status" width="66px" />
-          ) : (
-            <span className="management-status-pill" data-state={systemStatusTone(status, false, error)}>
-              {systemStatusLabel(status, false, error, translate)}
-            </span>
-          )}
+        <PanelHeaderActions label={t("workspace.management.actions.label")}>
           <ManagementDashboardControls dashboard={dashboard} disabled={loading} />
-          <button
+          <PanelHeaderAction
+            label={translate("workspace.management.actions.createPool")}
             type="button"
             onClick={openCreateModal}
             disabled={loading || !canCreatePool}
-            aria-label={translate("workspace.management.actions.createPool")}
-            title={translate("workspace.management.actions.createPool")}
           >
-            <Plus aria-hidden="true" size={15} />
-            <span>{translate("workspace.management.actions.createPool")}</span>
-          </button>
-          <button
+            <Plus aria-hidden="true" size={17} />
+          </PanelHeaderAction>
+          <PanelHeaderAction
+            label={t("common.actions.refresh")}
             type="button"
             onClick={() => void refreshSummary()}
             disabled={loading}
             aria-busy={loading || undefined}
-            aria-label={t("common.actions.refresh")}
-            title={t("common.actions.refresh")}
           >
-            {loading ? <LoaderCircle aria-hidden="true" size={15} /> : <RefreshCw aria-hidden="true" size={15} />}
-            <span>{t("common.actions.refresh")}</span>
-          </button>
-        </div>
+            {loading ? <LoaderCircle className="is-spinning" aria-hidden="true" size={16} /> : <RefreshCw aria-hidden="true" size={17} />}
+          </PanelHeaderAction>
+        </PanelHeaderActions>
       </header>
 
       <div className="management-body">

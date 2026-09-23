@@ -45,6 +45,7 @@ import {
 } from "../../api.js";
 import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
+import { PanelHeaderAction, PanelHeaderActions, PanelHeaderStatus } from "./PanelHeader.js";
 import {
   StorageFilePickerDialog,
   type StorageFilePickerPool,
@@ -427,23 +428,37 @@ export function PhotoLibraryPanel({
             <p>{settings ? t("workspace.photos.summary", { count: status?.total ?? photos.length }) : t("workspace.photos.description")}</p>
           </div>
         </div>
-        <div className="management-actions photo-library-actions" aria-label={t("workspace.photos.actions") }>
-          <button type="button" onClick={() => setPicker("library")} disabled={busyAction === "configure"} aria-busy={busyAction === "configure" || undefined} aria-label={settings ? t("workspace.photos.changeLibrary") : t("workspace.photos.chooseLibrary")}>
-            {busyAction === "configure" ? <LoaderCircle className="is-spinning" aria-hidden="true" size={15} /> : <FolderCog aria-hidden="true" size={15} />}
-            <span>{settings ? t("workspace.photos.changeLibrary") : t("workspace.photos.chooseLibrary")}</span>
-          </button>
-          <button type="button" onClick={() => void startScan()} disabled={!settings || Boolean(busyAction) || statusBusy} title={t("workspace.photos.scanNow")}>
-            <ScanLine aria-hidden="true" size={15} />
-            <span>{t("workspace.photos.scanNow")}</span>
-          </button>
-          <button type="button" onClick={() => uploadInputRef.current?.click()} disabled={!settings || Boolean(busyAction) || status?.state === "offline"} aria-busy={busyAction === "upload" || undefined} aria-label={t("workspace.photos.upload")}>
-            {busyAction === "upload" ? <LoaderCircle className="is-spinning" aria-hidden="true" size={15} /> : <Upload aria-hidden="true" size={15} />}
-            <span>{t("workspace.photos.upload")}</span>
-          </button>
-          <button type="button" onClick={() => void loadLibrary()} disabled={loading} title={t("common.actions.refresh")} aria-label={t("common.actions.refresh")}>
-            <RefreshCw className={loading ? "is-spinning" : undefined} aria-hidden="true" size={15} />
-          </button>
-        </div>
+        <PanelHeaderActions label={t("workspace.photos.actions")} className="photo-library-actions">
+          <PanelHeaderAction
+            label={settings ? t("workspace.photos.changeLibrary") : t("workspace.photos.chooseLibrary")}
+            type="button"
+            onClick={() => setPicker("library")}
+            disabled={busyAction === "configure"}
+            aria-busy={busyAction === "configure" || undefined}
+          >
+            {busyAction === "configure" ? <LoaderCircle className="is-spinning" aria-hidden="true" size={16} /> : <FolderCog aria-hidden="true" size={17} />}
+          </PanelHeaderAction>
+          <PanelHeaderAction
+            label={t("workspace.photos.scanNow")}
+            type="button"
+            onClick={() => void startScan()}
+            disabled={!settings || Boolean(busyAction) || statusBusy}
+          >
+            <ScanLine aria-hidden="true" size={17} />
+          </PanelHeaderAction>
+          <PanelHeaderAction
+            label={t("workspace.photos.upload")}
+            type="button"
+            onClick={() => uploadInputRef.current?.click()}
+            disabled={!settings || Boolean(busyAction) || status?.state === "offline"}
+            aria-busy={busyAction === "upload" || undefined}
+          >
+            {busyAction === "upload" ? <LoaderCircle className="is-spinning" aria-hidden="true" size={16} /> : <Upload aria-hidden="true" size={17} />}
+          </PanelHeaderAction>
+          <PanelHeaderAction label={t("common.actions.refresh")} type="button" onClick={() => void loadLibrary()} disabled={loading}>
+            <RefreshCw className={loading ? "is-spinning" : undefined} aria-hidden="true" size={17} />
+          </PanelHeaderAction>
+        </PanelHeaderActions>
       </header>
 
       {settings ? (
@@ -627,13 +642,18 @@ export function PhotoLibraryPanel({
 function PhotoStatusBadge({ status }: { status: PhotoLibraryStatus }) {
   const { t } = useTranslation();
   const busy = status.state === "queued" || status.state === "scanning";
+  const label = [
+    t(`workspace.photos.status.${status.state}`),
+    status.state === "scanning" ? `${status.processed}/${status.scanned}` : null,
+    status.failed ? t("workspace.photos.failedCount", { count: status.failed }) : null
+  ].filter(Boolean).join(" · ");
   return (
-    <span className="management-status-pill photo-library-status" data-state={status.state === "degraded" ? "warning" : status.state} role="status" title={status.error ?? undefined}>
-      {busy ? <LoaderCircle className="is-spinning" aria-hidden="true" size={13} /> : null}
-      <span>{t(`workspace.photos.status.${status.state}`)}</span>
-      {status.state === "scanning" ? <small>{status.processed}/{status.scanned}</small> : null}
-      {status.failed ? <small>{t("workspace.photos.failedCount", { count: status.failed })}</small> : null}
-    </span>
+    <PanelHeaderStatus
+      label={label}
+      tone={status.state === "ready" ? "ready" : status.state === "offline" ? "offline" : status.state === "degraded" ? "warning" : "neutral"}
+      busy={busy}
+      title={status.error ?? label}
+    />
   );
 }
 

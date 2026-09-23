@@ -54,6 +54,7 @@ import { LocalTerminalPanel } from "./LocalTerminalPanel.js";
 import { HttpDownloaderPanel } from "./HttpDownloaderPanel.js";
 import { PhotoLibraryPanel } from "./PhotoLibraryPanel.js";
 import { FileListSkeleton, SkeletonBlock } from "./ManagementSkeleton.js";
+import { PanelHeaderAction, PanelHeaderActions } from "./PanelHeader.js";
 import type { CodeFontSettings } from "../../lib/editor-settings.js";
 import type { ResolvedTheme } from "../../lib/theme-settings.js";
 
@@ -817,57 +818,53 @@ export function WorkspacePane({
                   </div>
                 </div>
 
-                <div className="management-actions files-header-actions" aria-label={t("workspace.management.actions.label")}>
-                  <button
-                    className="icon-button files-header-button"
+                <PanelHeaderActions label={t("workspace.management.actions.label")} className="files-header-actions">
+                  <PanelHeaderAction
+                    className="files-header-button"
+                    label={t("common.actions.up")}
                     type="button"
                     onClick={onGoUp}
                     disabled={!selectedStoragePool || currentPath === selectedStoragePool.path}
-                    title={t("common.actions.up")}
-                    aria-label={t("common.actions.up")}
                   >
                     <ChevronLeft aria-hidden="true" size={18} />
-                  </button>
-                  <button
-                    className="icon-button files-header-button"
+                  </PanelHeaderAction>
+                  <PanelHeaderAction
+                    className="files-header-button"
+                    label={t("common.actions.refresh")}
                     type="button"
                     onClick={onRefreshFiles}
                     disabled={!hasStoragePool}
-                    title={t("common.actions.refresh")}
-                    aria-label={t("common.actions.refresh")}
                   >
                     <RefreshCw aria-hidden="true" size={18} />
-                  </button>
-                  <button
-                    className="icon-button files-header-button"
+                  </PanelHeaderAction>
+                  <PanelHeaderAction
+                    className="files-header-button"
+                    label={t("workspace.actions.newFolder")}
+                    tooltip={sessionId ? t("workspace.actions.newFolder") : t("workspace.actions.noSession")}
                     type="button"
                     onClick={openCreateFolderDialog}
                     disabled={!hasStoragePool || !sessionId}
-                    title={sessionId ? t("workspace.actions.newFolder") : t("workspace.actions.noSession")}
-                    aria-label={t("workspace.actions.newFolder")}
                   >
                     <FolderPlus aria-hidden="true" size={18} />
-                  </button>
-                  <button
-                    className="icon-button files-header-button"
+                  </PanelHeaderAction>
+                  <PanelHeaderAction
+                    className="files-header-button"
+                    label={t("workspace.uploadFiles")}
                     type="button"
                     onClick={triggerFileUpload}
                     disabled={!hasStoragePool}
-                    title={t("workspace.uploadFiles")}
-                    aria-label={t("workspace.uploadFiles")}
                   >
                     <Upload aria-hidden="true" size={18} />
-                  </button>
-                  <button
-                    className="icon-button files-header-button"
+                  </PanelHeaderAction>
+                  <PanelHeaderAction
+                    className="files-header-button"
+                    label={t("workspace.uploadFolder")}
                     type="button"
                     onClick={triggerFolderUpload}
                     disabled={!hasStoragePool}
-                    title={t("workspace.uploadFolder")}
-                    aria-label={t("workspace.uploadFolder")}
                   >
                     <FolderUp aria-hidden="true" size={18} />
-                  </button>
+                  </PanelHeaderAction>
                   <ActivityMenu
                     operations={operations}
                     operationsReady={operationsReady}
@@ -876,7 +873,7 @@ export function WorkspacePane({
                     onCancelUploadBatch={onCancelUploadBatch}
                     onRollback={onRollback}
                   />
-                </div>
+                </PanelHeaderActions>
 
                 <div
                   className={`files-navigation-bar${storagePools.length > 0 ? " has-storage-pool-switcher" : ""}`}

@@ -37,6 +37,7 @@ import {
 import type { ResolvedTheme } from "../../lib/theme-settings.js";
 import { applyTerminalOptions, terminalOptions } from "../../lib/terminal-theme.js";
 import { SkeletonBlock } from "./ManagementSkeleton.js";
+import { PanelHeaderAction, PanelHeaderActions, PanelHeaderStatus } from "./PanelHeader.js";
 
 type TerminalStatus = "connecting" | "connected" | "disconnected" | "error" | "exited" | "takenOver";
 
@@ -341,53 +342,46 @@ export function LocalTerminalPanel({
             <span className="eyebrow">{t("workspace.terminal.eyebrow")}</span>
             <h2>{t("workspace.terminal.title")}</h2>
             <p>{t("workspace.terminal.description")}</p>
+            {activeViewState ? (
+              <PanelHeaderStatus
+                label={String(terminalStatusLabel(activeViewState.status, t))}
+                tone={terminalStatusTone(activeViewState.status)}
+                busy={activeViewState.status === "connecting"}
+                title={activeViewState.diagnostic ?? String(terminalStatusLabel(activeViewState.status, t))}
+              />
+            ) : null}
           </div>
         </div>
-        <div className="management-actions workspace-terminal-actions" aria-label={t("workspace.terminal.actionsLabel")}>
-          {activeViewState ? (
-            <span
-              className="management-status-pill"
-              data-state={terminalStatusTone(activeViewState.status)}
-              aria-live="polite"
-              title={activeViewState.diagnostic ?? terminalStatusLabel(activeViewState.status, t)}
-            >
-              {terminalStatusLabel(activeViewState.status, t)}
-            </span>
-          ) : null}
-          <button
+        <PanelHeaderActions label={t("workspace.terminal.actionsLabel")} className="workspace-terminal-actions">
+          <PanelHeaderAction
+            label={t("workspace.terminal.rename")}
             type="button"
-            className="management-icon-action"
             onClick={() => activeTab && openRenameDialog(activeTab)}
             disabled={!activeTab || Boolean(pendingAction)}
-            title={t("workspace.terminal.rename")}
-            aria-label={t("workspace.terminal.rename")}
           >
-            <Pencil aria-hidden="true" size={14} />
-          </button>
-          <button
+            <Pencil aria-hidden="true" size={16} />
+          </PanelHeaderAction>
+          <PanelHeaderAction
+            label={t("workspace.terminal.restart")}
             type="button"
-            className="management-icon-action"
             onClick={() => activeTab && void restartTab(activeTab.id)}
             disabled={!activeTab || Boolean(pendingAction)}
-            title={t("workspace.terminal.restart")}
-            aria-label={t("workspace.terminal.restart")}
           >
-            <RefreshCw aria-hidden="true" size={14} />
-          </button>
-          <button
+            <RefreshCw aria-hidden="true" size={16} />
+          </PanelHeaderAction>
+          <PanelHeaderAction
+            label={t("workspace.terminal.close")}
             type="button"
-            className="management-icon-action is-danger"
+            className="is-danger"
             onClick={() => {
               setActionError(null);
               if (activeTab) setCloseCandidate(activeTab);
             }}
             disabled={!activeTab || Boolean(pendingAction)}
-            title={t("workspace.terminal.close")}
-            aria-label={t("workspace.terminal.close")}
           >
-            <X aria-hidden="true" size={15} />
-          </button>
-        </div>
+            <X aria-hidden="true" size={17} />
+          </PanelHeaderAction>
+        </PanelHeaderActions>
       </header>
 
       <div className="workspace-terminal-header">

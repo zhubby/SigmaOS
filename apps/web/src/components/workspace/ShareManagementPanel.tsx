@@ -47,7 +47,8 @@ import {
   ManagementDashboardGrid,
   useManagementDashboard
 } from "./ManagementDashboard.js";
-import { ManagementSkeletonBody, SkeletonBlock } from "./ManagementSkeleton.js";
+import { ManagementSkeletonBody } from "./ManagementSkeleton.js";
+import { PanelHeaderAction, PanelHeaderActions, PanelHeaderStatus } from "./PanelHeader.js";
 
 type StatusTone = "ready" | "warning" | "offline" | "neutral";
 type Translate = (key: string, options?: Record<string, unknown>) => string;
@@ -353,42 +354,34 @@ export function ShareManagementPanel({
             <span className="eyebrow">{t("workspace.management.shares.eyebrow")}</span>
             <h2>{t("workspace.management.shares.title")}</h2>
             <p>{t("workspace.management.shares.description")}</p>
+            <PanelHeaderStatus
+              label={shareStatusLabel(summary, loading, error, t)}
+              tone={statusTone}
+              busy={loading || refreshing}
+            />
           </div>
         </div>
-        <div className="management-actions" aria-label={t("workspace.management.actions.label")}>
-          {loading ? (
-            <SkeletonBlock className="management-skeleton-status" width="66px" />
-          ) : (
-            <span className="management-status-pill" data-state={statusTone}>
-              {shareStatusLabel(summary, false, error, t)}
-            </span>
-          )}
+        <PanelHeaderActions label={t("workspace.management.actions.label")}>
           <ManagementDashboardControls dashboard={dashboard} disabled={loading || submitting} />
-          <button
+          <PanelHeaderAction
+            label={t("common.actions.refresh")}
             type="button"
             onClick={refreshShareData}
             disabled={loading || refreshing || submitting}
             aria-busy={loading || refreshing || undefined}
-            title={t("common.actions.refresh")}
-            aria-label={t("common.actions.refresh")}
           >
-            {loading || refreshing ? <LoaderCircle aria-hidden="true" size={15} /> : <RefreshCw aria-hidden="true" size={15} />}
-            <span>{t("common.actions.refresh")}</span>
-          </button>
-          <button
+            {loading || refreshing ? <LoaderCircle className="is-spinning" aria-hidden="true" size={16} /> : <RefreshCw aria-hidden="true" size={17} />}
+          </PanelHeaderAction>
+          <PanelHeaderAction
+            label={pendingShareApproval ? t("workspace.management.actions.pendingApproval") : t("workspace.management.shares.requestApproval")}
             type="submit"
             form="share-management-form"
             disabled={submitDisabled}
             aria-busy={submitting || undefined}
-            title={pendingShareApproval ? t("workspace.management.actions.pendingApproval") : t("workspace.management.shares.requestApproval")}
-            aria-label={pendingShareApproval ? t("workspace.management.actions.pendingApproval") : t("workspace.management.shares.requestApproval")}
           >
-            {submitting ? <LoaderCircle aria-hidden="true" size={15} /> : <Share2 aria-hidden="true" size={15} />}
-            <span>
-              {pendingShareApproval ? t("workspace.management.actions.pendingApproval") : t("workspace.management.shares.requestApproval")}
-            </span>
-          </button>
-        </div>
+            {submitting ? <LoaderCircle className="is-spinning" aria-hidden="true" size={16} /> : <Share2 aria-hidden="true" size={17} />}
+          </PanelHeaderAction>
+        </PanelHeaderActions>
       </header>
 
       <form id="share-management-form" className="management-body share-management-body" onSubmit={submitProposal}>

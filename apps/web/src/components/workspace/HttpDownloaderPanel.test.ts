@@ -24,9 +24,10 @@ describe("HttpDownloaderPanel download creation", () => {
     expect(button).toContain("disabled");
     expect(button).toContain('aria-busy="true"');
     expect(button).toContain('aria-label="Loading storage"');
+    expect(button).toContain('title="Loading storage"');
     expect(button).toContain('data-state="loading"');
     expect(button).toContain("is-spinning");
-    expect(button).toContain("Loading storage");
+    expect(visibleButtonText(button)).toBe("");
   });
 
   it("keeps creation available as a storage configuration action when no pool is mounted", () => {
@@ -37,7 +38,7 @@ describe("HttpDownloaderPanel download creation", () => {
     expect(button).toContain('aria-label="New download"');
     expect(button).toContain('data-state="needs-storage"');
     expect(button).toContain("Configure a mounted storage pool");
-    expect(button).toContain("New download");
+    expect(visibleButtonText(button)).toBe("");
   });
 
   it("renders the normal creation action when a mounted pool is available", () => {
@@ -46,8 +47,9 @@ describe("HttpDownloaderPanel download creation", () => {
     expect(button).not.toContain("disabled");
     expect(button).not.toContain("aria-busy");
     expect(button).toContain('aria-label="New download"');
+    expect(button).toContain('title="New download"');
     expect(button).toContain('data-state="ready"');
-    expect(button).toContain("New download");
+    expect(visibleButtonText(button)).toBe("");
   });
 });
 
@@ -70,7 +72,11 @@ function renderDownloadButton({
     onNotifySuccess: vi.fn(),
     onNotifyWarning: vi.fn()
   }));
-  const button = html.match(/<button[^>]*class="primary-button download-create-button"[^>]*>[\s\S]*?<\/button>/)?.[0];
+  const button = html.match(/<button[^>]*class="panel-header-action download-create-button"[^>]*>[\s\S]*?<\/button>/)?.[0];
   expect(button).toBeDefined();
   return button ?? "";
+}
+
+function visibleButtonText(button: string): string {
+  return button.replace(/<[^>]+>/gu, "").trim();
 }
