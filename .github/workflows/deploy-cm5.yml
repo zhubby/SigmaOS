@@ -386,7 +386,7 @@ jobs:
             local part_name=${part_path##*/}
             for attempt in 1 2 3; do
               if timeout --signal=TERM --kill-after=30s 900 \
-                  sftp -B 131072 -R 128 -b - "${ssh_options[@]}" \
+                  sftp -B 131072 -R 16 -b - "${ssh_options[@]}" \
                   "$CM5_DEPLOY_USER@$CM5_HOST" <<SFTP
           reput "$part_path" "$remote_parts_dir/$part_name"
           SFTP

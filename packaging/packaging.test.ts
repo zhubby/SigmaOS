@@ -304,7 +304,7 @@ describe("native packaging artifacts", () => {
     expect(deployWorkflow).toContain('upload_part()');
     expect(deployWorkflow).toContain('for attempt in 1 2 3; do');
     expect(deployWorkflow).toContain("timeout --signal=TERM --kill-after=30s 900");
-    expect(deployWorkflow).toContain('sftp -B 131072 -R 128 -b - "${ssh_options[@]}"');
+    expect(deployWorkflow).toContain('sftp -B 131072 -R 16 -b - "${ssh_options[@]}"');
     expect(deployWorkflow).toContain('reput "$part_path" "$remote_parts_dir/$part_name"');
     expect(deployWorkflow).toContain("SFTP upload of %s attempt %s failed; preserving part for resume");
     expect(deployWorkflow).toContain('assembled_package="$partial_package.assemble.$$"');
