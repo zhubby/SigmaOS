@@ -127,6 +127,28 @@ impl TmuxManager {
         .await
     }
 
+    pub async fn resize(
+        &self,
+        session_name: &str,
+        cols: u16,
+        rows: u16,
+    ) -> Result<(), TermuxError> {
+        let _guard = self.command_lock.lock().await;
+        let cols = cols.to_string();
+        let rows = rows.to_string();
+        self.run_checked_unlocked([
+            "resize-window",
+            "-t",
+            session_name,
+            "-x",
+            &cols,
+            "-y",
+            &rows,
+        ])
+        .await
+        .map(|_| ())
+    }
+
     pub async fn destroy(&self, session_name: &str) -> Result<(), TermuxError> {
         let _guard = self.command_lock.lock().await;
         self.destroy_unlocked(session_name).await

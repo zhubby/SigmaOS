@@ -346,7 +346,15 @@ async fn run_open_session(
                     let Some(frame) = frame? else {
                         break;
                     };
-                    match handle_session_frame(&frame, &stream_id, &process.master).await {
+                    match handle_session_frame(
+                        &frame,
+                        &stream_id,
+                        &session_name,
+                        &state.tmux,
+                        &process.master,
+                    )
+                    .await
+                    {
                         Ok(SessionFrameResult::Continue) => {}
                         Ok(SessionFrameResult::Close { id, destroy }) => {
                             if destroy {
@@ -447,6 +455,8 @@ enum SessionFrameResult {
 async fn handle_session_frame(
     frame: &[u8],
     expected_stream_id: &str,
+    session_name: &str,
+    tmux: &TmuxManager,
     master: &tokio::io::unix::AsyncFd<std::os::fd::OwnedFd>,
 ) -> Result<SessionFrameResult, TermuxError> {
     let parsed = ClientFrame::parse(frame)?;
@@ -466,6 +476,7 @@ async fn handle_session_frame(
             } => {
                 require_stream(&stream_id, expected_stream_id)?;
                 pty::resize(master, cols, rows)?;
+                tmux.resize(session_name, cols, rows).await?;
                 Ok(SessionFrameResult::Continue)
             }
         },
