@@ -206,6 +206,10 @@ button.vm-create-submit[aria-busy="true"] {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .app-notification {
+    animation: none;
+  }
+
   :where(
     button,
     a[href],

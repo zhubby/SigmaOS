@@ -17,12 +17,13 @@
 
 .app-notification-region {
   position: fixed;
-  top: 76px;
-  right: calc(100vw - var(--chat-pane-width) + 16px);
-  z-index: 35;
+  top: calc(env(safe-area-inset-top, 0px) + 16px);
+  left: 50%;
+  z-index: 110;
   display: grid;
   gap: 8px;
-  width: min(420px, calc(var(--chat-pane-width) - 100px));
+  width: min(440px, calc(100vw - 32px));
+  transform: translateX(-50%);
   pointer-events: none;
 }
 
@@ -39,6 +40,9 @@
   background: var(--dialog-bg);
   box-shadow: var(--shadow), inset 3px 0 0 var(--red);
   pointer-events: none;
+  animation:
+    app-notification-in 160ms cubic-bezier(0.22, 1, 0.36, 1) both,
+    app-notification-out 160ms ease-in 5.84s both;
 }
 
 .app-notification > svg {
@@ -100,6 +104,20 @@
 .app-notification button:hover {
   color: var(--text);
   background: var(--surface-hover);
+}
+
+@keyframes app-notification-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes app-notification-out {
+  to {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
 }
 
 .mobile-tabs {

@@ -569,14 +569,6 @@
     min-height: 0;
   }
 
-  .app-notification-region {
-    position: static;
-    grid-row: 2;
-    grid-column: 1;
-    width: auto;
-    margin: 8px 8px 0;
-  }
-
   .mobile-tabs {
     display: grid;
     grid-row: 1;

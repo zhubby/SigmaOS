@@ -126,6 +126,7 @@ import {
 } from "./lib/theme-settings.js";
 import { loadFileListingForView, syncSessionPath } from "./lib/session.js";
 import { readStoredStoragePoolId, writeStoredStoragePoolId } from "./lib/storage-pool-settings.js";
+import { scheduleToastDismissal } from "./lib/toast.js";
 
 type MobileView = "chat" | "workspace";
 const MAX_UPLOAD_BATCHES = 8;
@@ -241,6 +242,27 @@ export function App() {
     storagePoolId: string;
     path: string;
   } | null>(null);
+
+  useEffect(
+    () => scheduleToastDismissal(error, (notice) => {
+      setError((current) => current === notice ? null : current);
+    }),
+    [error]
+  );
+
+  useEffect(
+    () => scheduleToastDismissal(successNotice, (notice) => {
+      setSuccessNotice((current) => current === notice ? null : current);
+    }),
+    [successNotice]
+  );
+
+  useEffect(
+    () => scheduleToastDismissal(warningNotice, (notice) => {
+      setWarningNotice((current) => current === notice ? null : current);
+    }),
+    [warningNotice]
+  );
   const notificationRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selectedRoot = roots.find((root) => root.id === selectedRootId);
@@ -2007,9 +2029,9 @@ export function App() {
       />
 
       {error || successNotice || warningNotice ? (
-        <div className="app-notification-region">
+        <div className="app-notification-region" aria-live="polite" aria-atomic="false">
           {error ? (
-            <section className="app-notification" data-tone="error" role="alert">
+            <section key={`error:${error}`} className="app-notification" data-tone="error" role="alert">
               <AlertTriangle aria-hidden="true" size={18} />
               <div>
                 <strong>{t("notifications.errorTitle")}</strong>
@@ -2026,7 +2048,7 @@ export function App() {
             </section>
           ) : null}
           {successNotice ? (
-            <section className="app-notification" data-tone="success" role="status">
+            <section key={`success:${successNotice}`} className="app-notification" data-tone="success" role="status">
               <CircleCheck aria-hidden="true" size={18} />
               <div>
                 <strong>{t("notifications.successTitle")}</strong>
@@ -2043,7 +2065,7 @@ export function App() {
             </section>
           ) : null}
           {warningNotice ? (
-            <section className="app-notification" data-tone="warning" role="status">
+            <section key={`warning:${warningNotice}`} className="app-notification" data-tone="warning" role="status">
               <CircleAlert aria-hidden="true" size={18} />
               <div>
                 <strong>{t("notifications.warningTitle")}</strong>
