@@ -384,7 +384,41 @@ jobs:
           upload_part() {
             local part_path=$1
             local part_name=${part_path##*/}
+            local expected_size
+            local expected_sha256
+            local remote_state
+            expected_size="$(stat --format=%s "$part_path")"
+            expected_sha256="$(sha256sum "$part_path" | awk '{print $1}')"
             for attempt in 1 2 3; do
+              remote_state="$(
+                ssh "${ssh_options[@]}" "$CM5_DEPLOY_USER@$CM5_HOST" sh -s -- \
+                  "$remote_parts_dir/$part_name" "$expected_size" "$expected_sha256" <<'REMOTE'
+          set -eu
+          remote_part_path=$1
+          expected_size=$2
+          expected_sha256=$3
+          if [ -L "$remote_part_path" ] || [ ! -f "$remote_part_path" ]; then
+            echo "Release part is missing or not a regular file" >&2
+            exit 1
+          fi
+          actual_size="$(stat --format=%s "$remote_part_path")"
+          if [ "$actual_size" -eq "$expected_size" ]; then
+            actual_sha256="$(sha256sum "$remote_part_path" | awk '{print $1}')"
+            if [ "$actual_sha256" = "$expected_sha256" ]; then
+              printf '%s\n' complete
+              exit 0
+            fi
+            : > "$remote_part_path"
+          elif [ "$actual_size" -gt "$expected_size" ]; then
+            : > "$remote_part_path"
+          fi
+          printf '%s\n' upload
+          REMOTE
+              )"
+              if [ "$remote_state" = complete ]; then
+                return 0
+              fi
+              [ "$remote_state" = upload ]
               if timeout --signal=TERM --kill-after=30s 900 \
                   sftp -B 131072 -R 16 -b - "${ssh_options[@]}" \
                   "$CM5_DEPLOY_USER@$CM5_HOST" <<SFTP

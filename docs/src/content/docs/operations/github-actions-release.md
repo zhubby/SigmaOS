@@ -232,7 +232,7 @@ sudo cat /var/lib/sigmaos-deploy/current-release.json
 gh workflow run deploy-cm5.yml --ref main -f tag=vX.Y.Z
 ```
 
-传输中断时，CM5 会保留 SHA256 命名的分片目录；从 `main` 重试同一个 tag 时，每个分片都会从已有字节继续上传，最多四片并行。所有分片拼接且 checksum 匹配后，临时文件会原子替换为 `package.deb`，因此成功部署后的再次重试仍可能重新传输完整 package。若 GitHub runner 与 CM5 只能经 DERP 通信，上传可能需要数分钟。日志出现 `version X.Y.Z is already installed; verifying runtime only` 表示命中幂等验证分支。
+传输中断时，CM5 会保留 SHA256 命名的分片目录；从 `main` 重试同一个 tag 时，完整分片会先校验大小和 SHA256，较小分片从已有字节继续上传，最多四片并行。所有分片拼接且 checksum 匹配后，临时文件会原子替换为 `package.deb`，因此成功部署后的再次重试仍可能重新传输完整 package。若 GitHub runner 与 CM5 只能经 DERP 通信，上传可能需要数分钟。日志出现 `version X.Y.Z is already installed; verifying runtime only` 表示命中幂等验证分支。
 
 ## 常见失败
 

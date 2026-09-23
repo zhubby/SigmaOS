@@ -302,6 +302,11 @@ describe("native packaging artifacts", () => {
     expect(deployWorkflow).toContain('if [ ! -e "$part_path" ]; then');
     expect(deployWorkflow).toContain(': > "$part_path"');
     expect(deployWorkflow).toContain('upload_part()');
+    expect(deployWorkflow).toContain('expected_size="$(stat --format=%s "$part_path")"');
+    expect(deployWorkflow).toContain('expected_sha256="$(sha256sum "$part_path"');
+    expect(deployWorkflow).toContain('actual_size="$(stat --format=%s "$remote_part_path")"');
+    expect(deployWorkflow).toContain('[ "$actual_sha256" = "$expected_sha256" ]');
+    expect(deployWorkflow).toContain("printf '%s\\n' complete");
     expect(deployWorkflow).toContain('for attempt in 1 2 3; do');
     expect(deployWorkflow).toContain("timeout --signal=TERM --kill-after=30s 900");
     expect(deployWorkflow).toContain('sftp -B 131072 -R 16 -b - "${ssh_options[@]}"');
