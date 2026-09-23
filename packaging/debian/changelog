@@ -1,3 +1,9 @@
+sigmaos (0.8.1) unstable; urgency=medium
+
+  * Preserve local appliance configuration during unattended package upgrades.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Wed, 23 Sep 2026 10:03:19 +0000
+
 sigmaos (0.8.0) unstable; urgency=medium
 
   * Replace the Node terminal helper with the hardened Rust termux daemon and Termux Protocol v1.
