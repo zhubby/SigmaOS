@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { TerminalTab } from "../../api.js";
 import { i18n, initI18n } from "../../i18n/index.js";
-import { terminalReconnectDelay, TerminalTabBar } from "./LocalTerminalPanel.js";
+import { LocalTerminalPanel, terminalReconnectDelay, TerminalTabBar } from "./LocalTerminalPanel.js";
 
 const tabs: TerminalTab[] = [
   terminalTab("11111111-1111-4111-8111-111111111111", 1),
@@ -36,6 +36,25 @@ describe("TerminalTabBar", () => {
     expect(html).toContain('aria-label="新建终端"');
     expect(html).toContain("disabled");
     expect(html).toContain("已达到整机 2 个终端会话的上限。");
+  });
+});
+
+describe("LocalTerminalPanel", () => {
+  it("uses the shared workspace panel heading hierarchy", async () => {
+    await initI18n();
+    await i18n.changeLanguage("en");
+    const html = renderToStaticMarkup(createElement(LocalTerminalPanel, {
+      active: true,
+      root: undefined,
+      codeFontSettings: { familyId: "system", fontSizePx: 12 },
+      resolvedTheme: "dark"
+    }));
+
+    expect(html).toContain('class="management-header workspace-terminal-overview"');
+    expect(html).toContain("Local shell");
+    expect(html).toContain("<h2>Terminal</h2>");
+    expect(html).toContain("Direct shell access to the selected NAS root.");
+    expect(html).toContain('aria-label="Terminal actions"');
   });
 });
 

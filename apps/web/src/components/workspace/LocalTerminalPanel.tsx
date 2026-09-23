@@ -332,21 +332,18 @@ export function LocalTerminalPanel({
 
   return (
     <section className="workspace-terminal-panel" hidden={!active} aria-hidden={!active} aria-label={t("workspace.terminal.title")}>
-      <header className="workspace-terminal-header">
-        {tabState ? (
-          <TerminalTabBar
-            tabs={tabs}
-            activeTabId={tabState.activeTabId}
-            maxSessions={tabState.maxSessions}
-            createDisabled={Boolean(pendingAction) || atLocalLimit}
-            onSelect={(tabId) => void selectTab(tabId)}
-            onCreate={() => void createTab()}
-            onRename={openRenameDialog}
-          />
-        ) : (
-          <div className="workspace-terminal-tabs-placeholder" aria-hidden="true" />
-        )}
-        <div className="workspace-terminal-actions">
+      <header className="management-header workspace-terminal-overview">
+        <div className="management-title-block">
+          <span className="management-title-icon">
+            <TerminalSquare aria-hidden="true" size={20} />
+          </span>
+          <div className="management-title-copy">
+            <span className="eyebrow">{t("workspace.terminal.eyebrow")}</span>
+            <h2>{t("workspace.terminal.title")}</h2>
+            <p>{t("workspace.terminal.description")}</p>
+          </div>
+        </div>
+        <div className="management-actions workspace-terminal-actions" aria-label={t("workspace.terminal.actionsLabel")}>
           {activeViewState ? (
             <span
               className="management-status-pill"
@@ -392,6 +389,22 @@ export function LocalTerminalPanel({
           </button>
         </div>
       </header>
+
+      <div className="workspace-terminal-header">
+        {tabState ? (
+          <TerminalTabBar
+            tabs={tabs}
+            activeTabId={tabState.activeTabId}
+            maxSessions={tabState.maxSessions}
+            createDisabled={Boolean(pendingAction) || atLocalLimit}
+            onSelect={(tabId) => void selectTab(tabId)}
+            onCreate={() => void createTab()}
+            onRename={openRenameDialog}
+          />
+        ) : (
+          <div className="workspace-terminal-tabs-placeholder" aria-hidden="true" />
+        )}
+      </div>
 
       <div className="workspace-terminal-stage">
         {!rootId ? (
