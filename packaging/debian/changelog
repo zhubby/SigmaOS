@@ -1,3 +1,9 @@
+sigmaos (0.7.8) unstable; urgency=medium
+
+  * Align the Terminal workspace panel with the shared page heading and toolbar design.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Wed, 23 Sep 2026 01:20:11 +0000
+
 sigmaos (0.7.7) unstable; urgency=medium
 
   * Fix photo folder approvals and enable HEIC processing.
