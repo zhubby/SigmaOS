@@ -294,10 +294,14 @@ describe("native packaging artifacts", () => {
     expect(deployWorkflow).not.toContain('failed_units="$(systemctl --failed --no-legend --plain || true)"');
     expect(deployWorkflow).toContain("awk '$1 ~ /^sigmaos-/ { print }'");
     expect(deployWorkflow).toContain("releases/download/$RELEASE_TAG/$RELEASE_ASSET");
-    expect(deployWorkflow).toContain('actual_sha256="$(sha256sum "$temp_package"');
-    expect(deployWorkflow).toContain('mv -f "$temp_package" "$incoming_dir/package.deb"');
+    expect(deployWorkflow).toContain('partial_package="$incoming_dir/package.deb.$expected_sha256.download"');
+    expect(deployWorkflow).toContain("preserving partial package for resume");
+    expect(deployWorkflow).toContain('actual_sha256="$(sha256sum "$partial_package"');
+    expect(deployWorkflow).toContain('mv -f "$partial_package" "$incoming_dir/package.deb"');
     expect(deployWorkflow).toContain("ServerAliveInterval=15");
     expect(deployWorkflow).toContain("--max-time 900");
+    expect(deployWorkflow).toContain("--retry-max-time 3600");
+    expect(deployWorkflow).toContain("--continue-at -");
     expect(deployWorkflow).toContain("printf 'N\\n' | sudo -n /usr/local/sbin/sigmaos-deploy");
     expect(deployWorkflow).toContain('> "$RUNNER_TEMP/cm5-config.sha256"');
     expect(deployWorkflow).toContain('[ "$installed_status" = "install ok installed" ]');

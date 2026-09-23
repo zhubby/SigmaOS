@@ -322,6 +322,7 @@ jobs:
             "${baseline[1]:-unknown}" "${baseline[2]:-unknown}"
 
       - name: Stage and deploy release on CM5
+        timeout-minutes: 75
         run: |
           set -euo pipefail
 
@@ -350,20 +351,30 @@ jobs:
           release_url=$1
           expected_sha256=$2
           incoming_dir=/var/lib/sigmaos-deploy/incoming
-          temp_package="$incoming_dir/package.deb.download.$$"
-          trap 'rm -f "$temp_package"' EXIT HUP INT TERM
+          partial_package="$incoming_dir/package.deb.$expected_sha256.download"
+          if [ -L "$partial_package" ] || { [ -e "$partial_package" ] && [ ! -f "$partial_package" ]; }; then
+            echo "Partial release package is not a regular file" >&2
+            exit 1
+          fi
 
           umask 077
-          curl --fail --location --silent --show-error \
-            --retry 3 --retry-all-errors --connect-timeout 15 --max-time 900 \
-            --output "$temp_package" "$release_url"
-          actual_sha256="$(sha256sum "$temp_package" | awk '{print $1}')"
+          if ! curl --fail --location --silent --show-error \
+              --retry 3 --retry-all-errors --retry-max-time 3600 \
+              --connect-timeout 15 --max-time 900 --continue-at - \
+              --output "$partial_package" "$release_url"; then
+            partial_sha256="$(sha256sum "$partial_package" 2>/dev/null | awk '{print $1}')"
+            [ "$partial_sha256" = "$expected_sha256" ] || {
+              echo "Release download interrupted; preserving partial package for resume" >&2
+              exit 1
+            }
+          fi
+          actual_sha256="$(sha256sum "$partial_package" | awk '{print $1}')"
           [ "$actual_sha256" = "$expected_sha256" ] || {
             echo "Downloaded release package checksum mismatch" >&2
+            rm -f "$partial_package"
             exit 1
           }
-          mv -f "$temp_package" "$incoming_dir/package.deb"
-          trap - EXIT HUP INT TERM
+          mv -f "$partial_package" "$incoming_dir/package.deb"
           # v0.8.0 predates the helper's noninteractive conffile policy. The
           # response preserves the local config while bootstrapping v0.8.1+.
           printf 'N\n' | sudo -n /usr/local/sbin/sigmaos-deploy
