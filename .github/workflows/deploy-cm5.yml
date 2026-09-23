@@ -217,8 +217,6 @@ jobs:
           [[ "$package_version" == "$RELEASE_VERSION" ]]
           [[ "$package_architecture" == arm64 ]]
 
-          cp "$package_path" "$release_dir/package.deb"
-
       - name: Validate CM5 target
         run: |
           set -euo pipefail
@@ -289,7 +287,41 @@ jobs:
           tags: tag:github-actions
           ping: ${{ vars.CM5_HOST }}
 
-      - name: Upload release to CM5
+      - name: Capture CM5 upgrade baseline
+        run: |
+          set -euo pipefail
+
+          CM5_DEPLOY_USER="${CM5_DEPLOY_USER:-sigmaos-deploy}"
+          ssh_options=(
+            -o BatchMode=yes
+            -o ConnectTimeout=15
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=4
+            -o StrictHostKeyChecking=accept-new
+          )
+          mapfile -t baseline < <(
+            ssh "${ssh_options[@]}" "$CM5_DEPLOY_USER@$CM5_HOST" sh -s <<'REMOTE'
+          set -eu
+          [ -f /etc/sigmaos/config.toml ] && [ -r /etc/sigmaos/config.toml ]
+          config_sha256="$(
+            awk '
+              /^\[terminal\][[:space:]]*(#.*)?$/ { in_terminal = 1; print; next }
+              /^\[/ { in_terminal = 0 }
+              in_terminal && /^[[:space:]]*(user|helper_socket_path|termux_socket_path)[[:space:]]*=/ { next }
+              { print }
+            ' /etc/sigmaos/config.toml | sha256sum | awk '{print $1}'
+          )"
+          package_version="$(dpkg-query -W -f='${Version}' sigmaos 2>/dev/null || true)"
+          package_status="$(dpkg-query -W -f='${Status}' sigmaos 2>/dev/null || true)"
+          printf '%s\n%s\n%s\n' "$config_sha256" "$package_version" "$package_status"
+          REMOTE
+          )
+          [[ "${baseline[0]:-}" =~ ^[0-9a-f]{64}$ ]]
+          printf '%s\n' "${baseline[0]}" > "$RUNNER_TEMP/cm5-config.sha256"
+          printf 'CM5 upgrade baseline: version=%s status=%s\n' \
+            "${baseline[1]:-unknown}" "${baseline[2]:-unknown}"
+
+      - name: Stage and deploy release on CM5
         run: |
           set -euo pipefail
 
@@ -302,15 +334,40 @@ jobs:
           ssh_options=(
             -o BatchMode=yes
             -o ConnectTimeout=15
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=4
             -o StrictHostKeyChecking=accept-new
           )
           release_dir="$RUNNER_TEMP/cm5-release"
           scp "${ssh_options[@]}" \
-            "$release_dir/package.deb" \
             "$release_dir/release-manifest.json" \
             "$CM5_DEPLOY_USER@$CM5_HOST:/var/lib/sigmaos-deploy/incoming/"
-          ssh "${ssh_options[@]}" "$CM5_DEPLOY_USER@$CM5_HOST" \
-            'sudo -n /usr/local/sbin/sigmaos-deploy'
+
+          release_url="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/$RELEASE_ASSET"
+          ssh "${ssh_options[@]}" "$CM5_DEPLOY_USER@$CM5_HOST" sh -s -- \
+            "$release_url" "$RELEASE_SHA256" <<'REMOTE'
+          set -eu
+          release_url=$1
+          expected_sha256=$2
+          incoming_dir=/var/lib/sigmaos-deploy/incoming
+          temp_package="$incoming_dir/package.deb.download.$$"
+          trap 'rm -f "$temp_package"' EXIT HUP INT TERM
+
+          umask 077
+          curl --fail --location --silent --show-error \
+            --retry 3 --retry-all-errors --connect-timeout 15 --max-time 900 \
+            --output "$temp_package" "$release_url"
+          actual_sha256="$(sha256sum "$temp_package" | awk '{print $1}')"
+          [ "$actual_sha256" = "$expected_sha256" ] || {
+            echo "Downloaded release package checksum mismatch" >&2
+            exit 1
+          }
+          mv -f "$temp_package" "$incoming_dir/package.deb"
+          trap - EXIT HUP INT TERM
+          # v0.8.0 predates the helper's noninteractive conffile policy. The
+          # response preserves the local config while bootstrapping v0.8.1+.
+          printf 'N\n' | sudo -n /usr/local/sbin/sigmaos-deploy
+          REMOTE
 
       - name: Verify CM5 services and build metadata
         run: |
@@ -320,15 +377,42 @@ jobs:
           ssh_options=(
             -o BatchMode=yes
             -o ConnectTimeout=15
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=4
             -o StrictHostKeyChecking=accept-new
           )
+          expected_config_sha256="$(<"$RUNNER_TEMP/cm5-config.sha256")"
           ssh "${ssh_options[@]}" "$CM5_DEPLOY_USER@$CM5_HOST" sh -s -- \
-            "$RELEASE_VERSION" "$RELEASE_COMMIT_SHA" <<'REMOTE'
+            "$RELEASE_VERSION" "$RELEASE_COMMIT_SHA" "$expected_config_sha256" <<'REMOTE'
           set -eu
           expected_version=$1
           expected_commit_sha=$2
+          expected_config_sha256=$3
           check_dir="$(mktemp -d /tmp/sigmaos-deploy-check.XXXXXX)"
           trap 'rm -rf "$check_dir"' EXIT HUP INT TERM
+
+          installed_status="$(dpkg-query -W -f='${Status}' sigmaos)"
+          installed_version="$(dpkg-query -W -f='${Version}' sigmaos)"
+          [ "$installed_status" = "install ok installed" ]
+          [ "$installed_version" = "$expected_version" ]
+          [ -f /etc/sigmaos/config.toml ] && [ -r /etc/sigmaos/config.toml ]
+          actual_config_sha256="$(
+            awk '
+              /^\[terminal\][[:space:]]*(#.*)?$/ { in_terminal = 1; print; next }
+              /^\[/ { in_terminal = 0 }
+              in_terminal && /^[[:space:]]*(user|helper_socket_path|termux_socket_path)[[:space:]]*=/ { next }
+              { print }
+            ' /etc/sigmaos/config.toml | sha256sum | awk '{print $1}'
+          )"
+          [ "$actual_config_sha256" = "$expected_config_sha256" ]
+          awk '
+            /^\[terminal\][[:space:]]*(#.*)?$/ { in_terminal = 1; next }
+            /^\[/ { in_terminal = 0 }
+            in_terminal && /^[[:space:]]*helper_socket_path[[:space:]]*=/ { legacy = 1 }
+            in_terminal && /^[[:space:]]*termux_socket_path[[:space:]]*=/ { socket = 1 }
+            in_terminal && /^[[:space:]]*user[[:space:]]*=[[:space:]]*"sigmaos"[[:space:]]*(#.*)?$/ { user = 1 }
+            END { exit (legacy || !socket || !user) ? 1 : 0 }
+          ' /etc/sigmaos/config.toml
 
           systemctl is-active --quiet sigmaos-api.service
           systemctl is-active --quiet sigmaos-worker@1.service
@@ -336,6 +420,11 @@ jobs:
           systemctl is-active --quiet sigmaos-downloader.service
           systemctl is-active --quiet sigmaos-hostd.service
           systemctl is-active --quiet sigmaos-termux.service
+          systemctl show --property ExecStart --value sigmaos-termux.service | \
+            grep -Fq /usr/lib/sigmaos/bin/sigmaos-termux
+          ! systemctl is-active --quiet sigmaos-terminal-helper.service
+          ! systemctl is-enabled --quiet sigmaos-terminal-helper.service 2>/dev/null
+          ! systemctl cat sigmaos-terminal-helper.service >/dev/null 2>&1
 
           failed_units="$(systemctl --failed --no-legend --plain | awk '$1 ~ /^sigmaos-/ { print }' || true)"
           if [ -n "$failed_units" ]; then

@@ -293,6 +293,20 @@ describe("native packaging artifacts", () => {
     expect(releaseWorkflow).toMatch(/package-arm64:[\s\S]*?apt-get install[\s\S]*?\n\s+acl \\/u);
     expect(deployWorkflow).not.toContain('failed_units="$(systemctl --failed --no-legend --plain || true)"');
     expect(deployWorkflow).toContain("awk '$1 ~ /^sigmaos-/ { print }'");
+    expect(deployWorkflow).toContain("releases/download/$RELEASE_TAG/$RELEASE_ASSET");
+    expect(deployWorkflow).toContain('actual_sha256="$(sha256sum "$temp_package"');
+    expect(deployWorkflow).toContain('mv -f "$temp_package" "$incoming_dir/package.deb"');
+    expect(deployWorkflow).toContain("ServerAliveInterval=15");
+    expect(deployWorkflow).toContain("--max-time 900");
+    expect(deployWorkflow).toContain("printf 'N\\n' | sudo -n /usr/local/sbin/sigmaos-deploy");
+    expect(deployWorkflow).toContain('> "$RUNNER_TEMP/cm5-config.sha256"');
+    expect(deployWorkflow).toContain('[ "$installed_status" = "install ok installed" ]');
+    expect(deployWorkflow).toContain('[ "$actual_config_sha256" = "$expected_config_sha256" ]');
+    expect(deployWorkflow).toContain("END { exit (legacy || !socket || !user) ? 1 : 0 }");
+    expect(deployWorkflow).toContain("/usr/lib/sigmaos/bin/sigmaos-termux");
+    expect(deployWorkflow).toContain("! systemctl is-active --quiet sigmaos-terminal-helper.service");
+    expect(deployWorkflow).not.toContain('cp "$package_path" "$release_dir/package.deb"');
+    expect(deployWorkflow).not.toContain('"$release_dir/package.deb" \\\n            "$release_dir/release-manifest.json"');
   });
 
   it("ships a loopback API reverse proxy for LAN access", async () => {
