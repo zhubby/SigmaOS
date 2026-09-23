@@ -344,33 +344,42 @@ jobs:
             "$release_dir/release-manifest.json" \
             "$CM5_DEPLOY_USER@$CM5_HOST:/var/lib/sigmaos-deploy/incoming/"
 
-          release_url="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/$RELEASE_ASSET"
-          ssh "${ssh_options[@]}" "$CM5_DEPLOY_USER@$CM5_HOST" sh -s -- \
-            "$release_url" "$RELEASE_SHA256" <<'REMOTE'
-          set -eu
-          release_url=$1
-          expected_sha256=$2
           incoming_dir=/var/lib/sigmaos-deploy/incoming
-          partial_package="$incoming_dir/package.deb.$expected_sha256.download"
+          partial_package="$incoming_dir/package.deb.$RELEASE_SHA256.download"
+          ssh "${ssh_options[@]}" "$CM5_DEPLOY_USER@$CM5_HOST" sh -s -- \
+            "$partial_package" <<'REMOTE'
+          set -eu
+          partial_package=$1
           if [ -L "$partial_package" ] || { [ -e "$partial_package" ] && [ ! -f "$partial_package" ]; }; then
             echo "Partial release package is not a regular file" >&2
             exit 1
           fi
+          REMOTE
 
-          umask 077
-          if ! curl --fail --location --silent --show-error \
-              --retry 3 --retry-all-errors --retry-max-time 3600 \
-              --connect-timeout 15 --max-time 900 --continue-at - \
-              --output "$partial_package" "$release_url"; then
-            partial_sha256="$(sha256sum "$partial_package" 2>/dev/null | awk '{print $1}')"
-            [ "$partial_sha256" = "$expected_sha256" ] || {
-              echo "Release download interrupted; preserving partial package for resume" >&2
-              exit 1
-            }
-          fi
+          upload_succeeded=0
+          for attempt in 1 2 3; do
+            if timeout --signal=TERM 2100 \
+                sftp -B 262144 -R 128 -b - "${ssh_options[@]}" \
+                "$CM5_DEPLOY_USER@$CM5_HOST" <<SFTP
+          reput "$release_dir/$RELEASE_ASSET" "$partial_package"
+          SFTP
+            then
+              upload_succeeded=1
+              break
+            fi
+            printf 'SFTP upload attempt %s failed; preserving partial package for resume\n' "$attempt" >&2
+          done
+          [[ "$upload_succeeded" == 1 ]]
+
+          ssh "${ssh_options[@]}" "$CM5_DEPLOY_USER@$CM5_HOST" sh -s -- \
+            "$partial_package" "$RELEASE_SHA256" <<'REMOTE'
+          set -eu
+          partial_package=$1
+          expected_sha256=$2
+          incoming_dir=/var/lib/sigmaos-deploy/incoming
           actual_sha256="$(sha256sum "$partial_package" | awk '{print $1}')"
           [ "$actual_sha256" = "$expected_sha256" ] || {
-            echo "Downloaded release package checksum mismatch" >&2
+            echo "Uploaded release package checksum mismatch" >&2
             rm -f "$partial_package"
             exit 1
           }
