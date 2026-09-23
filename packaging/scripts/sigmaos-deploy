@@ -9,9 +9,9 @@ STATE_PATH="$BASE_DIR/current-release.json"
 LOCK_PATH=/run/lock/sigmaos-deploy.lock
 
 TIMERS='sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer sigmaos-health.timer sigmaos-backup-daily.timer sigmaos-backup-weekly.timer'
-RUNTIME_SERVICES='sigmaos-hostd.service sigmaos-terminal-helper.service sigmaos-api.service sigmaos-worker@1.service sigmaos-photo-worker.service sigmaos-downloader.service'
+RUNTIME_SERVICES='sigmaos-hostd.service sigmaos-termux.service sigmaos-api.service sigmaos-worker@1.service sigmaos-photo-worker.service sigmaos-downloader.service'
 WRITERS="sigmaos-indexer.service sigmaos-scheduler.service sigmaos-maintenance.service sigmaos-health.service sigmaos-backup-daily.service sigmaos-backup-weekly.service $RUNTIME_SERVICES sigmaos-player-helper.service"
-RETIRED_UNITS='sigmaos-share-helper.service'
+RETIRED_UNITS='sigmaos-share-helper.service sigmaos-terminal-helper.service'
 
 success=0
 work_dir=
@@ -131,7 +131,7 @@ activate_runtime() {
 
 verify_runtime() {
   log "checking SigmaOS services"
-  for unit in sigmaos-api.service sigmaos-worker@1.service sigmaos-photo-worker.service sigmaos-downloader.service sigmaos-hostd.service sigmaos-terminal-helper.service; do
+  for unit in sigmaos-api.service sigmaos-worker@1.service sigmaos-photo-worker.service sigmaos-downloader.service sigmaos-hostd.service sigmaos-termux.service; do
     systemctl is-active --quiet "$unit" || die "service is not active: $unit"
   done
 
@@ -181,7 +181,7 @@ capture_runtime_diagnostics() {
   target_diagnostics_path=$1
   systemctl status $RUNTIME_SERVICES --no-pager --full > "$target_diagnostics_path/services-status.txt" 2>&1 || true
   systemctl --failed --no-legend --plain > "$target_diagnostics_path/failed-units.txt" 2>&1 || true
-  journalctl -u sigmaos-api.service -u sigmaos-worker@1.service -u sigmaos-photo-worker.service -u sigmaos-downloader.service -u sigmaos-hostd.service -u sigmaos-terminal-helper.service -n 200 --no-pager > "$target_diagnostics_path/services-journal.txt" 2>&1 || true
+  journalctl -u sigmaos-api.service -u sigmaos-worker@1.service -u sigmaos-photo-worker.service -u sigmaos-downloader.service -u sigmaos-hostd.service -u sigmaos-termux.service -n 200 --no-pager > "$target_diagnostics_path/services-journal.txt" 2>&1 || true
 
   log "service status at failure:" >&2
   cat "$target_diagnostics_path/services-status.txt" >&2
@@ -294,6 +294,12 @@ fi
 if [ -f "$state_dir/sigmaos-share-helper.service.active" ]; then
   : > "$state_dir/sigmaos-hostd.service.active"
 fi
+if [ -f "$state_dir/sigmaos-terminal-helper.service.enabled" ]; then
+  : > "$state_dir/sigmaos-termux.service.enabled"
+fi
+if [ -f "$state_dir/sigmaos-terminal-helper.service.active" ]; then
+  : > "$state_dir/sigmaos-termux.service.active"
+fi
 cp -a "$state_dir" "$backup_path/systemd-state"
 
 if [ -f "$STATE_PATH" ]; then
@@ -321,7 +327,10 @@ for unit in $TIMERS $WRITERS $RETIRED_UNITS; do
 done
 
 tar -C /etc -czf "$backup_path/config.tgz" sigmaos
-tar -C /var/lib -czf "$backup_path/state.tgz" sigmaos
+state_paths=sigmaos
+[ -d /var/lib/sigmaos-terminal ] && state_paths="$state_paths sigmaos-terminal"
+[ -d /var/lib/sigmaos-termux ] && state_paths="$state_paths sigmaos-termux"
+tar -C /var/lib -czf "$backup_path/state.tgz" $state_paths
 
 log "installing $manifest_tag"
 DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-remove "$work_dir/package.deb"

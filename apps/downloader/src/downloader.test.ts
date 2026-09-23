@@ -108,7 +108,7 @@ function testConfig(dataDir: string, root: string): SigmaConfig {
       shares: []
     },
     hostd: { socketPath: "/tmp/hostd.sock" },
-    terminal: { user: "test-user", helperSocketPath: "/tmp/terminal-helper.sock" },
+    terminal: { user: "test-user", termuxSocketPath: "/tmp/termux.sock" },
     player: {
       enabled: false,
       helperSocketPath: "/tmp/player-helper.sock",

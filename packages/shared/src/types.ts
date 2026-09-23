@@ -430,7 +430,7 @@ export interface HostdConfig {
 
 export interface TerminalConfig {
   user: string | null;
-  helperSocketPath: string;
+  termuxSocketPath: string;
   sessionIdleTimeoutMs?: number;
   connectTimeoutMs?: number;
   maxSessions?: number;

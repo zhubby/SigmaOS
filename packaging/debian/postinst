@@ -11,8 +11,21 @@ if [ "$1" = "configure" ]; then
   if ! id sigmaos-nfs >/dev/null 2>&1; then
     adduser --system --no-create-home --disabled-login --shell /usr/sbin/nologin sigmaos-nfs
   fi
-  usermod --home /var/lib/sigmaos-terminal --shell /bin/bash sigmaos
-  install -d -o sigmaos -g sigmaos -m 0700 /var/lib/sigmaos-terminal
+  legacy_termux_home=/var/lib/sigmaos-terminal
+  termux_home=/var/lib/sigmaos-termux
+  if [ -d "$legacy_termux_home" ] && [ -e "$termux_home" ]; then
+    printf 'sigmaos: refusing to merge existing terminal homes: %s and %s\n' "$legacy_termux_home" "$termux_home" >&2
+    exit 1
+  fi
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl disable --now sigmaos-terminal-helper.service 2>/dev/null || true
+  fi
+  if [ -d "$legacy_termux_home" ]; then
+    mv "$legacy_termux_home" "$termux_home"
+  fi
+  install -d -o sigmaos -g sigmaos -m 0700 "$termux_home"
+  chown -R sigmaos:sigmaos "$termux_home"
+  usermod --home "$termux_home" --shell /bin/bash sigmaos
   install -d -o root -g root -m 0700 /var/backups/sigmaos-permissions
   install -d -o root -g root -m 0755 /var/lib/sigmaos-share
   if id sigma-share >/dev/null 2>&1; then
@@ -30,6 +43,7 @@ if [ "$1" = "configure" ]; then
 
   if [ -f /etc/sigmaos/config.toml ]; then
     /usr/lib/sigmaos/bin/sigmaos-hostd migrate-config
+    /usr/lib/sigmaos/bin/sigmaos-termux migrate-config
   fi
 
   SIGMAOS_LOCALE=${SIGMAOS_LOCALE:-C.UTF-8} \
@@ -38,15 +52,17 @@ if [ "$1" = "configure" ]; then
   if command -v systemctl >/dev/null 2>&1; then
     systemd-tmpfiles --create sigmaos.conf || true
 
-    # Remove the retired Node helper during upgrades before activating hostd.
+    # Remove the remaining retired helper before activating its Rust replacement.
     systemctl disable --now sigmaos-share-helper.service 2>/dev/null || true
+    rm -f /etc/systemd/system/sigmaos-terminal-helper.service.d/identity.conf
+    rmdir /etc/systemd/system/sigmaos-terminal-helper.service.d 2>/dev/null || true
 
     # Optional runtime groups are host-dependent; keep the drop-in valid even
     # when Docker/libvirt/KVM are installed after the SigmaOS package.
     /usr/lib/sigmaos/scripts/sigmaos-refresh-groups.sh
-    /usr/lib/sigmaos/scripts/sigmaos-refresh-terminal.sh || true
+    /usr/lib/sigmaos/scripts/sigmaos-refresh-termux.sh || true
     /usr/lib/sigmaos/scripts/sigmaos-refresh-player.sh || true
-    systemctl enable sigmaos-hostd.service sigmaos-terminal-helper.service sigmaos-api.service sigmaos-worker@1.service sigmaos-photo-worker.service sigmaos-downloader.service sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer sigmaos-backup-daily.timer sigmaos-backup-weekly.timer sigmaos-health.timer || true
+    systemctl enable sigmaos-hostd.service sigmaos-termux.service sigmaos-api.service sigmaos-worker@1.service sigmaos-photo-worker.service sigmaos-downloader.service sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer sigmaos-backup-daily.timer sigmaos-backup-weekly.timer sigmaos-health.timer || true
   fi
 fi
 

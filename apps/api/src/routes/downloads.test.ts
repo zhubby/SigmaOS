@@ -203,7 +203,7 @@ function testConfig(root: string): SigmaConfig {
     docker: { enabled: false, socketPath: "/var/run/docker.sock", composeCommand: "docker", operationTimeoutMs: 1000, consoleShells: [], composeRoots: [] },
     hostd: { socketPath: "/tmp/hostd.sock" },
     shares: { enabled: false, account: { username: "share", password: null }, shares: [] },
-    terminal: { user: "test-user", helperSocketPath: "/tmp/terminal-helper.sock" },
+    terminal: { user: "test-user", termuxSocketPath: "/tmp/termux.sock" },
     player: { enabled: false, helperSocketPath: "/tmp/player-helper.sock", videoOutput: "drm", drmConnector: null, audioOutput: "alsa", audioDevice: null, hwdec: "auto-safe", user: "sigmaos" },
     nasRoots: [{ id: "local", name: "Local", path: root }]
   };

@@ -45,7 +45,7 @@ JPEG、PNG、WebP、GIF、HEIC 和 HEIF 由照片 worker 处理。原图、GIF �
 
 标签 ID 和旧会话 ID 必须是 UUID；名称去除首尾空格后为 1–64 个字符，也可传 `null` 恢复默认名称。无效 root、ID 或名称返回 `400/404`，会话上限或旧 ID 冲突返回 `409`。删除活动标签时优先激活右侧标签，其次左侧；删除最后一个标签后活动项为 `null`。
 
-`GET /api/terminal?rootId=...` 使用 `sigmaos-terminal-v1` 和 `sigmaos-session.<uuid>` WebSocket subprotocol。已登记标签以 persistent 模式打开；未登记 ID 保持旧客户端兼容并按空闲策略回收。一个标签只允许一个控制连接，新连接建立后旧连接收到 `{ "type": "taken_over" }`。`open` broker 请求的 `persistent` 字段可选，省略时等同旧版非持久会话。
+`GET /api/terminal?rootId=...` 使用 `sigmaos-terminal-v1` 和 `sigmaos-session.<uuid>` WebSocket subprotocol。已登记标签通过 Termux Protocol v1 以 persistent 模式打开；未登记 ID 保持旧客户端兼容并按空闲策略回收。一个标签只允许一个控制连接，新连接建立后旧连接收到 `{ "type": "taken_over" }`。内部 `session.open` 请求的 `persistent` 字段可选，省略时等同旧版非持久会话。
 
 ## HTTP 下载
 

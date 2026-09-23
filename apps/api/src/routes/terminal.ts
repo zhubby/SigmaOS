@@ -9,10 +9,10 @@ import {
   initializeTerminalTabs,
   renameTerminalTab
 } from "@sigmaos/db";
-import { TERMINAL_BROKER_MAX_SESSIONS } from "@sigmaos/shared";
+import { TERMUX_MAX_SESSIONS } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
 import { terminalMessage } from "../lib/terminal.js";
-import { createTerminalRuntime } from "../lib/terminal-broker.js";
+import { createTerminalRuntime } from "../lib/termux-client.js";
 import {
   TerminalSessionManager,
   type TerminalSession,
@@ -28,7 +28,7 @@ interface TerminalQuery {
 
 export function registerTerminalRoutes(server: FastifyInstance, context: ApiRouteContext): void {
   const runtime = context.terminal ?? createTerminalRuntime(context.config.terminal);
-  const maxSessions = context.config.terminal.maxSessions ?? TERMINAL_BROKER_MAX_SESSIONS;
+  const maxSessions = context.config.terminal.maxSessions ?? TERMUX_MAX_SESSIONS;
   const sessions = new TerminalSessionManager(
     runtime,
     context.config.terminal.sessionIdleTimeoutMs,

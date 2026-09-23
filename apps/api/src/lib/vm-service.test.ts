@@ -17,7 +17,7 @@ function config(): SigmaConfig {
     vm: { enabled: true, libvirtUri: "qemu:///system", storagePath: "/tmp/vmstore", networkName: "default", isoRoots: ["/tmp/iso"], operationTimeoutMs: 1000, consoleMode: "serial" },
     hostd: { socketPath: "/tmp/hostd.sock" },
     shares: { enabled: false, account: { username: "share", password: null }, shares: [] },
-    terminal: { user: "test-user", helperSocketPath: "/tmp/terminal-helper.sock" },
+    terminal: { user: "test-user", termuxSocketPath: "/tmp/termux.sock" },
     player: { enabled: false, helperSocketPath: "/tmp/player-helper.sock", videoOutput: "drm", drmConnector: null, audioOutput: "alsa", audioDevice: null, hwdec: "auto-safe", user: "sigmaos" },
     nasRoots: []
   };

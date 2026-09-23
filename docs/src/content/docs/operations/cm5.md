@@ -9,12 +9,12 @@ sidebar:
   order: 2
 ---
 
-CM5 必须在目标 arm64 主机上构建 Debian 包，以匹配 `better-sqlite3` 和 `node-pty` 等原生模块。不要在 x64 开发机编译后直接复制 `node_modules` 到 CM5。
+CM5 必须在目标 arm64 主机上构建 Debian 包，以匹配 `better-sqlite3` 原生模块和 Rust hostd/termux 二进制。不要在 x64 开发机编译后直接复制 `node_modules` 或 Rust 二进制到 CM5。
 
 ## CM5 前置条件
 
 - 运行 Debian 12/bookworm 或兼容的 arm64 系统（Debian 13/trixie 也需在目标主机验收）；
-- 至少准备一个非 root 本地用户作为 terminal-helper 身份；
+- 确认包管理的非 root `sigmaos` 用户可以使用 `/var/lib/sigmaos-termux` 和配置的 NAS roots；
 - 将 NAS 数据盘挂载到 `/srv/nas`，需要备份时将仓库放在与 NAS、`/var/lib/sigmaos` 不重叠的 `/srv/backup`；
 - 确保构建阶段可以访问 APT、Node.js release 和 npm registry，或传入内部镜像；
 - Wi-Fi 管理要求 NetworkManager、wpa_supplicant、dnsmasq-base、wireless-regdb 和 iw；Debian 包会声明这些依赖，但不会自动把现有 networkd 主机迁移到 NetworkManager；
@@ -47,7 +47,7 @@ sudo SIGMAOS_NAS_ROOT_PATH=/srv/nas \
 
 ```bash
 sudo systemctl is-active sigmaos-api.service sigmaos-worker@1.service
-sudo systemctl is-active sigmaos-terminal-helper.service sigmaos-hostd.service
+sudo systemctl is-active sigmaos-termux.service sigmaos-hostd.service
 sudo systemctl list-timers 'sigmaos-*'
 curl -fsS http://127.0.0.1:3010/health
 curl -fsS http://127.0.0.1:3010/api/roots/readiness
@@ -108,12 +108,15 @@ sudo systemctl stop sigmaos-indexer.timer sigmaos-scheduler.timer \
 ```bash
 sudo install -d -o root -g root -m 0700 /srv/backup/sigmaos-upgrade
 sudo tar -C /etc -czf /srv/backup/sigmaos-upgrade/config-before-upgrade.tgz sigmaos
-sudo tar -C /var/lib -czf /srv/backup/sigmaos-upgrade/state-before-upgrade.tgz sigmaos
+state_paths=sigmaos
+[ -d /var/lib/sigmaos-terminal ] && state_paths="$state_paths sigmaos-terminal"
+[ -d /var/lib/sigmaos-termux ] && state_paths="$state_paths sigmaos-termux"
+sudo tar -C /var/lib -czf /srv/backup/sigmaos-upgrade/state-before-upgrade.tgz $state_paths
 ```
 
 示例目录必须未被之前升级占用，避免覆盖恢复材料。配置/state 包可能包含未加密秘密，限制权限并转存到加密备份仓库。它不包含默认 Docker volume 数据，容器工作负载需另行备份。
 
-安装新包后先启动 API、worker 和 helpers，再串行运行 `sigmaos-indexer.service`、`sigmaos-scheduler.service`、`sigmaos-health.service`，最后重新启用 timers。保留旧 `.deb` 与备份，直到浏览器、API、终端身份、root readiness、索引和备份结果全部通过验收。
+安装新包后先启动 API、worker、hostd 和 termux，再串行运行 `sigmaos-indexer.service`、`sigmaos-scheduler.service`、`sigmaos-health.service`，最后重新启用 timers。保留旧 `.deb`、`config.toml.pre-termux.bak` 与状态备份，直到浏览器、API、终端身份、root readiness、索引和备份结果全部通过验收。
 
 降级不会自动回滚数据库 migration。若新版本已执行 schema migration，使用与旧包匹配的 SQLite/state 备份恢复，再安装旧包；不要在没有备份的情况下直接覆盖生产数据库。
 
@@ -170,10 +173,10 @@ CM5 的 0.3.0 初次 RustFS 冒烟中，运行版本为 `1.0.0-rc.6`：S3 `http:
 
 ```bash
 sudo systemctl --failed
-sudo systemctl show sigmaos-api.service sigmaos-worker@1.service sigmaos-hostd.service -p NRestarts -p ExecMainStatus
-sudo journalctl -u sigmaos-api.service -u sigmaos-worker@1.service -u sigmaos-hostd.service --since '15 minutes ago' --no-pager
+sudo systemctl show sigmaos-api.service sigmaos-worker@1.service sigmaos-hostd.service sigmaos-termux.service -p NRestarts -p ExecMainStatus
+sudo journalctl -u sigmaos-api.service -u sigmaos-worker@1.service -u sigmaos-hostd.service -u sigmaos-termux.service --since '15 minutes ago' --no-pager
 curl -fsS http://127.0.0.1:3010/api/docker/summary
 curl -fsS http://127.0.0.1:3010/api/backup/status
 ```
 
-健康信号：版本与来源一致、服务重启计数稳定、无 `Permission denied`/`SQLITE_CANTOPEN`、Engine ready、已知 ImageID 的占用数准确、不可用限制被拒绝、应用 health/登录/对象读取正常。新出现的目录所有权变化、反复重启、数据不可读或迁移错误应停止验收和 timers，保留现场并按匹配旧包的状态备份恢复；不要盲目降级数据库或 reset-failed。部署前已存在的 backup 失败单独记录与处理，生产 Go 必须有真实备份与恢复证据。
+健康信号：版本与来源一致、服务重启计数稳定、termux socket 可连接且终端可输入/调整尺寸/重连、无 `Permission denied`/`SQLITE_CANTOPEN`、Engine ready、已知 ImageID 的占用数准确、不可用限制被拒绝、应用 health/登录/对象读取正常。termux 反复重启、socket/PTY 错误、家目录冲突、新出现的目录所有权变化、数据不可读或迁移错误应停止验收和 timers，保留现场并按匹配旧包的状态备份恢复；不要盲目降级数据库或 reset-failed。部署前已存在的 backup 失败单独记录与处理，生产 Go 必须有真实备份与恢复证据。

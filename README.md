@@ -103,8 +103,8 @@ flowchart LR
   Indexer --> DB
   Scheduler --> DB
   API --> Host
-  API -->|Unix socket| TerminalBroker[Terminal broker]
-  TerminalBroker -->|PTY as configured user| Host
+  API -->|Termux Protocol v1 over Unix socket| Termux[termux daemon]
+  Termux -->|PTY as sigmaos user| Host
   API -->|JSONL Unix socket| Hostd
   Hostd --> Host
 ```
@@ -120,7 +120,7 @@ The main runtime components are:
 | `apps/indexer` | Walks NAS roots, hashes files, extracts bounded text, and maintains the FTS index. |
 | `apps/scheduler` | Generates duplicate, backup, provider, and health reports; checkpoints and optimizes SQLite. |
 | `apps/hostd` | Rust host integration daemon for approved shares, storage, Docker daemon, and NetworkManager changes. |
-| `apps/terminal-helper` | Runs WebSocket terminal PTYs as the configured non-root passwd user. |
+| `apps/termux` | Rust terminal daemon for native PTYs and persistent tmux sessions under the non-root `sigmaos` account. |
 | `packages/agent` | Pi SDK integration, NAS-scoped tools, session persistence, and tool policy enforcement. |
 | `packages/db` | SQLite connection, migrations, repositories, job queue, approvals, operations, and FTS queries. |
 | `packages/nas-tools` | Root-relative path validation, symlink escape protection, file reads, metadata, and mutations. |
@@ -146,7 +146,7 @@ SigmaOS currently assumes a trusted, single-user appliance. It has no multi-user
 - Write-capable Pi tools default to approval or disabled policies, configurable from the UI.
 - Approved file changes are audited. Trash uses a SigmaOS-managed quarantine area, and v1 never permanently deletes it during maintenance.
 - Docker management is disabled by default. Access to `/var/run/docker.sock` is effectively root-equivalent.
-- The local terminal is a real interactive login shell running through `apps/terminal-helper` as the configured non-root passwd user. The API service itself remains `sigmaos`; `NoNewPrivileges` on the broker prevents terminal `sudo` escalation.
+- The local terminal is a real interactive login shell running through Rust `apps/termux` as the non-root `sigmaos` user. The API service also runs as `sigmaos`; `NoNewPrivileges` and an empty capability set prevent terminal `sudo` escalation.
 - Privileged host changes are isolated in Rust `apps/hostd`, which accepts versioned JSONL requests over an authenticated Unix socket and only performs allowlisted operations.
 
 Always configure at least one explicit NAS root. When no root is provided, the development fallback is the host filesystem root.
@@ -158,7 +158,7 @@ For application development:
 - Node.js 22 or newer
 - npm (the version bundled with Node.js 22 is supported)
 - Rust 1.95.0 (pinned by `rust-toolchain.toml`)
-- A compiler toolchain supported by the native `better-sqlite3` and `node-pty` dependencies when prebuilt binaries are unavailable
+- A compiler toolchain supported by the native `better-sqlite3` dependency when a prebuilt binary is unavailable
 
 Optional host tools enable additional features:
 
@@ -315,7 +315,7 @@ For an `arm64` CM5 (or an `amd64` Debian host), run the host installer from a ch
 sudo SIGMAOS_NAS_ROOT_PATH=/srv/nas packaging/scripts/install.sh
 ```
 
-The installer checks the Debian architecture, switches Debian and Raspberry Pi APT entries to domestic mirrors, installs Node.js 22 from the verified Aliyun Node.js release mirror when needed, installs the pinned Rust 1.95.0 toolchain through rustup, and configures npm to use `https://registry.npmmirror.com`. It then builds the package on the target host and initializes first-boot configuration only for a new installation. Building on the target keeps `sigmaos-hostd`, `better-sqlite3`, and `node-pty` compatible with the board. It starts the SigmaOS API, worker, hostd, terminal-helper, and an Nginx reverse proxy on port 80 by default; indexer, scheduler, maintenance, health, and backup timers are enabled for their scheduled runs. The API remains loopback-only and Nginx is the LAN entry point.
+The installer checks the Debian architecture, switches Debian and Raspberry Pi APT entries to domestic mirrors, installs Node.js 22 from the verified Aliyun Node.js release mirror when needed, installs the pinned Rust 1.95.0 toolchain through rustup, and configures npm to use `https://registry.npmmirror.com`. It then builds the package on the target host and initializes first-boot configuration only for a new installation. Building on the target keeps `sigmaos-hostd`, `sigmaos-termux`, and `better-sqlite3` compatible with the board. It starts the SigmaOS API, worker, hostd, termux, and an Nginx reverse proxy on port 80 by default; indexer, scheduler, maintenance, health, and backup timers are enabled for their scheduled runs. The API remains loopback-only and Nginx is the LAN entry point.
 
 The mirror defaults can be overridden for a private mirror or restored to another mirror with `SIGMAOS_APT_MIRROR`, `SIGMAOS_APT_SECURITY_MIRROR`, `SIGMAOS_RPI_MIRROR`, `SIGMAOS_NODE_MIRROR`, `SIGMAOS_NODE_VERSION`, and `SIGMAOS_NPM_REGISTRY`. The installer only rewrites known Debian/Raspberry Pi URIs, saves original source files under `/var/backups/sigmaos-apt`, preserves `signed-by`, suites, components, and unrelated sources, and disables any NodeSource entry after switching to the domestic Node.js binary distribution. To restore an original source, copy its backup from `/var/backups/sigmaos-apt` back to `/etc/apt/sources.list.d` (or uncomment the marked NodeSource line) before running the installer again with an explicit `SIGMAOS_NODE_MIRROR`.
 
@@ -336,6 +336,7 @@ apps/
   hostd/          Rust privileged host integration daemon
   indexer/        NAS scanner and SQLite FTS indexer
   scheduler/      Reports and database maintenance
+  termux/         Rust PTY daemon with tmux-backed terminal persistence
   web/            React/Vite user interface
   worker/         Agent job processor
 packages/

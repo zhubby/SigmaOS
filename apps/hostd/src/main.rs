@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 
 use sigmaos_hostd::config::{DEFAULT_CONFIG_PATH, HostdConfig};
-use sigmaos_hostd::config_migration::{migrate_config, migrate_terminal_config};
+use sigmaos_hostd::config_migration::migrate_config;
 use sigmaos_hostd::error::{ErrorCode, HostdError};
 use sigmaos_hostd::server::HostdServer;
 use tracing_subscriber::EnvFilter;
@@ -40,20 +40,11 @@ async fn run() -> Result<(), HostdError> {
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|| std::path::PathBuf::from(DEFAULT_CONFIG_PATH));
             let outcome = migrate_config(&config_path)?;
-            let terminal_outcome = migrate_terminal_config(&config_path)?;
             tracing::info!(
                 path = %config_path.display(),
                 changed = outcome.changed,
                 backup = outcome.backup_path.as_ref().map(|path| path.display().to_string()),
                 "hostd configuration migration complete"
-            );
-            tracing::info!(
-                changed = terminal_outcome.changed,
-                backup = terminal_outcome
-                    .backup_path
-                    .as_ref()
-                    .map(|path| path.display().to_string()),
-                "terminal configuration migration complete"
             );
             Ok(())
         }

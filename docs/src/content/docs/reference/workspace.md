@@ -17,5 +17,5 @@ sidebar:
 | `apps/photo-worker` | 照片 EXIF 索引、HEIC 解码和 WebP 衍生图生成 |
 | `apps/indexer` | NAS 扫描与 FTS5 索引 |
 | `apps/scheduler` / `apps/backup` | 报告、维护、restic |
-| `apps/hostd` / `apps/terminal-helper` | Rust 特权宿主机操作与非 root 终端隔离 |
+| `apps/hostd` / `apps/termux` | Rust 特权宿主机操作与非 root PTY/tmux 终端服务 |
 | `packages/db` / `nas-tools` / `agent` / `shared` | 共享持久化、安全、agent 和配置契约 |

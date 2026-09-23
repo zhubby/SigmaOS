@@ -21,7 +21,7 @@ DOCKER_ENABLED=${SIGMAOS_ENABLE_DOCKER:-0}
 VM_ENABLED=${SIGMAOS_ENABLE_VM:-0}
 PLAYER_ENABLED=${SIGMAOS_ENABLE_PLAYER:-0}
 PLAYER_USER=${SIGMAOS_PLAYER_USER:-sigmaos}
-TERMINAL_USER=${SIGMAOS_TERMINAL_USER:-sigmaos}
+TERMINAL_USER=${SIGMAOS_TERMUX_USER:-sigmaos}
 DEBIAN_FRONTEND=noninteractive
 export DEBIAN_FRONTEND
 export CARGO_HOME="$SIGMAOS_CARGO_HOME"
@@ -121,7 +121,7 @@ esac
 [ -n "$SIGMAOS_RUSTUP_HOME" ] || die "SIGMAOS_RUSTUP_HOME must not be empty"
 [ -n "$SIGMAOS_APT_BACKUP_DIR" ] || die "SIGMAOS_APT_BACKUP_DIR must not be empty"
 [ -n "$SIGMAOS_LOCALE" ] || die "SIGMAOS_LOCALE must not be empty"
-[ "$TERMINAL_USER" = sigmaos ] || die "SIGMAOS_TERMINAL_USER must be sigmaos"
+[ "$TERMINAL_USER" = sigmaos ] || die "SIGMAOS_TERMUX_USER must be sigmaos"
 
 case "$NGINX_ENABLED" in
   0|1) ;;
@@ -292,7 +292,7 @@ if [ "$SIGMAOS_CONFIG_EXISTS" = "0" ]; then
   SIGMAOS_VM_ENABLED="$VM_ENABLED" \
   SIGMAOS_PLAYER_ENABLED="$PLAYER_ENABLED" \
   SIGMAOS_PLAYER_USER="$PLAYER_USER" \
-  SIGMAOS_TERMINAL_USER="$TERMINAL_USER" \
+  SIGMAOS_TERMUX_USER="$TERMINAL_USER" \
     /usr/lib/sigmaos/scripts/sigmaos-first-boot.sh
 else
   log "preserving existing SigmaOS configuration"
@@ -301,7 +301,7 @@ fi
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload
   /usr/lib/sigmaos/scripts/sigmaos-refresh-groups.sh
-  /usr/lib/sigmaos/scripts/sigmaos-refresh-terminal.sh
+  /usr/lib/sigmaos/scripts/sigmaos-refresh-termux.sh
   SIGMAOS_PLAYER_USER="$PLAYER_USER" /usr/lib/sigmaos/scripts/sigmaos-refresh-player.sh
   if [ "$DOCKER_ENABLED" = "1" ]; then
     systemctl enable --now docker.service
@@ -316,12 +316,12 @@ if command -v systemctl >/dev/null 2>&1; then
   fi
   systemctl enable --now \
     sigmaos-hostd.service \
-    sigmaos-terminal-helper.service \
+    sigmaos-termux.service \
     sigmaos-api.service \
     sigmaos-worker@1.service \
     sigmaos-photo-worker.service \
     sigmaos-downloader.service
-  systemctl restart sigmaos-hostd.service sigmaos-terminal-helper.service \
+  systemctl restart sigmaos-hostd.service sigmaos-termux.service \
     sigmaos-api.service sigmaos-worker@1.service sigmaos-photo-worker.service sigmaos-downloader.service
   if [ "$PLAYER_ENABLED" = "1" ]; then
     systemctl enable --now sigmaos-player-helper.service

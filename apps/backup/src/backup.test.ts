@@ -28,7 +28,7 @@ function config(root: string, repository: string, passwordFile: string): SigmaCo
     docker: { enabled: false, socketPath: "/var/run/docker.sock", composeCommand: "docker", operationTimeoutMs: 120000, consoleShells: ["/bin/sh"], composeRoots: [] },
     hostd: { socketPath: "/tmp/hostd.sock" },
     shares: { enabled: false, account: { username: "share", password: null }, shares: [] },
-    terminal: { user: "test-user", helperSocketPath: "/tmp/terminal-helper.sock" },
+    terminal: { user: "test-user", termuxSocketPath: "/tmp/termux.sock" },
     player: { enabled: false, helperSocketPath: "/tmp/player-helper.sock", videoOutput: "drm", drmConnector: null, audioOutput: "alsa", audioDevice: null, hwdec: "auto-safe", user: "sigmaos" },
     nasRoots: [{ id: "local", name: "Local", path: root, mountPolicy: "optional" }],
     backup: { enabled: true, repositoryPath: repository, passwordFile, stagingPath: path.join(path.dirname(root), "staging"), requireMount: false, retryCount: 1, timeoutMs: 1000, keepDaily: 7, keepWeekly: 4 },

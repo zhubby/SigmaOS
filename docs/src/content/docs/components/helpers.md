@@ -1,21 +1,23 @@
 ---
 title: hostd 与终端服务
-description: hostd 和 terminal-helper 的 Unix socket 权限隔离。
+description: Rust hostd 和 termux 的 Unix socket、权限与进程边界。
 type: reference
 status: current
 audience: [developer, operator]
-sourceOfTruth: [apps/hostd/src/server.rs, apps/hostd/src/shares.rs, apps/hostd/src/storage.rs, apps/hostd/src/docker_daemon.rs, apps/hostd/src/network_manager.rs, apps/terminal-helper/src/index.ts, apps/terminal-helper/src/session-policy.ts, packages/shared/src/terminal-protocol.ts, packaging/systemd/sigmaos-hostd.service, packaging/systemd/sigmaos-terminal-helper.service]
+sourceOfTruth: [apps/hostd/src/server.rs, apps/hostd/src/shares.rs, apps/hostd/src/storage.rs, apps/hostd/src/docker_daemon.rs, apps/hostd/src/network_manager.rs, apps/termux/src/server.rs, apps/termux/src/pty.rs, apps/termux/src/session_policy.rs, packages/shared/src/termux-protocol.ts, packaging/systemd/sigmaos-hostd.service, packaging/systemd/sigmaos-termux.service]
 sidebar:
   order: 6
 ---
 
-`sigmaos-hostd` 是 Rust root daemon，默认只在 `/run/sigmaos/hostd.sock` 接受版本化 JSONL 单请求，并验证 Unix peer UID。systemd unit 与 API 共同读取 `/etc/sigmaos/config.toml` 的 `[hostd].socket_path`，不会用 unit 环境变量覆盖迁移后的路径；自定义路径若超出 `/run/sigmaos`，还必须同步调整 unit 的 `ReadWritePaths`。操作名、命令、参数和配置目标均使用 allowlist；共享路径只能引用 hostd 自己从配置读取的 NAS roots，客户端携带的 root 只用于一致性校验。API 和 terminal-helper 均以 `sigmaos` 运行；terminal-helper 在 `/var/lib/sigmaos-terminal` 保存 tmux 状态，并通过 attach PTY 提供终端。session 名称由 NAS root 和标签 ID 稳定生成，因此 API 或 WebSocket 重连只会重新 attach，不会重复创建 shell。终端与 API 共用 UID，不能把 systemd 路径屏蔽视为二者之间的安全隔离。
+`sigmaos-hostd` 是 Rust root daemon，默认只在 `/run/sigmaos/hostd.sock` 接受版本化 JSONL 单请求，并验证 Unix peer UID。systemd unit 与 API 共同读取 `/etc/sigmaos/config.toml` 的 `[hostd].socket_path`，不会用 unit 环境变量覆盖迁移后的路径；自定义路径若超出 `/run/sigmaos`，还必须同步调整 unit 的 `ReadWritePaths`。操作名、命令、参数和配置目标均使用 allowlist；共享路径只能引用 hostd 自己从配置读取的 NAS roots，客户端携带的 root 只用于一致性校验。
 
-API 在已登记标签的 broker `open` 请求中发送可选的 `persistent: true`。terminal-helper 把该状态写入 tmux session 的 `@sigmaos_persistent` 选项；空闲 reaper 和容量淘汰都会跳过这些 session。未携带标记的旧客户端 session 继续按配置的空闲时间回收。整机上所有持久与非持久 session 共同受 `terminal.maxSessions` 限制，容量不足时只可淘汰非持久 session。
+`sigmaos-termux` 是非 root Rust daemon，默认在 `/run/sigmaos/termux.sock` 接受 Termux Protocol v1 JSONL 长连接，并验证 Unix peer UID。协议用 request、response、stream ID 关联控制请求和 PTY 流，以 Base64 传输原始字节；未知版本、字段、重复 attach 和超限输入都会返回结构化错误。API 与 termux 均以 `sigmaos` 运行，termux 在 `/var/lib/sigmaos-termux` 保存 tmux socket，并通过 native PTY attach。session 名称由 NAS root 和标签 ID 稳定生成，因此 API 或 WebSocket 重连只会重新 attach，不会重复创建 shell。两者共用 UID，不能把 systemd 路径屏蔽视为安全隔离边界。
 
-关闭或重启标签时，API 使用稳定 session 名称向 terminal-helper 发送 destroy，即使当前没有 WebSocket 连接也会终止 tmux session。销毁失败时 API 保留 SQLite 标签，避免元数据宣称进程已结束。API/terminal-helper 进程重启不会影响仍由 tmux 承载的 shell；主机重启会终止 tmux，之后同一标签首次连接时创建新 shell，不恢复旧进程或 scrollback。
+API 在已登记标签的 `open` 请求中发送 `persistent: true`。termux 把该状态写入 tmux session 的 `@sigmaos_persistent` 选项；空闲 reaper 和容量淘汰都会跳过这些 session。未携带标记的旧客户端 session 继续按配置的空闲时间回收。整机上所有持久与非持久 session 共同受 `terminal.maxSessions` 限制，连接上限与 session 上限分开计算，容量不足时只可淘汰非持久 session。
 
-API 通过 Unix socket 调用 hostd 和 terminal-helper；浏览器永远不直接连接宿主机 socket。
+关闭或重启标签时，API 使用稳定 session 名称向 termux 发送 destroy，即使当前没有 WebSocket 连接也会终止 tmux session。销毁失败时 API 保留 SQLite 标签，避免元数据宣称进程已结束。API/termux 进程重启不会影响仍由 tmux 承载的 shell；主机重启会终止 tmux，之后同一标签首次连接时创建新 shell，不恢复旧进程或 scrollback。
+
+API 通过 Unix socket 调用 hostd 和 termux；浏览器永远不直接连接宿主机 socket。
 
 ## 共享账号与 systemd 写边界
 

@@ -9,7 +9,7 @@ sidebar:
   order: 1
 ---
 
-生产部署使用 Debian package、Node.js 22 和 Rust `sigmaos-hostd`，不把 SigmaOS 自身放入 Docker。API、worker、downloader、hostd、terminal-helper 是常驻服务；indexer、scheduler、maintenance、health、backup 由 oneshot service 和 timer 驱动。
+生产部署使用 Debian package、Node.js 22，以及 Rust `sigmaos-hostd` 和 `sigmaos-termux`，不把 SigmaOS 自身放入 Docker。API、worker、downloader、hostd、termux 是常驻服务；indexer、scheduler、maintenance、health、backup 由 oneshot service 和 timer 驱动。
 
 Nginx 只反向代理到 loopback API。运行时路径主要是 `/usr/lib/sigmaos`、`/etc/sigmaos`、`/var/lib/sigmaos`、`/run/sigmaos` 和配置的 `/srv` roots。API 静态提供 React Web 与 `/docs/` 文档站。
 
@@ -28,7 +28,7 @@ findmnt /srv/nas
 
 ## 从源码构建 Debian 包
 
-在目标架构主机上执行构建，让 Rust hostd、`better-sqlite3`、`node-pty` 等原生产物与运行环境一致。Rust 版本由 `rust-toolchain.toml` 固定为 1.95.0：
+在目标架构主机上执行构建，让 Rust hostd/termux 和 `better-sqlite3` 等原生产物与运行环境一致。Rust 版本由 `rust-toolchain.toml` 固定为 1.95.0：
 
 ```bash
 npm ci
@@ -57,13 +57,13 @@ sudo SIGMAOS_ENABLE_NGINX=1 \
   ./packaging/scripts/install.sh
 ```
 
-脚本会安装 Node.js 22 和 Rust 1.95.0、构建并安装本架构 `.deb`，然后仅在新安装时执行 `sigmaos-first-boot.sh`。首次初始化会创建 `/etc/sigmaos/config.toml`、`/var/lib/sigmaos`、`/srv/nas`、`/srv/iso` 和本地管理员记录；升级会保留其他配置，把旧终端身份迁移为 `sigmaos`，并保存 `config.toml.pre-terminal.bak`。终端家目录为 `/var/lib/sigmaos-terminal`，旧 tmux shell 会在升级时退出，但标签仍可重新连接并创建 shell。
+脚本会安装 Node.js 22 和 Rust 1.95.0、构建并安装本架构 `.deb`，然后仅在新安装时执行 `sigmaos-first-boot.sh`。首次初始化会创建 `/etc/sigmaos/config.toml`、`/var/lib/sigmaos`、`/var/lib/sigmaos-termux`、`/srv/nas`、`/srv/iso` 和本地管理员记录。升级会固定终端身份为 `sigmaos`，把 `[terminal].helper_socket_path` 迁移到 `termux_socket_path`，并保留权限为 `0600` 的 `config.toml.pre-termux.bak`。若仅存在旧家目录，`/var/lib/sigmaos-terminal` 会原子迁移为 `/var/lib/sigmaos-termux`；新旧目录同时存在时安装会拒绝合并，要求运维人员先核对数据。
 
 核心服务会被 `enable --now`：
 
 ```bash
 sudo systemctl status sigmaos-api.service sigmaos-worker@1.service sigmaos-downloader.service
-sudo systemctl status sigmaos-hostd.service sigmaos-terminal-helper.service
+sudo systemctl status sigmaos-hostd.service sigmaos-termux.service
 ```
 
 索引、scheduler、maintenance、health 和 backup timers 默认只启用，不会在安装命令中立刻执行。需要立即刷新时运行：
@@ -96,7 +96,7 @@ sudo systemctl stop sigmaos-indexer.timer sigmaos-scheduler.timer \
   sigmaos-maintenance.timer sigmaos-health.timer \
   sigmaos-backup-daily.timer sigmaos-backup-weekly.timer
 sudo systemctl stop sigmaos-downloader.service sigmaos-worker@1.service \
-  sigmaos-api.service sigmaos-terminal-helper.service sigmaos-hostd.service
+  sigmaos-api.service sigmaos-termux.service sigmaos-hostd.service
 sudo dpkg -i .sigmaos/sigmaos_<version>_<arch>.deb
 sudo systemctl daemon-reload
 findmnt /srv/nas/pool1
@@ -113,16 +113,16 @@ sudo /usr/lib/sigmaos/scripts/sigmaos-nas-acl.sh --apply --pool /srv/nas/pool1
 
 共享服务只在启用的共享路径获得 ACL。hostd 应用共享设置时备份受影响路径的 ACL，服务重载失败会恢复；可写 NFS 客户端被映射为 `sigmaos-nfs`，不继承客户端 UID。
 
-从旧版升级时，`postinst` 会把 `[shares].helper_socket_path` 迁移到 `[hostd].socket_path`，删除 SQLite share settings 中的 `helperSocketPath`，并停用已废弃的 `sigmaos-share-helper.service`。如果新旧 socket 配置同时存在，以 `[hostd]` 为准；修改 TOML 前会创建权限为 `0600` 的 `config.toml.pre-hostd.bak`，重复执行不会覆盖备份。完成 ACL 验证后启动服务：
+从旧版升级时，`postinst` 会先确认新旧终端家目录不存在冲突，再停止 `sigmaos-terminal-helper.service`，然后把旧家目录迁移到 `/var/lib/sigmaos-termux`。随后运行 hostd 与 termux 的幂等配置迁移，并停用已废弃的 `sigmaos-share-helper.service`。hostd 迁移把 `[shares].helper_socket_path` 移到 `[hostd].socket_path`；termux 迁移把 `[terminal].helper_socket_path` 移到 `termux_socket_path` 并固定用户为 `sigmaos`。新字段已存在时以新字段为准；对应的 `.pre-hostd.bak` 和 `.pre-termux.bak` 只在首次修改时创建且不会被重复覆盖。完成 ACL 验证后启动服务：
 
 ```bash
-sudo systemctl start sigmaos-hostd.service sigmaos-terminal-helper.service \
+sudo systemctl start sigmaos-hostd.service sigmaos-termux.service \
   sigmaos-api.service sigmaos-worker@1.service sigmaos-downloader.service
 sudo systemctl --failed
-sudo journalctl -u sigmaos-hostd.service -u sigmaos-terminal-helper.service -n 100 --no-pager
+sudo journalctl -u sigmaos-hostd.service -u sigmaos-termux.service -n 100 --no-pager
 ```
 
-确认新版本通过验收后再重新启用 timers。降级只能恢复程序包，迁移脚本没有通用的数据库反向迁移；若新版本已改变 schema，应使用升级前的 SQLite 备份和对应版本包一起恢复。
+确认新版本通过验收后再重新启用 timers。回滚到 `0.7.x` 还需停止 termux，将 `/var/lib/sigmaos-termux` 恢复为旧包使用的 `/var/lib/sigmaos-terminal`，并恢复 `config.toml.pre-termux.bak`；不要在两个目录都存在时合并。迁移脚本没有通用的数据库反向迁移；若新版本已改变 schema，应使用升级前的 SQLite 备份和对应版本包一起恢复。
 
 ## GitHub Actions 与 Tailscale 自动升级
 

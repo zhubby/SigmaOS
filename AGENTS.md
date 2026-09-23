@@ -14,7 +14,7 @@ a Docker container.
 - `apps/worker`: agent job worker.
 - `apps/indexer`: SQLite/FTS NAS indexer.
 - `apps/scheduler`: scheduled maintenance, backup, and health jobs.
-- `apps/backup`, `apps/hostd`, `apps/terminal-helper`: backup and host
+- `apps/backup`, `apps/hostd`, `apps/termux`: backup and host
   integration processes.
 - `packages/db`, `packages/nas-tools`, `packages/agent`, `packages/shared`:
   persistence, path-safe filesystem operations, agent routing, and shared
@@ -28,8 +28,8 @@ a Docker container.
 
 Node.js 22 (the documented minimum is 22.12+) and npm are required for local
 development and CI. Production packages support Debian-family `amd64` and
-`arm64`; native modules such as `better-sqlite3` and `node-pty` must be built on
-the target architecture.
+`arm64`; native modules such as `better-sqlite3` and Rust daemons must be built
+for the target architecture.
 
 ## Working Tree And Scope
 
@@ -196,7 +196,7 @@ Use service status and journald, not only a single liveness request:
 ```bash
 sudo systemctl --failed
 sudo systemctl is-active sigmaos-api.service sigmaos-worker@1.service \
-  sigmaos-terminal-helper.service sigmaos-hostd.service
+  sigmaos-termux.service sigmaos-hostd.service
 sudo systemctl list-timers 'sigmaos-*'
 sudo journalctl -u sigmaos-api.service -u sigmaos-worker@1.service -n 100 --no-pager
 curl -fsS http://127.0.0.1:3010/health

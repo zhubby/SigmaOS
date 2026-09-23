@@ -4,7 +4,7 @@ import { parse } from "smol-toml";
 import {
   TERMINAL_SESSION_DEFAULT_CONNECT_TIMEOUT_MS,
   TERMINAL_SESSION_DEFAULT_IDLE_TIMEOUT_MS
-} from "./terminal-protocol.js";
+} from "./termux-protocol.js";
 import type {
   DlnaMediaType,
   DockerComposeRootConfig,
@@ -109,7 +109,7 @@ interface TomlConfig {
   };
   terminal?: {
     user?: string;
-    helper_socket_path?: string;
+    termux_socket_path?: string;
     session_idle_timeout_ms?: number;
     connect_timeout_ms?: number;
     max_sessions?: number;
@@ -433,21 +433,21 @@ function loadShareConfig(env: NodeJS.ProcessEnv, fileConfig: TomlConfig): ShareC
 
 function loadTerminalConfig(env: NodeJS.ProcessEnv, fileConfig: TomlConfig): TerminalConfig {
   return {
-    user: normalizeText(env.SIGMAOS_TERMINAL_USER) ?? normalizeText(fileConfig.terminal?.user),
-    helperSocketPath:
-      normalizeText(env.SIGMAOS_TERMINAL_HELPER_SOCKET_PATH) ??
-      normalizeText(fileConfig.terminal?.helper_socket_path) ??
-      "/run/sigmaos/terminal-helper.sock",
+    user: normalizeText(env.SIGMAOS_TERMUX_USER) ?? normalizeText(fileConfig.terminal?.user),
+    termuxSocketPath:
+      normalizeText(env.SIGMAOS_TERMUX_SOCKET_PATH) ??
+      normalizeText(fileConfig.terminal?.termux_socket_path) ??
+      "/run/sigmaos/termux.sock",
     sessionIdleTimeoutMs: toPositiveInteger(
-      env.SIGMAOS_TERMINAL_SESSION_IDLE_TIMEOUT_MS,
+      env.SIGMAOS_TERMUX_SESSION_IDLE_TIMEOUT_MS,
       fileConfig.terminal?.session_idle_timeout_ms ?? TERMINAL_SESSION_DEFAULT_IDLE_TIMEOUT_MS
     ),
     connectTimeoutMs: toPositiveInteger(
-      env.SIGMAOS_TERMINAL_CONNECT_TIMEOUT_MS,
+      env.SIGMAOS_TERMUX_CONNECT_TIMEOUT_MS,
       fileConfig.terminal?.connect_timeout_ms ?? TERMINAL_SESSION_DEFAULT_CONNECT_TIMEOUT_MS
     ),
     maxSessions: toPositiveInteger(
-      env.SIGMAOS_TERMINAL_MAX_SESSIONS,
+      env.SIGMAOS_TERMUX_MAX_SESSIONS,
       fileConfig.terminal?.max_sessions ?? 32
     )
   };

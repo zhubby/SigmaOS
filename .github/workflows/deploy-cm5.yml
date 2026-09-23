@@ -335,7 +335,7 @@ jobs:
           systemctl is-active --quiet sigmaos-photo-worker.service
           systemctl is-active --quiet sigmaos-downloader.service
           systemctl is-active --quiet sigmaos-hostd.service
-          systemctl is-active --quiet sigmaos-terminal-helper.service
+          systemctl is-active --quiet sigmaos-termux.service
 
           failed_units="$(systemctl --failed --no-legend --plain | awk '$1 ~ /^sigmaos-/ { print }' || true)"
           if [ -n "$failed_units" ]; then

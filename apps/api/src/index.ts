@@ -4,7 +4,7 @@ import { ensureNasRoots, openSigmaDb } from "@sigmaos/db";
 import { loadConfig } from "@sigmaos/shared";
 import { loadBuildInfo } from "./lib/build-info.js";
 import { createSystemCommandRunner } from "./lib/system-management.js";
-import { createTerminalRuntime } from "./lib/terminal-broker.js";
+import { createTerminalRuntime } from "./lib/termux-client.js";
 import { createPlayerRuntime } from "./lib/player.js";
 import { buildServer } from "./server.js";
 import { registerWebApp } from "./web-static.js";

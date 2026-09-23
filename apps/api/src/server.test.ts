@@ -4800,7 +4800,7 @@ function testConfig(dataDir: string): SigmaConfig {
     },
     terminal: {
       user: "test-user",
-      helperSocketPath: "/tmp/terminal-helper.sock"
+      termuxSocketPath: "/tmp/termux.sock"
     },
     player: {
       enabled: false,

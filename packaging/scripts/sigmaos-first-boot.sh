@@ -15,7 +15,7 @@ DOCKER_ENABLED="${SIGMAOS_DOCKER_ENABLED:-0}"
 VM_ENABLED="${SIGMAOS_VM_ENABLED:-0}"
 PLAYER_ENABLED="${SIGMAOS_PLAYER_ENABLED:-${SIGMAOS_ENABLE_PLAYER:-0}}"
 PLAYER_USER="${SIGMAOS_PLAYER_USER:-sigmaos}"
-TERMINAL_USER="${SIGMAOS_TERMINAL_USER:-sigmaos}"
+TERMINAL_USER="${SIGMAOS_TERMUX_USER:-sigmaos}"
 
 if [ -e "$CONFIG_PATH" ] && [ "${SIGMAOS_FIRST_BOOT_FORCE:-0}" != "1" ]; then
   printf "SigmaOS configuration already exists at %s; preserving it\n" "$CONFIG_PATH"
@@ -23,7 +23,7 @@ if [ -e "$CONFIG_PATH" ] && [ "${SIGMAOS_FIRST_BOOT_FORCE:-0}" != "1" ]; then
 fi
 
 [ "$TERMINAL_USER" = sigmaos ] || {
-  printf "SIGMAOS_TERMINAL_USER must be sigmaos\n" >&2
+  printf "SIGMAOS_TERMUX_USER must be sigmaos\n" >&2
   exit 1
 }
 
@@ -126,7 +126,7 @@ account_username = "sigma-share"
 
 [terminal]
 user = "$TERMINAL_USER"
-helper_socket_path = "/run/sigmaos/terminal-helper.sock"
+termux_socket_path = "/run/sigmaos/termux.sock"
 session_idle_timeout_ms = 1800000
 connect_timeout_ms = 10000
 max_sessions = 32

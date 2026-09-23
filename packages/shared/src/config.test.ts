@@ -49,7 +49,7 @@ describe("loadConfig", () => {
     expect(config.hostd).toEqual({ socketPath: "/run/sigmaos/hostd.sock" });
     expect(config.terminal).toEqual({
       user: null,
-      helperSocketPath: "/run/sigmaos/terminal-helper.sock",
+      termuxSocketPath: "/run/sigmaos/termux.sock",
       sessionIdleTimeoutMs: 1_800_000,
       connectTimeoutMs: 10_000,
       maxSessions: 32
@@ -148,7 +148,7 @@ describe("loadConfig", () => {
     });
   });
 
-  it("loads the terminal user and helper socket from TOML and environment", async () => {
+  it("loads the terminal user and Termux socket from TOML and environment", async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-config-"));
     const configPath = path.join(tempDir, "config.toml");
     await writeFile(
@@ -156,24 +156,24 @@ describe("loadConfig", () => {
       `
         [terminal]
         user = "zhubby"
-        helper_socket_path = "/tmp/terminal.sock"
+        termux_socket_path = "/tmp/termux.sock"
       `
     );
 
     expect(loadConfig({ SIGMAOS_CONFIG: configPath } as NodeJS.ProcessEnv, tempDir).terminal).toEqual({
       user: "zhubby",
-      helperSocketPath: "/tmp/terminal.sock",
+      termuxSocketPath: "/tmp/termux.sock",
       sessionIdleTimeoutMs: 1_800_000,
       connectTimeoutMs: 10_000,
       maxSessions: 32
     });
     expect(loadConfig({
       SIGMAOS_CONFIG: configPath,
-      SIGMAOS_TERMINAL_USER: "operator",
-      SIGMAOS_TERMINAL_HELPER_SOCKET_PATH: "/run/operator-terminal.sock"
+      SIGMAOS_TERMUX_USER: "operator",
+      SIGMAOS_TERMUX_SOCKET_PATH: "/run/operator-termux.sock"
     } as NodeJS.ProcessEnv, tempDir).terminal).toEqual({
       user: "operator",
-      helperSocketPath: "/run/operator-terminal.sock",
+      termuxSocketPath: "/run/operator-termux.sock",
       sessionIdleTimeoutMs: 1_800_000,
       connectTimeoutMs: 10_000,
       maxSessions: 32

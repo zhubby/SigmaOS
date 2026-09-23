@@ -79,7 +79,8 @@ describe("native packaging artifacts", () => {
 
     expect(install).toContain("usr/lib/sigmaos/apps/api/dist/");
     expect(install).toContain("target/release/sigmaos-hostd usr/lib/sigmaos/bin/");
-    expect(install).toContain("usr/lib/sigmaos/apps/terminal-helper/dist/");
+    expect(install).toContain("target/release/sigmaos-termux usr/lib/sigmaos/bin/");
+    expect(install).not.toContain("apps/terminal-helper");
     expect(install).toContain("usr/lib/sigmaos/apps/worker/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/photo-worker/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/indexer/dist/");
@@ -99,7 +100,7 @@ describe("native packaging artifacts", () => {
     );
     expect(install).toContain("packaging/scripts/sigmaos-nginx.sh usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/scripts/sigmaos-configure-locale.sh usr/lib/sigmaos/scripts/");
-    expect(install).toContain("packaging/scripts/sigmaos-refresh-terminal.sh usr/lib/sigmaos/scripts/");
+    expect(install).toContain("packaging/scripts/sigmaos-refresh-termux.sh usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/scripts/sigmaos-nas-acl.sh usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/scripts/sigmaos-share-acl.mjs usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/etc/samba.conf usr/share/sigmaos/");
@@ -133,7 +134,7 @@ describe("native packaging artifacts", () => {
     expect(control).not.toMatch(/^Depends:.*samba/m);
     const postrm = await readPackagingFile("debian", "postrm");
     expect(postrm.indexOf("optional-groups.conf")).toBeLessThan(postrm.indexOf("systemctl daemon-reload"));
-    expect(postrm).toContain("sigmaos-terminal-helper.service.d/identity.conf");
+    expect(postrm).toContain("sigmaos-termux.service.d/identity.conf");
   });
 
   it("ships first-boot and appliance image scaffolding", async () => {
@@ -144,7 +145,7 @@ describe("native packaging artifacts", () => {
     expect(firstBoot).toContain("SIGMAOS_ADMIN_DISPLAY_NAME");
     expect(firstBoot).toContain("SIGMAOS_DOCKER_ENABLED");
     expect(firstBoot).toContain("SIGMAOS_VM_ENABLED");
-    expect(firstBoot).toContain("SIGMAOS_TERMINAL_USER");
+    expect(firstBoot).toContain("SIGMAOS_TERMUX_USER");
     expect(firstBoot).not.toContain('chown -R sigmaos:sigmaos "$DATA_DIR" "$NAS_ROOT_PATH"');
     expect(firstBoot).toContain("[[nas_roots]]");
     expect(firstBoot).toContain("[model]");
@@ -161,7 +162,8 @@ describe("native packaging artifacts", () => {
     expect(manifest).toContain("git");
     expect(manifest).toContain("sigmaos-hostd.service");
     expect(manifest).not.toContain("sigmaos-share-helper.service");
-    expect(manifest).toContain("sigmaos-terminal-helper.service");
+    expect(manifest).toContain("sigmaos-termux.service");
+    expect(manifest).not.toContain("sigmaos-terminal-helper.service");
     expect(manifest).toContain("sigmaos-downloader.service");
     expect(manifest).toContain("sigmaos-photo-worker.service");
     expect(manifest).toContain("sigmaos-player-helper.service");
@@ -249,7 +251,7 @@ describe("native packaging artifacts", () => {
     expect(installer).toContain("SIGMAOS_ENABLE_DOCKER");
     expect(installer).toContain("docker-cli");
     expect(installer).toContain("SIGMAOS_ENABLE_VM");
-    expect(installer).toContain("TERMINAL_USER=${SIGMAOS_TERMINAL_USER:-sigmaos}");
+    expect(installer).toContain("TERMINAL_USER=${SIGMAOS_TERMUX_USER:-sigmaos}");
     expect(installer).not.toContain("${SUDO_USER:-}");
     expect(installer).toContain("SIGMAOS_LOCALE");
     expect(localeScript).toContain("AcceptEnv");
@@ -373,23 +375,39 @@ describe("native packaging artifacts", () => {
     expect(webdav).toContain("RuntimeDirectory=sigmaos-webdav");
   });
 
-  it("ships an isolated user terminal broker", async () => {
-    const unit = await readPackagingFile("systemd", "sigmaos-terminal-helper.service");
-    const refresh = await readPackagingFile("scripts", "sigmaos-refresh-terminal.sh");
+  it("ships an isolated Rust Termux daemon", async () => {
+    const unit = await readPackagingFile("systemd", "sigmaos-termux.service");
+    const refresh = await readPackagingFile("scripts", "sigmaos-refresh-termux.sh");
 
     expect(unit).toContain("User=sigmaos");
     expect(unit).toContain("ProtectHome=tmpfs");
     expect(unit).toContain("RestrictSUIDSGID=yes");
-    expect(unit).toContain("terminal-helper.sock");
+    expect(unit).toContain("termux.sock");
     expect(unit).toContain("CapabilityBoundingSet=");
     expect(unit).toContain("InaccessiblePaths=/etc/sigmaos /var/lib/sigmaos /var/log/sigmaos");
-    expect(unit).toContain("ReadWritePaths=/run/sigmaos /srv/nas /var/lib/sigmaos-terminal");
-    expect(unit).toContain("KillMode=control-group");
+    expect(unit).toContain("ReadWritePaths=/run/sigmaos /srv/nas /var/lib/sigmaos-termux");
+    expect(unit).toContain("KillMode=process");
+    expect(unit).toContain("ExecStart=/usr/lib/sigmaos/bin/sigmaos-termux");
+    expect(unit).not.toContain("/node");
     expect(refresh).toContain("User=%s\\n");
     expect(refresh).toContain("WorkingDirectory=%s\\n");
     expect(refresh).not.toContain("BindPaths=%s\\n");
-    expect(refresh).toContain("SIGMAOS_TERMINAL_HELPER_SOCKET_PATH");
+    expect(refresh).toContain("SIGMAOS_TERMUX_SOCKET_PATH");
+    expect(refresh).toContain("SIGMAOS_TERMUX_CONNECT_TIMEOUT_MS");
     expect(refresh).toContain("terminal user must be sigmaos");
+    expect(refresh).toContain("escape_systemd_value()");
+    expect(refresh).toContain("s/%/%%/g");
+    expect(refresh).toContain('ReadWritePaths="%s"\\n');
+    const postinst = await readPackagingFile("debian", "postinst");
+    expect(postinst).toContain("sigmaos-termux migrate-config");
+    expect(postinst).toContain("systemctl disable --now sigmaos-terminal-helper.service");
+    expect(postinst).toContain("refusing to merge existing terminal homes");
+    expect(postinst.indexOf("refusing to merge existing terminal homes")).toBeLessThan(
+      postinst.indexOf("systemctl disable --now sigmaos-terminal-helper.service")
+    );
+    expect(postinst.indexOf("systemctl disable --now sigmaos-terminal-helper.service")).toBeLessThan(
+      postinst.indexOf('mv "$legacy_termux_home" "$termux_home"')
+    );
     expect(await readPackagingFile("scripts", "sigmaos-nas-acl.sh")).toContain("findmnt -rn --mountpoint");
     expect(await readPackagingFile("scripts", "sigmaos-nas-acl.sh")).toContain("getfacl --absolute-names");
   });
@@ -421,6 +439,11 @@ describe("native packaging artifacts", () => {
     expect(deploy).toContain('state_dir/sigmaos-hostd.service.enabled');
     expect(deploy).toContain('state_dir/sigmaos-share-helper.service.active');
     expect(deploy).toContain('state_dir/sigmaos-hostd.service.active');
+    expect(deploy).toContain('state_dir/sigmaos-terminal-helper.service.enabled');
+    expect(deploy).toContain('state_dir/sigmaos-termux.service.enabled');
+    expect(deploy).toContain('state_dir/sigmaos-terminal-helper.service.active');
+    expect(deploy).toContain('state_dir/sigmaos-termux.service.active');
+    expect(deploy).toContain("sigmaos-termux");
     expect(deploy).toContain("package.deb must be a regular file");
     expect(deploy).toContain("/api/roots/readiness");
     expect(deploy).toContain("/api/system/build-info");

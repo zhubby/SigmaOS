@@ -1,3 +1,9 @@
+sigmaos (0.8.0) unstable; urgency=medium
+
+  * Replace the Node terminal helper with the hardened Rust termux daemon and Termux Protocol v1.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Wed, 23 Sep 2026 12:00:00 +0000
+
 sigmaos (0.7.9) unstable; urgency=medium
 
   * Unify Workspace panel headers with icon-only actions and inline status.

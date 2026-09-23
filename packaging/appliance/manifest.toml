@@ -1,5 +1,5 @@
 name = "sigmaos-appliance"
-version = "0.7.9"
+version = "0.8.0"
 base_suite = "bookworm"
 target_arch = "arm64"
 
@@ -12,7 +12,7 @@ package = "sigmaos.deb"
 [services]
 units = [
   "sigmaos-api.service",
-  "sigmaos-terminal-helper.service",
+  "sigmaos-termux.service",
   "sigmaos-player-helper.service",
   "sigmaos-hostd.service",
   "sigmaos-worker@1.service",

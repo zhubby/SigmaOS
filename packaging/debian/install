@@ -1,6 +1,6 @@
 apps/api/dist/* usr/lib/sigmaos/apps/api/dist/
 target/release/sigmaos-hostd usr/lib/sigmaos/bin/
-apps/terminal-helper/dist/* usr/lib/sigmaos/apps/terminal-helper/dist/
+target/release/sigmaos-termux usr/lib/sigmaos/bin/
 apps/worker/dist/* usr/lib/sigmaos/apps/worker/dist/
 apps/photo-worker/dist/* usr/lib/sigmaos/apps/photo-worker/dist/
 apps/indexer/dist/* usr/lib/sigmaos/apps/indexer/dist/
@@ -19,7 +19,7 @@ packaging/scripts/sigmaos-first-boot.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-nginx.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-configure-locale.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-refresh-groups.sh usr/lib/sigmaos/scripts/
-packaging/scripts/sigmaos-refresh-terminal.sh usr/lib/sigmaos/scripts/
+packaging/scripts/sigmaos-refresh-termux.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-nas-acl.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-share-acl.mjs usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-refresh-player.sh usr/lib/sigmaos/scripts/

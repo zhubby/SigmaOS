@@ -152,7 +152,7 @@ git push origin "v${VERSION}"
 
 1. `Quality` 使用 Node.js 22 运行版本策略、typecheck、lint、test 和完整 build。
 2. `Package (amd64)` 在 Ubuntu runner 构建并检查 Debian 产物。
-3. `Package (arm64)` 在原生 ARM64 runner 的固定 `node:22-bookworm` 容器中构建，确保 `better-sqlite3`、`node-pty` 等原生模块匹配 CM5。
+3. `Package (arm64)` 在原生 ARM64 runner 的固定 `node:22-bookworm` 容器中构建，确保 `better-sqlite3` 原生模块和 Rust hostd/termux 二进制匹配 CM5。
 4. `Documentation browser smoke` 构建文档并用 Chromium 检查导航、搜索与页面渲染。
 5. tag run 在上述 job 全部成功后创建 GitHub Release，包含两个架构的 `.deb`、`.changes`、`.buildinfo`、`SHA256SUMS` 和 `release-manifest.json`。
 
@@ -218,7 +218,7 @@ sudo systemctl --failed
 sudo systemctl is-active \
   sigmaos-api.service sigmaos-worker@1.service \
   sigmaos-downloader.service sigmaos-hostd.service \
-  sigmaos-terminal-helper.service
+  sigmaos-termux.service
 curl -fsS http://127.0.0.1:3010/health
 curl -fsS http://127.0.0.1:3010/api/roots/readiness
 curl -fsS http://127.0.0.1:3010/api/system/health
