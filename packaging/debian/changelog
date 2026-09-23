@@ -1,3 +1,9 @@
+sigmaos (0.7.9) unstable; urgency=medium
+
+  * Unify Workspace panel headers with icon-only actions and inline status.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Wed, 23 Sep 2026 03:19:12 +0000
+
 sigmaos (0.7.8) unstable; urgency=medium
 
   * Align the Terminal workspace panel with the shared page heading and toolbar design.
