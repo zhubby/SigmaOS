@@ -298,7 +298,7 @@ describe("native packaging artifacts", () => {
     expect(deployWorkflow).toContain('if [ -L "$partial_package" ] || { [ -e "$partial_package" ] && [ ! -f "$partial_package" ]; }');
     expect(deployWorkflow).toContain('for attempt in 1 2 3; do');
     expect(deployWorkflow).toContain("timeout --signal=TERM 2100");
-    expect(deployWorkflow).toContain('sftp -B 262144 -R 128 -b - "${ssh_options[@]}"');
+    expect(deployWorkflow).toContain('sftp -B 131072 -R 128 -b - "${ssh_options[@]}"');
     expect(deployWorkflow).toContain('reput "$release_dir/$RELEASE_ASSET" "$partial_package"');
     expect(deployWorkflow).toContain("SFTP upload attempt %s failed; preserving partial package for resume");
     expect(deployWorkflow).toContain('actual_sha256="$(sha256sum "$partial_package"');

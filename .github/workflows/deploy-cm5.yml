@@ -359,7 +359,7 @@ jobs:
           upload_succeeded=0
           for attempt in 1 2 3; do
             if timeout --signal=TERM 2100 \
-                sftp -B 262144 -R 128 -b - "${ssh_options[@]}" \
+                sftp -B 131072 -R 128 -b - "${ssh_options[@]}" \
                 "$CM5_DEPLOY_USER@$CM5_HOST" <<SFTP
           reput "$release_dir/$RELEASE_ASSET" "$partial_package"
           SFTP
