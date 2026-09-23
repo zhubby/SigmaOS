@@ -180,7 +180,7 @@ git push origin "v${VERSION}"
 
 1. 进入 `production` environment，并验证 GitHub OIDC claims；
 2. 使用 `tailscale/github-action@v4` 创建带 `tag:github-actions` 的临时节点；
-3. 经 Tailscale SSH 上传 `release-manifest.json`，并用 SFTP 将 package 断点续传到 SHA256 命名的临时文件；CM5 校验 checksum 后再原子替换 staging 中的 `package.deb`；
+3. 经 Tailscale SSH 上传 `release-manifest.json`，并用 SFTP 将 package 切成可独立续传的分片；CM5 按顺序拼接并校验完整 SHA256 后，再原子替换 staging 中的 `package.deb`；
 4. 执行 `sudo -n /usr/local/sbin/sigmaos-deploy`；
 5. 再次检查常驻服务、failed units、API liveness、root readiness、system health，以及 build-info 的版本和 commit；
 6. workflow 结束时 logout 并清理临时 Tailscale 节点。
@@ -232,7 +232,7 @@ sudo cat /var/lib/sigmaos-deploy/current-release.json
 gh workflow run deploy-cm5.yml --ref main -f tag=vX.Y.Z
 ```
 
-传输中断时，CM5 会保留 SHA256 命名的部分 package；从 `main` 重试同一个 tag 时，SFTP 会从已有字节继续上传。package 完整且 checksum 匹配后，临时文件会原子替换为 `package.deb`，因此成功部署后的再次重试仍可能重新上传完整 package。若 GitHub runner 与 CM5 只能经 DERP 通信，上传可能需要数分钟。日志出现 `version X.Y.Z is already installed; verifying runtime only` 表示命中幂等验证分支。
+传输中断时，CM5 会保留 SHA256 命名的分片目录；从 `main` 重试同一个 tag 时，每个分片都会从已有字节继续上传，最多四片并行。所有分片拼接且 checksum 匹配后，临时文件会原子替换为 `package.deb`，因此成功部署后的再次重试仍可能重新传输完整 package。若 GitHub runner 与 CM5 只能经 DERP 通信，上传可能需要数分钟。日志出现 `version X.Y.Z is already installed; verifying runtime only` 表示命中幂等验证分支。
 
 ## 常见失败
 

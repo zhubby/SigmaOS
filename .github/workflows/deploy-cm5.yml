@@ -345,41 +345,114 @@ jobs:
             "$CM5_DEPLOY_USER@$CM5_HOST:/var/lib/sigmaos-deploy/incoming/"
 
           incoming_dir=/var/lib/sigmaos-deploy/incoming
+          local_parts_dir="$release_dir/parts"
+          remote_parts_dir="$incoming_dir/package.deb.$RELEASE_SHA256.parts"
           partial_package="$incoming_dir/package.deb.$RELEASE_SHA256.download"
+          rm -rf "$local_parts_dir"
+          mkdir -p "$local_parts_dir"
+          split -b 4m -d -a 4 "$release_dir/$RELEASE_ASSET" "$local_parts_dir/part-"
+          mapfile -t part_paths < <(find "$local_parts_dir" -type f -name 'part-*' -print | sort)
+          ((${#part_paths[@]} > 0))
+
           ssh "${ssh_options[@]}" "$CM5_DEPLOY_USER@$CM5_HOST" sh -s -- \
-            "$partial_package" <<'REMOTE'
+            "$remote_parts_dir" "${part_paths[@]##*/}" <<'REMOTE'
           set -eu
-          partial_package=$1
+          remote_parts_dir=$1
+          shift
+          if [ -L "$remote_parts_dir" ] || { [ -e "$remote_parts_dir" ] && [ ! -d "$remote_parts_dir" ]; }; then
+            echo "Release parts path is not a directory" >&2
+            exit 1
+          fi
+          umask 077
+          mkdir -p "$remote_parts_dir"
+          for part_name do
+            case "$part_name" in
+              part-[0-9][0-9][0-9][0-9]) ;;
+              *) echo "Invalid release part name" >&2; exit 1 ;;
+            esac
+            part_path="$remote_parts_dir/$part_name"
+            if [ -L "$part_path" ] || { [ -e "$part_path" ] && [ ! -f "$part_path" ]; }; then
+              echo "Release part is not a regular file" >&2
+              exit 1
+            fi
+            if [ ! -e "$part_path" ]; then
+              : > "$part_path"
+            fi
+          done
+          REMOTE
+
+          upload_part() {
+            local part_path=$1
+            local part_name=${part_path##*/}
+            for attempt in 1 2 3; do
+              if timeout --signal=TERM --kill-after=30s 900 \
+                  sftp -B 131072 -R 128 -b - "${ssh_options[@]}" \
+                  "$CM5_DEPLOY_USER@$CM5_HOST" <<SFTP
+          reput "$part_path" "$remote_parts_dir/$part_name"
+          SFTP
+              then
+                return 0
+              fi
+              printf 'SFTP upload of %s attempt %s failed; preserving part for resume\n' "$part_name" "$attempt" >&2
+            done
+            return 1
+          }
+
+          part_index=0
+          while ((part_index < ${#part_paths[@]})); do
+            part_pids=()
+            batch_end=$((part_index + 4))
+            while ((part_index < batch_end && part_index < ${#part_paths[@]})); do
+              upload_part "${part_paths[part_index]}" &
+              part_pids+=("$!")
+              part_index=$((part_index + 1))
+            done
+            batch_failed=0
+            for part_pid in "${part_pids[@]}"; do
+              if ! wait "$part_pid"; then
+                batch_failed=1
+              fi
+            done
+            ((batch_failed == 0))
+          done
+
+          ssh "${ssh_options[@]}" "$CM5_DEPLOY_USER@$CM5_HOST" sh -s -- \
+            "$remote_parts_dir" "$partial_package" "$RELEASE_SHA256" "${#part_paths[@]}" <<'REMOTE'
+          set -eu
+          remote_parts_dir=$1
+          partial_package=$2
+          expected_sha256=$3
+          part_count=$4
+          incoming_dir=/var/lib/sigmaos-deploy/incoming
           if [ -L "$partial_package" ] || { [ -e "$partial_package" ] && [ ! -f "$partial_package" ]; }; then
             echo "Partial release package is not a regular file" >&2
             exit 1
           fi
-          REMOTE
-
-          upload_succeeded=0
-          for attempt in 1 2 3; do
-            if timeout --signal=TERM --kill-after=30s 2100 \
-                sftp -B 131072 -R 128 -b - "${ssh_options[@]}" \
-                "$CM5_DEPLOY_USER@$CM5_HOST" <<SFTP
-          reput "$release_dir/$RELEASE_ASSET" "$partial_package"
-          SFTP
-            then
-              upload_succeeded=1
-              break
+          assembled_package="$partial_package.assemble.$$"
+          rm -f "$assembled_package"
+          part_index=0
+          while [ "$part_index" -lt "$part_count" ]; do
+            part_name=$(printf 'part-%04d' "$part_index")
+            part_path="$remote_parts_dir/$part_name"
+            if [ -L "$part_path" ] || { [ ! -f "$part_path" ]; }; then
+              echo "Release part is missing or not a regular file" >&2
+              rm -f "$assembled_package"
+              exit 1
             fi
-            printf 'SFTP upload attempt %s failed; preserving partial package for resume\n' "$attempt" >&2
+            cat "$part_path" >> "$assembled_package"
+            part_index=$((part_index + 1))
           done
-          [[ "$upload_succeeded" == 1 ]]
-
-          ssh "${ssh_options[@]}" "$CM5_DEPLOY_USER@$CM5_HOST" sh -s -- \
-            "$partial_package" "$RELEASE_SHA256" <<'REMOTE'
-          set -eu
-          partial_package=$1
-          expected_sha256=$2
-          incoming_dir=/var/lib/sigmaos-deploy/incoming
+          actual_sha256="$(sha256sum "$assembled_package" | awk '{print $1}')"
+          [ "$actual_sha256" = "$expected_sha256" ] || {
+            echo "Assembled release package checksum mismatch" >&2
+            rm -f "$assembled_package"
+            exit 1
+          }
+          mv -f "$assembled_package" "$partial_package"
+          rm -rf "$remote_parts_dir"
           actual_sha256="$(sha256sum "$partial_package" | awk '{print $1}')"
           [ "$actual_sha256" = "$expected_sha256" ] || {
-            echo "Uploaded release package checksum mismatch" >&2
+            echo "Assembled release package checksum mismatch after move" >&2
             rm -f "$partial_package"
             exit 1
           }
