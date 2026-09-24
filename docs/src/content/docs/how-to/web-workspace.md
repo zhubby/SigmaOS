@@ -36,7 +36,7 @@ sidebar:
 
 ## 使用相册
 
-首次打开 Photos 面板时选择一个已挂载存储池中的目录。照片原文件保持原位，`sigmaos-photo-worker.service` 会递归扫描 JPEG、PNG、WebP、GIF、HEIC 和 HEIF，优先使用 EXIF 拍摄时间并生成本地 WebP 缩略图与预览。扫描状态会显示 queued、scanning、ready、degraded 或 storage offline；新增文件后可以手动扫描，服务也会每 30 分钟确保一次完整扫描。
+Photos 面板使用系统配置中指定的唯一照片目录，不在面板内切换目录。照片原文件保持原位，`sigmaos-photo-worker.service` 会递归扫描 JPEG、PNG、WebP、GIF、HEIC 和 HEIF，优先使用 EXIF 拍摄时间并生成本地 WebP 缩略图与预览。扫描状态会显示 queued、scanning、ready、degraded 或 storage offline；新增文件后可以手动扫描，服务也会每 30 分钟确保一次完整扫描。
 
 照片墙按日期分页。点击照片打开支持前后切换和缩放的查看器；选择多张后可以下载原图/ZIP。移动和删除会创建现有文件 approval，批准前不会改变原文件；移动目标限定在当前照片库内，删除进入 SigmaOS trash。上传直接写入照片库并按 SHA-256 拒绝重复内容，单文件上限为 512 MiB。
 

@@ -1109,12 +1109,60 @@
 }
 
 .download-task-row {
+  --download-actions-width: 132px;
+  --download-status-text: var(--neutral-status-text);
+  --download-status-fill: var(--neutral-status-text);
+  --download-status-bg: var(--neutral-status-bg);
+  --download-status-border: var(--line);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) var(--download-actions-width);
   gap: 14px;
   min-width: 0;
   padding: 14px 16px;
   border-bottom: 1px solid var(--line-soft);
+  transition: background-color 180ms var(--control-easing), border-color 180ms var(--control-easing);
+}
+
+.download-task-row[data-status="queued"] {
+  --download-status-text: var(--neutral-status-text);
+  --download-status-fill: var(--neutral-status-text);
+  --download-status-bg: var(--neutral-status-bg);
+  --download-status-border: var(--line);
+}
+
+.download-task-row[data-status="running"] {
+  --download-status-text: var(--accent-soft-text);
+  --download-status-fill: var(--accent);
+  --download-status-bg: var(--accent-soft-bg);
+  --download-status-border: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+.download-task-row[data-status="paused"] {
+  --download-status-text: var(--warning-text);
+  --download-status-fill: var(--yellow);
+  --download-status-bg: var(--warning-bg);
+  --download-status-border: color-mix(in srgb, var(--yellow) 45%, var(--line));
+}
+
+.download-task-row[data-status="completed"] {
+  --download-status-text: var(--success-text);
+  --download-status-fill: var(--green);
+  --download-status-bg: var(--success-bg);
+  --download-status-border: color-mix(in srgb, var(--green) 45%, var(--line));
+}
+
+.download-task-row[data-status="failed"] {
+  --download-status-text: var(--danger-text);
+  --download-status-fill: var(--red);
+  --download-status-bg: var(--danger-bg);
+  --download-status-border: var(--danger-border);
+}
+
+.download-task-row[data-status="cancelled"] {
+  --download-status-text: var(--teal-text);
+  --download-status-fill: var(--teal-text);
+  --download-status-bg: var(--teal-bg);
+  --download-status-border: color-mix(in srgb, var(--teal-text) 45%, var(--line));
 }
 
 .download-task-main {
@@ -1134,16 +1182,8 @@
 .download-task-icon {
   display: grid;
   place-items: center;
-  color: var(--accent-soft-text);
-}
-
-.download-task-row[data-status="completed"] .download-task-icon {
-  color: var(--success-text);
-}
-
-.download-task-row[data-status="failed"] .download-task-icon,
-.download-task-row[data-status="cancelled"] .download-task-icon {
-  color: var(--danger-text);
+  color: var(--download-status-text);
+  transition: color 180ms var(--control-easing);
 }
 
 .download-task-heading > div {
@@ -1171,26 +1211,17 @@
 
 .download-task-status {
   padding: 3px 6px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--download-status-border);
   border-radius: 3px;
-  color: var(--muted);
+  color: var(--download-status-text);
+  background: var(--download-status-bg);
   font-size: 10px;
   font-weight: 800;
   text-transform: uppercase;
-}
-
-.download-task-row[data-status="running"] .download-task-status {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
-  color: var(--accent-soft-text);
-}
-
-.download-task-row[data-status="completed"] .download-task-status {
-  color: var(--success-text);
-}
-
-.download-task-row[data-status="failed"] .download-task-status,
-.download-task-row[data-status="cancelled"] .download-task-status {
-  color: var(--danger-text);
+  transition:
+    color 180ms var(--control-easing),
+    background-color 180ms var(--control-easing),
+    border-color 180ms var(--control-easing);
 }
 
 .download-task-path {
@@ -1203,27 +1234,55 @@
 }
 
 .download-progress-track {
-  height: 5px;
+  height: 6px;
   overflow: hidden;
   border-radius: 2px;
-  background: var(--line);
+  background: color-mix(in srgb, var(--download-status-fill) 18%, var(--line));
+  transition: background-color 180ms var(--control-easing);
 }
 
 .download-progress-track > span {
+  position: relative;
   display: block;
   height: 100%;
+  min-width: 0;
   border-radius: inherit;
-  background: var(--accent);
-  transition: width 300ms ease;
+  background: var(--download-status-fill);
+  transition:
+    width 420ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 180ms var(--control-easing);
 }
 
-.download-task-row[data-status="completed"] .download-progress-track > span {
-  background: var(--success);
+.download-progress-track.is-indeterminate > span::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -60%;
+  width: 60%;
+  content: "";
+  background: rgb(255 255 255 / 30%);
+  transform: skewX(-18deg);
+  animation: download-progress-sheen 1.5s ease-in-out infinite;
 }
 
-.download-task-row[data-status="failed"] .download-progress-track > span,
-.download-task-row[data-status="cancelled"] .download-progress-track > span {
-  background: var(--danger);
+@keyframes download-progress-sheen {
+  to {
+    transform: translateX(260%) skewX(-18deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .download-task-row,
+  .download-task-icon,
+  .download-task-status,
+  .download-progress-track,
+  .download-progress-track > span {
+    transition-duration: 0.01ms;
+  }
+
+  .download-progress-track.is-indeterminate > span::after {
+    animation: none;
+  }
 }
 
 .download-task-meta {
@@ -1247,6 +1306,8 @@
   display: flex;
   align-items: center;
   align-self: center;
+  justify-content: flex-end;
+  width: var(--download-actions-width);
   gap: 4px;
 }
 

@@ -451,7 +451,7 @@ export function HttpDownloaderPanel({
   );
 }
 
-function DownloadTaskRow({
+export function DownloadTaskRow({
   task,
   locale,
   pendingAction,
@@ -470,6 +470,9 @@ function DownloadTaskRow({
   const progress = task.totalBytes && task.totalBytes > 0
     ? Math.min(100, Math.round(task.receivedBytes / task.totalBytes * 100))
     : null;
+  const isIndeterminate = progress === null && task.status === "running";
+  const progressValue = progress ?? (task.status === "completed" ? 100 : null);
+  const progressWidth = progressValue ?? (isIndeterminate ? 36 : 0);
   const host = getHost(task.url);
   const canPause = task.status === "queued" || task.status === "running";
   const canResume = task.status === "paused";
@@ -491,8 +494,16 @@ function DownloadTaskRow({
           <span className="download-task-status">{t(`workspace.downloads.status.${task.status}`)}</span>
         </div>
         <div className="download-task-path" title={task.targetPath}>{task.targetPath}</div>
-        <div className="download-progress-track" aria-label={t("workspace.downloads.progress", { name: task.targetFileName })}>
-          <span style={{ width: `${progress ?? (task.status === "running" ? 100 : 0)}%` }} />
+        <div
+          className={`download-progress-track${isIndeterminate ? " is-indeterminate" : ""}`}
+          data-indeterminate={isIndeterminate ? "true" : undefined}
+          role="progressbar"
+          aria-label={t("workspace.downloads.progress", { name: task.targetFileName })}
+          aria-valuemin={progressValue === null ? undefined : 0}
+          aria-valuemax={progressValue === null ? undefined : 100}
+          aria-valuenow={progressValue ?? undefined}
+        >
+          <span style={{ width: `${progressWidth}%` }} />
         </div>
         <div className="download-task-meta">
           <span>{formatProgress(task, locale, t)}</span>

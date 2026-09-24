@@ -48,7 +48,7 @@ export function StorageFilePickerDialog({
   initialPoolId: string;
   locale: SupportedLocale;
   mode?: "iso" | "directory";
-  directoryPurpose?: "downloads" | "photoLibrary" | "photoMove";
+  directoryPurpose?: "downloads" | "photoMove";
   initialPath?: string;
   boundaryPath?: string;
   onCancel: () => void;
@@ -75,32 +75,23 @@ export function StorageFilePickerDialog({
   const [createFolderSubmitting, setCreateFolderSubmitting] = useState(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const loadRequestId = useRef(0);
-  const directoryCopy = directoryPurpose === "photoLibrary"
+  const directoryCopy = directoryPurpose === "photoMove"
     ? {
-        eyebrow: t("workspace.photos.libraryDirectory"),
-        title: t("workspace.photos.libraryPickerTitle"),
-        description: t("workspace.photos.libraryPickerDescription"),
+        eyebrow: t("workspace.photos.moveDestination"),
+        title: t("workspace.photos.movePickerTitle"),
+        description: t("workspace.photos.movePickerDescription"),
         list: t("workspace.photos.directoryPickerList"),
         empty: t("workspace.photos.directoryPickerEmpty"),
-        select: t("workspace.photos.useLibraryDirectory")
+        select: t("workspace.photos.useMoveDestination")
       }
-    : directoryPurpose === "photoMove"
-      ? {
-          eyebrow: t("workspace.photos.moveDestination"),
-          title: t("workspace.photos.movePickerTitle"),
-          description: t("workspace.photos.movePickerDescription"),
-          list: t("workspace.photos.directoryPickerList"),
-          empty: t("workspace.photos.directoryPickerEmpty"),
-          select: t("workspace.photos.useMoveDestination")
-        }
-      : {
-          eyebrow: t("workspace.downloads.targetDirectory"),
-          title: t("workspace.downloads.directoryPickerTitle"),
-          description: t("workspace.downloads.directoryPickerDescription"),
-          list: t("workspace.downloads.directoryPickerList"),
-          empty: t("workspace.downloads.directoryPickerEmpty"),
-          select: t("workspace.downloads.selectCurrentDirectory")
-        };
+    : {
+        eyebrow: t("workspace.downloads.targetDirectory"),
+        title: t("workspace.downloads.directoryPickerTitle"),
+        description: t("workspace.downloads.directoryPickerDescription"),
+        list: t("workspace.downloads.directoryPickerList"),
+        empty: t("workspace.downloads.directoryPickerEmpty"),
+        select: t("workspace.downloads.selectCurrentDirectory")
+      };
   const pickerRootPath = boundaryPath && selectedPool?.id === initialPool?.id ? boundaryPath : selectedPool?.path ?? ".";
 
   const loadDirectory = useCallback(async () => {

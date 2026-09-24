@@ -2,7 +2,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { initI18n } from "../../i18n/index.js";
-import { HttpDownloaderPanel, type HttpDownloaderPool } from "./HttpDownloaderPanel.js";
+import type { DownloadTask } from "../../api.js";
+import { DownloadTaskRow, HttpDownloaderPanel, type HttpDownloaderPool } from "./HttpDownloaderPanel.js";
 
 const mountedPool: HttpDownloaderPool = {
   id: "pool-1",
@@ -53,6 +54,42 @@ describe("HttpDownloaderPanel download creation", () => {
   });
 });
 
+describe("DownloadTaskRow progress states", () => {
+  it("exposes a determinate progressbar with the current percentage", () => {
+    const html = renderDownloadRow({ receivedBytes: 25, totalBytes: 100 });
+
+    expect(html).toContain('class="download-task-row" data-status="running"');
+    expect(html).toContain('class="download-progress-track" role="progressbar"');
+    expect(html).toContain('aria-valuemin="0"');
+    expect(html).toContain('aria-valuemax="100"');
+    expect(html).toContain('aria-valuenow="25"');
+    expect(html).toContain('style="width:25%"');
+  });
+
+  it("uses an indeterminate progress state when a running task has no total", () => {
+    const html = renderDownloadRow({ receivedBytes: 2_000, totalBytes: null });
+
+    expect(html).toContain('class="download-progress-track is-indeterminate"');
+    expect(html).toContain('data-indeterminate="true"');
+    expect(html).not.toContain("aria-valuenow");
+    expect(html).toContain('style="width:36%"');
+  });
+
+  it("shows completed tasks as full even when the server has no total", () => {
+    const html = renderDownloadRow({ status: "completed", receivedBytes: 2_000, totalBytes: null });
+
+    expect(html).toContain('class="download-task-row" data-status="completed"');
+    expect(html).toContain('aria-valuenow="100"');
+    expect(html).toContain('style="width:100%"');
+  });
+
+  it("keeps a distinct status marker for every download state", () => {
+    for (const status of ["queued", "running", "paused", "completed", "failed", "cancelled"] as const) {
+      expect(renderDownloadRow({ status })).toContain(`data-status="${status}"`);
+    }
+  });
+});
+
 function renderDownloadButton({
   storagePoolsLoading,
   pools
@@ -79,4 +116,41 @@ function renderDownloadButton({
 
 function visibleButtonText(button: string): string {
   return button.replace(/<[^>]+>/gu, "").trim();
+}
+
+const baseTask: DownloadTask = {
+  id: "task-1",
+  url: "https://example.com/archive.zip",
+  rootId: "nas",
+  storagePoolId: "pool-1",
+  targetDirectory: "/srv/nas/data",
+  targetFileName: "archive.zip",
+  targetPath: "/srv/nas/data/archive.zip",
+  partialPath: "/srv/nas/data/.task-1.sigmaos-download.part",
+  status: "running",
+  receivedBytes: 25,
+  totalBytes: 100,
+  speedBytesPerSecond: 10,
+  etag: null,
+  lastModified: null,
+  error: null,
+  workerId: "worker-1",
+  leaseExpiresAt: null,
+  createdAt: "2026-09-24T00:00:00.000Z",
+  updatedAt: "2026-09-24T00:00:00.000Z",
+  startedAt: "2026-09-24T00:00:00.000Z",
+  finishedAt: null,
+  lastProgressAt: "2026-09-24T00:00:00.000Z",
+  fileOperationId: null
+};
+
+function renderDownloadRow(overrides: Partial<DownloadTask> = {}): string {
+  return renderToStaticMarkup(createElement(DownloadTaskRow, {
+    task: { ...baseTask, ...overrides },
+    locale: "en",
+    pendingAction: null,
+    onAction: vi.fn(),
+    onDelete: vi.fn(),
+    onOpenDirectory: vi.fn()
+  }));
 }

@@ -1226,7 +1226,6 @@ export function WorkspacePane({
           ) : activePanel === "photos" ? (
             <PhotoLibraryPanel
               pools={storagePools}
-              selectedStoragePoolId={selectedStoragePoolId}
               selectedRootId={selectedRootId}
               sessionId={sessionId}
               approvalRefreshKey={pendingApprovals.map((approval) => approval.id).join(",")}

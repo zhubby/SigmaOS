@@ -4,7 +4,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
-  FolderCog,
   FolderInput,
   ImageOff,
   Images,
@@ -37,7 +36,6 @@ import {
   getPhotoTimeline,
   proposePhotoOperation,
   requestPhotoScan,
-  savePhotoLibrarySettings,
   uploadPhoto,
   type PhotoAsset,
   type PhotoLibrarySettings,
@@ -48,15 +46,13 @@ import type { SupportedLocale } from "../../i18n/locale.js";
 import { PanelHeaderAction, PanelHeaderActions, PanelHeaderStatus } from "./PanelHeader.js";
 import {
   StorageFilePickerDialog,
-  type StorageFilePickerPool,
-  type StorageFileSelection
+  type StorageFilePickerPool
 } from "./StorageFilePickerDialog.js";
 
 const PHOTO_EXTENSIONS = /\.(?:jpe?g|png|webp|gif|heic|heif)$/iu;
 
 export function PhotoLibraryPanel({
   pools,
-  selectedStoragePoolId,
   selectedRootId,
   sessionId,
   approvalRefreshKey,
@@ -68,7 +64,6 @@ export function PhotoLibraryPanel({
   onNotifyWarning
 }: {
   pools: StorageFilePickerPool[];
-  selectedStoragePoolId: string;
   selectedRootId: string;
   sessionId: string | null;
   approvalRefreshKey: string;
@@ -92,7 +87,7 @@ export function PhotoLibraryPanel({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [picker, setPicker] = useState<"library" | "move" | null>(null);
+  const [picker, setPicker] = useState<"move" | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [lightboxId, setLightboxId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -197,25 +192,6 @@ export function PhotoLibraryPanel({
       if (trigger?.isConnected) window.requestAnimationFrame(() => trigger.focus());
     };
   }, [deleteOpen]);
-
-  async function configureLibrary(selection: StorageFileSelection) {
-    setBusyAction("configure");
-    onNotifyError(null);
-    try {
-      const result = await savePhotoLibrarySettings(selection);
-      setSettings(result.settings);
-      setStatus(await getPhotoLibraryStatus());
-      setPhotos([]);
-      setNextCursor(null);
-      setSelectedIds(new Set());
-      setPicker(null);
-      onNotifySuccess(t("workspace.photos.librarySaved"));
-    } catch (error) {
-      onNotifyError(errorMessage(error));
-    } finally {
-      setBusyAction(null);
-    }
-  }
 
   async function startScan() {
     if (!settings || busyAction) return;
@@ -396,7 +372,6 @@ export function PhotoLibraryPanel({
     trapDialogFocus(event, lightboxRef.current);
   }
 
-  const initialPoolId = settings?.storagePoolId ?? selectedStoragePoolId;
   const movePools = configuredPool ? [configuredPool] : [];
 
   return (
@@ -429,15 +404,6 @@ export function PhotoLibraryPanel({
           </div>
         </div>
         <PanelHeaderActions label={t("workspace.photos.actions")} className="photo-library-actions">
-          <PanelHeaderAction
-            label={settings ? t("workspace.photos.changeLibrary") : t("workspace.photos.chooseLibrary")}
-            type="button"
-            onClick={() => setPicker("library")}
-            disabled={busyAction === "configure"}
-            aria-busy={busyAction === "configure" || undefined}
-          >
-            {busyAction === "configure" ? <LoaderCircle className="is-spinning" aria-hidden="true" size={16} /> : <FolderCog aria-hidden="true" size={17} />}
-          </PanelHeaderAction>
           <PanelHeaderAction
             label={t("workspace.photos.scanNow")}
             type="button"
@@ -493,9 +459,9 @@ export function PhotoLibraryPanel({
               </button>
             </div>
           ) : photos.length ? (
-            <button className="photo-select-all" type="button" onClick={selectAllLoaded} aria-label={t("workspace.photos.select")}>
+            <button className="photo-select-all" type="button" onClick={selectAllLoaded} aria-label={t("workspace.photos.selectAll")} title={t("workspace.photos.selectAll")}>
               <Square aria-hidden="true" size={15} />
-              <span>{t("workspace.photos.select")}</span>
+              <span>{t("workspace.photos.selectAll")}</span>
             </button>
           ) : null}
         </div>
@@ -517,7 +483,7 @@ export function PhotoLibraryPanel({
         ) : loadError ? (
           <div className="workspace-empty-state" role="alert"><ImageOff aria-hidden="true" size={28} /><strong>{t("workspace.photos.loadFailed")}</strong><p>{loadError}</p><button className="secondary-button" type="button" onClick={() => void loadLibrary()}>{t("common.actions.refresh")}</button></div>
         ) : !settings ? (
-          <div className="workspace-empty-state photo-library-empty"><Images aria-hidden="true" size={34} /><strong>{t("workspace.photos.unconfiguredTitle")}</strong><p>{t("workspace.photos.unconfiguredBody")}</p><button className="primary-button" type="button" onClick={() => setPicker("library")}><FolderCog aria-hidden="true" size={16} />{t("workspace.photos.chooseLibrary")}</button></div>
+          <div className="workspace-empty-state photo-library-empty"><Images aria-hidden="true" size={34} /><strong>{t("workspace.photos.unconfiguredTitle")}</strong><p>{t("workspace.photos.unconfiguredBody")}</p></div>
         ) : photos.length === 0 ? (
           <div className="workspace-empty-state photo-library-empty" role="status">
             {statusBusy ? <LoaderCircle className="is-spinning" aria-hidden="true" size={30} /> : <ImageOff aria-hidden="true" size={30} />}
@@ -551,19 +517,6 @@ export function PhotoLibraryPanel({
           </div>
         )}
       </div>
-
-      {picker === "library" ? (
-        <StorageFilePickerDialog
-          pools={pools}
-          initialPoolId={initialPoolId}
-          locale={locale}
-          mode="directory"
-          directoryPurpose="photoLibrary"
-          onCancel={() => setPicker(null)}
-          onSelect={(selection) => void configureLibrary(selection)}
-          {...(onRequestCreateFolder ? { onRequestCreateFolder } : {})}
-        />
-      ) : null}
 
       {picker === "move" && settings ? (
         <StorageFilePickerDialog
