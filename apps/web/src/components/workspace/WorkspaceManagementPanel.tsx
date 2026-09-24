@@ -1266,6 +1266,13 @@ function DockerManagementPanel({
         <PanelHeaderActions label={t("workspace.management.actions.label")}>
           <ManagementDashboardControls dashboard={dashboard} disabled={loading} />
           <PanelHeaderAction
+            label={t("workspace.management.docker.daemon.openSettings")}
+            type="button"
+            onClick={() => setDaemonSettingsOpen(true)}
+          >
+            <Settings2 aria-hidden="true" size={17} />
+          </PanelHeaderAction>
+          <PanelHeaderAction
             label={t("common.actions.refresh")}
             type="button"
             onClick={refreshSummary}
