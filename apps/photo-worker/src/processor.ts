@@ -15,7 +15,7 @@ import {
   type SigmaDatabase
 } from "@sigmaos/db";
 import { isPathInside, resolveSafeExistingPath } from "@sigmaos/nas-tools";
-import type { PhotoJobRecord, SigmaConfig } from "@sigmaos/shared";
+import { PHOTO_DATA_DIRECTORY_NAME, type PhotoJobRecord, type SigmaConfig } from "@sigmaos/shared";
 import { MAX_PHOTO_BYTES, photoMimeType, processPhotoFile, removeStalePhotoDerivatives } from "./media.js";
 
 const LEASE_MS = 60_000;
@@ -139,7 +139,7 @@ export async function processPhotoJob(input: {
           } else {
             const photo = await processPhotoFile({
               sourcePath: safe.realPath,
-              cacheRoot: path.join(config.dataDir, "photos"),
+              cacheRoot: path.join(config.dataDir, PHOTO_DATA_DIRECTORY_NAME),
               mtimeMs
             });
             upsertPhotoAsset(db, {
@@ -199,7 +199,7 @@ export async function processPhotoJob(input: {
       removeStalePhotoAssets(db, { libraryUpdatedAt: settings.updatedAt, indexedBefore: scanStartedAt });
       removeStalePhotoUploadReservations(db, { libraryUpdatedAt: settings.updatedAt, createdBefore: scanStartedAt });
       await removeStalePhotoDerivatives({
-        cacheRoot: path.join(config.dataDir, "photos"),
+        cacheRoot: path.join(config.dataDir, PHOTO_DATA_DIRECTORY_NAME),
         activeKeys: listPhotoDerivativeKeys(db, settings.updatedAt),
         modifiedBefore: new Date(scanStartedAt)
       });

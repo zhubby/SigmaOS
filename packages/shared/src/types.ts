@@ -614,6 +614,13 @@ export interface PublicSystemInfo {
     localEndpointConfigured: boolean;
     dockerEnabled: boolean;
     dockerComposeRootCount: number;
+    photos: {
+      dataDir: string;
+      maxFileSizeBytes: number;
+      thumbnailSizePx: number;
+      previewMaxEdgePx: number;
+      supportedExtensions: string[];
+    };
     nasRoots: NasRootConfig[];
   };
 }

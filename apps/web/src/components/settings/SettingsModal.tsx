@@ -11,6 +11,7 @@ import {
   Folder,
   HardDrive,
   Image as ImageIcon,
+  Images,
   KeyRound,
   Lock,
   MemoryStick,
@@ -32,6 +33,8 @@ import type {
   PendingApproval,
   ModelProviderSettings,
   PiToolPolicySettings,
+  PhotoLibrarySettings,
+  PhotoLibraryStatus,
   SystemInfo,
   SystemInfoStorageVolume
 } from "../../api.js";
@@ -80,6 +83,8 @@ interface SettingsModalProps {
   saving: boolean;
   dockerSettings: DockerSettings | null;
   downloadSettings: DownloadSettings | null;
+  photoSettings: PhotoLibrarySettings | null;
+  photoStatus: PhotoLibraryStatus | null;
   settings: ModelProviderSettings | null;
   systemInfo: SystemInfo | null;
   systemInfoError: string | null;
@@ -124,6 +129,8 @@ export function SettingsModal({
   saving,
   dockerSettings,
   downloadSettings,
+  photoSettings,
+  photoStatus,
   settings,
   systemInfo,
   systemInfoError,
@@ -170,7 +177,14 @@ export function SettingsModal({
       )
     : SETTINGS_SECTIONS;
   const groups = [...new Set(visibleSections.map((section) => section.group))];
-  const currentState = settingsSectionState(currentSection, settings, dockerSettings, buildInfo, downloadSettings);
+  const currentState = settingsSectionState(
+    currentSection,
+    settings,
+    dockerSettings,
+    buildInfo,
+    downloadSettings,
+    photoStatus
+  );
   const providerOptions = PROVIDER_OPTIONS.map((provider) => ({
     value: provider,
     label: providerLabel(provider, t)
@@ -261,7 +275,7 @@ export function SettingsModal({
                     {settingsSectionIcon(section.id)}
                     <span>
                       <strong>{settingsSectionTitle(section, t)}</strong>
-                      <small>{settingsSectionLabel(section, settings, loading, t, dockerSettings, buildInfo, downloadSettings)}</small>
+                      <small>{settingsSectionLabel(section, settings, loading, t, dockerSettings, buildInfo, downloadSettings, photoSettings, photoStatus)}</small>
                     </span>
                   </button>
                 ))}
@@ -287,12 +301,17 @@ export function SettingsModal({
               <div className="settings-header-meta" aria-label={t("settings.status")}>
                 <span data-state={currentState}>
                   {settingsStateIcon(currentState)}
-                  {settingsSectionLabel(currentSection, settings, loading, t, dockerSettings, buildInfo, downloadSettings)}
+                  {settingsSectionLabel(currentSection, settings, loading, t, dockerSettings, buildInfo, downloadSettings, photoSettings, photoStatus)}
                 </span>
                 {activeSection === "version" ? (
                   <span>
                     <ShieldCheck aria-hidden="true" size={13} />
                     {t("settings.version.readOnly")}
+                  </span>
+                ) : activeSection === "photos" ? (
+                  <span>
+                    <ShieldCheck aria-hidden="true" size={13} />
+                    {t("settings.photos.readOnly")}
                   </span>
                 ) : (
                   <span>
@@ -316,6 +335,8 @@ export function SettingsModal({
               systemInfoError={systemInfoError}
               buildInfo={buildInfo}
               downloadSettings={downloadSettings}
+              photoSettings={photoSettings}
+              photoStatus={photoStatus}
               locale={resolvedLocale}
               onSectionChange={onSectionChange}
             />
@@ -551,6 +572,16 @@ export function SettingsModal({
             />
           ) : null}
 
+          {activeSection === "photos" ? (
+            <SettingsPhotosPage
+              settings={photoSettings}
+              status={photoStatus}
+              runtime={systemInfo?.sigma.photos ?? null}
+              loading={loading}
+              locale={resolvedLocale}
+            />
+          ) : null}
+
           {activeSection === "security" ? (
             <SettingsSecurityPage
               settings={settings}
@@ -585,6 +616,8 @@ function SettingsOverview({
   systemInfoError,
   buildInfo,
   downloadSettings,
+  photoSettings,
+  photoStatus,
   locale,
   onSectionChange
 }: {
@@ -595,6 +628,8 @@ function SettingsOverview({
   systemInfoError: string | null;
   buildInfo: BuildInfo | null;
   downloadSettings: DownloadSettings | null;
+  photoSettings: PhotoLibrarySettings | null;
+  photoStatus: PhotoLibraryStatus | null;
   locale: SupportedLocale;
   onSectionChange: (section: SettingsSectionId) => void;
 }) {
@@ -630,7 +665,7 @@ function SettingsOverview({
         },
         {
           value: formatLocaleNumber(
-            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings, dockerSettings, buildInfo, downloadSettings) === "ready")
+            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings, dockerSettings, buildInfo, downloadSettings, photoStatus) === "ready")
               .length,
             locale
           ),
@@ -638,7 +673,7 @@ function SettingsOverview({
         },
         {
           value: formatLocaleNumber(
-            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings, dockerSettings, buildInfo, downloadSettings) === "missing")
+            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings, dockerSettings, buildInfo, downloadSettings, photoStatus) === "missing")
               .length,
             locale
           ),
@@ -715,8 +750,8 @@ function SettingsOverview({
                 <strong>{settingsSectionTitle(section, t)}</strong>
                 <small>{settingsSectionDescription(section, t)}</small>
               </span>
-              <em data-state={settingsSectionState(section, settings, dockerSettings, buildInfo, downloadSettings)}>
-                {settingsSectionLabel(section, settings, loading, t, dockerSettings, buildInfo, downloadSettings)}
+              <em data-state={settingsSectionState(section, settings, dockerSettings, buildInfo, downloadSettings, photoStatus)}>
+                {settingsSectionLabel(section, settings, loading, t, dockerSettings, buildInfo, downloadSettings, photoSettings, photoStatus)}
               </em>
             </button>
           ))}
@@ -1480,6 +1515,155 @@ function SettingsFilesPage({
             <span data-state="ready">{t("common.states.ready")}</span>
           </header>
           <SettingsConfigRows items={previewRows} />
+        </section>
+      </div>
+    </div>
+  );
+}
+
+export function SettingsPhotosPage({
+  settings,
+  status,
+  runtime,
+  loading,
+  locale
+}: {
+  settings: PhotoLibrarySettings | null;
+  status: PhotoLibraryStatus | null;
+  runtime: SystemInfo["sigma"]["photos"] | null;
+  loading: boolean;
+  locale: SupportedLocale;
+}) {
+  const { t } = useTranslation();
+  const state: SettingsState = loading && !status
+    ? "loading"
+    : status?.state === "ready"
+      ? "ready"
+      : status?.state === "queued" || status?.state === "scanning"
+        ? "loading"
+        : "missing";
+  const stateLabel = loading && !status
+    ? t("common.states.loading")
+    : status
+      ? t(`settings.photos.states.${status.state}`)
+      : t("common.states.unavailable");
+  const unavailable = t("common.states.unavailable");
+  const libraryRows: SettingsInfoRow[] = [
+    {
+      label: t("settings.photos.libraryPath"),
+      value: settings?.path ?? t("settings.photos.notConfigured"),
+      mono: Boolean(settings)
+    },
+    {
+      label: t("settings.photos.rootId"),
+      value: settings?.rootId ?? unavailable
+    },
+    {
+      label: t("settings.photos.storagePoolId"),
+      value: settings?.storagePoolId ?? unavailable
+    },
+    {
+      label: t("settings.photos.libraryUpdatedAt"),
+      value: settings ? formatDate(settings.updatedAt, locale) : unavailable
+    }
+  ];
+  const scanRows: SettingsInfoRow[] = [
+    {
+      label: t("settings.photos.scanState"),
+      value: stateLabel,
+      ...(status?.error ? { detail: status.error } : {})
+    },
+    {
+      label: t("settings.photos.currentPath"),
+      value: status?.currentPath ?? t("common.dash"),
+      mono: Boolean(status?.currentPath)
+    },
+    {
+      label: t("settings.photos.statusUpdatedAt"),
+      value: status?.updatedAt ? formatDate(status.updatedAt, locale) : t("common.dash")
+    }
+  ];
+  const runtimeRows: SettingsInfoRow[] = [
+    {
+      label: t("settings.photos.dataDir"),
+      value: runtime?.dataDir ?? unavailable,
+      mono: Boolean(runtime)
+    },
+    {
+      label: t("settings.photos.maxFileSize"),
+      value: runtime ? formatBytes(runtime.maxFileSizeBytes, locale) : unavailable
+    },
+    {
+      label: t("settings.photos.thumbnailSize"),
+      value: runtime
+        ? t("settings.photos.squarePixels", { value: formatLocaleNumber(runtime.thumbnailSizePx, locale) })
+        : unavailable
+    },
+    {
+      label: t("settings.photos.previewSize"),
+      value: runtime
+        ? t("settings.photos.maxEdgePixels", { value: formatLocaleNumber(runtime.previewMaxEdgePx, locale) })
+        : unavailable
+    },
+    {
+      label: t("settings.photos.supportedFormats"),
+      value: runtime
+        ? runtime.supportedExtensions.map((extension) => extension.slice(1).toUpperCase()).join(", ")
+        : unavailable
+    }
+  ];
+
+  return (
+    <div className="settings-content-body">
+      <div className="settings-page-grid">
+        <section className="settings-section-card">
+          <header>
+            <div>
+              <h3>{t("settings.photos.libraryTitle")}</h3>
+              <p>{t("settings.photos.libraryDescription")}</p>
+            </div>
+            <span data-state={settings ? "ready" : state}>{settings ? t("common.states.configured") : stateLabel}</span>
+          </header>
+          <SettingsInfoList rows={libraryRows} />
+        </section>
+
+        <section className="settings-section-card">
+          <header>
+            <div>
+              <h3>{t("settings.photos.scanTitle")}</h3>
+              <p>{t("settings.photos.scanDescription")}</p>
+            </div>
+            <span data-state={state}>{stateLabel}</span>
+          </header>
+          <div className="settings-metric-grid settings-system-metric-grid">
+            {[
+              { label: t("settings.photos.assets"), value: status?.total },
+              { label: t("settings.photos.scanned"), value: status?.scanned },
+              { label: t("settings.photos.processed"), value: status?.processed },
+              { label: t("settings.photos.failed"), value: status?.failed }
+            ].map((metric) => (
+              <article key={metric.label}>
+                <strong>
+                  {metric.value === undefined ? t("common.dash") : formatLocaleNumber(metric.value, locale)}
+                </strong>
+                <span>{metric.label}</span>
+              </article>
+            ))}
+          </div>
+          <SettingsInfoList rows={scanRows} />
+        </section>
+
+        <section className="settings-section-card">
+          <header>
+            <div>
+              <h3>{t("settings.photos.processingTitle")}</h3>
+              <p>{t("settings.photos.processingDescription")}</p>
+            </div>
+            <span data-state={runtime ? "ready" : loading ? "loading" : "missing"}>
+              {runtime ? t("settings.photos.readOnly") : loading ? t("common.states.loading") : unavailable}
+            </span>
+          </header>
+          <SettingsInfoList rows={runtimeRows} />
         </section>
       </div>
     </div>
@@ -2476,6 +2660,8 @@ function settingsSectionIcon(section: SettingsSectionId) {
       return <Server aria-hidden="true" size={16} />;
     case "files":
       return <Folder aria-hidden="true" size={16} />;
+    case "photos":
+      return <Images aria-hidden="true" size={16} />;
     case "downloads":
       return <Download aria-hidden="true" size={16} />;
     case "security":

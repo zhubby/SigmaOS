@@ -7,10 +7,15 @@ import path from "node:path";
 import { promisify } from "node:util";
 import * as exifr from "exifr";
 import sharp from "sharp";
-import type { PhotoTakenAtSource } from "@sigmaos/shared";
+import {
+  PHOTO_MAX_FILE_SIZE_BYTES,
+  PHOTO_PREVIEW_MAX_EDGE_PX,
+  PHOTO_THUMBNAIL_SIZE_PX,
+  type PhotoTakenAtSource
+} from "@sigmaos/shared";
 
 const execFileAsync = promisify(execFile);
-export const MAX_PHOTO_BYTES = 512 * 1024 * 1024;
+export const MAX_PHOTO_BYTES = PHOTO_MAX_FILE_SIZE_BYTES;
 
 const PHOTO_MIME_TYPES: Record<string, string> = {
   ".jpg": "image/jpeg",
@@ -106,14 +111,21 @@ export async function processPhotoFile(input: {
     if (!(await exists(thumbnailPath))) {
       await sharp(imagePath, { animated: mimeType === "image/gif", failOn: "warning", limitInputPixels: true })
         .rotate()
-        .resize(512, 512, { fit: "cover", position: "attention", withoutEnlargement: true })
+        .resize(PHOTO_THUMBNAIL_SIZE_PX, PHOTO_THUMBNAIL_SIZE_PX, {
+          fit: "cover",
+          position: "attention",
+          withoutEnlargement: true
+        })
         .webp({ quality: 80 })
         .toFile(thumbnailPath);
     }
     if (!(await exists(previewPath))) {
       await sharp(imagePath, { animated: mimeType === "image/gif", failOn: "warning", limitInputPixels: true })
         .rotate()
-        .resize(2048, 2048, { fit: "inside", withoutEnlargement: true })
+        .resize(PHOTO_PREVIEW_MAX_EDGE_PX, PHOTO_PREVIEW_MAX_EDGE_PX, {
+          fit: "inside",
+          withoutEnlargement: true
+        })
         .webp({ quality: 85 })
         .toFile(previewPath);
     }

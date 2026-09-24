@@ -1522,6 +1522,10 @@ export const en = {
         title: "Files & Preview",
         description: "Preview limits, inline media behavior, and editor defaults."
       },
+      photos: {
+        title: "Photos",
+        description: "Photo library location, indexing state, and processing limits."
+      },
       security: {
         title: "Security",
         description: "Access control, secret handling, and operation safety."
@@ -1846,6 +1850,42 @@ export const en = {
       metadataOnly: "Metadata only",
       megabytes: "MB",
       pixels: "px"
+    },
+    photos: {
+      readOnly: "Read-only runtime",
+      libraryTitle: "Photo Library",
+      libraryDescription: "Configured NAS location used as the single photo library.",
+      libraryPath: "Library path",
+      rootId: "Root ID",
+      storagePoolId: "Storage pool ID",
+      libraryUpdatedAt: "Configuration updated",
+      notConfigured: "Not configured",
+      scanTitle: "Index Status",
+      scanDescription: "Current library availability and the latest scan progress.",
+      scanState: "State",
+      currentPath: "Current path",
+      statusUpdatedAt: "Status updated",
+      assets: "Assets",
+      scanned: "Scanned",
+      processed: "Processed",
+      failed: "Failed",
+      processingTitle: "Processing Configuration",
+      processingDescription: "Server-managed derivative storage, formats, and image limits.",
+      dataDir: "Photo data directory",
+      maxFileSize: "Max file size",
+      thumbnailSize: "Thumbnail size",
+      previewSize: "Preview size",
+      supportedFormats: "Supported formats",
+      squarePixels: "{{value}} x {{value}} px",
+      maxEdgePixels: "{{value}} px max edge",
+      states: {
+        unconfigured: "Not configured",
+        queued: "Scan queued",
+        scanning: "Scanning",
+        ready: "Ready",
+        degraded: "Degraded",
+        offline: "Offline"
+      }
     },
     security: {
       secretsTitle: "Secrets",
@@ -3491,6 +3531,10 @@ export const zhCN = {
         title: "文件与预览",
         description: "预览限制、内联媒体行为和编辑器默认值。"
       },
+      photos: {
+        title: "照片",
+        description: "照片库位置、索引状态和处理限制。"
+      },
       security: {
         title: "安全",
         description: "访问控制、密钥处理和操作安全。"
@@ -3815,6 +3859,42 @@ export const zhCN = {
       metadataOnly: "仅元数据",
       megabytes: "MB",
       pixels: "px"
+    },
+    photos: {
+      readOnly: "只读运行配置",
+      libraryTitle: "照片库",
+      libraryDescription: "用作唯一照片库的 NAS 位置。",
+      libraryPath: "照片库目录",
+      rootId: "Root ID",
+      storagePoolId: "存储池 ID",
+      libraryUpdatedAt: "配置更新时间",
+      notConfigured: "未配置",
+      scanTitle: "索引状态",
+      scanDescription: "当前照片库可用性和最近一次扫描进度。",
+      scanState: "状态",
+      currentPath: "当前路径",
+      statusUpdatedAt: "状态更新时间",
+      assets: "照片数",
+      scanned: "已扫描",
+      processed: "已处理",
+      failed: "失败",
+      processingTitle: "处理配置",
+      processingDescription: "由服务端管理的派生文件存储、格式和图像限制。",
+      dataDir: "Photo 数据目录",
+      maxFileSize: "单文件上限",
+      thumbnailSize: "缩略图尺寸",
+      previewSize: "预览图尺寸",
+      supportedFormats: "支持格式",
+      squarePixels: "{{value}} x {{value}} px",
+      maxEdgePixels: "最长边 {{value}} px",
+      states: {
+        unconfigured: "未配置",
+        queued: "扫描已排队",
+        scanning: "扫描中",
+        ready: "就绪",
+        degraded: "部分异常",
+        offline: "离线"
+      }
     },
     security: {
       secretsTitle: "密钥",

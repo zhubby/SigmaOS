@@ -23,7 +23,14 @@ import {
   savePhotoLibrarySettings
 } from "@sigmaos/db";
 import { isPathInside } from "@sigmaos/nas-tools";
-import type { FileOperationProposal, PhotoAssetRecord, PhotoTimelinePage } from "@sigmaos/shared";
+import {
+  PHOTO_DATA_DIRECTORY_NAME,
+  PHOTO_MAX_FILE_SIZE_BYTES,
+  PHOTO_SUPPORTED_EXTENSIONS,
+  type FileOperationProposal,
+  type PhotoAssetRecord,
+  type PhotoTimelinePage
+} from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
 import {
   resolveScopedExistingPath,
@@ -32,10 +39,9 @@ import {
   StorageScopeError
 } from "../lib/storage-scope.js";
 
-const MAX_PHOTO_BYTES = 512 * 1024 * 1024;
 const MAX_BATCH_SIZE = 100;
 const EXPORT_TTL_MS = 5 * 60 * 1_000;
-const SUPPORTED_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"]);
+const SUPPORTED_EXTENSIONS = new Set<string>(PHOTO_SUPPORTED_EXTENSIONS);
 interface PhotoExport {
   expiresAt: number;
   assetIds: string[];
@@ -151,7 +157,7 @@ export function registerPhotoRoutes(server: FastifyInstance, context: ApiRouteCo
     Querystring: { name?: string; directory?: string };
   }>(
     "/api/photos/upload",
-    { bodyLimit: MAX_PHOTO_BYTES },
+    { bodyLimit: PHOTO_MAX_FILE_SIZE_BYTES },
     async (request, reply) => {
       const settings = getPhotoLibrarySettings(db);
       if (!settings) {
@@ -190,7 +196,7 @@ export function registerPhotoRoutes(server: FastifyInstance, context: ApiRouteCo
       const limiter = new Transform({
         transform(chunk: Buffer, _encoding, callback) {
           written += chunk.length;
-          if (written > MAX_PHOTO_BYTES) {
+          if (written > PHOTO_MAX_FILE_SIZE_BYTES) {
             callback(Object.assign(new Error("Photo exceeds the 512 MiB upload limit"), { statusCode: 413, expose: true }));
             return;
           }
@@ -460,7 +466,7 @@ async function sendDerivative(
     reply.status(404).send({ error: "Photo derivative is not available" });
     return;
   }
-  const cacheRoot = path.join(context.config.dataDir, "photos");
+  const cacheRoot = path.join(context.config.dataDir, PHOTO_DATA_DIRECTORY_NAME);
   const candidatePath = path.resolve(cacheRoot, key);
   if (!isPathInside(cacheRoot, candidatePath)) {
     reply.status(404).send({ error: "Photo derivative is not available" });

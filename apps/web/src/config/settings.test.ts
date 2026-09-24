@@ -72,4 +72,37 @@ describe("settings helpers", () => {
     expect(settingsSectionState(section, null, null, null)).toBe("missing");
     expect(settingsSectionLabel(section, null, false, t, null, null)).toBe("common.states.unavailable");
   });
+
+  it("reflects photo library scan state in the settings navigation", () => {
+    const section: SettingsSection = {
+      id: "photos",
+      group: "workspace"
+    };
+    const photoSettings = {
+      rootId: "nas",
+      storagePoolId: "pool-a",
+      path: "Photos",
+      updatedAt: "2026-09-24T00:00:00.000Z"
+    };
+    const photoStatus = {
+      state: "scanning" as const,
+      total: 24,
+      failed: 0,
+      scanned: 30,
+      processed: 24,
+      currentPath: "Photos/2026",
+      error: null,
+      updatedAt: "2026-09-24T00:01:00.000Z"
+    };
+    const t = ((key: string) => key) as TFunction<"translation">;
+
+    expect(settingsSectionState(section, null, null, null, null, photoStatus)).toBe("loading");
+    expect(settingsSectionLabel(section, null, false, t, null, null, null, photoSettings, photoStatus)).toBe(
+      "settings.photos.states.scanning"
+    );
+    expect(settingsSectionState(section, null, null, null, null, {
+      ...photoStatus,
+      state: "unconfigured"
+    })).toBe("missing");
+  });
 });

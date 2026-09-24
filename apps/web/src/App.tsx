@@ -28,6 +28,8 @@ import {
   getModelProviderSettings,
   getNotifications,
   getPiToolPolicySettings,
+  getPhotoLibrarySettings,
+  getPhotoLibraryStatus,
   proposeFileOperation,
   rejectRequest,
   markAllNotificationsRead,
@@ -57,6 +59,8 @@ import {
   type NasRoot,
   type OperationNotification,
   type PendingApproval,
+  type PhotoLibrarySettings,
+  type PhotoLibraryStatus,
   type PiToolPolicySettings,
   type Session,
   type SessionSummary,
@@ -205,6 +209,8 @@ export function App() {
   const [toolPolicySettings, setToolPolicySettings] = useState<PiToolPolicySettings | null>(null);
   const [dockerSettings, setDockerSettings] = useState<DockerSettings | null>(null);
   const [downloadSettings, setDownloadSettings] = useState<DownloadSettings | null>(null);
+  const [photoSettings, setPhotoSettings] = useState<PhotoLibrarySettings | null>(null);
+  const [photoStatus, setPhotoStatus] = useState<PhotoLibraryStatus | null>(null);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [systemInfoError, setSystemInfoError] = useState<string | null>(null);
   const [buildInfo, setBuildInfo] = useState<BuildInfo | null>(null);
@@ -812,11 +818,22 @@ export function App() {
     setSystemInfoError(null);
     setBuildInfoError(null);
     try {
-      const [settingsResult, toolPolicyResult, dockerSettingsResult, downloadSettingsResult, systemInfoResult, buildInfoResult] = await Promise.allSettled([
+      const [
+        settingsResult,
+        toolPolicyResult,
+        dockerSettingsResult,
+        downloadSettingsResult,
+        photoSettingsResult,
+        photoStatusResult,
+        systemInfoResult,
+        buildInfoResult
+      ] = await Promise.allSettled([
         getModelProviderSettings(),
         getPiToolPolicySettings(),
         getDockerSettings(),
         getDownloadSettings(),
+        getPhotoLibrarySettings(),
+        getPhotoLibraryStatus(),
         getSystemInfo(),
         getBuildInfo()
       ]);
@@ -848,6 +865,20 @@ export function App() {
       } else {
         setDownloadSettings(null);
         errors.push(toErrorMessage(downloadSettingsResult.reason));
+      }
+
+      if (photoSettingsResult.status === "fulfilled") {
+        setPhotoSettings(photoSettingsResult.value);
+      } else {
+        setPhotoSettings(null);
+        errors.push(toErrorMessage(photoSettingsResult.reason));
+      }
+
+      if (photoStatusResult.status === "fulfilled") {
+        setPhotoStatus(photoStatusResult.value);
+      } else {
+        setPhotoStatus(null);
+        errors.push(toErrorMessage(photoStatusResult.reason));
       }
 
       if (systemInfoResult.status === "fulfilled") {
@@ -2198,6 +2229,8 @@ export function App() {
           settings={modelSettings}
           dockerSettings={dockerSettings}
           downloadSettings={downloadSettings}
+          photoSettings={photoSettings}
+          photoStatus={photoStatus}
           dockerForm={dockerSettingsForm}
           systemInfo={systemInfo}
           systemInfoError={systemInfoError}

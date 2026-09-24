@@ -868,6 +868,13 @@ describe("API server", () => {
           sigma: {
             dataDir: tempDir,
             databasePath: path.join(tempDir, "sigmaos.sqlite"),
+            photos: {
+              dataDir: path.join(tempDir, "photos"),
+              maxFileSizeBytes: 512 * 1024 * 1024,
+              thumbnailSizePx: 512,
+              previewMaxEdgePx: 2048,
+              supportedExtensions: [".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"]
+            },
             nasRoots: [{ id: "local", name: "Local", path: rootDir }]
           }
         }
