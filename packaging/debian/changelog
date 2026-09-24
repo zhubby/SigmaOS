@@ -1,3 +1,9 @@
+sigmaos (0.8.4) unstable; urgency=medium
+
+  * Refine Photo and download UI, and prune obsolete CM5 deployment artifacts after upgrades.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Thu, 24 Sep 2026 03:59:59 +0000
+
 sigmaos (0.8.3) unstable; urgency=medium
 
   * Expose Photo library paths, indexing status, and processing limits in system settings.
