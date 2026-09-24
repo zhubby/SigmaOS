@@ -67,7 +67,7 @@ import {
   ManagementDashboardGrid,
   useManagementDashboard
 } from "./ManagementDashboard.js";
-import { PanelHeaderAction, PanelHeaderActions, PanelHeaderStatus } from "./PanelHeader.js";
+import { PanelHeader, PanelHeaderAction, PanelHeaderActions } from "./PanelHeader.js";
 import { SystemWifiManagement } from "./SystemWifiManagement.js";
 
 type StatusTone = "ready" | "warning" | "offline" | "neutral";
@@ -238,23 +238,11 @@ export function SystemNetworkManagementPanel({
 
   return (
     <section className="workspace-management" aria-label={t("workspace.management.network.title")}>
-      <header className="management-header">
-        <div className="management-title-block">
-          <span className="management-title-icon">
-            <Network aria-hidden="true" size={20} />
-          </span>
-          <div className="management-title-copy">
-            <span className="eyebrow">{t("workspace.management.network.eyebrow")}</span>
-            <h2>{t("workspace.management.network.title")}</h2>
-            <p>{t("workspace.management.network.description")}</p>
-            <PanelHeaderStatus
-              label={systemStatusLabel(status, loading, error, translate)}
-              tone={loading ? "neutral" : systemStatusTone(status, false, error)}
-              busy={loading}
-            />
-          </div>
-        </div>
-        <PanelHeaderActions label={t("workspace.management.actions.label")}>
+      <PanelHeader
+        icon={<Network aria-hidden="true" size={20} />}
+        title={t("workspace.management.network.title")}
+        subtitle={t("workspace.management.network.description")}
+        actions={<PanelHeaderActions label={t("workspace.management.actions.label")}>
           <ManagementDashboardControls dashboard={dashboard} disabled={loading} />
           <PanelHeaderAction
             label={t("common.actions.refresh")}
@@ -265,8 +253,8 @@ export function SystemNetworkManagementPanel({
           >
             {loading ? <LoaderCircle className="is-spinning" aria-hidden="true" size={16} /> : <RefreshCw aria-hidden="true" size={17} />}
           </PanelHeaderAction>
-        </PanelHeaderActions>
-      </header>
+        </PanelHeaderActions>}
+      />
 
       <div className="management-body">
         {loading ? <ManagementSkeletonBody tableColumns={8} tableRows={4} /> : (
@@ -625,23 +613,11 @@ export function SystemStorageManagementPanel({
 
   return (
     <section className="workspace-management" aria-label={t("workspace.management.storage.title")}>
-      <header className="management-header">
-        <div className="management-title-block">
-          <span className="management-title-icon">
-            <Database aria-hidden="true" size={20} />
-          </span>
-          <div className="management-title-copy">
-            <span className="eyebrow">{t("workspace.management.storage.eyebrow")}</span>
-            <h2>{t("workspace.management.storage.title")}</h2>
-            <p>{t("workspace.management.storage.description")}</p>
-            <PanelHeaderStatus
-              label={systemStatusLabel(status, loading, error, translate)}
-              tone={loading ? "neutral" : systemStatusTone(status, false, error)}
-              busy={loading}
-            />
-          </div>
-        </div>
-        <PanelHeaderActions label={t("workspace.management.actions.label")}>
+      <PanelHeader
+        icon={<Database aria-hidden="true" size={20} />}
+        title={t("workspace.management.storage.title")}
+        subtitle={t("workspace.management.storage.description")}
+        actions={<PanelHeaderActions label={t("workspace.management.actions.label")}>
           <ManagementDashboardControls dashboard={dashboard} disabled={loading} />
           <PanelHeaderAction
             label={translate("workspace.management.actions.createPool")}
@@ -660,8 +636,8 @@ export function SystemStorageManagementPanel({
           >
             {loading ? <LoaderCircle className="is-spinning" aria-hidden="true" size={16} /> : <RefreshCw aria-hidden="true" size={17} />}
           </PanelHeaderAction>
-        </PanelHeaderActions>
-      </header>
+        </PanelHeaderActions>}
+      />
 
       <div className="management-body">
         {loading ? <ManagementSkeletonBody tableColumns={7} tableRows={4} variant="storage" /> : (

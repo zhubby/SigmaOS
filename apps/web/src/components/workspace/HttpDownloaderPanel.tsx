@@ -10,7 +10,6 @@ import {
   Plus,
   RotateCw,
   Trash2,
-  WifiOff,
   X
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -23,7 +22,7 @@ import {
 } from "../../api.js";
 import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
-import { PanelHeaderAction, PanelHeaderActions } from "./PanelHeader.js";
+import { PanelHeader, PanelHeaderAction, PanelHeaderActions } from "./PanelHeader.js";
 import { StorageFilePickerDialog, type StorageFilePickerPool, type StorageFileSelection } from "./StorageFilePickerDialog.js";
 
 export type HttpDownloaderPool = StorageFilePickerPool;
@@ -64,7 +63,6 @@ export function HttpDownloaderPanel({
   const [tasks, setTasks] = useState<DownloadTask[]>([]);
   const [filter, setFilter] = useState<DownloadFilter>("all");
   const [loading, setLoading] = useState(true);
-  const [connected, setConnected] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [url, setUrl] = useState("");
@@ -86,7 +84,6 @@ export function HttpDownloaderPanel({
       })
       .catch((error: unknown) => {
         if (!active) return;
-        setConnected(false);
         onNotifyError(errorMessage(error));
       })
       .finally(() => {
@@ -105,13 +102,11 @@ export function HttpDownloaderPanel({
         if (Array.isArray(snapshot.tasks)) {
           setTasks(snapshot.tasks);
         }
-        setConnected(true);
       } catch {
-        setConnected(false);
+        // Keep the last valid task snapshot when an event cannot be decoded.
       }
     };
     source.addEventListener("snapshot", handleSnapshot);
-    source.onerror = () => setConnected(false);
     return () => {
       source.removeEventListener("snapshot", handleSnapshot);
       source.close();
@@ -264,16 +259,12 @@ export function HttpDownloaderPanel({
 
   return (
     <section className="workspace-management http-downloader-panel" aria-label={t("workspace.downloads.title")}>
-      <header className="management-header downloads-header">
-        <div className="management-title-block">
-          <span className="management-title-icon"><Download aria-hidden="true" size={20} /></span>
-          <div className="management-title-copy">
-            <span className="eyebrow">{t("workspace.downloads.eyebrow")}</span>
-            <h2>{t("workspace.downloads.title")}</h2>
-            <p>{t("workspace.downloads.description")}</p>
-          </div>
-        </div>
-        <PanelHeaderActions label={t("workspace.management.actions.label")} className="downloads-header-actions">
+      <PanelHeader
+        className="downloads-header"
+        icon={<Download aria-hidden="true" size={20} />}
+        title={t("workspace.downloads.title")}
+        subtitle={t("workspace.downloads.description")}
+        actions={<PanelHeaderActions label={t("workspace.management.actions.label")} className="downloads-header-actions">
           <PanelHeaderAction
             label={t(storagePoolsLoading ? "workspace.downloads.loadingStoragePools" : "workspace.downloads.newDownload")}
             tooltip={storagePoolsLoading
@@ -292,8 +283,8 @@ export function HttpDownloaderPanel({
               ? <LoaderCircle className="is-spinning" aria-hidden="true" size={16} />
               : <Plus aria-hidden="true" size={17} />}
           </PanelHeaderAction>
-        </PanelHeaderActions>
-      </header>
+        </PanelHeaderActions>}
+      />
 
       <div className="downloads-toolbar">
         <div className="downloads-filters" role="tablist" aria-label={t("workspace.downloads.filters")}>
@@ -325,10 +316,6 @@ export function HttpDownloaderPanel({
               <span>{t("workspace.downloads.speed")}</span>
             </div>
           </div>
-          <span className={`downloads-connection${connected ? "" : " is-disconnected"}`}>
-            {connected ? <span className="downloads-connection-dot" aria-hidden="true" /> : <WifiOff aria-hidden="true" size={14} />}
-            {connected ? t("workspace.downloads.connected") : t("workspace.downloads.disconnected")}
-          </span>
         </div>
       </div>
 

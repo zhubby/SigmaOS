@@ -37,7 +37,7 @@ import {
 import type { ResolvedTheme } from "../../lib/theme-settings.js";
 import { applyTerminalOptions, terminalOptions } from "../../lib/terminal-theme.js";
 import { SkeletonBlock } from "./ManagementSkeleton.js";
-import { PanelHeaderAction, PanelHeaderActions, PanelHeaderStatus } from "./PanelHeader.js";
+import { PanelHeader, PanelHeaderAction, PanelHeaderActions } from "./PanelHeader.js";
 
 type TerminalStatus = "connecting" | "connected" | "disconnected" | "error" | "exited" | "takenOver";
 
@@ -333,26 +333,12 @@ export function LocalTerminalPanel({
 
   return (
     <section className="workspace-terminal-panel" hidden={!active} aria-hidden={!active} aria-label={t("workspace.terminal.title")}>
-      <header className="management-header workspace-terminal-overview">
-        <div className="management-title-block">
-          <span className="management-title-icon">
-            <TerminalSquare aria-hidden="true" size={20} />
-          </span>
-          <div className="management-title-copy">
-            <span className="eyebrow">{t("workspace.terminal.eyebrow")}</span>
-            <h2>{t("workspace.terminal.title")}</h2>
-            <p>{t("workspace.terminal.description")}</p>
-            {activeViewState ? (
-              <PanelHeaderStatus
-                label={String(terminalStatusLabel(activeViewState.status, t))}
-                tone={terminalStatusTone(activeViewState.status)}
-                busy={activeViewState.status === "connecting"}
-                title={activeViewState.diagnostic ?? String(terminalStatusLabel(activeViewState.status, t))}
-              />
-            ) : null}
-          </div>
-        </div>
-        <PanelHeaderActions label={t("workspace.terminal.actionsLabel")} className="workspace-terminal-actions">
+      <PanelHeader
+        className="workspace-terminal-overview"
+        icon={<TerminalSquare aria-hidden="true" size={20} />}
+        title={t("workspace.terminal.title")}
+        subtitle={t("workspace.terminal.description")}
+        actions={<PanelHeaderActions label={t("workspace.terminal.actionsLabel")} className="workspace-terminal-actions">
           <PanelHeaderAction
             label={t("workspace.terminal.rename")}
             type="button"
@@ -381,8 +367,8 @@ export function LocalTerminalPanel({
           >
             <X aria-hidden="true" size={17} />
           </PanelHeaderAction>
-        </PanelHeaderActions>
-      </header>
+        </PanelHeaderActions>}
+      />
 
       <div className="workspace-terminal-header">
         {tabState ? (
@@ -878,23 +864,6 @@ function parseTerminalMessage(raw: unknown): TerminalMessage | null {
   } catch {
     return null;
   }
-}
-
-function terminalStatusLabel(status: TerminalStatus, t: (key: string) => unknown): string {
-  return String(t(`workspace.terminal.status.${status}`));
-}
-
-function terminalStatusTone(status: TerminalStatus): "ready" | "warning" | "offline" | "neutral" {
-  if (status === "connected") {
-    return "ready";
-  }
-  if (status === "error" || status === "disconnected" || status === "takenOver") {
-    return "offline";
-  }
-  if (status === "connecting") {
-    return "warning";
-  }
-  return "neutral";
 }
 
 function isTerminalNavigationKey(key: string): key is TerminalTabNavigationKey {

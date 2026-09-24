@@ -48,7 +48,7 @@ import {
   useManagementDashboard
 } from "./ManagementDashboard.js";
 import { ManagementSkeletonBody } from "./ManagementSkeleton.js";
-import { PanelHeaderAction, PanelHeaderActions, PanelHeaderStatus } from "./PanelHeader.js";
+import { PanelHeader, PanelHeaderAction, PanelHeaderActions } from "./PanelHeader.js";
 
 type StatusTone = "ready" | "warning" | "offline" | "neutral";
 type Translate = (key: string, options?: Record<string, unknown>) => string;
@@ -345,23 +345,11 @@ export function ShareManagementPanel({
 
   return (
     <section className="workspace-management workspace-share-management" aria-label={t("workspace.management.shares.title")}>
-      <header className="management-header">
-        <div className="management-title-block">
-          <span className="management-title-icon">
-            <Share2 aria-hidden="true" size={20} />
-          </span>
-          <div className="management-title-copy">
-            <span className="eyebrow">{t("workspace.management.shares.eyebrow")}</span>
-            <h2>{t("workspace.management.shares.title")}</h2>
-            <p>{t("workspace.management.shares.description")}</p>
-            <PanelHeaderStatus
-              label={shareStatusLabel(summary, loading, error, t)}
-              tone={statusTone}
-              busy={loading || refreshing}
-            />
-          </div>
-        </div>
-        <PanelHeaderActions label={t("workspace.management.actions.label")}>
+      <PanelHeader
+        icon={<Share2 aria-hidden="true" size={20} />}
+        title={t("workspace.management.shares.title")}
+        subtitle={t("workspace.management.shares.description")}
+        actions={<PanelHeaderActions label={t("workspace.management.actions.label")}>
           <ManagementDashboardControls dashboard={dashboard} disabled={loading || submitting} />
           <PanelHeaderAction
             label={t("common.actions.refresh")}
@@ -381,8 +369,8 @@ export function ShareManagementPanel({
           >
             {submitting ? <LoaderCircle className="is-spinning" aria-hidden="true" size={16} /> : <Share2 aria-hidden="true" size={17} />}
           </PanelHeaderAction>
-        </PanelHeaderActions>
-      </header>
+        </PanelHeaderActions>}
+      />
 
       <form id="share-management-form" className="management-body share-management-body" onSubmit={submitProposal}>
         {loading ? <ManagementSkeletonBody tableColumns={5} tableRows={3} /> : (

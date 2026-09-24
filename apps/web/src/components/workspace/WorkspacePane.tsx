@@ -54,7 +54,7 @@ import { LocalTerminalPanel } from "./LocalTerminalPanel.js";
 import { HttpDownloaderPanel } from "./HttpDownloaderPanel.js";
 import { PhotoLibraryPanel } from "./PhotoLibraryPanel.js";
 import { FileListSkeleton, SkeletonBlock } from "./ManagementSkeleton.js";
-import { PanelHeaderAction, PanelHeaderActions } from "./PanelHeader.js";
+import { PanelHeader, PanelHeaderAction, PanelHeaderActions } from "./PanelHeader.js";
 import type { CodeFontSettings } from "../../lib/editor-settings.js";
 import type { ResolvedTheme } from "../../lib/theme-settings.js";
 
@@ -256,7 +256,6 @@ export function WorkspacePane({
   storageSummaryLoading,
   selectedStoragePoolId,
   currentPath,
-  displayPath,
   breadcrumbs,
   entries,
   fileListingLoading,
@@ -321,7 +320,6 @@ export function WorkspacePane({
   storageSummaryLoading: boolean;
   selectedStoragePoolId: string;
   currentPath: string;
-  displayPath: string;
   breadcrumbs: string[];
   entries: FileEntry[];
   fileListingLoading: boolean;
@@ -406,11 +404,6 @@ export function WorkspacePane({
   const hasStoragePool = Boolean(selectedStoragePool);
   const storagePoolPathDepth = selectedStoragePool?.path.split("/").filter(Boolean).length ?? 0;
   const visibleBreadcrumbs = selectedStoragePool ? breadcrumbs.slice(storagePoolPathDepth) : breadcrumbs;
-  const displayTitle = !selectedStoragePool
-    ? t("workspace.selectStoragePoolTitle")
-    : displayPath === selectedStoragePool.path
-      ? selectedStoragePool.name
-      : folderTitle(displayPath, selectedStoragePool.name);
   const sortedEntries = useMemo(() => sortEntries(entries, fileSort), [entries, fileSort]);
   const gitChangeCount = gitStatus
     ? gitStatus.summary.staged + gitStatus.summary.modified + gitStatus.summary.untracked + gitStatus.summary.conflicted
@@ -804,21 +797,12 @@ export function WorkspacePane({
         <div className="workspace-stage" data-panel={activePanel}>
           {activePanel === "files" ? (
             <>
-              <header
-                className={`management-header files-header${storagePools.length > 0 ? " has-storage-pool-switcher" : ""}`}
-              >
-                <div className="management-title-block files-title-block">
-                  <span className="management-title-icon">
-                    <Files aria-hidden="true" size={20} />
-                  </span>
-                  <div className="management-title-copy">
-                    <span className="eyebrow">{t("workspace.filesEyebrow")}</span>
-                    <h2>{fileListingLoading ? <SkeletonBlock width="42%" /> : displayTitle}</h2>
-                    <p>{fileListingLoading ? <SkeletonBlock width="68%" /> : t("workspace.filesManagementDescription")}</p>
-                  </div>
-                </div>
-
-                <PanelHeaderActions label={t("workspace.management.actions.label")} className="files-header-actions">
+              <PanelHeader
+                className="files-header"
+                icon={<Files aria-hidden="true" size={20} />}
+                title={t("workspace.files")}
+                subtitle={t("workspace.filesManagementDescription")}
+                actions={<PanelHeaderActions label={t("workspace.management.actions.label")} className="files-header-actions">
                   <PanelHeaderAction
                     className="files-header-button"
                     label={t("common.actions.up")}
@@ -873,11 +857,12 @@ export function WorkspacePane({
                     onCancelUploadBatch={onCancelUploadBatch}
                     onRollback={onRollback}
                   />
-                </PanelHeaderActions>
+                </PanelHeaderActions>}
+              />
 
-                <div
-                  className={`files-navigation-bar${storagePools.length > 0 ? " has-storage-pool-switcher" : ""}`}
-                >
+              <div
+                className={`files-navigation-bar${storagePools.length > 0 ? " has-storage-pool-switcher" : ""}`}
+              >
                   <div className="root-control storage-pool-control">
                     <label htmlFor="storage-pool-switcher">{t("workspace.storagePoolLabel")}</label>
                     {fileListingLoading ? (
@@ -901,8 +886,7 @@ export function WorkspacePane({
                       disabled={!hasStoragePool}
                     />
                   </form>
-                </div>
-              </header>
+              </div>
 
               <div
                 className={`workspace-grid${hasPreview ? " has-preview" : ""}${isPreviewCollapsed ? " is-preview-collapsed" : ""}${isDropActive ? " is-drop-active" : ""}`}
@@ -1444,15 +1428,6 @@ export function WorkspacePane({
 
 function isArchiveFileName(name: string): boolean {
   return /\.(?:zip|tar|gz|tgz|rar)$/iu.test(name);
-}
-
-export function folderTitle(displayPath: string, rootTitle: string): string {
-  const normalizedPath = displayPath.replace(/[\\/]+$/gu, "");
-  if (!normalizedPath || normalizedPath === ".") {
-    return rootTitle;
-  }
-
-  return normalizedPath.split(/[\\/]/u).filter(Boolean).pop() ?? rootTitle;
 }
 
 function poolRelativePath(pathname: string, poolPath: string): string {

@@ -2,9 +2,37 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { RefreshCw } from "lucide-react";
 import { describe, expect, it } from "vitest";
-import { PanelHeaderAction, PanelHeaderActions, PanelHeaderStatus } from "./PanelHeader.js";
+import { PanelHeader, PanelHeaderAction, PanelHeaderActions } from "./PanelHeader.js";
 
 describe("PanelHeader", () => {
+  it("renders icon, two-line title copy, and actions in a fixed order", () => {
+    const html = renderToStaticMarkup(createElement(PanelHeader, {
+      className: "example-header",
+      icon: createElement(RefreshCw, { "aria-hidden": true, size: 20 }),
+      title: "Downloads",
+      subtitle: "Queue and monitor downloads.",
+      actions: createElement(
+        PanelHeaderActions,
+        {
+          label: "Panel actions",
+          children: createElement(
+            PanelHeaderAction,
+            { label: "Refresh", type: "button" },
+            createElement(RefreshCw, { "aria-hidden": true, size: 17 })
+          )
+        }
+      )
+    }));
+
+    expect(html).toContain('class="management-header example-header"');
+    expect(html).toContain('<h2>Downloads</h2>');
+    expect(html).toContain('<p>Queue and monitor downloads.</p>');
+    expect(html.indexOf("management-title-icon")).toBeLessThan(html.indexOf("management-title-copy"));
+    expect(html.indexOf("management-title-copy")).toBeLessThan(html.indexOf("panel-header-actions"));
+    expect(html).not.toContain("eyebrow");
+    expect(html).not.toContain("panel-inline-status");
+  });
+
   it("renders icon-only actions with an accessible label and tooltip", () => {
     const html = renderToStaticMarkup(createElement(
       PanelHeaderActions,
@@ -25,15 +53,4 @@ describe("PanelHeader", () => {
     expect(button.replace(/<[^>]+>/gu, "").trim()).toBe("");
   });
 
-  it("renders status as inline text and a dot instead of a capsule", () => {
-    const html = renderToStaticMarkup(createElement(PanelHeaderStatus, {
-      label: "Connected",
-      tone: "ready"
-    }));
-
-    expect(html).toContain('class="panel-header-status"');
-    expect(html).toContain('class="panel-header-status-dot"');
-    expect(html).not.toContain("management-status-pill");
-    expect(html).toContain("Connected");
-  });
 });

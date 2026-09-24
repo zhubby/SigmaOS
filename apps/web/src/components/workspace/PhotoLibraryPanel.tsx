@@ -43,7 +43,7 @@ import {
 } from "../../api.js";
 import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
-import { PanelHeaderAction, PanelHeaderActions, PanelHeaderStatus } from "./PanelHeader.js";
+import { PanelHeader, PanelHeaderAction, PanelHeaderActions } from "./PanelHeader.js";
 import {
   StorageFilePickerDialog,
   type StorageFilePickerPool
@@ -394,16 +394,12 @@ export function PhotoLibraryPanel({
         onChange={handleUploadChange}
       />
 
-      <header className="management-header photo-library-header">
-        <div className="management-title-block">
-          <span className="management-title-icon"><Images aria-hidden="true" size={20} /></span>
-          <div className="management-title-copy">
-            <span className="eyebrow">{t("workspace.photos.eyebrow")}</span>
-            <h2>{t("workspace.photos.title")}</h2>
-            <p>{settings ? t("workspace.photos.summary", { count: status?.total ?? photos.length }) : t("workspace.photos.description")}</p>
-          </div>
-        </div>
-        <PanelHeaderActions label={t("workspace.photos.actions")} className="photo-library-actions">
+      <PanelHeader
+        className="photo-library-header"
+        icon={<Images aria-hidden="true" size={20} />}
+        title={t("workspace.photos.title")}
+        subtitle={t("workspace.photos.description")}
+        actions={<PanelHeaderActions label={t("workspace.photos.actions")} className="photo-library-actions">
           <PanelHeaderAction
             label={t("workspace.photos.scanNow")}
             type="button"
@@ -424,8 +420,8 @@ export function PhotoLibraryPanel({
           <PanelHeaderAction label={t("common.actions.refresh")} type="button" onClick={() => void loadLibrary()} disabled={loading}>
             <RefreshCw className={loading ? "is-spinning" : undefined} aria-hidden="true" size={17} />
           </PanelHeaderAction>
-        </PanelHeaderActions>
-      </header>
+        </PanelHeaderActions>}
+      />
 
       {settings ? (
         <div className="photo-library-bar">
@@ -434,7 +430,6 @@ export function PhotoLibraryPanel({
             <strong>{configuredPool?.name ?? settings.storagePoolId}</strong>
             <span>{settings.path}</span>
           </div>
-          {status ? <PhotoStatusBadge status={status} /> : null}
           {selected.length ? (
             <div className="photo-selection-actions" aria-label={t("workspace.photos.selectionActions")}>
               <span>{t("workspace.photos.selected", { count: selected.length })}</span>
@@ -589,24 +584,6 @@ export function PhotoLibraryPanel({
         </div>
       ) : null}
     </section>
-  );
-}
-
-function PhotoStatusBadge({ status }: { status: PhotoLibraryStatus }) {
-  const { t } = useTranslation();
-  const busy = status.state === "queued" || status.state === "scanning";
-  const label = [
-    t(`workspace.photos.status.${status.state}`),
-    status.state === "scanning" ? `${status.processed}/${status.scanned}` : null,
-    status.failed ? t("workspace.photos.failedCount", { count: status.failed }) : null
-  ].filter(Boolean).join(" · ");
-  return (
-    <PanelHeaderStatus
-      label={label}
-      tone={status.state === "ready" ? "ready" : status.state === "offline" ? "offline" : status.state === "degraded" ? "warning" : "neutral"}
-      busy={busy}
-      title={status.error ?? label}
-    />
   );
 }
 

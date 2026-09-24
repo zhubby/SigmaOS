@@ -1,7 +1,31 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
-import { LoaderCircle } from "lucide-react";
 
-type PanelHeaderStatusTone = "ready" | "warning" | "offline" | "neutral";
+export interface PanelHeaderProps {
+  icon: ReactNode;
+  title: ReactNode;
+  subtitle: ReactNode;
+  actions: ReactNode;
+  className?: string;
+}
+
+export function PanelHeader({
+  icon,
+  title,
+  subtitle,
+  actions,
+  className
+}: PanelHeaderProps) {
+  return (
+    <header className={["management-header", className].filter(Boolean).join(" ")}>
+      <span className="management-title-icon">{icon}</span>
+      <div className="management-title-copy">
+        <h2>{title}</h2>
+        <p>{subtitle}</p>
+      </div>
+      {actions}
+    </header>
+  );
+}
 
 export function PanelHeaderActions({
   label,
@@ -38,28 +62,5 @@ export function PanelHeaderAction({
     >
       {children}
     </button>
-  );
-}
-
-export function PanelHeaderStatus({
-  label,
-  tone,
-  busy = false,
-  title
-}: {
-  label: string;
-  tone: PanelHeaderStatusTone;
-  busy?: boolean;
-  title?: string;
-}) {
-  return (
-    <span className="panel-header-status" data-state={tone} role="status" aria-live="polite" title={title ?? label}>
-      {busy ? (
-        <LoaderCircle className="is-spinning" aria-hidden="true" size={12} />
-      ) : (
-        <span className="panel-header-status-dot" aria-hidden="true" />
-      )}
-      <span>{label}</span>
-    </span>
   );
 }

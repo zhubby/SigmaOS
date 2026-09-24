@@ -90,7 +90,7 @@ import {
   type StorageFilePickerPool,
   type StorageFileSelection
 } from "./StorageFilePickerDialog.js";
-import { PanelHeaderAction, PanelHeaderActions, PanelHeaderStatus } from "./PanelHeader.js";
+import { PanelHeader, PanelHeaderAction, PanelHeaderActions } from "./PanelHeader.js";
 
 export type ManagementPanelId = "docker" | "virtualMachines" | "network" | "storage" | "shares";
 
@@ -161,7 +161,6 @@ interface DockerPressurePoint {
 
 interface ManagementPanelConfig {
   Icon: LucideIcon;
-  eyebrowKey: TranslationKey;
   titleKey: TranslationKey;
   descriptionKey: TranslationKey;
   statusKey: TranslationKey;
@@ -196,7 +195,6 @@ const VM_COLUMNS: ManagementColumn[] = [
 const MANAGEMENT_PANELS: Record<Exclude<ManagementPanelId, "docker" | "network" | "storage" | "shares">, ManagementPanelConfig> = {
   virtualMachines: {
     Icon: MonitorCog,
-    eyebrowKey: "workspace.management.virtualMachines.eyebrow",
     titleKey: "workspace.management.virtualMachines.title",
     descriptionKey: "workspace.management.virtualMachines.description",
     statusKey: "workspace.management.virtualMachines.hypervisorPreview",
@@ -429,22 +427,11 @@ export function WorkspaceManagementPanel({
 
   return (
     <section className="workspace-management" aria-label={t(config.titleKey)}>
-      <header className="management-header">
-        <div className="management-title-block">
-          <span className="management-title-icon">
-            <HeaderIcon aria-hidden="true" size={20} />
-          </span>
-          <div className="management-title-copy">
-            <span className="eyebrow">{t(config.eyebrowKey)}</span>
-            <h2>{t(config.titleKey)}</h2>
-            <p>{t(config.descriptionKey)}</p>
-            <PanelHeaderStatus
-              label={String(t("workspace.management.previewMode"))}
-              tone={config.statusState}
-            />
-          </div>
-        </div>
-        <PanelHeaderActions label={String(t("workspace.management.actions.label"))}>
+      <PanelHeader
+        icon={<HeaderIcon aria-hidden="true" size={20} />}
+        title={t(config.titleKey)}
+        subtitle={t(config.descriptionKey)}
+        actions={<PanelHeaderActions label={String(t("workspace.management.actions.label"))}>
           {config.actions.map((action) => {
             const ActionIcon = action.Icon;
             return (
@@ -459,8 +446,8 @@ export function WorkspaceManagementPanel({
               </PanelHeaderAction>
             );
           })}
-        </PanelHeaderActions>
-      </header>
+        </PanelHeaderActions>}
+      />
 
       <div className="management-body">
         <section className="management-command-panel">
@@ -721,23 +708,11 @@ function VirtualMachineManagementPanel({
   const statusTone = host?.status === "ready" ? "ready" : host?.status === "degraded" ? "warning" : "offline";
   return (
     <section className="workspace-management" aria-label={t("workspace.management.virtualMachines.title")}>
-      <header className="management-header">
-        <div className="management-title-block">
-          <span className="management-title-icon">
-            <MonitorCog aria-hidden="true" size={20} />
-          </span>
-          <div className="management-title-copy">
-            <span className="eyebrow">{t("workspace.management.virtualMachines.eyebrow")}</span>
-            <h2>{t("workspace.management.virtualMachines.title")}</h2>
-            <p>{t("workspace.management.virtualMachines.description")}</p>
-            <PanelHeaderStatus
-              label={vmHostStatusLabel(host?.status, loading, t)}
-              tone={loading ? "neutral" : statusTone}
-              busy={loading}
-            />
-          </div>
-        </div>
-        <PanelHeaderActions label={t("workspace.management.actions.label")}>
+      <PanelHeader
+        icon={<MonitorCog aria-hidden="true" size={20} />}
+        title={t("workspace.management.virtualMachines.title")}
+        subtitle={t("workspace.management.virtualMachines.description")}
+        actions={<PanelHeaderActions label={t("workspace.management.actions.label")}>
           <ManagementDashboardControls dashboard={dashboard} disabled={loading} />
           <PanelHeaderAction
             label={t("common.actions.refresh")}
@@ -751,8 +726,8 @@ function VirtualMachineManagementPanel({
             onClick={openCreateVm}
             disabled={!canMutate}
           ><Play aria-hidden="true" size={17} /></PanelHeaderAction>
-        </PanelHeaderActions>
-      </header>
+        </PanelHeaderActions>}
+      />
       <div className="management-body">
         {loading ? <ManagementSkeletonBody tableColumns={7} tableRows={4} /> : (
           <ManagementDashboardGrid
@@ -1247,23 +1222,11 @@ function DockerManagementPanel({
 
   return (
     <section className="workspace-management" aria-label={t("workspace.management.docker.title")}>
-      <header className="management-header">
-        <div className="management-title-block">
-          <span className="management-title-icon">
-            <Container aria-hidden="true" size={20} />
-          </span>
-          <div className="management-title-copy">
-            <span className="eyebrow">{t("workspace.management.docker.eyebrow")}</span>
-            <h2>{t("workspace.management.docker.title")}</h2>
-            <p>{t("workspace.management.docker.description")}</p>
-            <PanelHeaderStatus
-              label={dockerStatusLabel(daemonStatus, loading, t)}
-              tone={loading && !daemonStatus ? "neutral" : daemonStatus ? dockerDaemonTone(daemonStatus.state) : "neutral"}
-              busy={loading}
-            />
-          </div>
-        </div>
-        <PanelHeaderActions label={t("workspace.management.actions.label")}>
+      <PanelHeader
+        icon={<Container aria-hidden="true" size={20} />}
+        title={t("workspace.management.docker.title")}
+        subtitle={t("workspace.management.docker.description")}
+        actions={<PanelHeaderActions label={t("workspace.management.actions.label")}>
           <ManagementDashboardControls dashboard={dashboard} disabled={loading} />
           <PanelHeaderAction
             label={t("workspace.management.docker.daemon.openSettings")}
@@ -1298,8 +1261,8 @@ function DockerManagementPanel({
               <button type="button" role="menuitem" onClick={() => { setCreateMenuOpen(false); setCreateKind("network"); }} disabled={!canUseDocker || Boolean(pendingAction) || !sessionId}>{t("workspace.management.docker.create.kinds.network")}</button>
             </div>
           </div>
-        </PanelHeaderActions>
-      </header>
+        </PanelHeaderActions>}
+      />
 
       <div className="management-body">
         {loading ? <ManagementSkeletonBody tableColumns={6} tableRows={4} variant="docker" /> : (
@@ -2144,22 +2107,6 @@ function DockerStorageInventory({ summary, t }: { summary: DockerSummary | null;
       </div>
     </section>
   );
-}
-
-function vmHostStatusLabel(status: VmSummary["host"]["status"] | undefined, loading: boolean, t: Translate): string {
-  if (loading) {
-    return String(t("common.states.loading"));
-  }
-  if (status === "ready") {
-    return String(t("workspace.management.states.ready"));
-  }
-  if (status === "degraded") {
-    return String(t("workspace.management.states.degraded"));
-  }
-  if (status === "disabled") {
-    return String(t("workspace.management.virtualMachines.unavailable"));
-  }
-  return String(t("common.states.unavailable"));
 }
 
 function vmStateLabel(state: VmSummary["instances"][number]["state"], t: Translate): string {

@@ -23,6 +23,10 @@
   background: var(--footer-bg);
 }
 
+.workspace-stage[data-panel="files"] {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
 .workspace-stage[data-panel="docker"],
 .workspace-stage[data-panel="virtualMachines"],
 .workspace-stage[data-panel="network"],
@@ -1080,28 +1084,6 @@
   background: var(--surface-hover);
 }
 
-.downloads-connection {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: 0 0 auto;
-  color: var(--muted-2);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.downloads-connection.is-disconnected {
-  color: var(--warning-text);
-}
-
-.downloads-connection-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--success);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 15%, transparent);
-}
-
 .downloads-list {
   min-height: 0;
   overflow: auto;
@@ -1869,24 +1851,18 @@
 
 .management-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 16px;
+  grid-template-areas: "icon copy actions";
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
   min-height: 70px;
   padding: 14px 16px;
   border-bottom: 1px solid var(--header-border);
   background: var(--channel-bg);
 }
 
-.management-title-block {
-  display: grid;
-  grid-template-columns: 40px minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
 .management-title-icon {
+  grid-area: icon;
   display: grid;
   place-items: center;
   width: 40px;
@@ -1897,24 +1873,25 @@
 }
 
 .management-title-copy {
+  grid-area: copy;
   display: grid;
   gap: 3px;
   min-width: 0;
 }
 
-.management-title-block h2,
+.management-title-copy h2,
 .management-command-copy h3,
 .management-section-header h3 {
   margin: 0;
   color: var(--text);
 }
 
-.management-title-block h2 {
+.management-title-copy h2 {
   font-size: 20px;
   line-height: 1.15;
 }
 
-.management-title-block p,
+.management-title-copy p,
 .management-command-copy p,
 .management-section-header p {
   margin: 0;
@@ -1922,50 +1899,9 @@
   line-height: 1.45;
 }
 
-.management-title-block p {
+.management-title-copy p {
   max-width: 720px;
   font-size: 12.5px;
-}
-
-.panel-header-status {
-  display: inline-flex;
-  align-items: center;
-  justify-self: start;
-  gap: 6px;
-  min-width: 0;
-  margin-top: 1px;
-  color: var(--neutral-status-text);
-  font-size: 11px;
-  font-weight: 750;
-  line-height: 1.35;
-}
-
-.panel-header-status > span:last-child {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.panel-header-status-dot {
-  flex: 0 0 6px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 13%, transparent);
-}
-
-.panel-header-status[data-state="ready"] {
-  color: var(--success-text);
-}
-
-.panel-header-status[data-state="warning"] {
-  color: var(--warning-text);
-}
-
-.panel-header-status[data-state="offline"] {
-  color: var(--danger-text);
 }
 
 .management-actions {
@@ -1974,6 +1910,10 @@
   justify-content: flex-end;
   gap: 6px;
   min-width: 0;
+}
+
+.panel-header-actions {
+  grid-area: actions;
 }
 
 .panel-header-action,
@@ -2236,26 +2176,6 @@
   background: var(--danger-bg);
 }
 
-.files-header {
-  grid-template-rows: auto auto;
-}
-
-.files-title-block h2 {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.files-title-block p {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.files-header-actions {
-  flex-wrap: wrap;
-}
-
 .management-actions.files-header-actions {
   overflow: visible;
 }
@@ -2286,11 +2206,13 @@
 
 .files-navigation-bar {
   display: grid;
-  grid-column: 1 / -1;
   grid-template-columns: minmax(170px, 230px) minmax(190px, 1fr);
   align-items: end;
   gap: 10px;
   min-width: 0;
+  padding: 10px 16px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--subtle-bg);
 }
 
 .files-navigation-bar.has-root-switcher {
@@ -6609,15 +6531,6 @@
 
   .share-protocol-grid {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .workspace-share-management .management-header {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .workspace-share-management .management-actions {
-    justify-content: flex-end;
-    flex-wrap: wrap;
   }
 
   .share-service-row {

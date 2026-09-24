@@ -19,6 +19,17 @@ beforeAll(async () => {
 });
 
 describe("HttpDownloaderPanel download creation", () => {
+  it("does not render a dedicated connection state", () => {
+    const html = renderDownloader({ storagePoolsLoading: false, pools: [mountedPool] });
+    const header = html.match(/<header[^>]*class="management-header downloads-header"[^>]*>[\s\S]*?<\/header>/u)?.[0] ?? "";
+
+    expect(header).toContain("<h2>Downloads</h2>");
+    expect(header).toContain("Queue and monitor public HTTP and HTTPS downloads.");
+    expect(header).not.toContain("HTTP transfer");
+    expect(header).not.toContain("downloads-connection");
+    expect(html).not.toContain("downloads-connection");
+  });
+
   it("renders a stable busy control while storage pools load", () => {
     const button = renderDownloadButton({ storagePoolsLoading: true, pools: [] });
 
@@ -97,7 +108,20 @@ function renderDownloadButton({
   storagePoolsLoading: boolean;
   pools: HttpDownloaderPool[];
 }): string {
-  const html = renderToStaticMarkup(createElement(HttpDownloaderPanel, {
+  const html = renderDownloader({ storagePoolsLoading, pools });
+  const button = html.match(/<button[^>]*class="panel-header-action download-create-button"[^>]*>[\s\S]*?<\/button>/)?.[0];
+  expect(button).toBeDefined();
+  return button ?? "";
+}
+
+function renderDownloader({
+  storagePoolsLoading,
+  pools
+}: {
+  storagePoolsLoading: boolean;
+  pools: HttpDownloaderPool[];
+}): string {
+  return renderToStaticMarkup(createElement(HttpDownloaderPanel, {
     pools,
     storagePoolsLoading,
     selectedStoragePoolId: pools[0]?.id ?? "",
@@ -109,9 +133,6 @@ function renderDownloadButton({
     onNotifySuccess: vi.fn(),
     onNotifyWarning: vi.fn()
   }));
-  const button = html.match(/<button[^>]*class="panel-header-action download-create-button"[^>]*>[\s\S]*?<\/button>/)?.[0];
-  expect(button).toBeDefined();
-  return button ?? "";
 }
 
 function visibleButtonText(button: string): string {

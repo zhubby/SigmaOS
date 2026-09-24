@@ -330,7 +330,6 @@ export function App() {
     : "";
   const resolvedLocale = resolveSupportedLocale(i18n.resolvedLanguage ?? i18n.language);
   const resolvedTheme = resolveThemePreference(themePreference, systemTheme);
-  const displayPath = currentPath;
   const breadcrumbs = useMemo(() => (currentPath === "." ? [] : currentPath.split("/").filter(Boolean)), [currentPath]);
   const appStyle = useMemo(
     () =>
@@ -2134,7 +2133,6 @@ export function App() {
         storageSummaryLoading={storageSummaryLoading}
         selectedStoragePoolId={selectedStoragePoolId}
         currentPath={currentPath}
-        displayPath={displayPath}
         breadcrumbs={breadcrumbs}
         entries={entries}
         fileListingLoading={

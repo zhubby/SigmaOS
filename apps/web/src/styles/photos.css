@@ -11,14 +11,6 @@
   background: var(--footer-bg);
 }
 
-.photo-library-header {
-  align-items: center;
-}
-
-.photo-library-actions {
-  flex-wrap: wrap;
-}
-
 .photo-library-bar {
   display: flex;
   align-items: center;
@@ -419,14 +411,6 @@
 }
 
 @container workspace-stage (max-width: 760px) {
-  .photo-library-header {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .photo-library-actions {
-    justify-content: flex-end;
-  }
-
   .photo-library-bar {
     align-items: stretch;
     flex-wrap: wrap;

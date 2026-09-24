@@ -125,6 +125,22 @@
   }
 }
 
+@container workspace-stage (max-width: 620px) {
+  .management-header {
+    grid-template-areas:
+      "icon copy"
+      "actions actions";
+    grid-template-columns: 40px minmax(0, 1fr);
+    gap: 10px 12px;
+    padding: 12px;
+  }
+
+  .panel-header-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
 @container system-wifi-section (max-width: 760px) {
   .system-wifi-device-summary {
     grid-template-columns: minmax(0, 1fr);
@@ -654,11 +670,6 @@
     align-items: end;
   }
 
-  .files-header-actions {
-    width: 100%;
-    justify-content: flex-start;
-  }
-
   .files-navigation-bar,
   .files-navigation-bar.has-root-switcher,
   .files-navigation-bar.has-storage-pool-switcher,
@@ -703,16 +714,6 @@
 
   .file-row {
     grid-template-columns: minmax(150px, 1fr) 180px 84px 124px;
-  }
-
-  .management-header {
-    grid-template-columns: 1fr;
-    gap: 12px;
-    padding: 12px;
-  }
-
-  .management-actions {
-    justify-content: flex-end;
   }
 
   .download-task-row {
@@ -1043,7 +1044,7 @@
     height: 22px;
   }
 
-  .management-title-block h2 {
+  .management-title-copy h2 {
     font-size: 18px;
   }
 
