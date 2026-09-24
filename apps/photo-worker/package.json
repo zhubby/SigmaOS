@@ -1,6 +1,6 @@
 {
   "name": "@sigmaos/photo-worker",
-  "version": "0.8.4",
+  "version": "0.8.5",
   "type": "module",
   "exports": {
     ".": "./src/processor.ts"
@@ -12,9 +12,9 @@
     "build": "cd ../.. && tsup apps/photo-worker/src/index.ts --format esm --platform node --target node22 --external=better-sqlite3 --external=sharp --out-dir apps/photo-worker/dist"
   },
   "dependencies": {
-    "@sigmaos/db": "0.8.4",
-    "@sigmaos/nas-tools": "0.8.4",
-    "@sigmaos/shared": "0.8.4",
+    "@sigmaos/db": "0.8.5",
+    "@sigmaos/nas-tools": "0.8.5",
+    "@sigmaos/shared": "0.8.5",
     "exifr": "^7.1.3",
     "sharp": "^0.35.4"
   }
