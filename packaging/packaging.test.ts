@@ -472,6 +472,12 @@ describe("native packaging artifacts", () => {
     expect(deploy).toContain('capture_runtime_diagnostics "$failure_dir"');
     expect(deploy).toContain('cat "$target_diagnostics_path/services-status.txt" >&2');
     expect(deploy).toContain('cat "$target_diagnostics_path/services-journal.txt" >&2');
+    expect(deploy).toContain("cleanup_deployment_artifacts");
+    expect(deploy).toContain("Keep the active release and one previous package");
+    expect(deploy).toContain("Keep the current upgrade backup and one older backup");
+    expect(deploy).toContain('find "$INCOMING_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +');
+    expect(deploy).toContain("traverse outside BASE_DIR");
+    expect(deploy).toContain('find "$BASE_DIR" -mindepth 1 -maxdepth 1 -type d -name \'work.*\'');
     expect(deploy).toContain('state_dir/sigmaos-share-helper.service.enabled');
     expect(deploy).toContain('state_dir/sigmaos-hostd.service.enabled');
     expect(deploy).toContain('state_dir/sigmaos-share-helper.service.active');
