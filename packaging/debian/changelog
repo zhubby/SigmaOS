@@ -1,3 +1,9 @@
+sigmaos (0.8.3) unstable; urgency=medium
+
+  * Expose Photo library paths, indexing status, and processing limits in system settings.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Thu, 24 Sep 2026 01:41:39 +0000
+
 sigmaos (0.8.2) unstable; urgency=medium
 
   * Propagate terminal resize to persistent tmux sessions
