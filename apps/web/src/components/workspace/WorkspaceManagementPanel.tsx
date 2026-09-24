@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Activity,
@@ -962,8 +962,6 @@ function DockerManagementPanel({
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [createKind, setCreateKind] = useState<"container" | "volume" | "network" | null>(null);
-  const [createMenuOpen, setCreateMenuOpen] = useState(false);
-  const createMenuRef = useRef<HTMLDivElement>(null);
   const [detailsState, setDetailsState] = useState<{
     container: DockerContainer;
     details: DockerContainerDetails | null;
@@ -984,28 +982,6 @@ function DockerManagementPanel({
   const currentDetailsContainer = detailsState
     ? containers.find((container) => container.id === detailsState.container.id) ?? detailsState.container
     : null;
-
-  useEffect(() => {
-    if (!createMenuOpen) {
-      return;
-    }
-    const closeOnPointerDown = (event: PointerEvent) => {
-      if (createMenuRef.current && !createMenuRef.current.contains(event.target as Node)) {
-        setCreateMenuOpen(false);
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setCreateMenuOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", closeOnPointerDown);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnPointerDown);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [createMenuOpen]);
 
   useEffect(() => {
     let active = true;
@@ -1220,6 +1196,20 @@ function DockerManagementPanel({
     }
   }
 
+  function renderCreateAction(kind: "container" | "volume" | "network") {
+    const label = String(t(`workspace.management.docker.create.titles.${kind}`));
+    return (
+      <PanelHeaderAction
+        label={label}
+        type="button"
+        onClick={() => setCreateKind(kind)}
+        disabled={!canUseDocker || Boolean(pendingAction) || !sessionId}
+      >
+        <Plus aria-hidden="true" size={17} />
+      </PanelHeaderAction>
+    );
+  }
+
   return (
     <section className="workspace-management" aria-label={t("workspace.management.docker.title")}>
       <PanelHeader
@@ -1244,23 +1234,6 @@ function DockerManagementPanel({
           >
             {loading ? <LoaderCircle className="is-spinning" aria-hidden="true" size={16} /> : <RefreshCw aria-hidden="true" size={17} />}
           </PanelHeaderAction>
-          <div className={`docker-create-menu${createMenuOpen ? " is-open" : ""}`} ref={createMenuRef}>
-            <PanelHeaderAction
-              label={t("workspace.management.docker.create.actions.create")}
-              tooltip={t("workspace.management.docker.create.actions.openMenu")}
-              type="button"
-              aria-haspopup="menu"
-              aria-expanded={createMenuOpen}
-              aria-controls="docker-create-menu-items"
-              onClick={() => setCreateMenuOpen((open) => !open)}
-              disabled={!canUseDocker || Boolean(pendingAction) || !sessionId}
-            ><Plus aria-hidden="true" size={17} /></PanelHeaderAction>
-            <div className="docker-create-menu-items" id="docker-create-menu-items" role="menu">
-              <button type="button" role="menuitem" onClick={() => { setCreateMenuOpen(false); setCreateKind("container"); }} disabled={!canUseDocker || Boolean(pendingAction) || !sessionId}>{t("workspace.management.docker.create.kinds.container")}</button>
-              <button type="button" role="menuitem" onClick={() => { setCreateMenuOpen(false); setCreateKind("volume"); }} disabled={!canUseDocker || Boolean(pendingAction) || !sessionId}>{t("workspace.management.docker.create.kinds.volume")}</button>
-              <button type="button" role="menuitem" onClick={() => { setCreateMenuOpen(false); setCreateKind("network"); }} disabled={!canUseDocker || Boolean(pendingAction) || !sessionId}>{t("workspace.management.docker.create.kinds.network")}</button>
-            </div>
-          </div>
         </PanelHeaderActions>}
       />
 
@@ -1327,6 +1300,7 @@ function DockerManagementPanel({
           <SectionHeader
             title={t("workspace.management.docker.containersTitle")}
             description={t("workspace.management.docker.containersDescription")}
+            action={renderCreateAction("container")}
           />
           {containers.length ? (
             <div className="management-table-wrap">
@@ -1394,12 +1368,12 @@ function DockerManagementPanel({
               {
                 id: "networks",
                 title: String(t("workspace.management.docker.networksTitle")),
-                content: <DockerNetworkInventory summary={summary} locale={locale} t={t} />
+                content: <DockerNetworkInventory summary={summary} locale={locale} t={t} action={renderCreateAction("network")} />
               },
               {
                 id: "storage",
                 title: String(t("workspace.management.docker.storageTitle")),
-                content: <DockerStorageInventory summary={summary} t={t} />
+                content: <DockerStorageInventory summary={summary} t={t} action={renderCreateAction("volume")} />
               },
               {
                 id: "compose",
@@ -2053,7 +2027,17 @@ function DockerRuntimePressure({
   );
 }
 
-function DockerNetworkInventory({ summary, locale, t }: { summary: DockerSummary | null; locale: SupportedLocale; t: Translate }) {
+function DockerNetworkInventory({
+  summary,
+  locale,
+  t,
+  action
+}: {
+  summary: DockerSummary | null;
+  locale: SupportedLocale;
+  t: Translate;
+  action: ReactNode;
+}) {
   const networks = summary?.networks ?? [];
   const count = summary?.metrics.networks ?? 0;
   return (
@@ -2061,6 +2045,7 @@ function DockerNetworkInventory({ summary, locale, t }: { summary: DockerSummary
       <SectionHeader
         title={String(t("workspace.management.docker.networksTitle"))}
         description={String(t("workspace.management.docker.networksDescription"))}
+        action={action}
       />
       <div className="docker-inventory-list">
         {networks.length ? networks.map((network) => (
@@ -2082,7 +2067,7 @@ function DockerNetworkInventory({ summary, locale, t }: { summary: DockerSummary
   );
 }
 
-function DockerStorageInventory({ summary, t }: { summary: DockerSummary | null; t: Translate }) {
+function DockerStorageInventory({ summary, t, action }: { summary: DockerSummary | null; t: Translate; action: ReactNode }) {
   const volumes = summary?.volumes ?? [];
   const count = summary?.metrics.volumes ?? 0;
   return (
@@ -2090,6 +2075,7 @@ function DockerStorageInventory({ summary, t }: { summary: DockerSummary | null;
       <SectionHeader
         title={String(t("workspace.management.docker.storageTitle"))}
         description={String(t("workspace.management.docker.storageDescription"))}
+        action={action}
       />
       <div className="docker-inventory-list">
         {volumes.length ? volumes.map((volume) => (
@@ -2339,13 +2325,14 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function SectionHeader({ title, description }: { title: string; description: string }) {
+function SectionHeader({ title, description, action }: { title: string; description: string; action?: ReactNode }) {
   return (
     <header className="management-section-header">
       <div>
         <h3>{title}</h3>
         <p>{description}</p>
       </div>
+      {action ? <div className="management-section-header-actions">{action}</div> : null}
     </header>
   );
 }

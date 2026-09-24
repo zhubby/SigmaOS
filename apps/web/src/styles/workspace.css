@@ -1971,42 +1971,6 @@
   opacity: 0.64;
 }
 
-.docker-create-menu {
-  position: relative;
-}
-
-.docker-create-menu-items {
-  position: absolute;
-  top: calc(100% + 5px);
-  right: 0;
-  z-index: 4;
-  display: none;
-  min-width: 150px;
-  padding: 4px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: var(--modal-bg);
-  box-shadow: 0 12px 30px rgb(0 0 0 / 28%);
-}
-
-.docker-create-menu:hover .docker-create-menu-items,
-.docker-create-menu:focus-within .docker-create-menu-items,
-.docker-create-menu.is-open .docker-create-menu-items {
-  display: grid;
-}
-
-.docker-create-menu-items button {
-  padding: 8px 10px;
-  color: var(--muted);
-  text-align: left;
-  background: transparent;
-}
-
-.docker-create-menu-items button:hover:not(:disabled) {
-  color: var(--text);
-  background: var(--subtle-bg);
-}
-
 .docker-create-add {
   display: inline-flex;
   align-items: center;
@@ -3414,6 +3378,12 @@
 
 .management-section-header > div {
   min-width: 0;
+}
+
+.management-section-header > .management-section-header-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
 }
 
 .management-section-header h3 {
