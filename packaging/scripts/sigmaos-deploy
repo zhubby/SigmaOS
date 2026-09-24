@@ -318,6 +318,7 @@ if [ "$installed_status" = "install ok installed" ]; then
     verify_runtime
     verify_build_info "$manifest_version" "$manifest_commit_sha"
     record_release "$manifest_tag" "$manifest_version" "$manifest_commit_sha"
+    cleanup_deployment_artifacts
     success=1
     rm -rf "$failure_dir"
     rm -rf "$work_dir"

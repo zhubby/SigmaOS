@@ -436,6 +436,7 @@ describe("native packaging artifacts", () => {
     const postinst = await readPackagingFile("debian", "postinst");
     expect(postinst).toContain("sigmaos-termux migrate-config");
     expect(postinst).toContain("systemctl disable --now sigmaos-terminal-helper.service");
+    expect(postinst).toContain("ln -sfn /usr/lib/sigmaos/scripts/sigmaos-deploy /usr/local/sbin/sigmaos-deploy");
     expect(postinst).toContain("refusing to merge existing terminal homes");
     expect(postinst.indexOf("refusing to merge existing terminal homes")).toBeLessThan(
       postinst.indexOf("systemctl disable --now sigmaos-terminal-helper.service")
@@ -467,6 +468,7 @@ describe("native packaging artifacts", () => {
     expect(deploy).toContain("systemctl restart $RUNTIME_SERVICES");
     expect(deploy).toContain('version $manifest_version is already installed; recovering runtime and release state');
     expect(deploy).toContain('record_release "$manifest_tag" "$manifest_version" "$manifest_commit_sha"');
+    expect(deploy).toContain('record_release "$manifest_tag" "$manifest_version" "$manifest_commit_sha"\n    cleanup_deployment_artifacts');
     expect(deploy).toContain("awk '$1 ~ /^sigmaos-/ { print }'");
     expect(deploy).toContain('failure_dir="$BACKUP_DIR/${manifest_tag}-retry-${retry_timestamp}"');
     expect(deploy).toContain('capture_runtime_diagnostics "$failure_dir"');

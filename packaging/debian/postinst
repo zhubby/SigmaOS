@@ -49,6 +49,11 @@ if [ "$1" = "configure" ]; then
   SIGMAOS_LOCALE=${SIGMAOS_LOCALE:-C.UTF-8} \
     /usr/lib/sigmaos/scripts/sigmaos-configure-locale.sh
 
+  # Keep the constrained deployment entrypoint pointed at the packaged helper
+  # after upgrades, including hosts bootstrapped before the helper was added.
+  install -d -o root -g root -m 0755 /usr/local/sbin
+  ln -sfn /usr/lib/sigmaos/scripts/sigmaos-deploy /usr/local/sbin/sigmaos-deploy
+
   if command -v systemctl >/dev/null 2>&1; then
     systemd-tmpfiles --create sigmaos.conf || true
 
