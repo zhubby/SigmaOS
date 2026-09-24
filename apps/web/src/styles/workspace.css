@@ -2734,9 +2734,19 @@
 
 .management-command-copy > div {
   display: grid;
-  justify-items: start;
-  gap: 8px;
+  grid-template-areas:
+    "title status"
+    "detail detail";
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 8px;
   min-width: 0;
+}
+
+.management-command-copy > div > .management-status-pill {
+  grid-area: status;
+  justify-self: end;
 }
 
 .management-command-copy h3 {
@@ -2745,23 +2755,12 @@
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.docker-command-title-row {
-  display: flex;
-  align-items: center;
-  gap: 7px;
   min-width: 0;
-}
-
-.docker-daemon-settings-trigger {
-  width: 26px;
-  min-width: 26px;
-  height: 26px;
-  color: var(--muted);
+  grid-area: title;
 }
 
 .management-command-copy p {
+  grid-area: detail;
   font-size: 12.5px;
 }
 

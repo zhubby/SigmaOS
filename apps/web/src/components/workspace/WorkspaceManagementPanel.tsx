@@ -1311,18 +1311,7 @@ function DockerManagementPanel({
               <span className="management-status-pill" data-state={daemonStatus ? dockerDaemonTone(daemonStatus.state) : "neutral"}>
                 {dockerStatusLabel(daemonStatus, loading, t)}
               </span>
-              <div className="docker-command-title-row">
-                <h3>{t("workspace.management.docker.title")}</h3>
-                <button
-                  type="button"
-                  className="management-icon-action docker-daemon-settings-trigger"
-                  onClick={() => setDaemonSettingsOpen(true)}
-                  aria-label={t("workspace.management.docker.daemon.openSettings")}
-                  title={t("workspace.management.docker.daemon.openSettings")}
-                >
-                  <Settings2 aria-hidden="true" size={15} />
-                </button>
-              </div>
+              <h3>{t("workspace.management.docker.title")}</h3>
               <p>{dockerStatusDetail(summary, loading, error, t)}</p>
             </div>
             <dl className="management-fact-list">
