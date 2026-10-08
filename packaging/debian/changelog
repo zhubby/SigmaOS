@@ -1,3 +1,9 @@
+sigmaos (0.8.8) unstable; urgency=medium
+
+  * Add comprehensive photo metadata search, managed Compose apps, and hardened VM operations.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Thu, 08 Oct 2026 23:19:09 +0000
+
 sigmaos (0.8.7) unstable; urgency=medium
 
   * Add file download support for photo and media previews.
