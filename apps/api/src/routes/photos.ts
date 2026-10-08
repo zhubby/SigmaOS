@@ -26,12 +26,14 @@ import { isPathInside } from "@sigmaos/nas-tools";
 import {
   PHOTO_DATA_DIRECTORY_NAME,
   PHOTO_MAX_FILE_SIZE_BYTES,
-  PHOTO_SUPPORTED_EXTENSIONS,
+  photoMediaKind,
   type FileOperationProposal,
   type PhotoAssetRecord,
   type PhotoTimelinePage
 } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
+import { sendFileStream } from "../lib/files.js";
+import { ffmpegVideoTranscoder, VideoCache } from "../lib/video-cache.js";
 import {
   resolveScopedExistingPath,
   resolveScopedTargetPath,
@@ -41,7 +43,6 @@ import {
 
 const MAX_BATCH_SIZE = 100;
 const EXPORT_TTL_MS = 5 * 60 * 1_000;
-const SUPPORTED_EXTENSIONS = new Set<string>(PHOTO_SUPPORTED_EXTENSIONS);
 interface PhotoExport {
   expiresAt: number;
   assetIds: string[];
@@ -51,6 +52,10 @@ interface PhotoExport {
 export function registerPhotoRoutes(server: FastifyInstance, context: ApiRouteContext): void {
   const { db, system } = context;
   const exports = new Map<string, PhotoExport>();
+  const videoCache = new VideoCache({
+    dataDir: context.config.dataDir,
+    transcoder: context.videoTranscoder ?? ffmpegVideoTranscoder
+  });
 
   server.get("/api/photos/settings", async () => ({ settings: getPhotoLibrarySettings(db) }));
 
@@ -153,6 +158,50 @@ export function registerPhotoRoutes(server: FastifyInstance, context: ApiRouteCo
     return reply.send(createReadStream(resolved.safe.realPath));
   });
 
+  server.get<{ Params: { id: string } }>("/api/photos/:id/video", async (request, reply) => {
+    const resolved = await resolveCurrentAsset(context, request.params.id);
+    if (!resolved) {
+      reply.status(404).send({ error: "Photo not found" });
+      return;
+    }
+    if (!resolved.asset.mimeType.startsWith("video/")) {
+      reply.status(415).send({ error: "Photo asset is not a video" });
+      return;
+    }
+    const sourceStat = await stat(resolved.safe.realPath);
+    if (!sourceStat.isFile()) {
+      reply.status(404).send({ error: "Photo not found" });
+      return;
+    }
+
+    const extension = path.extname(resolved.safe.realPath).toLowerCase();
+    if (extension === ".mp4" || extension === ".webm") {
+      return sendFileStream(reply, request.headers.range, resolved.safe.realPath, resolved.asset.mimeType);
+    }
+
+    const source = {
+      rootId: resolved.asset.rootId,
+      relativePath: resolved.safe.relativePath,
+      realPath: resolved.safe.realPath,
+      sizeBytes: sourceStat.size,
+      modifiedAtMs: sourceStat.mtimeMs
+    };
+    const cachePath = videoCache.pathFor(source);
+    const release = videoCache.acquire(cachePath);
+    try {
+      await videoCache.ensure(source);
+      const result = await sendFileStream(reply, request.headers.range, cachePath, "video/mp4", (stream) => {
+        stream.once("close", release);
+        stream.once("error", release);
+      });
+      if (reply.statusCode === 416) release();
+      return result;
+    } catch (error) {
+      release();
+      throw error;
+    }
+  });
+
   server.put<{
     Querystring: { name?: string; directory?: string };
   }>(
@@ -170,7 +219,7 @@ export function registerPhotoRoutes(server: FastifyInstance, context: ApiRouteCo
       }
       const fileName = normalizeFileName(request.query.name);
       if (!fileName) {
-        reply.status(400).send({ error: "A supported photo file name is required" });
+        reply.status(400).send({ error: "A supported media file name is required" });
         return;
       }
       const { scope, library } = await resolveLibraryScope(context, settings);
@@ -217,7 +266,7 @@ export function registerPhotoRoutes(server: FastifyInstance, context: ApiRouteCo
         if (reserved.duplicate) {
           await unlink(temporaryPath);
           reply.status(409).send({
-            error: reserved.conflict === "path" ? "Upload target already exists" : "This photo already exists in the library",
+            error: reserved.conflict === "path" ? "Upload target already exists" : "This media already exists in the library",
             duplicate: reserved.duplicate
           });
           return;
@@ -517,7 +566,7 @@ function decodeCursor(value: string | undefined): { takenAt: string; id: string 
 function normalizeFileName(value: string | undefined): string | null {
   const name = value?.trim() ?? "";
   if (!name || name === "." || name === ".." || name.includes("/") || name.includes("\\") || name.includes("\0")) return null;
-  if (Buffer.byteLength(name, "utf8") > 255 || !SUPPORTED_EXTENSIONS.has(path.extname(name).toLowerCase())) return null;
+  if (Buffer.byteLength(name, "utf8") > 255 || !photoMediaKind(name)) return null;
   return name;
 }
 

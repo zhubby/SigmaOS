@@ -16,7 +16,13 @@ import {
 } from "@sigmaos/db";
 import { isPathInside, resolveSafeExistingPath } from "@sigmaos/nas-tools";
 import { PHOTO_DATA_DIRECTORY_NAME, type PhotoJobRecord, type SigmaConfig } from "@sigmaos/shared";
-import { MAX_PHOTO_BYTES, photoMimeType, processPhotoFile, removeStalePhotoDerivatives } from "./media.js";
+import {
+  MAX_PHOTO_BYTES,
+  photoMimeType,
+  processPhotoFile,
+  removeStalePhotoDerivatives,
+  type PhotoMediaCommandRunner
+} from "./media.js";
 
 const LEASE_MS = 60_000;
 const PROGRESS_INTERVAL_MS = 1_000;
@@ -42,6 +48,7 @@ export async function processPhotoJob(input: {
   config: SigmaConfig;
   job: PhotoJobRecord;
   mountCommandRunner?: PhotoMountCommandRunner;
+  mediaCommandRunner?: PhotoMediaCommandRunner;
 }): Promise<void> {
   const { db, config, job } = input;
   const settings = getPhotoLibrarySettings(db);
@@ -140,7 +147,8 @@ export async function processPhotoJob(input: {
             const photo = await processPhotoFile({
               sourcePath: safe.realPath,
               cacheRoot: path.join(config.dataDir, PHOTO_DATA_DIRECTORY_NAME),
-              mtimeMs
+              mtimeMs,
+              ...(input.mediaCommandRunner ? { commandRunner: input.mediaCommandRunner } : {})
             });
             upsertPhotoAsset(db, {
               settings,

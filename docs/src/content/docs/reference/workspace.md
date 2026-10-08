@@ -14,7 +14,7 @@ sidebar:
 | `apps/web` | React/Vite 工作区与预览 |
 | `apps/api` | Fastify REST、SSE、WebSocket 和静态服务 |
 | `apps/worker` | agent job claim 与事件持久化 |
-| `apps/photo-worker` | 照片 EXIF 索引、HEIC 解码和 WebP 衍生图生成 |
+| `apps/photo-worker` | 图片、视频和 RAW 的 EXIF/文件时间索引、媒体解码和 WebP 衍生图生成 |
 | `apps/indexer` | NAS 扫描与 FTS5 索引 |
 | `apps/scheduler` / `apps/backup` | 报告、维护、restic |
 | `apps/hostd` / `apps/termux` | Rust 特权宿主机操作与非 root PTY/tmux 终端服务 |

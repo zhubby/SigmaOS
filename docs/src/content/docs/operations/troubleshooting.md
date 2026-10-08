@@ -13,7 +13,7 @@ sidebar:
 
 `SQLITE_BUSY` 通常表示 oneshot 任务并发；应停止相关 timers，确认任务退出后串行运行。静态页面停在 Loading 时，先确认 API 提供当前 Web asset，且不存在的 `/assets/*` 没有被 SPA fallback 返回。
 
-## 照片扫描与 HEIC
+## 媒体扫描与解码
 
 照片面板长时间停在 queued/scanning 或出现 degraded 时，先检查 worker、库状态和目录挂载：
 
@@ -22,9 +22,12 @@ sudo systemctl status sigmaos-photo-worker.service --no-pager
 sudo journalctl -u sigmaos-photo-worker.service -n 100 --no-pager
 curl -fsS http://127.0.0.1:3010/api/photos/status
 command -v heif-convert
+command -v dcraw_emu
+command -v ffmpeg
+command -v ffprobe
 ```
 
-`offline` 表示照片设置对应的 root、storage pool 或目录当前不可用；先恢复相同挂载，不要把其他目录挂到原路径伪装成照片库。单个 HEIC/HEIF 失败时确认 `libheif-examples` 已安装并验证源文件；JPEG/PNG 等全部失败时检查 `/var/lib/sigmaos/photos` 与照片目录对 `sigmaos` 用户的读写权限。完整遍历失败不会清理未确认的旧资源。
+`offline` 表示照片设置对应的 root、storage pool 或目录当前不可用；先恢复相同挂载，不要把其他目录挂到原路径伪装成照片库。单个 HEIC/HEIF 失败时确认 `libheif-examples` 已安装；单个 RAW 失败时确认 `libraw-bin`/`dcraw_emu` 可执行并验证源文件；视频海报或播放失败时确认 `ffmpeg` 和 `ffprobe` 已安装。JPEG/PNG 等全部失败时检查 `/var/lib/sigmaos/photos` 与照片目录对 `sigmaos` 用户的读写权限。WebP 衍生图位于 `/var/lib/sigmaos/photos/thumbnail` 和 `/var/lib/sigmaos/photos/preview`，视频转码缓存位于 `/var/lib/sigmaos/media-cache/videos`。单个文件解码失败只会将该媒体标记为 `failed`，其他媒体继续处理，原文件仍可下载；完整遍历失败不会清理未确认的旧资源。
 
 ## 服务目录所有权与启动顺序
 

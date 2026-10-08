@@ -11,6 +11,7 @@ import {
   Maximize2,
   Minus,
   Plus,
+  Play,
   RefreshCw,
   ScanLine,
   Square,
@@ -41,6 +42,11 @@ import {
   type PhotoLibrarySettings,
   type PhotoLibraryStatus
 } from "../../api.js";
+import {
+  PHOTO_SUPPORTED_EXTENSIONS,
+  photoMediaKind,
+  type PhotoMediaKind
+} from "@sigmaos/shared/photo-config";
 import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
 import { PanelHeader, PanelHeaderAction, PanelHeaderActions } from "./PanelHeader.js";
@@ -49,7 +55,7 @@ import {
   type StorageFilePickerPool
 } from "./StorageFilePickerDialog.js";
 
-const PHOTO_EXTENSIONS = /\.(?:jpe?g|png|webp|gif|heic|heif)$/iu;
+export const PHOTO_ACCEPT = PHOTO_SUPPORTED_EXTENSIONS.join(",");
 
 export function PhotoLibraryPanel({
   pools,
@@ -106,6 +112,7 @@ export function PhotoLibraryPanel({
   const groupedPhotos = useMemo(() => groupPhotosByDate(photos, locale), [locale, photos]);
   const lightboxIndex = lightboxId ? photos.findIndex((photo) => photo.id === lightboxId) : -1;
   const lightboxPhoto = lightboxIndex >= 0 ? photos[lightboxIndex] ?? null : null;
+  const lightboxMediaKind = lightboxPhoto ? photoMediaKindForAsset(lightboxPhoto) : null;
   const canPropose = Boolean(sessionId && settings?.rootId === selectedRootId);
   const statusBusy = status?.state === "queued" || status?.state === "scanning";
 
@@ -221,7 +228,7 @@ export function PhotoLibraryPanel({
 
   async function uploadFiles(files: File[]) {
     if (!settings || !files.length || busyAction) return;
-    const supported = files.filter((file) => PHOTO_EXTENSIONS.test(file.name));
+    const supported = files.filter((file) => photoMediaKind(file.name) !== null);
     if (!supported.length) {
       onNotifyWarning(t("workspace.photos.unsupportedUpload"));
       return;
@@ -358,6 +365,8 @@ export function PhotoLibraryPanel({
       setLightboxId(null);
       return;
     }
+    const target = event.target as HTMLElement | null;
+    if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && target?.closest("video")) return;
     if (event.key === "ArrowLeft") {
       event.preventDefault();
       showAdjacent(-1);
@@ -387,7 +396,7 @@ export function PhotoLibraryPanel({
         ref={uploadInputRef}
         className="workspace-upload-input"
         type="file"
-        accept=".jpg,.jpeg,.png,.webp,.gif,.heic,.heif,image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif"
+        accept={PHOTO_ACCEPT}
         multiple
         tabIndex={-1}
         aria-hidden="true"
@@ -493,10 +502,13 @@ export function PhotoLibraryPanel({
                 <div className="photo-wall">
                   {group.photos.map((photo) => {
                     const isSelected = selectedIds.has(photo.id);
+                    const mediaKind = photoMediaKindForAsset(photo);
                     return (
                       <article className={`photo-tile${isSelected ? " is-selected" : ""}`} key={photo.id}>
                         <button className="photo-open" type="button" onClick={(event) => openLightbox(photo, event.currentTarget)} aria-label={t("workspace.photos.openPhoto", { name: photo.name })}>
                           <img src={`/api/photos/${encodeURIComponent(photo.id)}/thumbnail`} alt="" loading="lazy" />
+                          {mediaKind === "video" ? <span className="photo-media-badge is-video" aria-hidden="true"><Play size={13} fill="currentColor" /></span> : null}
+                          {mediaKind === "raw" ? <span className="photo-media-badge is-raw" aria-hidden="true">RAW</span> : null}
                           <span className="photo-name">{photo.name}</span>
                         </button>
                         <button className="photo-select" type="button" aria-pressed={isSelected} onClick={() => toggleSelection(photo.id)} aria-label={isSelected ? t("workspace.photos.deselectPhoto", { name: photo.name }) : t("workspace.photos.selectPhoto", { name: photo.name })}>
@@ -559,15 +571,30 @@ export function PhotoLibraryPanel({
             <header className="photo-lightbox-header">
               <div><span className="eyebrow">{t("workspace.photos.viewer")}</span><h2 id="photo-lightbox-title">{lightboxPhoto.name}</h2></div>
               <div className="photo-lightbox-tools">
-                <button type="button" onClick={() => setZoom((current) => Math.max(1, current - 0.5))} disabled={zoom <= 1} title={t("workspace.photos.zoomOut")} aria-label={t("workspace.photos.zoomOut")}><Minus aria-hidden="true" size={17} /></button>
-                <button type="button" onClick={() => setZoom(1)} title={t("workspace.photos.resetZoom")} aria-label={t("workspace.photos.resetZoom")}><Maximize2 aria-hidden="true" size={17} /><span>{Math.round(zoom * 100)}%</span></button>
-                <button type="button" onClick={() => setZoom((current) => Math.min(4, current + 0.5))} disabled={zoom >= 4} title={t("workspace.photos.zoomIn")} aria-label={t("workspace.photos.zoomIn")}><Plus aria-hidden="true" size={17} /></button>
+                {lightboxMediaKind !== "video" ? <>
+                  <button type="button" onClick={() => setZoom((current) => Math.max(1, current - 0.5))} disabled={zoom <= 1} title={t("workspace.photos.zoomOut")} aria-label={t("workspace.photos.zoomOut")}><Minus aria-hidden="true" size={17} /></button>
+                  <button type="button" onClick={() => setZoom(1)} title={t("workspace.photos.resetZoom")} aria-label={t("workspace.photos.resetZoom")}><Maximize2 aria-hidden="true" size={17} /><span>{Math.round(zoom * 100)}%</span></button>
+                  <button type="button" onClick={() => setZoom((current) => Math.min(4, current + 0.5))} disabled={zoom >= 4} title={t("workspace.photos.zoomIn")} aria-label={t("workspace.photos.zoomIn")}><Plus aria-hidden="true" size={17} /></button>
+                </> : null}
                 <button type="button" onClick={() => setLightboxId(null)} title={t("common.actions.close")} aria-label={t("common.actions.close")}><X aria-hidden="true" size={18} /></button>
               </div>
             </header>
             <div className="photo-lightbox-body">
               <button className="photo-lightbox-nav is-previous" type="button" onClick={() => showAdjacent(-1)} disabled={lightboxIndex <= 0} title={t("workspace.photos.previous")} aria-label={t("workspace.photos.previous")}><ChevronLeft aria-hidden="true" size={24} /></button>
-              <div className="photo-lightbox-canvas"><img src={`/api/photos/${encodeURIComponent(lightboxPhoto.id)}/preview`} alt={lightboxPhoto.name} style={{ width: `${zoom * 100}%` }} /></div>
+              <div className="photo-lightbox-canvas">
+                {lightboxMediaKind === "video" ? (
+                  <video
+                    className="photo-lightbox-video"
+                    src={`/api/photos/${encodeURIComponent(lightboxPhoto.id)}/video`}
+                    poster={`/api/photos/${encodeURIComponent(lightboxPhoto.id)}/preview`}
+                    controls
+                    playsInline
+                    preload="metadata"
+                  />
+                ) : (
+                  <img src={`/api/photos/${encodeURIComponent(lightboxPhoto.id)}/preview`} alt={lightboxPhoto.name} style={{ width: `${zoom * 100}%` }} />
+                )}
+              </div>
               <button className="photo-lightbox-nav is-next" type="button" onClick={() => showAdjacent(1)} disabled={lightboxIndex >= photos.length - 1} title={t("workspace.photos.next")} aria-label={t("workspace.photos.next")}><ChevronRight aria-hidden="true" size={24} /></button>
               <aside className="photo-lightbox-meta">
                 <dl>
@@ -599,6 +626,10 @@ export function groupPhotosByDate(photos: PhotoAsset[], locale: SupportedLocale)
     else groups.push({ key, label: formatter.format(validDate), photos: [photo] });
   }
   return groups;
+}
+
+export function photoMediaKindForAsset(photo: Pick<PhotoAsset, "name" | "mimeType">): PhotoMediaKind {
+  return photoMediaKind(photo.name) ?? (photo.mimeType.startsWith("video/") ? "video" : "image");
 }
 
 function mergePhotos(current: PhotoAsset[], incoming: PhotoAsset[]): PhotoAsset[] {

@@ -1,9 +1,9 @@
-import { createReadStream, createWriteStream } from "node:fs";
+import { createWriteStream } from "node:fs";
 import { lstat, mkdir, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance } from "fastify";
 import {
   inferMimeType,
   inferPreviewKind,
@@ -25,7 +25,7 @@ import {
   clampPreviewBytes,
   getFilePreviewMeta,
   indexMatchToFileEntry,
-  parseRangeHeader,
+  sendFileStream,
   safeQueryIndex
 } from "../lib/files.js";
 import { getDirectoryGitView } from "../lib/git.js";
@@ -865,35 +865,6 @@ async function pathExists(absolutePath: string): Promise<boolean> {
     }
     throw error;
   }
-}
-
-async function sendFileStream(
-  reply: FastifyReply,
-  rangeHeader: string | string[] | undefined,
-  filePath: string,
-  mimeType: string,
-  onStreamCreated?: (stream: ReturnType<typeof createReadStream>) => void
-) {
-  const fileStat = await stat(filePath);
-  const range = parseRangeHeader(rangeHeader, fileStat.size);
-  reply.header("Accept-Ranges", "bytes");
-  reply.header("Content-Type", mimeType);
-
-  if (range === "invalid") {
-    reply.header("Content-Range", `bytes */${fileStat.size}`);
-    return reply.status(416).send();
-  }
-
-  const stream = range ? createReadStream(filePath, range) : createReadStream(filePath);
-  onStreamCreated?.(stream);
-  if (range) {
-    reply.header("Content-Range", `bytes ${range.start}-${range.end}/${fileStat.size}`);
-    reply.header("Content-Length", String(range.end - range.start + 1));
-    return reply.status(206).send(stream);
-  }
-
-  reply.header("Content-Length", String(fileStat.size));
-  return reply.send(stream);
 }
 
 async function prepareUploadTarget(scope: StoragePoolScope, requestedPath: string): Promise<{

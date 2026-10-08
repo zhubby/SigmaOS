@@ -36,9 +36,9 @@ sidebar:
 
 ## 使用相册
 
-Photos 面板使用系统配置中指定的唯一照片目录，不在面板内切换目录。照片原文件保持原位，`sigmaos-photo-worker.service` 会递归扫描 JPEG、PNG、WebP、GIF、HEIC 和 HEIF，优先使用 EXIF 拍摄时间并生成本地 WebP 缩略图与预览。扫描状态会显示 queued、scanning、ready、degraded 或 storage offline；新增文件后可以手动扫描，服务也会每 30 分钟确保一次完整扫描。
+Photos 面板使用系统配置中指定的唯一媒体目录，不在面板内切换目录。原文件保持原位，`sigmaos-photo-worker.service` 会递归扫描常见图片、视频和 RAW，优先使用 EXIF 拍摄时间并生成本地 WebP 缩略图与预览。视频缩略图取自首帧，点击视频后在查看器内播放；RAW 由 `dcraw_emu` 渲染预览。扫描状态会显示 queued、scanning、ready、degraded 或 storage offline；新增文件后可以手动扫描，服务也会每 30 分钟确保一次完整扫描。
 
-照片墙按日期分页。点击照片打开支持前后切换和缩放的查看器；选择多张后可以下载原图/ZIP。移动和删除会创建现有文件 approval，批准前不会改变原文件；移动目标限定在当前照片库内，删除进入 SigmaOS trash。上传直接写入照片库并按 SHA-256 拒绝重复内容，单文件上限为 512 MiB。
+媒体墙按日期分页并统一混排图片、视频和 RAW。支持图片 `.jpg/.jpeg/.png/.webp/.gif/.heic/.heif`、视频 `.mp4/.mov/.m4v/.avi/.mkv/.webm/.mpeg/.mpg` 和 RAW `.cr2/.cr3/.crw/.nef/.nrw/.arw/.srf/.sr2/.dng/.raf/.orf/.rw2/.pef/.rwl/.3fr/.x3f/.erf/.kdc/.mos/.mrw/.bay`。点击项目打开支持前后切换的查看器，图片和 RAW 支持缩放，视频显示原生播放控件；选择多项后可以下载原文件/ZIP。移动和删除会创建现有文件 approval，批准前不会改变原文件；移动目标限定在当前媒体库内，删除进入 SigmaOS trash。上传直接写入媒体库并按 SHA-256 拒绝重复内容，单文件上限为 512 MiB。
 
 ## 使用 Agent
 

@@ -5,6 +5,7 @@ import path from "node:path";
 
 export const VIDEO_CACHE_MAX_BYTES = 1024 * 1024 * 1024;
 export const VIDEO_TRANSCODE_VERSION = "h264-aac-v1";
+export const VIDEO_TRANSCODE_TIMEOUT_MS = 120_000;
 
 export interface VideoCacheSource {
   rootId: string;
@@ -182,6 +183,7 @@ export class VideoCache {
 export const ffmpegVideoTranscoder: VideoTranscoder = {
   transcode(inputPath, outputPath) {
     return new Promise<void>((resolve, reject) => {
+      let settled = false;
       const child = spawn(
         "ffmpeg",
         [
@@ -213,10 +215,22 @@ export const ffmpegVideoTranscoder: VideoTranscoder = {
         ],
         { stdio: ["ignore", "ignore", "ignore"] }
       );
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        child.kill("SIGKILL");
+        settled = true;
+        reject(new VideoTranscodingError("Video transcoding timed out"));
+      }, VIDEO_TRANSCODE_TIMEOUT_MS);
       child.once("error", () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
         reject(new VideoTranscodingError("Video transcoding is unavailable"));
       });
       child.once("close", (code) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
         if (code === 0) {
           resolve();
           return;

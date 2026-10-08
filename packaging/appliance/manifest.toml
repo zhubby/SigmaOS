@@ -38,6 +38,8 @@ base = [
   "npm",
   "sqlite3",
   "libheif-examples",
+  "ffmpeg",
+  "libraw-bin",
   "tmux",
   "nginx",
   "restic",
@@ -60,7 +62,6 @@ ai = [
 ocr_media_helpers = [
   "tesseract-ocr",
   "poppler-utils",
-  "ffmpeg",
   "imagemagick"
 ]
 media_playback = [

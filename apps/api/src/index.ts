@@ -6,6 +6,7 @@ import { loadBuildInfo } from "./lib/build-info.js";
 import { createSystemCommandRunner } from "./lib/system-management.js";
 import { createTerminalRuntime } from "./lib/termux-client.js";
 import { createPlayerRuntime } from "./lib/player.js";
+import { ffmpegVideoTranscoder } from "./lib/video-cache.js";
 import { buildServer } from "./server.js";
 import { registerWebApp } from "./web-static.js";
 
@@ -22,6 +23,7 @@ const server = await buildServer({
     commandRunner: createSystemCommandRunner(config.hostd.socketPath)
   },
   terminal: createTerminalRuntime(config.terminal),
+  videoTranscoder: ffmpegVideoTranscoder,
   player: createPlayerRuntime(config.player)
 });
 const webDist = resolveWebDist();

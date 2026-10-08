@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PHOTO_SUPPORTED_EXTENSIONS } from "@sigmaos/shared";
 import {
   appendEvent,
   createActionMessageAndJob,
@@ -873,7 +874,7 @@ describe("API server", () => {
               maxFileSizeBytes: 512 * 1024 * 1024,
               thumbnailSizePx: 512,
               previewMaxEdgePx: 2048,
-              supportedExtensions: [".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"]
+              supportedExtensions: [...PHOTO_SUPPORTED_EXTENSIONS]
             },
             nasRoots: [{ id: "local", name: "Local", path: rootDir }]
           }

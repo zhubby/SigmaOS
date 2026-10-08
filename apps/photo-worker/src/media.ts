@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { access, lstat, mkdir, mkdtemp, opendir, rm, unlink } from "node:fs/promises";
+import { access, lstat, mkdir, mkdtemp, opendir, rename, rm, unlink } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -11,20 +11,31 @@ import {
   PHOTO_MAX_FILE_SIZE_BYTES,
   PHOTO_PREVIEW_MAX_EDGE_PX,
   PHOTO_THUMBNAIL_SIZE_PX,
+  photoMediaKind as sharedPhotoMediaKind,
+  photoMimeType as sharedPhotoMimeType,
+  type PhotoMediaKind,
   type PhotoTakenAtSource
 } from "@sigmaos/shared";
 
 const execFileAsync = promisify(execFile);
 export const MAX_PHOTO_BYTES = PHOTO_MAX_FILE_SIZE_BYTES;
 
-const PHOTO_MIME_TYPES: Record<string, string> = {
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".png": "image/png",
-  ".webp": "image/webp",
-  ".gif": "image/gif",
-  ".heic": "image/heic",
-  ".heif": "image/heif"
+const MEDIA_COMMAND_TIMEOUT_MS = 120_000;
+const MEDIA_COMMAND_MAX_BUFFER = 1024 * 1024;
+const MEDIA_COMMAND_OPTIONS = {
+  timeout: MEDIA_COMMAND_TIMEOUT_MS,
+  maxBuffer: MEDIA_COMMAND_MAX_BUFFER
+} as const;
+
+export interface PhotoMediaCommandRunner {
+  run(command: string, args: string[], options?: { timeout: number; maxBuffer: number }): Promise<string>;
+}
+
+const systemMediaCommandRunner: PhotoMediaCommandRunner = {
+  async run(command, args, options = MEDIA_COMMAND_OPTIONS) {
+    const result = await execFileAsync(command, args, options);
+    return result.stdout;
+  }
 };
 
 export interface ProcessedPhoto {
@@ -40,7 +51,11 @@ export interface ProcessedPhoto {
 }
 
 export function photoMimeType(filePath: string): string | null {
-  return PHOTO_MIME_TYPES[path.extname(filePath).toLowerCase()] ?? null;
+  return sharedPhotoMimeType(filePath);
+}
+
+export function photoMediaKind(filePath: string): PhotoMediaKind | null {
+  return sharedPhotoMediaKind(filePath);
 }
 
 export async function removeStalePhotoDerivatives(input: {
@@ -80,9 +95,11 @@ export async function processPhotoFile(input: {
   sourcePath: string;
   cacheRoot: string;
   mtimeMs: number;
+  commandRunner?: PhotoMediaCommandRunner;
 }): Promise<ProcessedPhoto> {
   const mimeType = photoMimeType(input.sourcePath);
-  if (!mimeType) throw new Error("Unsupported photo format");
+  const mediaKind = photoMediaKind(input.sourcePath);
+  if (!mimeType || !mediaKind) throw new Error("Unsupported photo format");
 
   const contentHash = await hashFile(input.sourcePath);
   const thumbnailKey = path.join("thumbnail", `${contentHash}.webp`);
@@ -92,51 +109,69 @@ export async function processPhotoFile(input: {
   await Promise.all([mkdir(path.dirname(thumbnailPath), { recursive: true }), mkdir(path.dirname(previewPath), { recursive: true })]);
 
   const exif = await readPhotoExif(input.sourcePath);
-  const temporaryDirectory = mimeType === "image/heic" || mimeType === "image/heif"
+  const temporaryDirectory = mediaKind === "raw" || mediaKind === "video" || mimeType === "image/heic" || mimeType === "image/heif"
     ? await mkdtemp(path.join(os.tmpdir(), "sigmaos-photo-"))
     : null;
+  const commandRunner = input.commandRunner ?? systemMediaCommandRunner;
   try {
-    const imagePath = temporaryDirectory
-      ? await convertHeif(input.sourcePath, path.join(temporaryDirectory, "decoded.jpg"))
-      : input.sourcePath;
+    let imagePath = input.sourcePath;
+    let videoDimensions: { width: number; height: number } | null = null;
+    if (mediaKind === "raw") {
+      if (!temporaryDirectory) throw new Error("RAW temporary directory is unavailable");
+      imagePath = await convertRaw(input.sourcePath, path.join(temporaryDirectory, "decoded.tiff"), commandRunner);
+    } else if (mediaKind === "video") {
+      if (!temporaryDirectory) throw new Error("Video temporary directory is unavailable");
+      videoDimensions = await readVideoDimensions(input.sourcePath, commandRunner);
+      imagePath = await extractVideoFrame(input.sourcePath, path.join(temporaryDirectory, "frame.jpg"), commandRunner);
+    } else if (mimeType === "image/heic" || mimeType === "image/heif") {
+      if (!temporaryDirectory) throw new Error("HEIF temporary directory is unavailable");
+      imagePath = await convertHeif(input.sourcePath, path.join(temporaryDirectory, "decoded.jpg"), commandRunner);
+    }
+
     const image = sharp(imagePath, {
-      animated: mimeType === "image/gif",
+      animated: mediaKind === "image" && mimeType === "image/gif",
       failOn: "warning",
       limitInputPixels: true
     });
     const metadata = await image.metadata();
     const dimensions = metadata.autoOrient ?? { width: metadata.width, height: metadata.height };
-    if (!dimensions.width || !dimensions.height) throw new Error("Photo dimensions are unavailable");
+    const width = videoDimensions?.width ?? dimensions.width;
+    const height = videoDimensions?.height ?? dimensions.height;
+    if (!width || !height) throw new Error("Photo dimensions are unavailable");
 
     if (!(await exists(thumbnailPath))) {
-      await sharp(imagePath, { animated: mimeType === "image/gif", failOn: "warning", limitInputPixels: true })
-        .rotate()
-        .resize(PHOTO_THUMBNAIL_SIZE_PX, PHOTO_THUMBNAIL_SIZE_PX, {
-          fit: "cover",
-          position: "attention",
-          withoutEnlargement: true
-        })
-        .webp({ quality: 80 })
-        .toFile(thumbnailPath);
+      await publishDerivative(thumbnailPath, async (temporaryPath) => {
+        await sharp(imagePath, { animated: mediaKind === "image" && mimeType === "image/gif", failOn: "warning", limitInputPixels: true })
+          .rotate()
+          .resize(PHOTO_THUMBNAIL_SIZE_PX, PHOTO_THUMBNAIL_SIZE_PX, {
+            fit: "cover",
+            position: "attention",
+            withoutEnlargement: true
+          })
+          .webp({ quality: 80 })
+          .toFile(temporaryPath);
+      });
     }
     if (!(await exists(previewPath))) {
-      await sharp(imagePath, { animated: mimeType === "image/gif", failOn: "warning", limitInputPixels: true })
-        .rotate()
-        .resize(PHOTO_PREVIEW_MAX_EDGE_PX, PHOTO_PREVIEW_MAX_EDGE_PX, {
-          fit: "inside",
-          withoutEnlargement: true
-        })
-        .webp({ quality: 85 })
-        .toFile(previewPath);
+      await publishDerivative(previewPath, async (temporaryPath) => {
+        await sharp(imagePath, { animated: mediaKind === "image" && mimeType === "image/gif", failOn: "warning", limitInputPixels: true })
+          .rotate()
+          .resize(PHOTO_PREVIEW_MAX_EDGE_PX, PHOTO_PREVIEW_MAX_EDGE_PX, {
+            fit: "inside",
+            withoutEnlargement: true
+          })
+          .webp({ quality: 85 })
+          .toFile(temporaryPath);
+      });
     }
 
     const taken = selectTakenAt(exif, input.mtimeMs);
     return {
       contentHash,
       mimeType,
-      width: dimensions.width,
-      height: dimensions.height,
-      orientation: finiteInteger(exif.Orientation) ?? finiteInteger(metadata.orientation),
+      width,
+      height,
+      orientation: mediaKind === "video" ? null : finiteInteger(exif.Orientation) ?? finiteInteger(metadata.orientation),
       takenAt: taken.takenAt,
       takenAtSource: taken.source,
       thumbnailKey,
@@ -167,12 +202,9 @@ async function readPhotoExif(filePath: string): Promise<Record<string, unknown>>
   }
 }
 
-async function convertHeif(sourcePath: string, outputPath: string): Promise<string> {
+async function convertHeif(sourcePath: string, outputPath: string, commandRunner: PhotoMediaCommandRunner): Promise<string> {
   try {
-    await execFileAsync("heif-convert", [sourcePath, outputPath], {
-      timeout: 120_000,
-      maxBuffer: 1024 * 1024
-    });
+    await commandRunner.run("heif-convert", [sourcePath, outputPath], MEDIA_COMMAND_OPTIONS);
     await access(outputPath);
     return outputPath;
   } catch (error) {
@@ -180,6 +212,65 @@ async function convertHeif(sourcePath: string, outputPath: string): Promise<stri
     wrapped.cause = error;
     throw wrapped;
   }
+}
+
+async function convertRaw(sourcePath: string, outputPath: string, commandRunner: PhotoMediaCommandRunner): Promise<string> {
+  try {
+    await commandRunner.run("dcraw_emu", ["-w", "-T", "-O", outputPath, sourcePath], MEDIA_COMMAND_OPTIONS);
+    await access(outputPath);
+    if (!(await isDecodableImage(outputPath))) throw new Error("RAW decoder produced no decodable image");
+    return outputPath;
+  } catch (error) {
+    const wrapped = new Error("RAW conversion failed. Install libraw-bin and verify the source file.") as Error & { cause?: unknown };
+    wrapped.cause = error;
+    throw wrapped;
+  }
+}
+
+async function readVideoDimensions(sourcePath: string, commandRunner: PhotoMediaCommandRunner): Promise<{ width: number; height: number }> {
+  try {
+    const output = await commandRunner.run("ffprobe", [
+      "-v",
+      "error",
+      "-select_streams",
+      "v:0",
+      "-show_entries",
+      "stream=width,height",
+      "-of",
+      "json",
+      sourcePath
+    ], MEDIA_COMMAND_OPTIONS);
+    const parsed = JSON.parse(output) as { streams?: Array<{ width?: unknown; height?: unknown }> };
+    const width = finitePositiveInteger(parsed.streams?.[0]?.width);
+    const height = finitePositiveInteger(parsed.streams?.[0]?.height);
+    if (!width || !height) throw new Error("Video dimensions are unavailable");
+    return { width, height };
+  } catch (error) {
+    const wrapped = new Error("Video metadata could not be read") as Error & { cause?: unknown };
+    wrapped.cause = error;
+    throw wrapped;
+  }
+}
+
+async function extractVideoFrame(sourcePath: string, outputPath: string, commandRunner: PhotoMediaCommandRunner): Promise<string> {
+  const attempts = [
+    ["-hide_banner", "-loglevel", "error", "-y", "-ss", "00:00:01", "-i", sourcePath, "-frames:v", "1", "-q:v", "2", outputPath],
+    ["-hide_banner", "-loglevel", "error", "-y", "-i", sourcePath, "-frames:v", "1", "-q:v", "2", outputPath]
+  ];
+  let lastError: unknown;
+  for (const args of attempts) {
+    try {
+      await commandRunner.run("ffmpeg", args, MEDIA_COMMAND_OPTIONS);
+      if (await isDecodableImage(outputPath)) return outputPath;
+      lastError = new Error("FFmpeg produced no decodable frame");
+    } catch (error) {
+      lastError = error;
+    }
+    await rm(outputPath, { force: true }).catch(() => undefined);
+  }
+  const wrapped = new Error("Video thumbnail extraction failed") as Error & { cause?: unknown };
+  wrapped.cause = lastError;
+  throw wrapped;
 }
 
 async function hashFile(filePath: string): Promise<string> {
@@ -197,6 +288,25 @@ async function exists(filePath: string): Promise<boolean> {
   }
 }
 
+async function isDecodableImage(filePath: string): Promise<boolean> {
+  try {
+    const metadata = await sharp(filePath, { failOn: "warning", limitInputPixels: true }).metadata();
+    return Boolean(metadata.width && metadata.height);
+  } catch {
+    return false;
+  }
+}
+
+async function publishDerivative(targetPath: string, render: (temporaryPath: string) => Promise<void>): Promise<void> {
+  const temporaryPath = path.join(path.dirname(targetPath), `.${path.basename(targetPath)}.${randomUUID()}.tmp`);
+  try {
+    await render(temporaryPath);
+    await rename(temporaryPath, targetPath);
+  } finally {
+    await rm(temporaryPath, { force: true }).catch(() => undefined);
+  }
+}
+
 function toValidDate(value: unknown): Date | null {
   const date = value instanceof Date
     ? value
@@ -208,4 +318,9 @@ function toValidDate(value: unknown): Date | null {
 
 function finiteInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) ? value : null;
+}
+
+function finitePositiveInteger(value: unknown): number | null {
+  const result = finiteInteger(value);
+  return result && result > 0 ? result : null;
 }

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -64,6 +64,29 @@ describe("photo API", () => {
     expect(earlyUpload.statusCode).toBe(409);
     expect(earlyUpload.json().error).toContain("initial photo scan");
     completeInitialScan(settings);
+
+    const uploadedVideo = await app.inject({
+      method: "PUT",
+      url: "/api/photos/upload?name=clip.MP4",
+      headers: { "content-type": "application/octet-stream" },
+      payload: Buffer.from("video-upload")
+    });
+    expect(uploadedVideo.statusCode).toBe(201);
+    const uploadedRaw = await app.inject({
+      method: "PUT",
+      url: "/api/photos/upload?name=camera.CR3",
+      headers: { "content-type": "application/octet-stream" },
+      payload: Buffer.from("raw-upload")
+    });
+    expect(uploadedRaw.statusCode).toBe(201);
+    const unsupported = await app.inject({
+      method: "PUT",
+      url: "/api/photos/upload?name=notes.txt",
+      headers: { "content-type": "application/octet-stream" },
+      payload: Buffer.from("text-upload")
+    });
+    expect(unsupported.statusCode).toBe(400);
+
     const body = Buffer.from("jpeg-like-test-data");
     const existing = await addPhoto(root, settings, "existing.jpg", "2025-01-01T00:00:00.000Z", body);
 
@@ -106,6 +129,80 @@ describe("photo API", () => {
     await app.close();
   });
 
+  it("streams native photo videos and reuses the transcode cache for other containers", async () => {
+    const { app, root } = await setup();
+    await configure(app);
+    const settings = getPhotoLibrarySettings(db!)!;
+    completeInitialScan(settings);
+    const native = await addPhoto(root, settings, "native.mp4", "2025-01-01T00:00:00.000Z", Buffer.from("native-video"), "video/mp4");
+    const webm = await addPhoto(root, settings, "native.webm", "2025-01-01T00:00:00.000Z", Buffer.from("native-webm"), "video/webm");
+    const converted = await addPhoto(root, settings, "converted.mkv", "2025-01-01T00:00:00.000Z", Buffer.from("source-video"), "video/x-matroska");
+    const broken = await addPhoto(root, settings, "broken.avi", "2025-01-01T00:00:00.000Z", Buffer.from("broken-video"), "video/x-msvideo");
+    const raw = await addPhoto(root, settings, "camera.cr3", "2025-01-01T00:00:00.000Z", Buffer.from("raw-source"), "image/x-canon-cr3");
+    const escaped = await addPhoto(root, settings, "../outside.mp4", "2025-01-01T00:00:00.000Z", Buffer.from("outside-video"), "video/mp4");
+    let transcodeCalls = 0;
+    const transcode = async (inputPath: string, outputPath: string) => {
+      if (inputPath.endsWith("broken.avi")) {
+        await writeFile(outputPath, "partial-video");
+        throw new Error("transcode failed");
+      }
+      transcodeCalls += 1;
+      await writeFile(outputPath, `converted-video-${transcodeCalls}`);
+    };
+    await app.close();
+
+    const server = await buildServer({
+      config: testConfig(root),
+      db: db!,
+      system: storageSystem(root, { mounted: true }),
+      videoTranscoder: { transcode }
+    });
+    const nativeResponse = await server.inject({
+      method: "GET",
+      url: `/api/photos/${native.id}/video`,
+      headers: { range: "bytes=1-5" }
+    });
+    expect(nativeResponse.statusCode).toBe(206);
+    expect(nativeResponse.headers["content-type"]).toContain("video/mp4");
+    expect(nativeResponse.payload).toBe("ative");
+    const webmResponse = await server.inject({
+      method: "GET",
+      url: `/api/photos/${webm.id}/video`,
+      headers: { range: "bytes=0-5" }
+    });
+    expect(webmResponse.statusCode).toBe(206);
+    expect(webmResponse.headers["content-type"]).toContain("video/webm");
+    expect(webmResponse.payload).toBe("native");
+    const rawOriginal = await server.inject({ method: "GET", url: `/api/photos/${raw.id}/original?download=1` });
+    expect(rawOriginal.statusCode).toBe(200);
+    expect(rawOriginal.headers["content-type"]).toContain("image/x-canon-cr3");
+    expect(rawOriginal.payload).toBe("raw-source");
+    expect((await server.inject({ method: "GET", url: `/api/photos/${raw.id}/video` })).statusCode).toBe(415);
+    expect((await server.inject({ method: "GET", url: `/api/photos/${escaped.id}/video` })).statusCode).toBe(404);
+
+    const [first, second] = await Promise.all([
+      server.inject({ method: "GET", url: `/api/photos/${converted.id}/video` }),
+      server.inject({ method: "GET", url: `/api/photos/${converted.id}/video` })
+    ]);
+    expect(first.statusCode).toBe(200);
+    expect(first.payload).toBe("converted-video-1");
+    expect(second.payload).toBe("converted-video-1");
+    expect(transcodeCalls).toBe(1);
+
+    await writeFile(path.join(root, "Photos", "converted.mkv"), "changed-source-video");
+    const changed = await server.inject({ method: "GET", url: `/api/photos/${converted.id}/video` });
+    expect(changed.statusCode).toBe(200);
+    expect(changed.payload).toBe("converted-video-2");
+    expect(transcodeCalls).toBe(2);
+
+    const failed = await server.inject({ method: "GET", url: `/api/photos/${broken.id}/video` });
+    expect(failed.statusCode).toBe(503);
+    expect(failed.json().error).toBe("Video transcoding failed");
+    const cacheEntries = await readdir(path.join(tempDir!, "media-cache", "videos"));
+    expect(cacheEntries).not.toEqual(expect.arrayContaining([expect.stringMatching(/\.part$/u)]));
+    await server.close();
+  });
+
   it("serves cached derivatives while the configured storage pool is offline", async () => {
     const storageState = { mounted: true };
     const { app, root } = await setup(storageState);
@@ -113,6 +210,7 @@ describe("photo API", () => {
     const settings = getPhotoLibrarySettings(db!)!;
     completeInitialScan(settings);
     const photo = await addPhoto(root, settings, "cached.jpg", "2025-01-01T00:00:00.000Z");
+    const video = await addPhoto(root, settings, "offline.mp4", "2025-01-01T00:00:00.000Z", Buffer.from("video"), "video/mp4");
     const thumbnail = Buffer.from("cached-webp");
     const thumbnailPath = path.join(tempDir!, "photos", "thumbnail", "cached.jpg.webp");
     await mkdir(path.dirname(thumbnailPath), { recursive: true });
@@ -126,6 +224,8 @@ describe("photo API", () => {
     expect(response.rawPayload).toEqual(thumbnail);
     expect((await app.inject({ method: "GET", url: `/api/photos/${photo.id}/preview` })).statusCode).toBe(404);
     expect((await app.inject({ method: "GET", url: `/api/photos/${photo.id}/original` })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: `/api/photos/${video.id}/video` })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: "/api/photos/missing/video" })).statusCode).toBe(404);
     await app.close();
   });
 
@@ -229,7 +329,8 @@ async function addPhoto(
   settings: PhotoLibrarySettingsRecord,
   name: string,
   takenAt: string,
-  body = Buffer.from(name)
+  body = Buffer.from(name),
+  mimeType = "image/jpeg"
 ) {
   const photoPath = path.join(root, "Photos", name);
   await mkdir(path.dirname(photoPath), { recursive: true });
@@ -239,13 +340,13 @@ async function addPhoto(
     settings,
     path: path.join("Photos", name),
     name: fileName,
-    mimeType: "image/jpeg",
+    mimeType,
     sizeBytes: body.length,
     mtimeMs: Date.parse(takenAt),
     contentHash: createHash("sha256").update(body).digest("hex"),
     width: 100,
     height: 80,
-    orientation: 1,
+    orientation: mimeType.startsWith("video/") ? null : 1,
     takenAt,
     takenAtSource: "exif",
     thumbnailKey: `thumbnail/${fileName}.webp`,

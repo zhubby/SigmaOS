@@ -1,5 +1,7 @@
+import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import path from "node:path";
+import type { FastifyReply } from "fastify";
 import { queryIndexedText, type SigmaDatabase } from "@sigmaos/db";
 import {
   inferMimeType,
@@ -87,6 +89,35 @@ export function parseRangeHeader(
     start,
     end: Math.min(end, size - 1)
   };
+}
+
+export async function sendFileStream(
+  reply: FastifyReply,
+  rangeHeader: string | string[] | undefined,
+  filePath: string,
+  mimeType: string,
+  onStreamCreated?: (stream: ReturnType<typeof createReadStream>) => void
+) {
+  const fileStat = await stat(filePath);
+  const range = parseRangeHeader(rangeHeader, fileStat.size);
+  reply.header("Accept-Ranges", "bytes");
+  reply.header("Content-Type", mimeType);
+
+  if (range === "invalid") {
+    reply.header("Content-Range", `bytes */${fileStat.size}`);
+    return reply.status(416).send();
+  }
+
+  const stream = range ? createReadStream(filePath, range) : createReadStream(filePath);
+  onStreamCreated?.(stream);
+  if (range) {
+    reply.header("Content-Range", `bytes ${range.start}-${range.end}/${fileStat.size}`);
+    reply.header("Content-Length", String(range.end - range.start + 1));
+    return reply.status(206).send(stream);
+  }
+
+  reply.header("Content-Length", String(fileStat.size));
+  return reply.send(stream);
 }
 
 export function safeQueryIndex(db: SigmaDatabase, rootId: string, query: string, searchPath = ".") {

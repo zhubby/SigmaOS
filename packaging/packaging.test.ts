@@ -123,6 +123,8 @@ describe("native packaging artifacts", () => {
     expect(control).toContain("Build-Depends: debhelper-compat (= 13), nodejs, npm, cargo, rustc, acl");
     expect(control).toContain("mpv");
     expect(control).toContain("libheif-examples");
+    expect(control).toMatch(/^Depends:.*ffmpeg.*libraw-bin/m);
+    expect(control).not.toMatch(/^Suggests:.*ffmpeg/m);
     expect(control).toContain("Suggests:");
     expect(control).toContain("git");
     expect(control).toContain("ffmpeg");
@@ -173,7 +175,11 @@ describe("native packaging artifacts", () => {
     expect(buildImage).toMatch(/--include=.*(^|,)samba(,|\\|\s)/s);
     expect(manifest).toContain("tesseract-ocr");
     expect(manifest).toContain("libheif-examples");
+    expect(manifest).toContain("ffmpeg");
+    expect(manifest).toContain("libraw-bin");
     expect(buildImage).toContain("libheif-examples");
+    expect(buildImage).toContain("ffmpeg");
+    expect(buildImage).toContain("libraw-bin");
     expect(manifest).toContain("mdadm");
     expect(manifest).toContain("btrfs-progs");
     expect(manifest).toContain("smartmontools");

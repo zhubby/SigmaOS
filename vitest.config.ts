@@ -16,6 +16,7 @@ export default defineConfig({
       "@sigmaos/nas-tools": new URL("packages/nas-tools/src/index.ts", `file://${root}`).pathname,
       "@sigmaos/shared/docker-images": new URL("packages/shared/src/docker-images.ts", `file://${root}`).pathname,
       "@sigmaos/shared/docker-resources": new URL("packages/shared/src/docker-resources.ts", `file://${root}`).pathname,
+      "@sigmaos/shared/photo-config": new URL("packages/shared/src/photo-config.ts", `file://${root}`).pathname,
       "@sigmaos/shared": new URL("packages/shared/src/index.ts", `file://${root}`).pathname
     }
   }

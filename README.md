@@ -51,8 +51,8 @@ The following surfaces are intentionally limited today:
 
 ### Photo library
 
-- Bind one directory on a mounted storage pool and index JPEG, PNG, WebP, GIF, HEIC, and HEIF recursively.
-- Build a chronological EXIF-first timeline with cached WebP thumbnails and previews.
+- Bind one directory on a mounted storage pool and index common images, videos, and RAW camera files recursively.
+- Build a chronological EXIF-first media timeline with cached WebP thumbnails and previews, plus in-panel video playback.
 - Upload with SHA-256 duplicate detection, view metadata, download originals or ZIP selections, and request approval-gated batch move/trash operations.
 - Run immediate and periodic scans in a dedicated non-root photo worker without following symbolic links.
 
@@ -165,7 +165,8 @@ Optional host tools enable additional features:
 | Feature | Host dependencies |
 | --- | --- |
 | Git status | `git` |
-| Video transcoding | `ffmpeg` |
+| Video thumbnails and playback | `ffmpeg` |
+| RAW photo thumbnails and previews | `libraw-bin` (`dcraw_emu`) |
 | HEIC/HEIF photos | `libheif-examples` (`heif-convert`) |
 | Archive extraction | `gzip`, `unzip`, `tar`, `bsdtar`, or `unrar` as appropriate |
 | Storage and network inspection | `ip`, `lsblk`, `findmnt`, `mdadm`, `smartctl` |
@@ -325,7 +326,7 @@ Set `SIGMAOS_NGINX_PORT` to choose another listener port, or set `SIGMAOS_ENABLE
 
 Docker and VM runtimes are opt-in because Docker socket access is root-equivalent. Enable both during installation with `SIGMAOS_ENABLE_DOCKER=1 SIGMAOS_ENABLE_VM=1`; the installer installs the Docker engine, CLI, Compose plugin, and matching QEMU/libvirt packages, writes the feature flags, refreshes API access to the `docker`, `libvirt`, and `kvm` groups, grants the SigmaOS service account the non-interactive libvirt polkit action, starts the runtime services, and autostarts the standard libvirt `default` NAT network when it is available.
 
-Optional integrations are listed as Debian `Suggests` rather than hard dependencies. Install the host tools you need (for example `git`, `ffmpeg`, `restic`, Samba, or NFS) separately; the core package does not enable those services implicitly.
+Optional integrations are listed as Debian `Suggests` rather than hard dependencies. The package includes the required `ffmpeg` and `libraw-bin` media tools; install other host tools you need (for example `git`, `restic`, Samba, or NFS) separately. The core package does not enable optional services implicitly.
 
 ## Repository layout
 

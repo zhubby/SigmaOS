@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it } from "vitest";
+import { PHOTO_SUPPORTED_EXTENSIONS } from "@sigmaos/shared/photo-config";
 import { i18n, initI18n } from "../../i18n/index.js";
 import { SettingsPhotosPage } from "./SettingsModal.js";
 
@@ -33,7 +34,7 @@ describe("SettingsPhotosPage", () => {
         maxFileSizeBytes: 512 * 1024 * 1024,
         thumbnailSizePx: 512,
         previewMaxEdgePx: 2048,
-        supportedExtensions: [".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"]
+        supportedExtensions: [...PHOTO_SUPPORTED_EXTENSIONS]
       },
       loading: false,
       locale: "en"
@@ -44,7 +45,7 @@ describe("SettingsPhotosPage", () => {
     expect(html).toContain("/var/lib/sigmaos/photos");
     expect(html).toContain("512.0 MB");
     expect(html).toContain("2,048 px max edge");
-    expect(html).toContain("JPG, JPEG, PNG, WEBP, GIF, HEIC, HEIF");
+    expect(html).toContain(PHOTO_SUPPORTED_EXTENSIONS.map((extension) => extension.slice(1).toUpperCase()).join(", "));
     expect(html).toContain(">42<");
     expect(html).toContain(">1<");
   });
