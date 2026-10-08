@@ -34,16 +34,13 @@ export function mapPiToolPolicySettings(row: DbSystemSettingRow): PiToolPolicySe
 }
 
 export function mapDockerSettings(row: DbSystemSettingRow): DockerSettingsRecord {
-  const parsed = JSON.parse(row.value_json) as Partial<DockerSettingsRecord> & {
-    composeRoots?: Array<{ id?: unknown; name?: unknown; path?: unknown }>;
-  };
+  const parsed = JSON.parse(row.value_json) as Partial<DockerSettingsRecord>;
   return {
     enabled: Boolean(parsed.enabled),
     socketPath: normalizeString(parsed.socketPath) ?? "/var/run/docker.sock",
     composeCommand: normalizeString(parsed.composeCommand) ?? "docker",
     operationTimeoutMs: normalizePositiveInteger(parsed.operationTimeoutMs) ?? 120_000,
     consoleShells: normalizeDockerShells(parsed.consoleShells),
-    composeRoots: normalizeDockerComposeRoots(parsed.composeRoots),
     updatedAt: normalizeString(parsed.updatedAt) ?? row.updated_at
   };
 }
@@ -74,29 +71,6 @@ export function normalizePiToolPolicySettings(
   }
 
   return normalized;
-}
-
-function normalizeDockerComposeRoots(
-  roots: Array<{ id?: unknown; name?: unknown; path?: unknown }> | undefined
-): DockerSettingsRecord["composeRoots"] {
-  if (!Array.isArray(roots)) {
-    return [];
-  }
-
-  return roots
-    .map((root, index) => {
-      const pathValue = normalizeString(root.path);
-      if (!pathValue) {
-        return null;
-      }
-      const id = normalizeString(root.id) ?? `compose-root-${index + 1}`;
-      return {
-        id,
-        name: normalizeString(root.name) ?? id,
-        path: pathValue
-      };
-    })
-    .filter((root): root is DockerSettingsRecord["composeRoots"][number] => root !== null);
 }
 
 function normalizeDockerShells(shells: unknown): string[] {

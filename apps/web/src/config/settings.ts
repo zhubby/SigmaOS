@@ -40,19 +40,12 @@ export interface ModelProviderFormState {
   clearApiKey: boolean;
 }
 
-export interface DockerComposeRootFormState {
-  id: string;
-  name: string;
-  path: string;
-}
-
 export interface DockerSettingsFormState {
   enabled: boolean;
   socketPath: string;
   composeCommand: string;
   operationTimeoutMs: string;
   consoleShells: string;
-  composeRoots: DockerComposeRootFormState[];
   updatedAt: string;
 }
 
@@ -165,11 +158,6 @@ export function dockerSettingsToForm(settings: DockerSettings | null): DockerSet
     composeCommand: settings?.composeCommand ?? "docker",
     operationTimeoutMs: String(settings?.operationTimeoutMs ?? 120_000),
     consoleShells: (settings?.consoleShells ?? ["/bin/sh", "/bin/bash"]).join(", "),
-    composeRoots: (settings?.composeRoots ?? []).map((root) => ({
-      id: root.id,
-      name: root.name,
-      path: root.path
-    })),
     updatedAt: settings?.updatedAt ?? new Date(0).toISOString()
   };
 }

@@ -399,7 +399,6 @@ function testConfig(): SigmaConfig {
       composeCommand: "docker",
       operationTimeoutMs: 120_000,
       consoleShells: ["/bin/sh"],
-      composeRoots: []
     },
     shares: {
       enabled: false,

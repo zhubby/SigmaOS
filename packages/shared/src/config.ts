@@ -7,7 +7,6 @@ import {
 } from "./termux-protocol.js";
 import type {
   DlnaMediaType,
-  DockerComposeRootConfig,
   NasRootConfig,
   ShareConfig,
   ShareDefinitionConfig,
@@ -17,6 +16,8 @@ import type {
   TerminalConfig,
   VmConfig
 } from "./types.js";
+
+const MANAGED_DOCKER_APPS_PATH = "/srv/apps";
 
 interface TomlConfig {
   environment?: "development" | "production";
@@ -44,11 +45,6 @@ interface TomlConfig {
     compose_command?: string;
     operation_timeout_ms?: number;
     console_shells?: string[];
-    compose_roots?: Array<{
-      id?: string;
-      name?: string;
-      path?: string;
-    }>;
   };
   vm?: {
     enabled?: boolean;
@@ -202,8 +198,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
         env.SIGMAOS_DOCKER_OPERATION_TIMEOUT_MS,
         fileConfig.docker?.operation_timeout_ms ?? 120_000
       ),
-      consoleShells: loadDockerConsoleShells(env, fileConfig),
-      composeRoots: loadDockerComposeRoots(env, fileConfig, workspaceRoot)
+      consoleShells: loadDockerConsoleShells(env, fileConfig)
     },
     vm: loadVmConfig(env, fileConfig, workspaceRoot),
     hostd: loadHostdConfig(env, fileConfig),
@@ -346,6 +341,9 @@ function validateConfig(input: {
   }
   if (input.environment !== "production") return;
   for (const root of input.nasRoots) {
+    if (isUnder(root.path, MANAGED_DOCKER_APPS_PATH) || isUnder(MANAGED_DOCKER_APPS_PATH, root.path)) {
+      throw new Error(`Production NAS roots must not overlap ${MANAGED_DOCKER_APPS_PATH}`);
+    }
     if (root.mountPolicy === "required" && !isUnder(root.path, "/srv")) {
       throw new Error(`Production NAS root must be under /srv: ${root.path}`);
     }
@@ -377,33 +375,6 @@ function isUnder(candidate: string, parent: string): boolean {
 function isLoopbackHost(host: string): boolean {
   const normalized = host.trim().toLowerCase();
   return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1" || normalized === "[::1]";
-}
-
-function loadDockerComposeRoots(
-  env: NodeJS.ProcessEnv,
-  fileConfig: TomlConfig,
-  cwd: string
-): DockerComposeRootConfig[] {
-  if (env.SIGMAOS_DOCKER_COMPOSE_ROOTS) {
-    return env.SIGMAOS_DOCKER_COMPOSE_ROOTS.split(",")
-      .map((entry, index) => parseNamedPathEnv(entry.trim(), index, cwd, "compose-root"))
-      .filter((root): root is DockerComposeRootConfig => root !== null);
-  }
-
-  return (fileConfig.docker?.compose_roots ?? [])
-    .map((root, index) => {
-      const rootPath = normalizeText(root.path);
-      if (!rootPath) {
-        return null;
-      }
-      const id = normalizeText(root.id) ?? `compose-root-${index + 1}`;
-      return {
-        id,
-        name: normalizeText(root.name) ?? id,
-        path: path.resolve(cwd, rootPath)
-      };
-    })
-    .filter((root): root is DockerComposeRootConfig => root !== null);
 }
 
 function loadDockerConsoleShells(env: NodeJS.ProcessEnv, fileConfig: TomlConfig): string[] {
@@ -571,7 +542,7 @@ function parseNamedPathEnv(
   index: number,
   cwd: string,
   fallbackPrefix: string
-): NasRootConfig | DockerComposeRootConfig | null {
+): NasRootConfig | null {
   if (!entry) {
     return null;
   }

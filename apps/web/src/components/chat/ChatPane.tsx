@@ -786,12 +786,6 @@ function approvalCard(approval: PendingApproval, t: Translate): ApprovalCard {
           : []),
         ...(dockerOperation.service
           ? [{ label: t("chat.approvalCards.service"), value: dockerOperation.service }]
-          : []),
-        ...(dockerOperation.composeRootId
-          ? [{ label: t("chat.approvalCards.root"), value: dockerOperation.composeRootId }]
-          : []),
-        ...(dockerOperation.composeFilePath
-          ? [{ label: t("chat.approvalCards.composeFile"), value: dockerOperation.composeFilePath }]
           : [])
       ]
     };

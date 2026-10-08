@@ -8,6 +8,8 @@ import {
   createActionMessageAndJob,
   consumeDockerConsoleAuthorization,
   deleteDockerRegistryCredential,
+  DockerComposeAppConflictError,
+  DockerComposeAppProjectKeyConflictError,
   DockerRegistryCredentialConflictError,
   getDockerSettings,
   getApproval,
@@ -26,6 +28,10 @@ import {
 import type {
   DockerDaemonConfigUpdateInput,
   DockerDaemonStatus,
+  DockerComposeAppCreateInput,
+  DockerComposeAppDeleteInput,
+  DockerComposeAppUpdateInput,
+  DockerComposeAppValidateInput,
   DockerConsoleAuthorizationRecord,
   DockerContainerSummary,
   DockerCreateInput,
@@ -54,6 +60,11 @@ import {
   validateDockerDaemonConfigUpdate
 } from "../lib/docker-daemon.js";
 import {
+  DockerComposeMaterializationError,
+  DockerComposeUnavailableError,
+  DockerComposeValidationError
+} from "../lib/docker-compose.js";
+import {
   dockerRegistryAuthHeader,
   DockerRegistryValidationError,
   findDockerRegistryCredential,
@@ -80,6 +91,7 @@ type DockerProposalBody = DockerActionProposalBody | ({ sessionId?: string; acti
 const MAX_DOCKER_CREATE_BODY_BYTES = 256 * 1024;
 const MAX_DOCKER_DAEMON_BODY_BYTES = 256 * 1024 + 4096;
 const MAX_DOCKER_REGISTRY_BODY_BYTES = 64 * 1024;
+const MAX_DOCKER_APP_BODY_BYTES = 512 * 1024;
 const DOCKER_DAEMON_SAMPLE_MS = 1000;
 const DOCKER_DAEMON_HEARTBEAT_MS = 15_000;
 
@@ -87,10 +99,101 @@ export function registerDockerRoutes(server: FastifyInstance, context: ApiRouteC
   const { config, db, docker } = context;
   const currentConfig = () => effectiveDockerConfig(config, getDockerSettings(db));
   const daemon = docker?.daemon ?? new SystemDockerDaemonRuntime({ hostdSocketPath: config.hostd.socketPath });
+  const compose = dockerCompose(currentConfig().docker, docker);
 
   server.get("/api/docker/summary", async () => ({
     summary: await collectDockerSummary(currentConfig(), docker)
   }));
+
+  server.get("/api/docker/apps", async () => ({
+    apps: await compose.listProjects(await composeAppContainers(currentConfig().docker, docker))
+  }));
+
+  server.get<{
+    Params: { id: string };
+  }>("/api/docker/apps/:id", async (request, reply) => {
+    const app = await compose.getApp(
+      request.params.id,
+      await composeAppContainers(currentConfig().docker, docker)
+    );
+    if (!app) {
+      reply.status(404).send({ error: "Docker Compose App not found" });
+      return;
+    }
+    reply.send({ app });
+  });
+
+  server.post<{
+    Body: DockerComposeAppValidateInput;
+  }>("/api/docker/apps/validate", { bodyLimit: MAX_DOCKER_APP_BODY_BYTES }, async (request, reply) => {
+    try {
+      reply.send({ validation: await compose.validateApp(request.body) });
+    } catch (error) {
+      sendDockerComposeAppError(reply, error);
+    }
+  });
+
+  server.post<{
+    Body: DockerComposeAppCreateInput;
+  }>("/api/docker/apps", { bodyLimit: MAX_DOCKER_APP_BODY_BYTES }, async (request, reply) => {
+    try {
+      reply.status(201).send({ app: await compose.createApp(request.body) });
+    } catch (error) {
+      sendDockerComposeAppError(reply, error);
+    }
+  });
+
+  server.put<{
+    Params: { id: string };
+    Body: DockerComposeAppUpdateInput;
+  }>("/api/docker/apps/:id", { bodyLimit: MAX_DOCKER_APP_BODY_BYTES }, async (request, reply) => {
+    try {
+      const app = await compose.updateApp(request.params.id, request.body);
+      if (!app) {
+        reply.status(404).send({ error: "Docker Compose App not found" });
+        return;
+      }
+      reply.send({ app });
+    } catch (error) {
+      sendDockerComposeAppError(reply, error);
+    }
+  });
+
+  server.delete<{
+    Params: { id: string };
+    Body: DockerComposeAppDeleteInput;
+  }>("/api/docker/apps/:id", { bodyLimit: MAX_DOCKER_APP_BODY_BYTES }, async (request, reply) => {
+    if (request.body?.confirmed !== true) {
+      reply.status(400).send({ error: "Docker Compose App deletion requires confirmation" });
+      return;
+    }
+    if (!currentConfig().docker.enabled) {
+      reply.status(503).send({ error: "Docker management is disabled" });
+      return;
+    }
+    try {
+      const result = await compose.deleteApp(request.params.id, request.body, async (projectKey) => {
+        const containers = await dockerEngine(currentConfig().docker, docker).listContainers();
+        return containers.some((container) => container.composeProject === projectKey);
+      });
+      if (result === "not_found") {
+        reply.status(404).send({ error: "Docker Compose App not found" });
+        return;
+      }
+      if (result === "conflict") {
+        reply.status(409).send({ error: "Docker Compose App changed in another request" });
+        return;
+      }
+      if (result === "in_use") {
+        reply.status(409).send({ error: "Remove the Compose App containers before deleting the App" });
+        return;
+      }
+      reply.send({ deleted: true });
+    } catch (error) {
+      if (isDockerComposeAppError(error)) sendDockerComposeAppError(reply, error);
+      else reply.status(503).send({ error: safeDockerMessage(error) });
+    }
+  });
 
   server.get("/api/docker/registries", async () => ({
     registries: listDockerRegistryCredentials(db).map(toPublicDockerRegistryCredential)
@@ -614,8 +717,7 @@ async function buildDockerProposal(
     if (!body.composeProjectId) {
       throw new Error("Compose project id is required");
     }
-    const compose = dockerCompose(config.docker, docker);
-    const project = await compose.getProject(body.composeProjectId);
+    const project = await dockerCompose(config.docker, docker).getProject(body.composeProjectId);
     if (!project) {
       throw new Error("Compose project is not configured");
     }
@@ -625,15 +727,54 @@ async function buildDockerProposal(
       targetType: "compose_project",
       composeProjectId: project.id,
       composeProjectName: project.name,
-      composeRootId: project.rootId,
-      composeFilePath: project.filePath,
+      composeRevision: project.revision,
       ...(service ? { service } : {}),
-      risk: action === "compose_down" ? "high" : "medium",
+      risk: action === "compose_down" || project.risk === "high" ? "high" : "medium",
       summary: `${actionLabel(action)} Docker Compose project ${project.name}${service ? ` service ${service}` : ""}`
     };
   }
 
   throw new Error("Unsupported Docker action");
+}
+
+function sendDockerComposeAppError(reply: FastifyReply, error: unknown): void {
+  if (error instanceof DockerComposeValidationError) {
+    reply.status(400).send({ error: error.message });
+    return;
+  }
+  if (error instanceof DockerComposeAppConflictError || error instanceof DockerComposeAppProjectKeyConflictError) {
+    reply.status(409).send({ error: error.message });
+    return;
+  }
+  if (error instanceof DockerComposeUnavailableError) {
+    reply.status(503).send({ error: error.message });
+    return;
+  }
+  if (error instanceof DockerComposeMaterializationError) {
+    reply.status(502).send({ error: error.message.slice(0, 500) });
+    return;
+  }
+  reply.status(500).send({ error: "Unable to update Docker Compose App" });
+}
+
+async function composeAppContainers(
+  config: ReturnType<typeof effectiveDockerConfig>["docker"],
+  docker: ApiRouteContext["docker"]
+): Promise<DockerContainerSummary[] | null> {
+  if (!config.enabled) return null;
+  try {
+    return await dockerEngine(config, docker).listContainers();
+  } catch {
+    return null;
+  }
+}
+
+function isDockerComposeAppError(error: unknown): boolean {
+  return error instanceof DockerComposeValidationError ||
+    error instanceof DockerComposeAppConflictError ||
+    error instanceof DockerComposeAppProjectKeyConflictError ||
+    error instanceof DockerComposeUnavailableError ||
+    error instanceof DockerComposeMaterializationError;
 }
 
 function dockerCreateAuditResult(result: DockerCreateResult): Omit<DockerCreateResult, "error"> {

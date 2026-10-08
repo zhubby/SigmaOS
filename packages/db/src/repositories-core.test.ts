@@ -8,6 +8,7 @@ import {
   createActionMessageAndJob,
   createDockerOperationApproval,
   createDockerOperationRecord,
+  createDockerComposeApp,
   createDockerRegistryCredential,
   createDownloadTask,
   createPiToolCallApproval,
@@ -45,7 +46,14 @@ import {
   transitionDownloadTask,
   updateDownloadTaskProgress,
   deleteDockerRegistryCredential,
+  deleteDockerComposeApp,
+  getDockerComposeApp,
+  listDockerComposeApps,
+  listDockerComposeAppSummaries,
+  markDockerComposeAppDeployed,
+  restoreDockerComposeApp,
   updateDockerRegistryCredential,
+  updateDockerComposeApp,
   updateJobStatus,
   updateOperationNotificationForJob,
   type SigmaDatabase
@@ -701,5 +709,86 @@ describe("core repositories", () => {
         updatedAt: "2026-01-01T00:00:00.000Z"
       }
     ]);
+  });
+
+  it("persists managed Compose Apps and preserves hidden environment values on update", () => {
+    const created = createDockerComposeApp(db, {
+      name: "Postgres",
+      projectKey: "postgres",
+      composeContent: "services:\n  db:\n    image: postgres:18\n",
+      environment: [
+        { key: "POSTGRES_PASSWORD", value: "secret" },
+        { key: "POSTGRES_DB", value: "app" }
+      ],
+      services: ["db"],
+      warnings: [],
+      risk: "medium"
+    });
+
+    expect(created.revision).not.toBe(created.id);
+    expect(created.deployedRevision).toBeNull();
+    expect(listDockerComposeAppSummaries(db)[0]).not.toHaveProperty("composeContent");
+    expect(listDockerComposeAppSummaries(db)[0]).not.toHaveProperty("environment");
+    const updated = updateDockerComposeApp(db, created.id, created.revision, {
+      name: "Primary Postgres",
+      composeContent: created.composeContent,
+      environment: [
+        { key: "POSTGRES_PASSWORD" },
+        { key: "POSTGRES_USER", value: "sigmaos" }
+      ],
+      services: ["db"],
+      warnings: ["Host bind mount"],
+      risk: "high"
+    });
+
+    expect(updated).toMatchObject({
+      name: "Primary Postgres",
+      projectKey: "postgres",
+      environment: [
+        { key: "POSTGRES_PASSWORD", value: "secret" },
+        { key: "POSTGRES_USER", value: "sigmaos" }
+      ],
+      warnings: ["Host bind mount"],
+      risk: "high"
+    });
+    expect(updated?.revision).not.toBe(created.revision);
+    expect(() => updateDockerComposeApp(db, created.id, created.revision, {
+      name: created.name,
+      composeContent: created.composeContent,
+      environment: [],
+      services: ["db"],
+      warnings: [],
+      risk: "medium"
+    })).toThrow(/changed in another request/);
+    expect(restoreDockerComposeApp(db, updated!.revision, created)).toEqual(created);
+  });
+
+  it("enforces unique Compose project keys and revision-safe deletion", () => {
+    const app = createDockerComposeApp(db, {
+      name: "Media",
+      projectKey: "media",
+      composeContent: "services:\n  app:\n    image: alpine\n",
+      environment: [{ key: "TOKEN", value: "secret" }],
+      services: ["app"],
+      warnings: [],
+      risk: "medium"
+    });
+    expect(() => createDockerComposeApp(db, {
+      name: "Duplicate",
+      projectKey: "MEDIA",
+      composeContent: app.composeContent,
+      environment: [],
+      services: ["app"],
+      warnings: [],
+      risk: "medium"
+    })).toThrow(/already in use/);
+
+    expect(markDockerComposeAppDeployed(db, app.id, "stale")).toBeNull();
+    expect(markDockerComposeAppDeployed(db, app.id, app.revision)?.deployedRevision).toBe(app.revision);
+    expect(deleteDockerComposeApp(db, app.id, "stale")).toBe("conflict");
+    expect(deleteDockerComposeApp(db, app.id, app.revision)).toBe("deleted");
+    expect(getDockerComposeApp(db, app.id)).toBeNull();
+    expect(listDockerComposeApps(db)).toEqual([]);
+    expect(db.prepare("SELECT COUNT(*) FROM docker_app_environment").pluck().get()).toBe(0);
   });
 });

@@ -100,7 +100,6 @@ function testConfig(dataDir: string, root: string): SigmaConfig {
       composeCommand: "docker",
       operationTimeoutMs: 1_000,
       consoleShells: [],
-      composeRoots: []
     },
     shares: {
       enabled: false,

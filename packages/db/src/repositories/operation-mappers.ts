@@ -173,7 +173,6 @@ export function dockerProposalTargetId(proposal: DockerOperationProposal): strin
     proposal.networkName ??
     proposal.composeProjectId ??
     proposal.composeProjectName ??
-    proposal.composeFilePath ??
     "docker"
   );
 }

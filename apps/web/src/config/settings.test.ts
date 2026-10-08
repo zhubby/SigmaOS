@@ -23,7 +23,6 @@ describe("settings helpers", () => {
         composeCommand: "docker",
         operationTimeoutMs: 120_000,
         consoleShells: ["/bin/sh", "/bin/bash"],
-        composeRoots: [],
         updatedAt: "2026-01-01T00:00:00.000Z"
       })
     ).toBe("ready");
@@ -36,7 +35,6 @@ describe("settings helpers", () => {
       composeCommand: "docker",
       operationTimeoutMs: String(120_000),
       consoleShells: "/bin/sh, /bin/bash",
-      composeRoots: []
     });
   });
 

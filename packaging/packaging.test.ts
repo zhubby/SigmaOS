@@ -98,6 +98,9 @@ describe("native packaging artifacts", () => {
     await expect(readPackagingFile("systemd", "sigmaos-api.service")).resolves.toContain(
       "Environment=SIGMAOS_BUILD_INFO_PATH=/usr/lib/sigmaos/build-info.json"
     );
+    await expect(readPackagingFile("systemd", "sigmaos-api.service")).resolves.toContain(
+      "ReadWritePaths=/var/lib/sigmaos /var/log/sigmaos /srv/nas /var/lib/sigmaos/vmstore /srv/iso /srv/apps"
+    );
     expect(install).toContain("packaging/scripts/sigmaos-nginx.sh usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/scripts/sigmaos-configure-locale.sh usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/scripts/sigmaos-refresh-termux.sh usr/lib/sigmaos/scripts/");
@@ -117,7 +120,7 @@ describe("native packaging artifacts", () => {
     expect(tmpfiles).toContain("/run/sigmaos");
     expect(tmpfiles).toContain("/run/mdadm");
     expect(tmpfiles).toContain("d /run/samba 0755 root root -");
-    expect(control).toContain("Depends: nodejs (>= 20), sqlite3, tmux, acl, adduser, network-manager, wpasupplicant, dnsmasq-base, wireless-regdb, iw, libheif-examples");
+    expect(control).toContain("Depends: nodejs (>= 20), sqlite3, tmux, util-linux, acl, adduser, network-manager, wpasupplicant, dnsmasq-base, wireless-regdb, iw, libheif-examples");
     expect(control).toMatch(/^Depends:.*libheif-examples/m);
     expect(control).not.toContain("Recommends: libheif-examples");
     expect(control).toContain("Build-Depends: debhelper-compat (= 13), nodejs, npm, cargo, rustc, acl");
@@ -396,6 +399,9 @@ describe("native packaging artifacts", () => {
     expect(postinst).toContain("chown -R root:root /var/lib/sigmaos/network-manager");
     expect(postinst).toContain("install -d -o root -g root -m 0755 /var/lib/sigmaos-share");
     expect(postinst).toContain("usermod --home /var/lib/sigmaos-share sigma-share");
+    expect(postinst).toContain("install -d -o sigmaos -g sigmaos -m 0750 /srv/apps");
+    expect(apiUnit).toContain("ReadWritePaths=/var/lib/sigmaos /var/log/sigmaos /srv/nas /var/lib/sigmaos/vmstore /srv/iso /srv/apps");
+    expect(apiUnit).toContain("CapabilityBoundingSet=\n");
   });
 
   it("loads managed shares through each protocol's actual service entrypoint", async () => {

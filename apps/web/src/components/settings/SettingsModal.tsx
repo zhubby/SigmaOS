@@ -17,11 +17,9 @@ import {
   MemoryStick,
   Network,
   Package,
-  Plus,
   Search,
   Server,
   ShieldCheck,
-  Trash2,
   Wrench,
   X
 } from "lucide-react";
@@ -51,7 +49,6 @@ import {
   settingsSectionTitle,
   settingsStatus,
   settingsUpdatedAtLabel,
-  type DockerComposeRootFormState,
   type DockerSettingsFormState,
   type ModelProviderFormState,
   type SettingsSectionId,
@@ -1978,7 +1975,6 @@ function SettingsDockerPage({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const rootCount = form.composeRoots.length;
   const shellCount = splitDockerShells(form.consoleShells).length;
   const statusState = loading && !settings ? "loading" : settings ? "ready" : "missing";
   const statusLabel = loading && !settings
@@ -1988,41 +1984,6 @@ function SettingsDockerPage({
       : form.enabled
         ? t("settings.docker.enabled")
         : t("settings.docker.disabled");
-
-  function updateRoot(index: number, patch: Partial<DockerComposeRootFormState>) {
-    onChange({
-      ...form,
-      composeRoots: form.composeRoots.map((root, currentIndex) =>
-        currentIndex === index
-          ? {
-              ...root,
-              ...patch
-            }
-          : root
-      )
-    });
-  }
-
-  function addRoot() {
-    onChange({
-      ...form,
-      composeRoots: [
-        ...form.composeRoots,
-        {
-          id: `compose-root-${form.composeRoots.length + 1}`,
-          name: t("settings.docker.newRootName", { index: form.composeRoots.length + 1 }),
-          path: ""
-        }
-      ]
-    });
-  }
-
-  function removeRoot(index: number) {
-    onChange({
-      ...form,
-      composeRoots: form.composeRoots.filter((_, currentIndex) => currentIndex !== index)
-    });
-  }
 
   return (
     <form className="settings-form" onSubmit={onSubmit}>
@@ -2122,67 +2083,6 @@ function SettingsDockerPage({
               </div>
             </section>
 
-            <section className="settings-section-card">
-              <header>
-                <div>
-                  <h3>{t("settings.docker.composeTitle")}</h3>
-                  <p>{t("settings.docker.composeDescription")}</p>
-                </div>
-                <span data-state={rootCount ? "ready" : "missing"}>{formatLocaleNumber(rootCount, locale)}</span>
-              </header>
-
-              <div className="settings-docker-root-list">
-                {form.composeRoots.length ? (
-                  form.composeRoots.map((root, index) => (
-                    <div key={`${root.id}-${index}`} className="settings-docker-root-row">
-                      <div className="settings-docker-root-header">
-                        <span className="settings-docker-root-index">{formatLocaleNumber(index + 1, locale)}</span>
-                        <button
-                          type="button"
-                          className="settings-icon-button settings-docker-root-remove"
-                          onClick={() => removeRoot(index)}
-                          title={t("settings.docker.removeRoot")}
-                          aria-label={t("settings.docker.removeRoot")}
-                        >
-                          <Trash2 aria-hidden="true" size={14} />
-                        </button>
-                      </div>
-                      <label>
-                        <span>{t("settings.docker.rootId")}</span>
-                        <input
-                          value={root.id}
-                          onChange={(event) => updateRoot(index, { id: event.target.value })}
-                          placeholder={`compose-root-${index + 1}`}
-                        />
-                      </label>
-                      <label>
-                        <span>{t("settings.docker.rootName")}</span>
-                        <input
-                          value={root.name}
-                          onChange={(event) => updateRoot(index, { name: event.target.value })}
-                          placeholder={t("settings.docker.rootNamePlaceholder")}
-                        />
-                      </label>
-                      <label className="settings-field-wide">
-                        <span>{t("settings.docker.rootPath")}</span>
-                        <input
-                          value={root.path}
-                          onChange={(event) => updateRoot(index, { path: event.target.value })}
-                          placeholder={t("settings.docker.rootPathPlaceholder")}
-                        />
-                      </label>
-                    </div>
-                  ))
-                ) : (
-                  <p className="settings-empty-note">{t("settings.docker.noComposeRoots")}</p>
-                )}
-              </div>
-
-              <button type="button" className="secondary-button settings-docker-add-root" onClick={addRoot}>
-                <Plus aria-hidden="true" size={14} />
-                <span>{t("settings.docker.addRoot")}</span>
-              </button>
-            </section>
           </div>
 
           <aside className="settings-side-stack" aria-label={t("settings.docker.summaryTitle")}>
@@ -2207,12 +2107,12 @@ function SettingsDockerPage({
                   <dd className="is-mono">{form.composeCommand || t("common.dash")}</dd>
                 </div>
                 <div>
-                  <dt>{t("settings.docker.operationTimeout")}</dt>
-                  <dd>{form.operationTimeoutMs || t("common.dash")}</dd>
+                  <dt>{t("settings.docker.managedAppsPath")}</dt>
+                  <dd className="is-mono">/srv/apps</dd>
                 </div>
                 <div>
-                  <dt>{t("settings.docker.composeRootsCount")}</dt>
-                  <dd>{formatLocaleNumber(rootCount, locale)}</dd>
+                  <dt>{t("settings.docker.operationTimeout")}</dt>
+                  <dd>{form.operationTimeoutMs || t("common.dash")}</dd>
                 </div>
                 <div>
                   <dt>{t("settings.docker.consoleShellsCount")}</dt>

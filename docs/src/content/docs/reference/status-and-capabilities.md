@@ -33,6 +33,8 @@ Docker Engine readiness 独立来自配置的 Unix socket。daemon 可以是 `ru
 
 Registry 凭证会自动用于手动拉取、容器创建时的 `always/missing` 拉取，以及 Compose `pull/up`。首期不支持 push、tag、prune、导入导出、credential helper、自定义 CA、客户端证书、identity token 或逐层拉取进度。
 
+托管 Compose App 的配置状态与 Engine readiness 也应分开判断。数据库和 Compose CLI 可用时，即使 Engine 离线或 Docker 管理关闭，仍可查看、创建、验证和编辑 App；部署、Down、Restart、Pull 及删除前容器检查需要 Engine。`needsDeploy` 比较当前 revision 与最近成功完成的全项目 Compose Up revision；Pull、Restart 和 Down 不会清除它。审批等待期间 revision 变化会让旧审批失败，必须重新发起。
+
 ## Docker 资源与镜像占用
 
 Engine ready 不代表内核支持全部资源控制。资源区和创建向导显示 CPU quota/shares、cpuset、内存、swap、PID 能力的可用、不支持、未知状态；只有明确可用的限制才能填写和提交。内存统计可能为 `null`，不应推断容器停止或使用量为零。CM5 上的缺失能力需要单独检查内核/cgroup 配置，不能靠填写容器内存值解决，也不会由 SigmaOS 自动修改启动参数或重启设备。

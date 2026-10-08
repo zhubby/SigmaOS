@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { EventEmitter } from "node:events";
 import http from "node:http";
 import net from "node:net";
-import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -70,7 +70,7 @@ import type {
   SystemWifiSummary,
   StorageOperationProposal
 } from "@sigmaos/shared";
-import type { DockerComposeRuntime } from "./lib/docker-compose.js";
+import { DockerComposeService, type DockerComposeRuntime } from "./lib/docker-compose.js";
 import { DockerRequestError, type DockerEngineRuntime, type DockerExecStream } from "./lib/docker-client.js";
 import { DockerDaemonRequestError, type DockerDaemonRuntime } from "./lib/docker-daemon.js";
 import type { NetworkManagerRuntime } from "./lib/network-manager.js";
@@ -1753,7 +1753,6 @@ describe("API server", () => {
       method: "GET",
       url: "/api/settings/docker"
     });
-    const composeRootPath = path.resolve(process.cwd(), "compose/apps");
     const saved = await server.inject({
       method: "PATCH",
       url: "/api/settings/docker",
@@ -1762,14 +1761,7 @@ describe("API server", () => {
         socketPath: "/tmp/docker.sock",
         composeCommand: "/usr/bin/docker",
         operationTimeoutMs: 90_000,
-        consoleShells: ["/bin/sh"],
-        composeRoots: [
-          {
-            id: "apps",
-            name: "Apps",
-            path: "compose/apps"
-          }
-        ]
+        consoleShells: ["/bin/sh"]
       }
     });
     const loaded = await server.inject({
@@ -1784,8 +1776,7 @@ describe("API server", () => {
         socketPath: "/var/run/docker.sock",
         composeCommand: "docker",
         operationTimeoutMs: 120_000,
-        consoleShells: ["/bin/sh", "/bin/bash"],
-        composeRoots: []
+        consoleShells: ["/bin/sh", "/bin/bash"]
       }
     });
     expect(saved.statusCode).toBe(200);
@@ -1795,14 +1786,7 @@ describe("API server", () => {
         socketPath: "/tmp/docker.sock",
         composeCommand: "/usr/bin/docker",
         operationTimeoutMs: 90_000,
-        consoleShells: ["/bin/sh"],
-        composeRoots: [
-          {
-            id: "apps",
-            name: "Apps",
-            path: composeRootPath
-          }
-        ]
+        consoleShells: ["/bin/sh"]
       }
     });
     expect(loaded.json()).toMatchObject({
@@ -1812,16 +1796,7 @@ describe("API server", () => {
         composeCommand: "/usr/bin/docker"
       }
     });
-    expect(getDockerSettings(db)).toMatchObject({
-      enabled: true,
-      composeRoots: [
-        {
-          id: "apps",
-          name: "Apps",
-          path: composeRootPath
-        }
-      ]
-    });
+    expect(getDockerSettings(db)).toMatchObject({ enabled: true });
     await server.close();
   });
 
@@ -2274,6 +2249,224 @@ describe("API server", () => {
     const deleted = await server.inject({ method: "DELETE", url: `/api/docker/registries/${id}` });
     expect(deleted.statusCode).toBe(200);
     expect((await server.inject({ method: "GET", url: "/api/docker/registries" })).json().registries).toEqual([]);
+    await server.close();
+  });
+
+  it("manages Compose Apps as database-backed definitions without exposing environment values", async () => {
+    const composeCommand = await writeComposeTestCommand();
+    const appsRoot = path.join(tempDir, "apps");
+    const config = {
+      ...testConfig(tempDir),
+      docker: { ...testConfig(tempDir).docker, composeCommand }
+    };
+    const compose = new DockerComposeService(() => config.docker, db, appsRoot);
+    const engine = new FakeDockerEngine();
+    const server = await buildServer({ config, db, docker: { compose, engine, daemon: new FakeDockerDaemon() } });
+
+    const created = await server.inject({
+      method: "POST",
+      url: "/api/docker/apps",
+      payload: {
+        name: "Managed Media",
+        projectKey: "managed-media",
+        composeContent: "services:\n  app:\n    image: alpine\n",
+        environment: [{ key: "APP_TOKEN", value: "compose-secret" }]
+      }
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.body).not.toContain("compose-secret");
+    expect(created.json()).toMatchObject({ app: {
+      name: "Managed Media",
+      projectKey: "managed-media",
+      managedPath: path.join(appsRoot, "managed-media"),
+      environment: [{ key: "APP_TOKEN", valueConfigured: true }],
+      needsDeploy: true
+    } });
+    const appId = created.json().app.id as string;
+    const revision = created.json().app.revision as string;
+
+    const listed = await server.inject({ method: "GET", url: "/api/docker/apps" });
+    const detail = await server.inject({ method: "GET", url: `/api/docker/apps/${appId}` });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.body).not.toContain("compose-secret");
+    expect(detail.body).not.toContain("compose-secret");
+
+    const validated = await server.inject({
+      method: "POST",
+      url: "/api/docker/apps/validate",
+      payload: {
+        appId,
+        expectedRevision: revision,
+        projectKey: "managed-media",
+        composeContent: "services:\n  app:\n    image: alpine:3\n",
+        environment: [{ key: "APP_TOKEN" }]
+      }
+    });
+    expect(validated.statusCode).toBe(200);
+    expect(validated.body).not.toContain("compose-secret");
+
+    const updated = await server.inject({
+      method: "PUT",
+      url: `/api/docker/apps/${appId}`,
+      payload: {
+        name: "Managed Media Updated",
+        composeContent: "services:\n  app:\n    image: alpine:3\n",
+        environment: [{ key: "APP_TOKEN" }],
+        expectedRevision: revision
+      }
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.body).not.toContain("compose-secret");
+    const nextRevision = updated.json().app.revision as string;
+
+    const conflict = await server.inject({
+      method: "PUT",
+      url: `/api/docker/apps/${appId}`,
+      payload: {
+        name: "Stale",
+        composeContent: "services:\n  app:\n    image: alpine\n",
+        environment: [],
+        expectedRevision: revision
+      }
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect((await server.inject({
+      method: "PUT",
+      url: `/api/docker/apps/${appId}`,
+      payload: {}
+    })).statusCode).toBe(400);
+    expect((await server.inject({
+      method: "POST",
+      url: "/api/docker/apps"
+    })).statusCode).toBe(400);
+    expect((await server.inject({
+      method: "DELETE",
+      url: `/api/docker/apps/${appId}`,
+      payload: { expectedRevision: nextRevision, confirmed: true }
+    })).statusCode).toBe(503);
+    await server.close();
+
+    const enabledConfig = { ...config, docker: { ...config.docker, enabled: true } };
+    const occupiedEngine = new FakeDockerEngine();
+    occupiedEngine.listContainers = async () => [{
+      ...(await new FakeDockerEngine().listContainers())[0]!,
+      composeProject: "managed-media"
+    }];
+    const enabledServer = await buildServer({
+      config: enabledConfig,
+      db,
+      docker: { compose, engine: occupiedEngine, daemon: new FakeDockerDaemon() }
+    });
+    expect((await enabledServer.inject({
+      method: "DELETE",
+      url: `/api/docker/apps/${appId}`,
+      payload: { expectedRevision: nextRevision, confirmed: false }
+    })).statusCode).toBe(400);
+    expect((await enabledServer.inject({
+      method: "DELETE",
+      url: `/api/docker/apps/${appId}`,
+      payload: { expectedRevision: nextRevision, confirmed: true }
+    })).statusCode).toBe(409);
+    occupiedEngine.listContainers = async () => [];
+    expect((await enabledServer.inject({
+      method: "DELETE",
+      url: `/api/docker/apps/${appId}`,
+      payload: { confirmed: true }
+    })).statusCode).toBe(400);
+    expect((await enabledServer.inject({
+      method: "DELETE",
+      url: `/api/docker/apps/${appId}`,
+      payload: { expectedRevision: nextRevision, confirmed: true }
+    })).statusCode).toBe(200);
+    await expect(access(path.join(appsRoot, "managed-media"))).rejects.toThrow();
+    await enabledServer.close();
+  });
+
+  it("pins Compose deployment approvals to the saved App revision", async () => {
+    const composeCommand = await writeComposeTestCommand();
+    const config = dockerEnabledConfig(tempDir, { composeCommand });
+    const compose = new DockerComposeService(() => config.docker, db, path.join(tempDir, "apps"));
+    const server = await buildServer({
+      config,
+      db,
+      docker: { compose, engine: new FakeDockerEngine(), daemon: new FakeDockerDaemon() }
+    });
+    const created = await server.inject({ method: "POST", url: "/api/docker/apps", payload: {
+      name: "Managed App",
+      projectKey: "managed-app",
+      composeContent: "services:\n  app:\n    image: alpine\n",
+      environment: [{ key: "APP_TOKEN", value: "approval-secret" }]
+    } });
+    const app = created.json().app as { id: string; revision: string };
+    const session = createSession(db, { rootId: "local" });
+    const proposed = await server.inject({ method: "POST", url: "/api/docker/proposals", payload: {
+      sessionId: session.id,
+      action: "compose_up",
+      composeProjectId: app.id
+    } });
+    expect(proposed.statusCode).toBe(202);
+    expect(proposed.body).not.toContain("approval-secret");
+    expect(proposed.json()).toMatchObject({ approval: { proposal: [{
+      composeProjectId: app.id,
+      composeRevision: app.revision
+    }] } });
+    expect(proposed.body).not.toContain("managedPath");
+    expect(proposed.body).not.toContain("composeContent");
+
+    const updated = await server.inject({ method: "PUT", url: `/api/docker/apps/${app.id}`, payload: {
+      name: "Managed App",
+      composeContent: "services:\n  app:\n    image: alpine:3\n",
+      environment: [{ key: "APP_TOKEN" }],
+      expectedRevision: app.revision
+    } });
+    expect(updated.statusCode).toBe(200);
+    const approved = await server.inject({
+      method: "POST",
+      url: `/api/approvals/${proposed.json().approval.id}/approve`
+    });
+    expect(approved.statusCode).toBe(400);
+    expect(approved.body).not.toContain("approval-secret");
+    expect(getApproval(db, proposed.json().approval.id)?.status).toBe("failed");
+    await server.close();
+  });
+
+  it("enforces the managed Compose App request body limit", async () => {
+    const server = await buildServer({
+      config: testConfig(tempDir),
+      db,
+      docker: { compose: new FakeDockerCompose(), daemon: new FakeDockerDaemon() }
+    });
+    const response = await server.inject({ method: "POST", url: "/api/docker/apps", payload: {
+      name: "Oversized",
+      projectKey: "oversized",
+      composeContent: `services:\n  app:\n    image: alpine\n#${"x".repeat(520 * 1024)}`,
+      environment: []
+    } });
+    expect(response.statusCode).toBe(413);
+    await server.close();
+  });
+
+  it("returns service unavailable when the Compose CLI cannot validate an App", async () => {
+    const config = testConfig(tempDir);
+    const compose = new DockerComposeService(
+      () => ({ ...config.docker, composeCommand: path.join(tempDir, "missing-docker") }),
+      db,
+      path.join(tempDir, "apps")
+    );
+    const server = await buildServer({
+      config,
+      db,
+      docker: { compose, daemon: new FakeDockerDaemon() }
+    });
+    const response = await server.inject({ method: "POST", url: "/api/docker/apps", payload: {
+      name: "Unavailable",
+      projectKey: "unavailable",
+      composeContent: "services:\n  app:\n    image: alpine\n",
+      environment: []
+    } });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: "Docker Compose CLI is unavailable" });
     await server.close();
   });
 
@@ -4810,7 +5003,6 @@ function testConfig(dataDir: string): SigmaConfig {
       composeCommand: "docker",
       operationTimeoutMs: 120_000,
       consoleShells: ["/bin/sh", "/bin/bash"],
-      composeRoots: []
     },
     hostd: {
       socketPath: "/run/sigmaos/hostd.sock"
@@ -5117,14 +5309,19 @@ class FakeDockerCompose implements DockerComposeRuntime {
       {
         id: "compose-root:compose.yml",
         name: "media",
-        rootId: "compose-root",
-        rootName: "Compose",
-        filePath: "/srv/compose/compose.yml",
-        workingDir: "/srv/compose",
+        projectKey: "media",
+        managedPath: "/srv/apps/media",
         services: ["jellyfin"],
+        warnings: [],
+        risk: "medium",
+        revision: "revision-1",
+        deployedRevision: "revision-1",
+        needsDeploy: false,
         containerCount: 1,
         runningCount: 1,
-        status: "running"
+        status: "running",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z"
       }
     ]
   ) {}
@@ -5137,6 +5334,29 @@ class FakeDockerCompose implements DockerComposeRuntime {
     return this.projects.find((project) => project.id === projectId) ?? null;
   }
 
+  async getApp(projectId: string) {
+    const project = await this.getProject(projectId);
+    return project ? { ...project, composeContent: "services: {}\n", environment: [] } : null;
+  }
+
+  async validateApp() {
+    return { services: ["jellyfin"], warnings: [], risk: "medium" as const };
+  }
+
+  async createApp(): Promise<never> {
+    throw new Error("not implemented in API tests");
+  }
+
+  async updateApp(): Promise<null> {
+    return null;
+  }
+
+  async deleteApp(): Promise<"not_found"> {
+    return "not_found";
+  }
+
+  async reconcileAll(): Promise<void> {}
+
   async runProjectAction(
     proposal: DockerOperationProposal,
     registryCredentials: DockerRegistryCredentialRecord[] = []
@@ -5145,6 +5365,17 @@ class FakeDockerCompose implements DockerComposeRuntime {
     this.registryCredentials.push(registryCredentials);
     return { output: "done" };
   }
+}
+
+async function writeComposeTestCommand(): Promise<string> {
+  const command = path.join(tempDir, "docker-compose-test-command");
+  await writeFile(command, `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args.includes("config")) process.stdout.write(JSON.stringify({ services: { app: { image: "alpine" } } }));
+else process.stdout.write("done\\n");
+`);
+  await chmod(command, 0o755);
+  return command;
 }
 
 async function git(args: string[], cwd = rootDir): Promise<void> {

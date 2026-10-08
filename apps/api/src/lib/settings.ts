@@ -90,8 +90,7 @@ export function dockerSettingsToConfig(settings: DockerSettingsRecord): DockerCo
     socketPath: settings.socketPath,
     composeCommand: settings.composeCommand,
     operationTimeoutMs: settings.operationTimeoutMs,
-    consoleShells: settings.consoleShells,
-    composeRoots: settings.composeRoots
+    consoleShells: settings.consoleShells
   };
 }
 

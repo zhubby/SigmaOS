@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, chmod, realpath, unlink } from "node:fs/promises";
+import { access, chmod, mkdir, realpath, unlink } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { promisify } from "node:util";
@@ -14,7 +14,6 @@ import type {
 } from "@sigmaos/shared";
 
 const execFileAsync = promisify(execFile);
-const COMMAND_TIMEOUT_MS = 10_000;
 const COMMAND_MAX_BUFFER = 4 * 1024 * 1024;
 
 export interface VmCommandRunner {
@@ -24,6 +23,7 @@ export interface VmCommandRunner {
 export interface VmRuntimeDependencies {
   commandRunner?: VmCommandRunner;
   kvmAvailable?: boolean;
+  architecture?: NodeJS.Architecture;
 }
 
 export function vmQemuCommand(architecture = process.arch): "qemu-system-aarch64" | "qemu-system-x86_64" {
@@ -41,23 +41,35 @@ export const DEFAULT_VM_CONFIG: VmConfig = {
 };
 
 class NodeVmCommandRunner implements VmCommandRunner {
+  constructor(
+    private readonly timeoutMs: number,
+    private readonly cachePath: string
+  ) {}
+
   async run(command: string, args: string[]): Promise<string> {
+    await mkdir(this.cachePath, { recursive: true, mode: 0o700 });
     const { stdout } = await execFileAsync(command, args, {
-      timeout: COMMAND_TIMEOUT_MS,
-      maxBuffer: COMMAND_MAX_BUFFER
+      timeout: this.timeoutMs,
+      maxBuffer: COMMAND_MAX_BUFFER,
+      env: { ...process.env, XDG_CACHE_HOME: this.cachePath }
     });
     return stdout;
   }
 }
 
-export function vmCommandRunner(dependencies?: VmRuntimeDependencies): VmCommandRunner {
-  return dependencies?.commandRunner ?? new NodeVmCommandRunner();
+export function vmCommandRunner(config: SigmaConfig, dependencies?: VmRuntimeDependencies): VmCommandRunner {
+  const vm = config.vm ?? DEFAULT_VM_CONFIG;
+  return dependencies?.commandRunner ?? new NodeVmCommandRunner(
+    vm.operationTimeoutMs,
+    path.join(config.dataDir, ".cache")
+  );
 }
 
 export async function collectVmSummary(config: SigmaConfig, dependencies?: VmRuntimeDependencies): Promise<VmSummary> {
   const vm = config.vm ?? DEFAULT_VM_CONFIG;
   if (!vm.enabled) return unavailableSummary(vm, "disabled");
-  const runner = vmCommandRunner(dependencies);
+  const runner = vmCommandRunner(config, dependencies);
+  const architecture = dependencies?.architecture ?? process.arch;
   const issues: string[] = [];
   let libvirtVersion: string | null = null;
   let qemuVersion: string | null = null;
@@ -71,7 +83,7 @@ export async function collectVmSummary(config: SigmaConfig, dependencies?: VmRun
     return unavailableSummary(vm, safeVmMessage(error));
   }
   try {
-    qemuVersion = (await runner.run(vmQemuCommand(), ["--version"])).match(/version\s+(\S+)/iu)?.[1] ?? null;
+    qemuVersion = (await runner.run(vmQemuCommand(architecture), ["--version"])).match(/version\s+(\S+)/iu)?.[1] ?? null;
   } catch (error) {
     issues.push(`QEMU is unavailable: ${safeVmMessage(error)}`);
   }
@@ -87,7 +99,7 @@ export async function collectVmSummary(config: SigmaConfig, dependencies?: VmRun
   const running = filteredInstances.filter((item) => item.state === "running").length;
   const paused = filteredInstances.filter((item) => item.state === "paused").length;
   const vcpu = filteredInstances.reduce((sum, item) => sum + (item.vcpu ?? 0), 0);
-  const memoryBytes = filteredInstances.reduce((sum, item) => sum + (item.memoryBytes ?? 0), 0);
+  const memoryBytes = filteredInstances.reduce((sum, item) => sum + (item.maxMemoryBytes ?? item.memoryBytes ?? 0), 0);
   const diskBytes = filteredInstances.reduce(
     (sum, item) => sum + item.disks.reduce((diskSum, disk) => diskSum + (disk.capacityBytes ?? 0), 0),
     0
@@ -97,6 +109,7 @@ export async function collectVmSummary(config: SigmaConfig, dependencies?: VmRun
     collectedAt: new Date().toISOString(), enabled: true,
     host: {
       status, libvirtUri: vm.libvirtUri, libvirtVersion, qemuVersion, kvmAvailable,
+      architecture,
       cpuCount: hostResources.cpuCount, memoryTotalBytes: hostResources.memoryTotalBytes,
       memoryFreeBytes: hostResources.memoryFreeBytes, storagePath: vm.storagePath,
       storageTotalBytes: hostResources.storageTotalBytes, storageFreeBytes: hostResources.storageFreeBytes,
@@ -121,16 +134,19 @@ export async function applyVmOperation(
     const summary = await collectVmSummary(config, dependencies);
     if (summary.host.status !== "ready") throw new Error(summary.host.issues[0] ?? "Virtualization host is not ready");
   }
-  const runner = vmCommandRunner(dependencies);
+  const runner = vmCommandRunner(config, dependencies);
   const domain = requiredDomain(proposal);
   switch (proposal.action) {
-    case "start": await runVirsh(runner, vmConfig, ["start", domain]); break;
-    case "shutdown": await runVirsh(runner, vmConfig, ["shutdown", domain]); break;
-    case "stop": await runVirsh(runner, vmConfig, ["destroy", domain]); break;
+    case "start": await runVirshTransition(runner, vmConfig, ["start", domain], domain, ["running"]); break;
+    case "shutdown": await runVirshTransition(runner, vmConfig, ["shutdown", domain], domain, ["shut off"]); break;
+    case "stop": await runVirshTransition(runner, vmConfig, ["destroy", domain], domain, ["shut off"]); break;
     case "restart": await runVirsh(runner, vmConfig, ["reboot", domain]); break;
-    case "pause": await runVirsh(runner, vmConfig, ["suspend", domain]); break;
-    case "resume": await runVirsh(runner, vmConfig, ["resume", domain]); break;
-    case "reset": await runVirsh(runner, vmConfig, ["reset", domain]); break;
+    case "pause": await runVirshTransition(runner, vmConfig, ["suspend", domain], domain, ["paused"]); break;
+    case "resume": await runVirshTransition(runner, vmConfig, ["resume", domain], domain, ["running"]); break;
+    case "reset":
+      await runVirshTransition(runner, vmConfig, ["destroy", domain], domain, ["shut off"]);
+      await runVirshTransition(runner, vmConfig, ["start", domain], domain, ["running"]);
+      break;
     case "snapshot":
       await runVirsh(runner, vmConfig, [
         "snapshot-create-as",
@@ -163,8 +179,16 @@ export async function applyVmOperation(
         await assertAllowedIso(vmConfig, proposal.isoPath);
       }
       const sizeBytes = proposal.diskSizeBytes ?? 20 * 1024 ** 3;
+      let createdDisk = false;
       if (!proposal.diskPath) {
+        try {
+          await access(diskPath);
+          throw new Error("Virtual machine disk already exists");
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
         await runner.run("qemu-img", ["create", "-f", "qcow2", diskPath, String(sizeBytes)]);
+        createdDisk = true;
       } else {
         try {
           await access(diskPath);
@@ -172,9 +196,16 @@ export async function applyVmOperation(
           throw new Error("Existing virtual machine disk was not found");
         }
       }
-      await chmod(diskPath, 0o600);
-      const args = buildVmCreateArgs(vmConfig, domain, diskPath, proposal);
-      await runner.run("virt-install", args);
+      try {
+        await chmod(diskPath, 0o600);
+        const args = buildVmCreateArgs(vmConfig, domain, diskPath, proposal);
+        await runner.run("virt-install", args);
+      } catch (error) {
+        if (createdDisk && !(await domainExists(vmConfig, runner, domain))) {
+          await unlink(diskPath).catch(() => undefined);
+        }
+        throw error;
+      }
       break;
     }
     case "console":
@@ -215,12 +246,17 @@ export function buildVmCreateArgs(
     "--noautoconsole"
   ];
   if (proposal.osVariant) args.push("--os-variant", proposal.osVariant);
+  else args.push("--osinfo", "detect=on,name=linux2024");
   if (proposal.machineType) args.push("--machine", proposal.machineType);
   if (proposal.cpuMode) args.push("--cpu", proposal.cpuMode === "custom" ? proposal.cpuModel! : proposal.cpuMode);
   if (proposal.memoryBacking === "hugepages") args.push("--memorybacking", "hugepages=yes");
   if (proposal.firmware || proposal.bootMenu !== undefined) {
     const boot = [
-      ...(proposal.firmware === "uefi" ? ["uefi"] : []),
+      ...(proposal.firmware === "uefi" ? [
+        "uefi",
+        "firmware.feature0.name=secure-boot",
+        "firmware.feature0.enabled=no"
+      ] : []),
       ...(proposal.bootMenu !== undefined ? [`menu=${proposal.bootMenu ? "on" : "off"}`] : [])
     ];
     if (boot.length) args.push("--boot", boot.join(","));
@@ -238,7 +274,11 @@ export function buildVmUnavailableSummary(config: VmConfig, error: string | null
 }
 
 export function safeVmMessage(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error)).replace(/password\s*[:=]\s*\S+/giu, "password: [redacted]").slice(0, 500);
+  const stderr = error && typeof error === "object" && "stderr" in error && typeof error.stderr === "string"
+    ? error.stderr.trim()
+    : "";
+  const message = stderr || (error instanceof Error ? error.message : String(error));
+  return message.replace(/password\s*[:=]\s*\S+/giu, "password: [redacted]").slice(0, 2_000);
 }
 
 async function collectInstance(config: VmConfig, runner: VmCommandRunner, name: string, issues: string[]): Promise<VmInstanceSummary | null> {
@@ -253,10 +293,16 @@ async function collectInstance(config: VmConfig, runner: VmCommandRunner, name: 
     const state = stateText.includes("running") ? "running" : stateText.includes("paused") ? "paused" : stateText.includes("crashed") ? "crashed" : stateText.includes("shut off") ? "shutoff" : "unknown";
     const memory = Number(value("Used memory")?.match(/\d+/u)?.[0] ?? 0) * 1024;
     const maxMemory = Number(value("Max memory")?.match(/\d+/u)?.[0] ?? 0) * 1024;
+    const disks = await Promise.all(parseBlockDevices(block).map(async (disk) => ({
+      source: disk.source,
+      capacityBytes: await runVirsh(runner, config, ["domblkinfo", name, disk.target])
+        .then((output) => parseIntegerField(output, "Capacity"))
+        .catch(() => null)
+    })));
     return {
       id: value("UUID") ?? name, name, state, uuid: value("UUID"),
       vcpu: Number(value("CPU(s)")) || null, memoryBytes: memory || null, maxMemoryBytes: maxMemory || null,
-      os: null, disks: parseBlockDevices(block), networks: parseInterfaces(iface)
+      os: null, disks, networks: parseInterfaces(iface)
     };
   } catch (error) {
     issues.push(`${name}: ${safeVmMessage(error)}`);
@@ -268,10 +314,21 @@ async function collectStoragePools(config: VmConfig, runner: VmCommandRunner, is
   try {
     const names = parseNames(await runVirsh(runner, config, ["pool-list", "--all", "--name"]));
     return (await Promise.all(names.map(async (name) => {
-      const info = await runVirsh(runner, config, ["pool-info", name]);
-      const value = (key: string) => info.split(/\r?\n/u).find((line) => line.startsWith(`${key}:`))?.slice(key.length + 1).trim() ?? "";
-      return { name, path: value("Target"), state: value("State") || "unknown", capacityBytes: parseSize(value("Capacity")), allocationBytes: parseSize(value("Allocation")), availableBytes: parseSize(value("Available")) };
-    }))).filter((pool) => pool.path);
+      try {
+        const [info, xml] = await Promise.all([
+          runVirsh(runner, config, ["pool-info", name]),
+          runVirsh(runner, config, ["pool-dumpxml", name])
+        ]);
+        const value = (key: string) => info.split(/\r?\n/u).find((line) => line.startsWith(`${key}:`))?.slice(key.length + 1).trim() ?? "";
+        const parsed = new XMLParser({ ignoreAttributes: false, processEntities: false }).parse(xml) as {
+          pool?: { target?: { path?: string } };
+        };
+        return { name, path: parsed.pool?.target?.path ?? "", state: value("State") || "unknown", capacityBytes: parseSize(value("Capacity")), allocationBytes: parseSize(value("Allocation")), availableBytes: parseSize(value("Available")) };
+      } catch (error) {
+        issues.push(`Storage pool ${name}: ${safeVmMessage(error)}`);
+        return null;
+      }
+    }))).filter((pool): pool is NonNullable<typeof pool> => Boolean(pool?.path));
   } catch (error) { issues.push(`Storage pools: ${safeVmMessage(error)}`); return []; }
 }
 
@@ -295,13 +352,34 @@ async function collectHostResources(config: VmConfig, runner: VmCommandRunner, _
   return { cpuCount, memoryTotalBytes, memoryFreeBytes, storageTotalBytes, storageFreeBytes };
 }
 
-function parseBlockDevices(output: string) { return output.split(/\r?\n/u).slice(2).map((line) => line.trim()).filter(Boolean).map((line) => { const parts = line.split(/\s+/u); return { source: parts.at(-1) ?? line, capacityBytes: null }; }); }
+function parseBlockDevices(output: string) { return output.split(/\r?\n/u).slice(2).map((line) => line.trim()).filter(Boolean).map((line) => { const parts = line.split(/\s+/u); return { device: parts[1] ?? "", target: parts[2] ?? "", source: parts.at(-1) ?? line }; }).filter((disk) => disk.device === "disk" && disk.target); }
 function parseInterfaces(output: string) { return output.split(/\r?\n/u).slice(2).map((line) => line.trim()).filter(Boolean).map((line) => { const parts = line.split(/\s+/u); return { name: parts[0] ?? "", source: parts[2] ?? null, mac: parts[4] ?? null }; }); }
 function parseNames(output: string) { return output.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean); }
 function parseSize(value: string): number | null { const match = value.match(/([\d.]+)\s*(KiB|MiB|GiB|TiB|bytes?)/iu); if (!match) return null; const factor = { kib: 1024, mib: 1024 ** 2, gib: 1024 ** 3, tib: 1024 ** 4, byte: 1, bytes: 1 }[match[2]!.toLowerCase()] ?? 1; return Math.round(Number(match[1]) * factor); }
+function parseIntegerField(output: string, key: string): number | null { const value = output.split(/\r?\n/u).find((line) => line.startsWith(`${key}:`))?.slice(key.length + 1).trim(); const parsed = Number(value); return Number.isFinite(parsed) ? parsed : null; }
 async function runVirsh(runner: VmCommandRunner, config: VmConfig, args: string[]): Promise<string> { return runner.run("virsh", ["-c", config.libvirtUri, ...args]); }
+async function runVirshTransition(
+  runner: VmCommandRunner,
+  config: VmConfig,
+  args: string[],
+  domain: string,
+  desiredStates: string[]
+): Promise<void> {
+  if (desiredStates.includes(await domainState(config, runner, domain))) return;
+  try {
+    await runVirsh(runner, config, args);
+  } catch (error) {
+    if (!desiredStates.includes(await domainState(config, runner, domain))) throw error;
+  }
+}
+async function domainState(config: VmConfig, runner: VmCommandRunner, domain: string): Promise<string> {
+  return runVirsh(runner, config, ["domstate", domain])
+    .then((output) => output.trim().toLowerCase().replace(/\s+/gu, " "))
+    .catch(() => "");
+}
+async function domainExists(config: VmConfig, runner: VmCommandRunner, domain: string): Promise<boolean> { try { await runVirsh(runner, config, ["dominfo", domain]); return true; } catch { return false; } }
 async function canReadKvm() { try { await access("/dev/kvm"); return true; } catch { return false; } }
-function unavailableSummary(config: VmConfig, error: string | null): VmSummary { return { collectedAt: new Date().toISOString(), enabled: config.enabled, host: { status: error === "disabled" ? "disabled" : "unavailable", libvirtUri: config.libvirtUri, libvirtVersion: null, qemuVersion: null, kvmAvailable: false, cpuCount: null, memoryTotalBytes: null, memoryFreeBytes: null, storagePath: config.storagePath, storageTotalBytes: null, storageFreeBytes: null, networkName: config.networkName, error: error === "disabled" ? null : error, issues: error && error !== "disabled" ? [error] : [] }, metrics: { total: 0, running: 0, paused: 0, vcpu: 0, memoryBytes: 0, diskBytes: 0 }, instances: [], storagePools: [], networks: [] }; }
+function unavailableSummary(config: VmConfig, error: string | null): VmSummary { return { collectedAt: new Date().toISOString(), enabled: config.enabled, host: { status: error === "disabled" ? "disabled" : "unavailable", libvirtUri: config.libvirtUri, libvirtVersion: null, qemuVersion: null, architecture: process.arch, kvmAvailable: false, cpuCount: null, memoryTotalBytes: null, memoryFreeBytes: null, storagePath: config.storagePath, storageTotalBytes: null, storageFreeBytes: null, networkName: config.networkName, error: error === "disabled" ? null : error, issues: error && error !== "disabled" ? [error] : [] }, metrics: { total: 0, running: 0, paused: 0, vcpu: 0, memoryBytes: 0, diskBytes: 0 }, instances: [], storagePools: [], networks: [] }; }
 function requiredDomain(proposal: VmOperationProposal) { if (!proposal.domainName || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$/u.test(proposal.domainName)) throw new Error("A valid virtual machine name is required"); return proposal.domainName; }
 function requiredSnapshot(proposal: VmOperationProposal) { if (!proposal.snapshotName || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$/u.test(proposal.snapshotName)) throw new Error("A valid snapshot name is required"); return proposal.snapshotName; }
 function assertInside(root: string, candidate: string) { const base = path.resolve(root); const target = path.resolve(candidate); if (target !== base && !target.startsWith(`${base}${path.sep}`)) throw new Error("Virtual machine disk must stay inside the configured storage path"); }

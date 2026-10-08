@@ -4,7 +4,7 @@ import type { SigmaDatabase } from "../connection.js";
 import { mapVmConsoleAuthorization } from "./operation-mappers.js";
 import type { DbVmConsoleAuthorizationRow } from "./repository-rows.js";
 
-const AUTHORIZATION_TTL_MS = 5 * 60_000;
+export const VM_CONSOLE_AUTHORIZATION_TTL_MS = 5 * 60_000;
 
 export function createVmConsoleAuthorization(
   db: SigmaDatabase,
@@ -14,7 +14,7 @@ export function createVmConsoleAuthorization(
   const record: VmConsoleAuthorizationRecord = {
     id: randomUUID(), operationId: input.operationId, approvalId: input.approvalId,
     domainName: input.domainName, status: "active", createdAt: now.toISOString(),
-    expiresAt: new Date(now.getTime() + AUTHORIZATION_TTL_MS).toISOString(), usedAt: null
+    expiresAt: new Date(now.getTime() + VM_CONSOLE_AUTHORIZATION_TTL_MS).toISOString(), usedAt: null
   };
   db.prepare(`INSERT INTO vm_console_authorizations
     (id, operation_id, approval_id, domain_name, status, created_at, expires_at, used_at)

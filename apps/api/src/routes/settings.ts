@@ -14,7 +14,7 @@ import {
   saveModelProviderSettings,
   savePiToolPolicySettings
 } from "@sigmaos/db";
-import type { DockerSettingsRecord, ModelProviderName, PiToolPolicySettingsRecord } from "@sigmaos/shared";
+import type { ModelProviderName, PiToolPolicySettingsRecord } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
 import {
   defaultDockerSettings,
@@ -149,11 +149,6 @@ export function registerSettingsRoutes(server: FastifyInstance, { config, db }: 
       composeCommand?: string;
       operationTimeoutMs?: number | string;
       consoleShells?: string[] | string;
-      composeRoots?: Array<{
-        id?: string;
-        name?: string;
-        path?: string;
-      }>;
     };
   }>("/api/settings/docker", async (request, reply) => {
     const existing = getDockerSettings(db) ?? defaultDockerSettings(config);
@@ -167,8 +162,7 @@ export function registerSettingsRoutes(server: FastifyInstance, { config, db }: 
           request.body?.operationTimeoutMs,
           existing.operationTimeoutMs
         ),
-        consoleShells: normalizeDockerShells(request.body?.consoleShells, existing.consoleShells),
-        composeRoots: normalizeDockerRoots(request.body?.composeRoots, existing.composeRoots)
+        consoleShells: normalizeDockerShells(request.body?.consoleShells, existing.consoleShells)
       });
 
       reply.send({
@@ -210,45 +204,4 @@ function normalizeDockerShells(value: string[] | string | undefined, fallback: s
     }
     return shell;
   });
-}
-
-function normalizeDockerRoots(
-  roots: Array<{ id?: string; name?: string; path?: string }> | undefined,
-  fallback: DockerSettingsRecord["composeRoots"]
-): DockerSettingsRecord["composeRoots"] {
-  if (!roots) {
-    return fallback;
-  }
-
-  const normalized = roots
-    .map((root, index) => {
-      const pathValue = normalizeOptionalText(root.path);
-      if (!pathValue) {
-        throw new Error(`Docker compose root ${index + 1} is missing a path`);
-      }
-      const resolvedPath = path.resolve(process.cwd(), pathValue);
-      const id = normalizeOptionalText(root.id) ?? `compose-root-${index + 1}`;
-      const name = normalizeOptionalText(root.name) ?? id;
-      return {
-        id,
-        name,
-        path: resolvedPath
-      };
-    })
-    .filter((root) => Boolean(root.path));
-
-  const ids = new Set<string>();
-  const paths = new Set<string>();
-  for (const root of normalized) {
-    if (ids.has(root.id)) {
-      throw new Error(`Docker compose root id must be unique: ${root.id}`);
-    }
-    if (paths.has(root.path)) {
-      throw new Error(`Docker compose root path must be unique: ${root.path}`);
-    }
-    ids.add(root.id);
-    paths.add(root.path);
-  }
-
-  return normalized;
 }

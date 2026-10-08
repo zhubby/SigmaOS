@@ -8,14 +8,17 @@ import {
   createActionMessageAndJob,
   createVmConsoleAuthorization,
   createVmOperationApproval,
+  expireStaleVmConsoleOperations,
   getApproval,
   getJob,
   getSession,
+  getProposedVmOperationForTarget,
   getVmOperation,
   getVmOperationByApproval,
   listVmOperations,
   consumeVmConsoleAuthorization,
   updateJobStatus,
+  updateApprovalStatus,
   updateVmOperationStatus
 } from "@sigmaos/db";
 import type {
@@ -66,11 +69,29 @@ type VmProposalBody = {
   autostart?: boolean;
 };
 
+export function vmConsoleSpawnSpec(libvirtUri: string, domainName: string) {
+  return {
+    command: "script",
+    args: [
+      "-q", "-e", "-f", "-c",
+      'exec virsh -c "$SIGMAOS_VM_LIBVIRT_URI" console "$SIGMAOS_VM_DOMAIN"',
+      "/dev/null"
+    ],
+    env: {
+      SIGMAOS_VM_LIBVIRT_URI: libvirtUri,
+      SIGMAOS_VM_DOMAIN: domainName
+    }
+  };
+}
+
 export function registerVmRoutes(server: FastifyInstance, context: ApiRouteContext): void {
   server.get("/api/vms/summary", async () => ({ summary: await collectVmSummary(context.config, context.vm) }));
-  server.get<{ Querystring: { sessionId?: string } }>("/api/vms/operations", async (request) => ({
-    operations: listVmOperations(context.db, { ...(request.query.sessionId ? { sessionId: request.query.sessionId } : {}), limit: 100 })
-  }));
+  server.get<{ Querystring: { sessionId?: string } }>("/api/vms/operations", async (request) => {
+    expireStaleVmConsoleOperations(context.db);
+    return {
+      operations: listVmOperations(context.db, { ...(request.query.sessionId ? { sessionId: request.query.sessionId } : {}), limit: 100 })
+    };
+  });
   server.post<{ Body: VmProposalBody }>("/api/vms/proposals", async (request, reply) => {
     const session = getSession(context.db, request.body?.sessionId ?? "");
     if (!session) { reply.status(404).send({ error: "Session not found" }); return; }
@@ -109,6 +130,10 @@ export function registerVmRoutes(server: FastifyInstance, context: ApiRouteConte
         }
         return;
       }
+      if (getProposedVmOperationForTarget(context.db, proposal.domainName ?? "new-vm")) {
+        reply.status(409).send({ error: `A virtual machine operation is already pending for ${proposal.domainName}` });
+        return;
+      }
       const { message, job } = createActionMessageAndJob(context.db, { sessionId: session.id, content: proposal.summary, kind: "vm", status: "waiting_approval" });
       const { approval, operation } = createVmOperationApproval(context.db, { jobId: job.id, proposal });
       appendEvent(context.db, { sessionId: session.id, jobId: job.id, type: "approval.pending", payload: { approvalId: approval.id, proposal: approval.proposal, summary: proposal.summary } });
@@ -118,18 +143,37 @@ export function registerVmRoutes(server: FastifyInstance, context: ApiRouteConte
   server.post<{ Body: { operationId?: string } }>("/api/vms/console-sessions", async (request, reply) => {
     const operation = getVmOperation(context.db, request.body?.operationId ?? "");
     if (!operation || operation.action !== "console" || operation.status !== "approved" || !operation.approvalId) { reply.status(404).send({ error: "Approved VM console operation not found" }); return; }
+    const approval = getApproval(context.db, operation.approvalId);
     const proposal = operation.metadata.proposal as VmOperationProposal | undefined;
-    if (!proposal?.domainName) { reply.status(400).send({ error: "Console operation is missing domain metadata" }); return; }
+    if (!approval || !proposal?.domainName || !proposal.domainUuid) { reply.status(400).send({ error: "Console operation is missing VM identity metadata" }); return; }
     try {
+      const current = (await collectVmSummary(context.config, context.vm)).instances.find((instance) => instance.name === proposal.domainName);
+      if (!current?.uuid || current.uuid !== proposal.domainUuid) {
+        const error = "VM console approval no longer matches the current virtual machine";
+        updateVmOperationStatus(context.db, operation.id, "failed", { error, failedAt: new Date().toISOString() });
+        updateApprovalStatus(context.db, approval.id, "failed", ["approved"]);
+        updateJobStatus(context.db, approval.jobId, "failed", error, ["waiting_approval"]);
+        appendEvent(context.db, { sessionId: approval.sessionId, jobId: approval.jobId, type: "job.failed", payload: { jobId: approval.jobId, approvalId: approval.id, error } });
+        reply.status(409).send({ error });
+        return;
+      }
       const authorization = createVmConsoleAuthorization(context.db, { operationId: operation.id, approvalId: operation.approvalId, domainName: proposal.domainName });
-      updateVmOperationStatus(context.db, operation.id, "approved", { consoleSessionId: authorization.id });
+      const applied = updateVmOperationStatus(context.db, operation.id, "applied", { consoleSessionId: authorization.id, appliedAt: new Date().toISOString() });
+      if (!applied) throw new Error("VM console operation record disappeared before completion");
+      updateApprovalStatus(context.db, approval.id, "applied", ["approved"]);
+      updateJobStatus(context.db, approval.jobId, "completed", null, ["waiting_approval"]);
+      appendEvent(context.db, { sessionId: approval.sessionId, jobId: approval.jobId, type: "job.completed", payload: { jobId: approval.jobId, approvalId: approval.id, vmOperation: applied } });
       reply.status(201).send({ consoleSession: { ...authorization, websocketUrl: `/api/vms/console/${authorization.id}` } });
     } catch (error) { reply.status(400).send({ error: safeVmMessage(error) }); }
   });
   server.get<{ Params: { id: string } }>("/api/vms/console/:id", { websocket: true }, async (socket, request) => {
     const authorization = consumeVmConsoleAuthorization(context.db, request.params.id);
     if (!authorization) { sendSocket(socket, { type: "error", error: "VM console session is not available" }); socket.close(); return; }
-    const child = spawn("virsh", ["-c", (context.config.vm ?? DEFAULT_VM_CONFIG).libvirtUri, "console", authorization.domainName], { stdio: ["pipe", "pipe", "pipe"] });
+    const consoleProcess = vmConsoleSpawnSpec((context.config.vm ?? DEFAULT_VM_CONFIG).libvirtUri, authorization.domainName);
+    const child = spawn(consoleProcess.command, consoleProcess.args, {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, ...consoleProcess.env }
+    });
     let closed = false;
     const close = () => { if (closed) return; closed = true; child.kill(); };
     child.stdout.on("data", (data: Buffer) => sendSocket(socket, { type: "output", data: data.toString("utf8") }));
@@ -151,8 +195,10 @@ async function buildVmProposal(body: VmProposalBody, context: ApiRouteContext): 
   if (action !== "console" && action !== "delete" && summary.host.status !== "ready") throw new Error(summary.host.issues[0] ?? "Virtualization host is not ready");
   const domainName = normalizeDomain(body.domainName);
   if (!domainName) throw new Error("A valid virtual machine name is required");
-  if (action !== "create" && !summary.instances.some((instance) => instance.name === domainName)) throw new Error("Virtual machine not found");
+  const targetInstance = summary.instances.find((instance) => instance.name === domainName);
+  if (action !== "create" && !targetInstance) throw new Error("Virtual machine not found");
   if (action === "create" && summary.instances.some((instance) => instance.name === domainName)) throw new Error("Virtual machine already exists");
+  if (action === "console" && !targetInstance?.uuid) throw new Error("Virtual machine identity is unavailable");
   if (action === "snapshot" && !normalizeDomain(body.snapshotName)) throw new Error("Snapshot name is required");
   const storageIso = action === "create" && body.isoPath ? await resolveStorageIso(body, context) : null;
   const isoPath = storageIso?.absolutePath ?? body.isoPath;
@@ -161,10 +207,10 @@ async function buildVmProposal(body: VmProposalBody, context: ApiRouteContext): 
   if (action === "create" && isoPath && !storageIso && !vmConfig.isoRoots.some((root) => isInside(root, isoPath))) throw new Error("ISO path must stay inside a configured ISO root");
   if (action === "create" && body.diskPath && !isInside(vmConfig.storagePath, body.diskPath)) throw new Error("Disk path must stay inside the configured VM storage path");
   if (body.networkName && !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/u.test(body.networkName)) throw new Error("Network name is invalid");
-  const advanced = action === "create" ? validateCreateOptions(body) : {};
+  const advanced = action === "create" ? validateCreateOptions(body, summary.host.architecture) : {};
   const risk = action === "delete" || action === "create" ? "high" : "medium";
   return {
-    action, ...(domainName ? { domainName } : {}), ...(normalizeDomain(body.snapshotName) ? { snapshotName: normalizeDomain(body.snapshotName)! } : {}),
+    action, ...(domainName ? { domainName } : {}), ...(action === "console" ? { domainUuid: targetInstance!.uuid! } : {}), ...(normalizeDomain(body.snapshotName) ? { snapshotName: normalizeDomain(body.snapshotName)! } : {}),
     ...(body.vcpu !== undefined ? { vcpu: boundedInteger(body.vcpu, 1, 128, "vCPU") } : {}),
     ...(body.memoryBytes !== undefined ? { memoryBytes: boundedInteger(body.memoryBytes, 256 * 1024 ** 2, 1024 * 1024 ** 3, "Memory") } : {}),
     ...(body.diskSizeBytes !== undefined ? { diskSizeBytes: boundedInteger(body.diskSizeBytes, 1 * 1024 ** 3, 64 * 1024 ** 4, "Disk size") } : {}),
@@ -182,7 +228,7 @@ async function buildVmProposal(body: VmProposalBody, context: ApiRouteContext): 
   };
 }
 
-function validateCreateOptions(body: VmProposalBody): Partial<VmOperationProposal> {
+function validateCreateOptions(body: VmProposalBody, architecture: string): Partial<VmOperationProposal> {
   if (body.bootMenu !== undefined && typeof body.bootMenu !== "boolean") throw new Error("Boot menu must be a boolean");
   if (body.autostart !== undefined && typeof body.autostart !== "boolean") throw new Error("Autostart must be a boolean");
   if (body.vcpuTopology && (body.vcpuTopology.sockets === undefined || body.vcpuTopology.cores === undefined || body.vcpuTopology.threads === undefined)) {
@@ -201,14 +247,24 @@ function validateCreateOptions(body: VmProposalBody): Partial<VmOperationProposa
   if (topology && body.vcpu !== undefined && topology.sockets * topology.cores * topology.threads !== boundedInteger(body.vcpu, 1, 128, "vCPU")) {
     throw new Error("vCPU topology must match the total vCPU count");
   }
-  const cpuMode = oneOf(body.cpuMode, ["host-model", "host-passthrough", "custom"] as const, "CPU mode");
+  const isArmHost = architecture === "arm64" || architecture === "aarch64";
+  const requestedCpuMode = oneOf(body.cpuMode, ["host-model", "host-passthrough", "custom"] as const, "CPU mode");
+  if (isArmHost && requestedCpuMode === "host-model") {
+    throw new Error("host-model CPU mode is not supported on arm64 hosts; use host-passthrough or a custom model");
+  }
+  const cpuMode = requestedCpuMode ?? (isArmHost ? "host-passthrough" : undefined);
   const cpuModel = safeToken(body.cpuModel, "CPU model");
   if (cpuMode === "custom" && !cpuModel) throw new Error("A CPU model is required for custom CPU mode");
   if (cpuModel && cpuMode !== "custom") throw new Error("CPU model requires custom CPU mode");
+  const requestedFirmware = oneOf(body.firmware, ["bios", "uefi"] as const, "Firmware");
+  if (isArmHost && requestedFirmware === "bios") {
+    throw new Error("UEFI firmware is required on arm64 hosts");
+  }
+  const firmware = requestedFirmware ?? (isArmHost ? "uefi" : undefined);
   return {
     ...(topology ? { vcpuTopology: topology } : {}),
     ...(safeToken(body.osVariant, "OS variant") ? { osVariant: safeToken(body.osVariant, "OS variant")! } : {}),
-    ...(oneOf(body.firmware, ["bios", "uefi"] as const, "Firmware") ? { firmware: oneOf(body.firmware, ["bios", "uefi"] as const, "Firmware")! } : {}),
+    ...(firmware ? { firmware } : {}),
     ...(safeToken(body.machineType, "Machine type") ? { machineType: safeToken(body.machineType, "Machine type")! } : {}),
     ...(cpuMode ? { cpuMode } : {}),
     ...(cpuModel ? { cpuModel } : {}),

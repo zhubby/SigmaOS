@@ -931,12 +931,7 @@ export function App() {
           socketPath: dockerSettingsForm.socketPath,
           composeCommand: dockerSettingsForm.composeCommand,
           operationTimeoutMs: Number(dockerSettingsForm.operationTimeoutMs),
-          consoleShells: parseDockerShells(dockerSettingsForm.consoleShells),
-          composeRoots: dockerSettingsForm.composeRoots.map((root) => ({
-            id: root.id,
-            name: root.name,
-            path: root.path
-          }))
+          consoleShells: parseDockerShells(dockerSettingsForm.consoleShells)
         })
       ]);
       setModelSettings(settings);

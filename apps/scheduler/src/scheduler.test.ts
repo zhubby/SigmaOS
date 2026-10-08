@@ -45,7 +45,6 @@ beforeEach(async () => {
       composeCommand: "docker",
       operationTimeoutMs: 120_000,
       consoleShells: ["/bin/sh", "/bin/bash"],
-      composeRoots: []
     },
     shares: {
       enabled: false,

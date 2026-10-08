@@ -4,6 +4,9 @@ import type { SigmaDatabase } from "../connection.js";
 import { getJob } from "./jobs.js";
 import { mapVmOperation } from "./operation-mappers.js";
 import type { DbVmOperationRow } from "./repository-rows.js";
+import { VM_CONSOLE_AUTHORIZATION_TTL_MS } from "./vm-console-authorizations.js";
+
+const EXPIRED_CONSOLE_ERROR = "VM console approval expired before the console was opened";
 
 export function createVmOperationApproval(
   db: SigmaDatabase,
@@ -64,6 +67,54 @@ export function getVmOperationByApproval(db: SigmaDatabase, approvalId: string):
   const row = db.prepare(`SELECT id, approval_id, action, target_id, status, metadata_json, created_at, updated_at
     FROM vm_operations WHERE approval_id = ? ORDER BY created_at DESC LIMIT 1`).get(approvalId) as DbVmOperationRow | undefined;
   return row ? mapVmOperation(row) : null;
+}
+
+export function getProposedVmOperationForTarget(db: SigmaDatabase, targetId: string): VmOperationRecord | null {
+  const row = db.prepare(`SELECT id, approval_id, action, target_id, status, metadata_json, created_at, updated_at
+    FROM vm_operations WHERE target_id = ? AND status = 'proposed' ORDER BY created_at DESC LIMIT 1`)
+    .get(targetId) as DbVmOperationRow | undefined;
+  return row ? mapVmOperation(row) : null;
+}
+
+export function expireStaleVmConsoleOperations(db: SigmaDatabase, now = new Date()): number {
+  const timestamp = now.toISOString();
+  const cutoff = new Date(now.getTime() - VM_CONSOLE_AUTHORIZATION_TTL_MS).toISOString();
+  const rows = db.prepare(`SELECT o.id, o.approval_id, a.job_id
+    FROM vm_operations o
+    JOIN pending_approvals a ON a.id = o.approval_id
+    JOIN jobs j ON j.id = a.job_id
+    WHERE o.action = 'console' AND o.status = 'approved'
+      AND a.status = 'approved' AND j.status = 'waiting_approval'
+      AND o.updated_at <= ?`).all(cutoff) as Array<{ id: string; approval_id: string; job_id: string }>;
+
+  const expire = db.transaction(() => {
+    let expired = 0;
+    for (const row of rows) {
+      const approval = db.prepare(`UPDATE pending_approvals
+        SET status = 'expired', updated_at = ?
+        WHERE id = ? AND status = 'approved'`).run(timestamp, row.approval_id);
+      if (approval.changes !== 1) continue;
+
+      const operation = db.prepare(`UPDATE vm_operations
+        SET status = 'failed',
+            metadata_json = json_set(metadata_json, '$.error', ?, '$.failedAt', ?),
+            updated_at = ?
+        WHERE id = ? AND status = 'approved'`).run(EXPIRED_CONSOLE_ERROR, timestamp, timestamp, row.id);
+      const job = db.prepare(`UPDATE jobs
+        SET status = 'cancelled', error = ?, updated_at = ?
+        WHERE id = ? AND status = 'waiting_approval'`).run(EXPIRED_CONSOLE_ERROR, timestamp, row.job_id);
+      if (operation.changes !== 1 || job.changes !== 1) {
+        throw new Error("Failed to expire a stale VM console operation atomically");
+      }
+      db.prepare(`UPDATE operation_notifications
+        SET status = 'cancelled', error = ?, read_at = NULL, updated_at = ?
+        WHERE job_id = ?`).run(EXPIRED_CONSOLE_ERROR, timestamp, row.job_id);
+      expired += 1;
+    }
+    return expired;
+  });
+
+  return expire();
 }
 
 export function listVmOperations(db: SigmaDatabase, input: { sessionId?: string; limit?: number } = {}): VmOperationRecord[] {

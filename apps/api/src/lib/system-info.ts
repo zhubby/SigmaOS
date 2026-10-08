@@ -95,7 +95,6 @@ export async function collectSystemInfo(config: SigmaConfig): Promise<PublicSyst
       modelProvider: config.model.provider,
       localEndpointConfigured: Boolean(config.model.localEndpoint),
       dockerEnabled: config.docker.enabled,
-      dockerComposeRootCount: config.docker.composeRoots.length,
       photos: {
         dataDir: path.join(config.dataDir, PHOTO_DATA_DIRECTORY_NAME),
         maxFileSizeBytes: PHOTO_MAX_FILE_SIZE_BYTES,

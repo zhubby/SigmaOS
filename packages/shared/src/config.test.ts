@@ -35,8 +35,7 @@ describe("loadConfig", () => {
       socketPath: "/var/run/docker.sock",
       composeCommand: "docker",
       operationTimeoutMs: 120_000,
-      consoleShells: ["/bin/sh", "/bin/bash"],
-      composeRoots: []
+      consoleShells: ["/bin/sh", "/bin/bash"]
     });
     expect(config.shares).toMatchObject({
       enabled: false,
@@ -137,14 +136,7 @@ describe("loadConfig", () => {
       socketPath: "/tmp/docker.sock",
       composeCommand: "/usr/bin/docker",
       operationTimeoutMs: 45_000,
-      consoleShells: ["/bin/sh"],
-      composeRoots: [
-        {
-          id: "apps",
-          name: "Apps",
-          path: path.join(tempDir, "compose/apps")
-        }
-      ]
+      consoleShells: ["/bin/sh"]
     });
   });
 
@@ -216,19 +208,7 @@ describe("loadConfig", () => {
       socketPath: "/tmp/env-docker.sock",
       composeCommand: "/opt/bin/docker",
       operationTimeoutMs: 90_000,
-      consoleShells: ["/bin/sh", "/bin/bash"],
-      composeRoots: [
-        {
-          id: "media",
-          name: "Media",
-          path: path.join(tempDir, "compose/media")
-        },
-        {
-          id: "lab",
-          name: "Lab",
-          path: "/srv/lab"
-        }
-      ]
+      consoleShells: ["/bin/sh", "/bin/bash"]
     });
   });
 
@@ -254,6 +234,24 @@ describe("loadConfig", () => {
         expectedFstype: null
       }
     ]);
+  });
+
+  it("rejects production NAS roots that expose the managed Docker Apps path", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-config-"));
+    const configDir = tempDir;
+    const environment = {
+      SIGMAOS_CONFIG: path.join(configDir, "missing.toml"),
+      SIGMAOS_ENVIRONMENT: "production"
+    } as NodeJS.ProcessEnv;
+
+    expect(() => loadConfig({
+      ...environment,
+      SIGMAOS_NAS_ROOTS: "system:System:/srv"
+    }, configDir)).toThrow("must not overlap /srv/apps");
+    expect(() => loadConfig({
+      ...environment,
+      SIGMAOS_NAS_ROOTS: "apps:Apps:/srv/apps/data"
+    }, configDir)).toThrow("must not overlap /srv/apps");
   });
 
   it("loads share settings from TOML", async () => {

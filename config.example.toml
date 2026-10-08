@@ -27,10 +27,7 @@ console_shells = ["/bin/sh", "/bin/bash"]
 
 # Docker socket access is root-equivalent. Only enable this on a trusted
 # single-user appliance, and grant the sigmaos service access deliberately.
-# [[docker.compose_roots]]
-# id = "apps"
-# name = "Apps"
-# path = "/srv/compose"
+# Managed Compose Apps always use /srv/apps; this path is not configurable.
 
 [vm]
 enabled = true

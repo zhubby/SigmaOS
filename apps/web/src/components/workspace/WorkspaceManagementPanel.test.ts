@@ -1,9 +1,10 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import type { DockerContainer, DockerContainerDetails } from "../../api.js";
+import type { DockerContainer, DockerContainerDetails, VmSummary } from "../../api.js";
 import { i18n, initI18n } from "../../i18n/index.js";
-import { DockerContainerDetailsDialog } from "./WorkspaceManagementPanel.js";
+import { DockerComposeAppDialog } from "./DockerComposeAppDialog.js";
+import { DockerContainerDetailsDialog, VmInstanceActions } from "./WorkspaceManagementPanel.js";
 
 beforeAll(async () => {
   await initI18n();
@@ -68,5 +69,75 @@ describe("DockerContainerDetailsDialog", () => {
     expect(html).toContain('title="Start"');
     expect(html).not.toContain('title="Stop"');
     expect(html).toContain("rustfs /data");
+  });
+});
+
+describe("DockerComposeAppDialog", () => {
+  it("renders the managed path and complete create actions", () => {
+    const html = renderToStaticMarkup(createElement(DockerComposeAppDialog, {
+      app: null,
+      engineReady: true,
+      canDeploy: true,
+      onClose: vi.fn(),
+      onRefresh: vi.fn(),
+      onRequestDeploy: vi.fn(),
+      onNotifySuccess: vi.fn()
+    }));
+
+    expect(html).toContain("Create Compose App");
+    expect(html).toContain("/srv/apps/...");
+    expect(html).toContain("Validate");
+    expect(html).toContain("Save and deploy");
+  });
+});
+
+describe("VmInstanceActions", () => {
+  const vm: VmSummary["instances"][number] = {
+    id: "guest-id",
+    name: "guest",
+    state: "running",
+    uuid: "guest-id",
+    vcpu: 2,
+    memoryBytes: 1024,
+    maxMemoryBytes: 2048,
+    os: null,
+    disks: [],
+    networks: []
+  };
+  const props = {
+    pendingApproval: null,
+    approvedConsole: null,
+    canMutate: true,
+    canConsole: true,
+    pendingAction: null,
+    onRequest: vi.fn(),
+    onRequestConsole: vi.fn()
+  };
+
+  it("shows the complete running lifecycle without invalid start or resume actions", () => {
+    const html = renderToStaticMarkup(createElement(VmInstanceActions, { ...props, vm }));
+
+    expect(html).toContain('title="Stop"');
+    expect(html).toContain('title="Pause"');
+    expect(html).toContain('title="Force stop"');
+    expect(html).toContain('title="Restart"');
+    expect(html).toContain('title="Hard reset"');
+    expect(html).toContain('title="Snapshot"');
+    expect(html).toContain('title="Console"');
+    expect(html).not.toContain('title="Start"');
+    expect(html).not.toContain('title="Resume"');
+  });
+
+  it("resumes paused guests and limits stopped guests to valid actions", () => {
+    const paused = renderToStaticMarkup(createElement(VmInstanceActions, { ...props, vm: { ...vm, state: "paused" } }));
+    const stopped = renderToStaticMarkup(createElement(VmInstanceActions, { ...props, vm: { ...vm, state: "shutoff" } }));
+
+    expect(paused).toContain('title="Resume"');
+    expect(paused).not.toContain('title="Start"');
+    expect(paused).not.toContain('title="Restart"');
+    expect(stopped).toContain('title="Start"');
+    expect(stopped).toContain('title="Remove"');
+    expect(stopped).not.toContain('title="Console"');
+    expect(stopped).not.toContain('title="Snapshot"');
   });
 });

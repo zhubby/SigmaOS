@@ -35,6 +35,7 @@ if [ "$1" = "configure" ]; then
   install -d -o sigmaos -g sigmaos -m 0750 /var/lib/sigmaos /var/lib/sigmaos/trash /var/lib/sigmaos/reports /var/lib/sigmaos/pi-sessions
   install -d -o sigmaos -g sigmaos -m 0711 /var/lib/sigmaos/vmstore
   install -d -o sigmaos -g sigmaos -m 0755 /srv/nas /srv/iso
+  install -d -o sigmaos -g sigmaos -m 0750 /srv/apps
   chown -R sigmaos:sigmaos /var/lib/sigmaos
   install -d -o root -g root -m 0700 /var/lib/sigmaos/docker-daemon
   chown -R root:root /var/lib/sigmaos/docker-daemon

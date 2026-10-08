@@ -53,7 +53,8 @@ describe("SQLite schema migrations", () => {
       "016_hostd_config",
       "017_photo_library",
       "018_photo_upload_reservations",
-      "019_photo_metadata_index"
+      "019_photo_metadata_index",
+      "020_docker_compose_apps"
     ]);
   });
 
@@ -77,6 +78,35 @@ describe("SQLite schema migrations", () => {
       ]));
     } finally {
       database.close();
+    }
+  });
+
+  it("adds managed Compose App tables to an existing database without replacing settings", () => {
+    const databasePath = path.join(tempDir, "legacy-compose.sqlite");
+    const current = openSigmaDb(databasePath);
+    current.prepare(`
+      INSERT INTO system_settings (key, value_json, updated_at)
+      VALUES ('legacy_test', '{"preserved":true}', ?)
+    `).run(new Date().toISOString());
+    current.exec(`
+      DROP TABLE docker_app_environment;
+      DROP TABLE docker_apps;
+      DELETE FROM schema_migrations WHERE id = '020_docker_compose_apps';
+    `);
+    current.close();
+
+    const migrated = openSigmaDb(databasePath);
+    try {
+      const tables = migrated.prepare(`
+        SELECT name FROM sqlite_master
+        WHERE type = 'table' AND name IN ('docker_apps', 'docker_app_environment')
+        ORDER BY name
+      `).pluck().all();
+      expect(tables).toEqual(["docker_app_environment", "docker_apps"]);
+      expect(migrated.prepare("SELECT value_json FROM system_settings WHERE key = 'legacy_test'").pluck().get())
+        .toBe('{"preserved":true}');
+    } finally {
+      migrated.close();
     }
   });
 

@@ -32,14 +32,25 @@ export type VmCreateForm = {
 
 type Translate = (key: string) => unknown;
 
-export function initialVmCreateForm(network = "default"): VmCreateForm {
+export function isArmVmArchitecture(architecture?: string | null): boolean {
+  return architecture === "arm64" || architecture === "aarch64";
+}
+
+export function initialVmCreateForm(network = "default", architecture = "x64"): VmCreateForm {
+  const isArm = isArmVmArchitecture(architecture);
   return {
-    name: "", osVariant: "", vcpu: "2", memoryGiB: "2", cpuMode: "host-model", cpuModel: "",
+    name: "", osVariant: "", vcpu: "2", memoryGiB: "2", cpuMode: isArm ? "host-passthrough" : "host-model", cpuModel: "",
     customTopology: false, sockets: "1", cores: "2", threads: "1", memoryBacking: "default",
     diskGiB: "20", mediaMode: "iso", isoPath: "", isoRootId: "", isoStoragePoolId: "", diskPath: "",
     diskBus: "virtio", diskCache: "none", diskDiscard: "ignore", network, networkModel: "virtio", macAddress: "",
-    firmware: "bios", machineType: "", graphics: "none", videoModel: "none", bootMenu: false, autostart: false
+    firmware: isArm ? "uefi" : "bios", machineType: "", graphics: "none", videoModel: "none", bootMenu: false, autostart: false
   };
+}
+
+export function vmSnapshotName(domainName: string, now = new Date()): string {
+  const timestamp = now.toISOString().replace(/\D/gu, "").slice(0, 14);
+  const maxDomainLength = 63 - timestamp.length - 1;
+  return `${domainName.slice(0, maxDomainLength)}-${timestamp}`;
 }
 
 export function validateVmCreateStep(step: number, form: VmCreateForm, t: Translate): string | null {

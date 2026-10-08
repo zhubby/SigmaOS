@@ -20,14 +20,17 @@ import {
   MonitorCog,
   Network,
   Pause,
+  Pencil,
   Play,
   Plus,
   Power,
+  RefreshCcw,
   RefreshCw,
   RotateCw,
   ScrollText,
   Server,
   Settings2,
+  Square,
   TerminalSquare,
   Trash2,
   X,
@@ -69,9 +72,10 @@ import type { en } from "../../i18n/resources.js";
 import { SystemNetworkManagementPanel, SystemStorageManagementPanel } from "./SystemManagementPanel.js";
 import { ShareManagementPanel } from "./ShareManagementPanel.js";
 import { applyTerminalOptions, terminalOptions } from "../../lib/terminal-theme.js";
-import { initialVmCreateForm, validateVmCreateStep, type VmCreateForm } from "../../lib/vm-create-form.js";
+import { initialVmCreateForm, isArmVmArchitecture, validateVmCreateStep, vmSnapshotName, type VmCreateForm } from "../../lib/vm-create-form.js";
 import { DockerCreateDialogs } from "./DockerCreateDialogs.js";
 import { DockerDaemonSettingsDialog } from "./DockerDaemonSettingsDialog.js";
+import { DockerComposeAppDialog } from "./DockerComposeAppDialog.js";
 import { DockerImageManagement } from "./DockerImageManagement.js";
 import { DockerResourceStatus } from "./DockerResourceStatus.js";
 import { ManagementSkeletonBody } from "./ManagementSkeleton.js";
@@ -588,9 +592,12 @@ function VirtualMachineManagementPanel({
   }
   useEffect(() => { void refresh(); }, []);
   useEffect(() => {
-    if (vmOperations.length > 0) {
-      void refresh();
-    }
+    const latestOperation = vmOperations[0];
+    if (!latestOperation) return;
+    void refresh();
+    if (latestOperation.action !== "shutdown" || latestOperation.status !== "applied") return;
+    const timers = [2_500, 7_500, 20_000].map((delay) => window.setTimeout(() => void refresh(), delay));
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
   }, [vmOperations[0]?.updatedAt]);
 
   async function request(action: Parameters<typeof proposeVmOperation>[0]["action"], domainName: string, extra: Partial<Parameters<typeof proposeVmOperation>[0]> = {}): Promise<boolean> {
@@ -609,8 +616,9 @@ function VirtualMachineManagementPanel({
     finally { setPendingAction(null); }
   }
 
-  async function requestConsole(domainName: string) {
-    const approvedOperation = approvedVmConsoleOperation(domainName, vmOperations);
+  async function requestConsole(vm: VmSummary["instances"][number]) {
+    const domainName = vm.name;
+    const approvedOperation = approvedVmConsoleOperation(vm, vmOperations);
     if (approvedOperation) {
       setPendingAction(`console-open:${domainName}`);
       try {
@@ -666,7 +674,10 @@ function VirtualMachineManagementPanel({
   }
 
   function openCreateVm() {
-    setForm(initialVmCreateForm(host?.networkName ?? summary?.networks.find((network) => network.state === "active")?.name ?? "default"));
+    setForm(initialVmCreateForm(
+      host?.networkName ?? summary?.networks.find((network) => network.state === "active")?.name ?? "default",
+      host?.architecture
+    ));
     setCreateStep(1);
     setFurthestCreateStep(1);
     setWizardError(null);
@@ -705,6 +716,7 @@ function VirtualMachineManagementPanel({
   const host = summary?.host;
   const canMutate = host?.status === "ready" && !loading;
   const canConsole = (host?.status === "ready" || host?.status === "degraded") && !loading;
+  const isArmHost = isArmVmArchitecture(host?.architecture);
   const statusTone = host?.status === "ready" ? "ready" : host?.status === "degraded" ? "warning" : "offline";
   return (
     <section className="workspace-management" aria-label={t("workspace.management.virtualMachines.title")}>
@@ -767,7 +779,7 @@ function VirtualMachineManagementPanel({
                         <tbody>{summary.instances.map((vm) => (
                           <tr key={vm.id}>
                             <td>{vm.name}</td><td><span className="management-row-status" data-state={vm.state === "running" ? "ready" : vm.state === "paused" ? "warning" : "offline"}>{vmStateLabel(vm.state, t)}</span></td><td>{vm.vcpu ?? "-"}</td><td>{vm.memoryBytes ? formatBytes(vm.memoryBytes, "en") : "-"}</td><td>{formatBytes(vm.disks.reduce((sum, disk) => sum + (disk.capacityBytes ?? 0), 0), "en")}</td><td>{vm.networks.map((network) => network.name || network.source || "-").join(", ") || "-"}</td>
-                            <td><VmInstanceActions vm={vm} pendingApproval={pendingVmApprovalForTarget(pendingApprovals, vm.name)} approvedConsole={approvedVmConsoleOperation(vm.name, vmOperations)} canMutate={canMutate} canConsole={canConsole} pendingAction={pendingAction} onRequest={request} onRequestConsole={requestConsole} /></td>
+                            <td><VmInstanceActions vm={vm} pendingApproval={pendingVmApprovalForTarget(pendingApprovals, vm.name)} approvedConsole={approvedVmConsoleOperation(vm, vmOperations)} canMutate={canMutate} canConsole={canConsole} pendingAction={pendingAction} onRequest={request} onRequestConsole={requestConsole} /></td>
                           </tr>
                         ))}</tbody>
                       </table></div>
@@ -807,6 +819,7 @@ function VirtualMachineManagementPanel({
               <div className="vm-create-host-strip">
                 <span className="management-status-pill" data-state="ready"><CircleCheck size={13} />{t("workspace.management.virtualMachines.readyDetail")}</span>
                 <span><Cpu size={14} />{host?.cpuCount ?? "-"} {t("workspace.management.virtualMachines.createHostCpu")}</span>
+                <span><Server size={14} />{host?.architecture ?? "-"} {t("workspace.management.virtualMachines.createArchitecture")}</span>
                 <span><Network size={14} />{summary?.networks.length ?? 0} {t("workspace.management.virtualMachines.createNetworks")}</span>
               </div>
               <nav className="vm-create-stepper" aria-label={String(t("workspace.management.virtualMachines.createSteps"))}>
@@ -858,7 +871,7 @@ function VirtualMachineManagementPanel({
               {createStep === 4 ? (
                 <section className="vm-create-section vm-create-stage">
                   <div className="vm-create-section-heading"><span>04</span><div><h4>{t("workspace.management.virtualMachines.createAdvanced")}</h4><p>{t("workspace.management.virtualMachines.createAdvancedDetail")}</p></div></div>
-                  <div className="vm-create-field-grid"><label className="vm-create-field">{t("workspace.management.virtualMachines.firmware")}<select value={form.firmware} onChange={(event) => updateCreateForm("firmware", event.target.value as VmCreateForm["firmware"])}><option value="bios">BIOS</option><option value="uefi">UEFI</option></select></label><label className="vm-create-field">{t("workspace.management.virtualMachines.machineType")}<input value={form.machineType} onChange={(event) => updateCreateForm("machineType", event.target.value)} placeholder="q35" /><small>{t("workspace.management.virtualMachines.machineTypeHint")}</small></label><label className="vm-create-field">{t("workspace.management.virtualMachines.graphics")}<select value={form.graphics} onChange={(event) => updateCreateForm("graphics", event.target.value as VmCreateForm["graphics"])}><option value="none">none</option><option value="spice">SPICE</option><option value="vnc">VNC</option></select></label><label className="vm-create-field">{t("workspace.management.virtualMachines.videoModel")}<select value={form.videoModel} onChange={(event) => updateCreateForm("videoModel", event.target.value as VmCreateForm["videoModel"])}>{["none", "virtio", "qxl", "vga"].map((value) => <option key={value} value={value}>{value}</option>)}</select></label></div>
+                  <div className="vm-create-field-grid"><label className="vm-create-field">{t("workspace.management.virtualMachines.firmware")}<select value={form.firmware} onChange={(event) => updateCreateForm("firmware", event.target.value as VmCreateForm["firmware"])}><option value="bios" disabled={isArmHost}>BIOS</option><option value="uefi">UEFI</option></select>{isArmHost ? <small>{t("workspace.management.virtualMachines.firmwareArmHint")}</small> : null}</label><label className="vm-create-field">{t("workspace.management.virtualMachines.machineType")}<input value={form.machineType} onChange={(event) => updateCreateForm("machineType", event.target.value)} placeholder="q35" /><small>{t("workspace.management.virtualMachines.machineTypeHint")}</small></label><label className="vm-create-field">{t("workspace.management.virtualMachines.graphics")}<select value={form.graphics} onChange={(event) => updateCreateForm("graphics", event.target.value as VmCreateForm["graphics"])}><option value="none">none</option><option value="spice">SPICE</option><option value="vnc">VNC</option></select></label><label className="vm-create-field">{t("workspace.management.virtualMachines.videoModel")}<select value={form.videoModel} onChange={(event) => updateCreateForm("videoModel", event.target.value as VmCreateForm["videoModel"])}>{["none", "virtio", "qxl", "vga"].map((value) => <option key={value} value={value}>{value}</option>)}</select></label></div>
                   <div className="vm-create-toggle-grid"><label className="vm-create-toggle"><input type="checkbox" checked={form.bootMenu} onChange={(event) => updateCreateForm("bootMenu", event.target.checked)} /><span><strong>{t("workspace.management.virtualMachines.bootMenu")}</strong><small>{t("workspace.management.virtualMachines.bootMenuHint")}</small></span></label><label className="vm-create-toggle"><input type="checkbox" checked={form.autostart} onChange={(event) => updateCreateForm("autostart", event.target.checked)} /><span><strong>{t("workspace.management.virtualMachines.autostart")}</strong><small>{t("workspace.management.virtualMachines.autostartHint")}</small></span></label></div>
                   <div className="vm-create-summary"><div><span>{t("workspace.management.virtualMachines.name")}</span><strong>{form.name}</strong></div><div><span>{t("workspace.management.virtualMachines.createResources")}</span><strong>{form.vcpu} vCPU · {form.memoryGiB} GiB</strong></div><div><span>{t("workspace.management.virtualMachines.createSource")}</span><strong title={form.mediaMode === "iso" ? form.isoPath : form.diskPath}>{form.mediaMode === "iso" ? form.isoPath : form.diskPath}</strong></div><div><span>{t("workspace.management.virtualMachines.network")}</span><strong>{form.network} · {form.networkModel}</strong></div><div><span>{t("workspace.management.virtualMachines.firmware")}</span><strong>{form.firmware.toUpperCase()} · {form.graphics}</strong></div></div>
                   <div className="vm-create-review"><Info size={16} /><div><strong>{t("workspace.management.virtualMachines.createDirectTitle")}</strong><p>{t("workspace.management.virtualMachines.createDirectDetail")}</p></div></div>
@@ -867,7 +880,7 @@ function VirtualMachineManagementPanel({
 
               {wizardError ? <p className="vm-create-error" role="alert"><CircleAlert size={14} />{wizardError}</p> : null}
             </div>
-            <footer className="vm-create-dialog-footer"><span>{t("workspace.management.virtualMachines.stepCounter", { current: createStep, total: 4 })} · {form.name || t("workspace.management.virtualMachines.createReviewPlaceholder")}</span><div><button type="button" onClick={() => setCreateOpen(false)} disabled={pendingAction !== null}>{t("common.actions.cancel")}</button>{createStep > 1 ? <button type="button" onClick={retreatWizard} disabled={pendingAction !== null}><ChevronLeft size={14} />{t("workspace.management.virtualMachines.previous")}</button> : null}{createStep < 4 ? <button type="button" className="vm-create-submit" onClick={advanceWizard}><span>{t("workspace.management.virtualMachines.next")}</span><ChevronRight size={14} /></button> : <button type="submit" className="vm-create-submit" disabled={pendingAction !== null} aria-busy={pendingAction === `create:${form.name.trim()}` || undefined}>{pendingAction === `create:${form.name.trim()}` ? <><LoaderCircle className="spin" size={14} />{t("workspace.management.virtualMachines.creating")}</> : <><Settings2 size={14} />{t("workspace.management.virtualMachines.createNow")}</>}</button>}</div></footer>
+            <footer className="vm-create-dialog-footer"><span>{t("workspace.management.virtualMachines.stepCounter", { current: createStep, total: 4 })} · {form.name || t("workspace.management.virtualMachines.createReviewPlaceholder")}</span><div><button type="button" onClick={() => setCreateOpen(false)} disabled={pendingAction !== null}>{t("common.actions.cancel")}</button>{createStep > 1 ? <button type="button" onClick={retreatWizard} disabled={pendingAction !== null}><ChevronLeft size={14} />{t("workspace.management.virtualMachines.previous")}</button> : null}{createStep < 4 ? <button type="button" className="vm-create-submit" onClick={(event) => { event.preventDefault(); advanceWizard(); }}><span>{t("workspace.management.virtualMachines.next")}</span><ChevronRight size={14} /></button> : <button type="submit" className="vm-create-submit" disabled={pendingAction !== null} aria-busy={pendingAction === `create:${form.name.trim()}` || undefined}>{pendingAction === `create:${form.name.trim()}` ? <><LoaderCircle className="spin" size={14} />{t("workspace.management.virtualMachines.creating")}</> : <><Settings2 size={14} />{t("workspace.management.virtualMachines.createNow")}</>}</button>}</div></footer>
           </form>
         </div>
       ) : null}
@@ -880,12 +893,12 @@ function VirtualMachineManagementPanel({
           onSelect={selectIso}
         />
       ) : null}
-      {consoleSession ? <DockerConsoleDialog session={{ id: consoleSession.id, operationId: consoleSession.operationId, containerId: consoleSession.domainName, shell: "", expiresAt: consoleSession.expiresAt, websocketUrl: consoleSession.websocketUrl }} onClose={() => setConsoleSession(null)} /> : null}
+      {consoleSession ? <DockerConsoleDialog kind="vm" session={{ id: consoleSession.id, operationId: consoleSession.operationId, containerId: consoleSession.domainName, shell: "", expiresAt: consoleSession.expiresAt, websocketUrl: consoleSession.websocketUrl }} onClose={() => setConsoleSession(null)} /> : null}
     </section>
   );
 }
 
-function VmInstanceActions({
+export function VmInstanceActions({
   vm,
   pendingApproval,
   approvedConsole,
@@ -906,7 +919,7 @@ function VmInstanceActions({
     domainName: string,
     extra?: Partial<Parameters<typeof proposeVmOperation>[0]>
   ) => void | Promise<unknown>;
-  onRequestConsole: (domainName: string) => void | Promise<unknown>;
+  onRequestConsole: (vm: VmSummary["instances"][number]) => void | Promise<unknown>;
 }) {
   const { t } = useTranslation();
   const actionDisabled = !canMutate || pendingAction !== null || Boolean(pendingApproval);
@@ -919,13 +932,21 @@ function VmInstanceActions({
         <>
           <ActionIconButton label={pendingApproval ? pendingLabel : t("workspace.management.actions.stop")} disabled={actionDisabled} pending={Boolean(pendingApproval) || pendingAction === `shutdown:${domainName}`} Icon={Power} onClick={() => onRequest("shutdown", domainName)} />
           <ActionIconButton label={pendingApproval ? pendingLabel : t("workspace.management.actions.pause")} disabled={actionDisabled} pending={Boolean(pendingApproval) || pendingAction === `pause:${domainName}`} Icon={Pause} onClick={() => onRequest("pause", domainName)} />
+          <ActionIconButton label={pendingApproval ? pendingLabel : t("workspace.management.actions.forceStop")} disabled={actionDisabled} pending={Boolean(pendingApproval) || pendingAction === `stop:${domainName}`} Icon={Square} danger onClick={() => onRequest("stop", domainName)} />
+          <ActionIconButton label={pendingApproval ? pendingLabel : t("workspace.management.actions.restart")} disabled={actionDisabled} pending={Boolean(pendingApproval) || pendingAction === `restart:${domainName}`} Icon={RotateCw} onClick={() => onRequest("restart", domainName)} />
+          <ActionIconButton label={pendingApproval ? pendingLabel : t("workspace.management.actions.reset")} disabled={actionDisabled} pending={Boolean(pendingApproval) || pendingAction === `reset:${domainName}`} Icon={RefreshCcw} danger onClick={() => onRequest("reset", domainName)} />
+        </>
+      ) : vm.state === "paused" ? (
+        <>
+          <ActionIconButton label={pendingApproval ? pendingLabel : t("workspace.management.actions.resume")} disabled={actionDisabled} pending={Boolean(pendingApproval) || pendingAction === `resume:${domainName}`} Icon={Play} onClick={() => onRequest("resume", domainName)} />
+          <ActionIconButton label={pendingApproval ? pendingLabel : t("workspace.management.actions.forceStop")} disabled={actionDisabled} pending={Boolean(pendingApproval) || pendingAction === `stop:${domainName}`} Icon={Square} danger onClick={() => onRequest("stop", domainName)} />
+          <ActionIconButton label={pendingApproval ? pendingLabel : t("workspace.management.actions.reset")} disabled={actionDisabled} pending={Boolean(pendingApproval) || pendingAction === `reset:${domainName}`} Icon={RefreshCcw} danger onClick={() => onRequest("reset", domainName)} />
         </>
       ) : (
         <ActionIconButton label={pendingApproval ? pendingLabel : t("workspace.management.actions.start")} disabled={actionDisabled} pending={Boolean(pendingApproval) || pendingAction === `start:${domainName}`} Icon={Play} onClick={() => onRequest("start", domainName)} />
       )}
-      <ActionIconButton label={pendingApproval ? pendingLabel : t("workspace.management.actions.restart")} disabled={actionDisabled} pending={Boolean(pendingApproval) || pendingAction === `restart:${domainName}`} Icon={RotateCw} onClick={() => onRequest("restart", domainName)} />
-      <ActionIconButton label={pendingApproval ? pendingLabel : t("workspace.management.actions.snapshot")} disabled={actionDisabled} pending={Boolean(pendingApproval) || pendingAction === `snapshot:${domainName}`} Icon={Database} onClick={() => onRequest("snapshot", domainName, { snapshotName: `${domainName}-${new Date().toISOString().slice(0, 10)}` })} />
-      <ActionIconButton label={pendingApproval ? pendingLabel : approvedConsole ? t("workspace.management.actions.openConsole") : t("workspace.management.actions.console")} disabled={consoleDisabled} pending={Boolean(pendingApproval) || pendingAction === `console:${domainName}` || pendingAction === `console-open:${domainName}`} Icon={TerminalSquare} onClick={() => onRequestConsole(domainName)} />
+      {vm.state === "running" || vm.state === "paused" ? <ActionIconButton label={pendingApproval ? pendingLabel : t("workspace.management.actions.snapshot")} disabled={actionDisabled} pending={Boolean(pendingApproval) || pendingAction === `snapshot:${domainName}`} Icon={Database} onClick={() => onRequest("snapshot", domainName, { snapshotName: vmSnapshotName(domainName) })} /> : null}
+      {vm.state === "running" || vm.state === "paused" ? <ActionIconButton label={pendingApproval ? pendingLabel : approvedConsole ? t("workspace.management.actions.openConsole") : t("workspace.management.actions.console")} disabled={consoleDisabled} pending={Boolean(pendingApproval) || pendingAction === `console:${domainName}` || pendingAction === `console-open:${domainName}`} Icon={TerminalSquare} onClick={() => onRequestConsole(vm)} /> : null}
       <ActionIconButton label={pendingApproval ? pendingLabel : t("workspace.management.actions.remove")} disabled={actionDisabled} pending={Boolean(pendingApproval) || pendingAction === `delete:${domainName}`} Icon={Trash2} danger onClick={() => onRequest("delete", domainName)} />
     </div>
   );
@@ -962,6 +983,10 @@ function DockerManagementPanel({
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [createKind, setCreateKind] = useState<"container" | "volume" | "network" | null>(null);
+  const [composeDialog, setComposeDialog] = useState<{
+    app: DockerComposeProject | null;
+    deleteInitially: boolean;
+  } | null>(null);
   const [detailsState, setDetailsState] = useState<{
     container: DockerContainer;
     details: DockerContainerDetails | null;
@@ -1159,7 +1184,7 @@ function DockerManagementPanel({
     project: DockerComposeProject,
     action: "compose_up" | "compose_down" | "compose_pull" | "compose_restart"
   ) {
-    await requestDockerProposal(`${action}:${project.id}`, {
+    return requestDockerProposal(`${action}:${project.id}`, {
       action,
       targetType: "compose_project",
       composeProjectId: project.id
@@ -1382,6 +1407,16 @@ function DockerManagementPanel({
           <SectionHeader
             title={t("workspace.management.docker.composeTitle")}
             description={t("workspace.management.docker.composeDescription")}
+            action={(
+              <PanelHeaderAction
+                label={t("workspace.management.docker.apps.createAction")}
+                type="button"
+                onClick={() => setComposeDialog({ app: null, deleteInitially: false })}
+                disabled={Boolean(pendingAction)}
+              >
+                <Plus aria-hidden="true" size={17} />
+              </PanelHeaderAction>
+            )}
           />
           <div className="management-workload-list">
             {composeProjects.length ? (
@@ -1390,14 +1425,27 @@ function DockerManagementPanel({
                   {statusIcon(composeTone(project))}
                   <div>
                     <strong>{project.name}</strong>
-                    <span>{project.services.join(", ") || project.filePath}</span>
+                    <span>{project.services.join(", ") || project.managedPath}</span>
                   </div>
                   <em data-state={composeTone(project)}>{composeStatusLabel(project, t)}</em>
                   <div className="management-action-cluster">
+                    <ActionIconButton
+                      label={t("workspace.management.docker.apps.editAction")}
+                      disabled={Boolean(pendingAction)}
+                      Icon={Pencil}
+                      onClick={() => setComposeDialog({ app: project, deleteInitially: false })}
+                    />
                     {renderComposeButton(project, "compose_up", Play, t("workspace.management.actions.deploy"))}
                     {renderComposeButton(project, "compose_pull", RefreshCw, t("workspace.management.actions.pull"))}
                     {renderComposeButton(project, "compose_restart", RotateCw, t("workspace.management.actions.restart"))}
                     {renderComposeButton(project, "compose_down", Power, t("workspace.management.actions.stop"))}
+                    <ActionIconButton
+                      label={t("workspace.management.docker.apps.deleteAction")}
+                      disabled={Boolean(pendingAction)}
+                      Icon={Trash2}
+                      danger
+                      onClick={() => setComposeDialog({ app: project, deleteInitially: true })}
+                    />
                   </div>
                 </article>
               ))
@@ -1432,6 +1480,18 @@ function DockerManagementPanel({
           status={daemonStatus}
           onClose={() => setDaemonSettingsOpen(false)}
           onRefreshSummary={refreshSummary}
+          onNotifySuccess={(message) => onNotifySuccess(message)}
+        />
+      ) : null}
+      {composeDialog ? (
+        <DockerComposeAppDialog
+          app={composeDialog.app}
+          engineReady={canUseDocker}
+          canDeploy={canUseDocker && Boolean(sessionId) && !pendingAction}
+          deleteInitially={composeDialog.deleteInitially}
+          onClose={() => setComposeDialog(null)}
+          onRefresh={refreshSummary}
+          onRequestDeploy={async (app) => Boolean(await requestComposeAction(app, "compose_up"))}
           onNotifySuccess={(message) => onNotifySuccess(message)}
         />
       ) : null}
@@ -1763,24 +1823,27 @@ function DockerLogsDialog({
   );
 }
 
-function DockerConsoleDialog({ session, onClose }: { session: DockerConsoleSession; onClose: () => void }) {
+function DockerConsoleDialog({ session, onClose, kind = "docker" }: { session: DockerConsoleSession; onClose: () => void; kind?: "docker" | "vm" }) {
   const { t } = useTranslation();
   const terminalRef = useRef<HTMLDivElement | null>(null);
-  const messagesRef = useRef({
+  const consoleMessages = () => kind === "vm" ? {
+    connecting: t("workspace.management.virtualMachines.consoleConnecting"),
+    ready: t("workspace.management.virtualMachines.consoleReady"),
+    closed: t("workspace.management.virtualMachines.consoleClosed"),
+    disconnected: t("workspace.management.virtualMachines.consoleDisconnected")
+  } : {
     connecting: t("workspace.management.docker.consoleConnecting"),
     ready: t("workspace.management.docker.consoleReady"),
     closed: t("workspace.management.docker.consoleClosed"),
     disconnected: t("workspace.management.docker.consoleDisconnected")
+  };
+  const messagesRef = useRef({
+    ...consoleMessages()
   });
 
   useEffect(() => {
-    messagesRef.current = {
-      connecting: t("workspace.management.docker.consoleConnecting"),
-      ready: t("workspace.management.docker.consoleReady"),
-      closed: t("workspace.management.docker.consoleClosed"),
-      disconnected: t("workspace.management.docker.consoleDisconnected")
-    };
-  }, [t]);
+    messagesRef.current = consoleMessages();
+  }, [kind, t]);
 
   useEffect(() => {
     if (!terminalRef.current) {
@@ -1884,11 +1947,11 @@ function DockerConsoleDialog({ session, onClose }: { session: DockerConsoleSessi
 
   return (
     <div className="management-modal-backdrop" role="presentation">
-      <section className="management-modal management-console-modal" role="dialog" aria-modal="true" aria-labelledby="docker-console-title">
+      <section className="management-modal management-console-modal" role="dialog" aria-modal="true" aria-labelledby="management-console-title">
         <header>
           <div>
             <span className="eyebrow">{t("workspace.management.actions.console")}</span>
-            <h2 id="docker-console-title">{session.containerId}</h2>
+            <h2 id="management-console-title">{session.containerId}</h2>
           </div>
           <button type="button" className="management-icon-action" onClick={onClose} title={t("common.actions.dismissNotification")}>
             <X aria-hidden="true" size={14} />
@@ -2204,8 +2267,11 @@ function isVmOperationProposal(proposal: PendingApproval["proposal"][number]): p
   return "action" in proposal && "risk" in proposal && "summary" in proposal && (proposal as { action?: unknown }).action !== undefined;
 }
 
-function approvedVmConsoleOperation(domainName: string, operations: VmOperation[]): VmOperation | null {
-  return operations.find((operation) => operation.action === "console" && operation.status === "approved" && operation.targetId === domainName) ?? null;
+function approvedVmConsoleOperation(vm: VmSummary["instances"][number], operations: VmOperation[]): VmOperation | null {
+  return operations.find((operation) => {
+    const proposal = operation.metadata.proposal as VmOperationProposal | undefined;
+    return operation.action === "console" && operation.status === "approved" && operation.targetId === vm.name && proposal?.domainUuid === vm.uuid;
+  }) ?? null;
 }
 
 function containerTone(container: DockerContainer): StatusTone {
@@ -2222,6 +2288,9 @@ function containerTone(container: DockerContainer): StatusTone {
 }
 
 function composeTone(project: DockerComposeProject): StatusTone {
+  if (project.needsDeploy) {
+    return "warning";
+  }
   if (project.status === "running") {
     return "ready";
   }
@@ -2235,6 +2304,9 @@ function composeTone(project: DockerComposeProject): StatusTone {
 }
 
 function composeStatusLabel(project: DockerComposeProject, t: Translate): string {
+  if (project.needsDeploy) {
+    return String(t("workspace.management.docker.apps.needsDeploy"));
+  }
   if (project.status === "configured") {
     return String(t("workspace.management.states.staged"));
   }

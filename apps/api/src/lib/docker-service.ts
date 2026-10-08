@@ -8,7 +8,7 @@ import type {
   SigmaConfig
 } from "@sigmaos/shared";
 import type { DockerRegistryCredentialRecord } from "@sigmaos/db";
-import { DockerComposeService, type DockerComposeRuntime } from "./docker-compose.js";
+import type { DockerComposeRuntime } from "./docker-compose.js";
 import { DockerSocketClient, type DockerEngineRuntime } from "./docker-client.js";
 import { SystemDockerDaemonRuntime, type DockerDaemonRuntime } from "./docker-daemon.js";
 import { redactDockerRegistrySecrets } from "./docker-registry.js";
@@ -30,7 +30,10 @@ export function dockerEngine(config: DockerConfig, dependencies?: DockerRuntimeD
 }
 
 export function dockerCompose(config: DockerConfig, dependencies?: DockerRuntimeDependencies): DockerComposeRuntime {
-  return dependencies?.compose ?? new DockerComposeService(config);
+  if (!dependencies?.compose) {
+    throw new Error(`Managed Docker Compose runtime is unavailable for ${config.composeCommand}`);
+  }
+  return dependencies.compose;
 }
 
 export async function collectDockerSummary(
@@ -39,12 +42,13 @@ export async function collectDockerSummary(
 ): Promise<DockerSummary> {
   const daemon = dependencies?.daemon ?? new SystemDockerDaemonRuntime({ hostdSocketPath: config.hostd.socketPath });
   const daemonStatus = await daemon.getStatus();
+  const compose = dockerCompose(config.docker, dependencies);
   if (!config.docker.enabled) {
-    return dockerUnavailableSummary(config.docker, "disabled", null, daemonStatus);
+    const composeProjects = await compose.listProjects(null).catch(() => []);
+    return { ...dockerUnavailableSummary(config.docker, "disabled", null, daemonStatus), composeProjects };
   }
 
   const engine = dockerEngine(config.docker, dependencies);
-  const compose = dockerCompose(config.docker, dependencies);
   try {
     const [info, containers, counts] = await Promise.all([
       engine.getInfo(),
@@ -80,7 +84,7 @@ export async function collectDockerSummary(
       composeProjects
     };
   } catch (error) {
-    const composeProjects = await compose.listProjects([]).catch(() => []);
+    const composeProjects = await compose.listProjects(null).catch(() => []);
     return {
       ...dockerUnavailableSummary(config.docker, "unavailable", safeDockerMessage(error), daemonStatus),
       composeProjects

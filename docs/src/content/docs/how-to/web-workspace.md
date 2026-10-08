@@ -81,6 +81,10 @@ Docker 面板的镜像区域可以搜索本地镜像、查看完整 ID/tags/dige
 
 Registry 凭证入口即使 Engine 离线或 Docker 管理关闭也可使用。每个规范化 Registry 只保存一组用户名与密码/access token；编辑时密码字段始终为空，留空表示保留已有凭证。未限定 Registry 的镜像使用 Docker Hub 凭证，显式私有 Registry 只做精确匹配。手动拉取、容器创建的自动拉取以及 Compose `pull/up` 都在执行时读取当前凭证。
 
+Compose 项目区的“创建”按钮用于管理系统托管 App。名称用于显示，`projectKey` 创建后不可修改；Compose YAML 和环境变量保存在 SQLite，`/srv/apps/<project-key>` 只是 SigmaOS 自动发布的运行副本，不在文件面板中显示，也不应手工编辑。已有环境变量只显示“已配置”，留空保存表示保留原值，从列表移除才会删除。
+
+“保存”只生成新的 revision 并显示“需要部署”；“保存并部署”在保存成功后发起现有 Compose Up approval，审批创建失败不会撤销已保存内容。Engine 离线时仍可查看、创建和编辑，但不能部署或删除。删除前必须先通过 Down approval 移除项目容器，再进行独立二次确认；删除 App 不会清理镜像、named volume、网络或 NAS bind mount 数据。
+
 设置面板可以修改 model provider、Pi tool policy、Docker 配置、语言、主题、预览大小和编辑器字体。保存 provider secret 后 UI 只显示是否已配置，不会回显密钥。
 
 ## 常见状态判断

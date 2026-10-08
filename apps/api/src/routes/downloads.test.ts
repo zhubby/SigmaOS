@@ -200,7 +200,7 @@ function testConfig(root: string): SigmaConfig {
     worker: { pollMs: 50 },
     admin: { displayName: "Test", authMode: "local-only" },
     model: { provider: "pi", piCommand: "pi", localEndpoint: null },
-    docker: { enabled: false, socketPath: "/var/run/docker.sock", composeCommand: "docker", operationTimeoutMs: 1000, consoleShells: [], composeRoots: [] },
+    docker: { enabled: false, socketPath: "/var/run/docker.sock", composeCommand: "docker", operationTimeoutMs: 1000, consoleShells: [] },
     hostd: { socketPath: "/tmp/hostd.sock" },
     shares: { enabled: false, account: { username: "share", password: null }, shares: [] },
     terminal: { user: "test-user", termuxSocketPath: "/tmp/termux.sock" },

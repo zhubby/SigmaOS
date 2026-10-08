@@ -77,6 +77,15 @@ JPEG、PNG、WebP、GIF、HEIC、HEIF、常见视频和 RAW 由照片 worker 处
 
 Registry 地址只接受 hostname/IP 和可选端口；Docker Hub 别名归一化为 `docker.io`。未限定 Registry 的镜像和 Docker Hub 别名匹配 `docker.io`；包含点号、端口、`localhost` 或 IP 的首段按私有 Registry 精确匹配。无效地址/引用返回 `400`，重复 Registry 或镜像占用返回 `409`，不存在返回 `404`，Engine 不可用返回脱敏后的 `502`。Registry CRUD 不依赖 Docker 管理开关或 Engine 状态。
 
+## Docker 托管 Compose Apps
+
+- `GET /api/docker/apps` 返回托管 App 摘要；`GET /api/docker/apps/:id` 额外返回 Compose YAML 和仅含键名/`valueConfigured` 的环境变量摘要，永不返回环境变量值。
+- `POST /api/docker/apps/validate` 在隔离临时目录执行结构化 YAML 检查和 `docker compose config`。编辑已有 App 时可携带 `appId`、`expectedRevision`，环境变量省略 `value` 表示沿用数据库中的值。
+- `POST /api/docker/apps`、`PUT /api/docker/apps/:id` 分别创建和更新 App；更新必须提供 `expectedRevision`。`projectKey` 创建后不可修改，托管路径固定为 `/srv/apps/<project-key>`。
+- `DELETE /api/docker/apps/:id` 要求 `expectedRevision` 和 `confirmed: true`。Engine 不可查询或仍存在相同 Compose project label 的容器时拒绝删除；删除不会移除 images、named volumes、networks 或 NAS 数据。
+
+App 请求正文最多 512 KiB。非法 YAML、保留环境变量、本地 `build/env_file/include` 等额外文件依赖、相对 bind mount 或越过在线 NAS root 的绝对 bind mount 返回 `400`；revision/project key 冲突返回 `409`，Compose CLI 不可用返回 `503`，运行副本发布失败返回 `502`。创建和编辑不依赖 Engine readiness；部署仍通过 `/api/docker/proposals` 的 Compose Up approval。proposal 只保存 App ID、名称、revision、服务与风险，不保存 YAML、托管路径或秘密。
+
 ## Docker 资源限制
 
 `summary.engine.resourceCapabilities` 包含可空布尔字段 `memoryLimit`、`swapLimit`、`cpuQuota`、`cpuShares`、`cpuset`、`pidsLimit`，来自 Engine `/info`。CPU quota 要求 `CpuCfsQuota` 和 `CpuCfsPeriod` 同时为真；缺失或非布尔属性作为未知处理。

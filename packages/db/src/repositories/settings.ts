@@ -113,7 +113,6 @@ export function saveDockerSettings(
     composeCommand: settings.composeCommand,
     operationTimeoutMs: settings.operationTimeoutMs,
     consoleShells: settings.consoleShells,
-    composeRoots: settings.composeRoots,
     updatedAt
   };
 

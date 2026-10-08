@@ -9,7 +9,15 @@ import type {
   DockerImageRemoveInput,
   DockerImageRemoveResult,
   DockerImageSummary as SharedDockerImageSummary,
+  DockerComposeAppCreateInput,
+  DockerComposeAppDeleteInput,
+  DockerComposeAppDetail as SharedDockerComposeAppDetail,
+  DockerComposeAppSummary as SharedDockerComposeAppSummary,
+  DockerComposeAppUpdateInput,
+  DockerComposeAppValidateInput,
+  DockerComposeAppValidationResult,
   DockerOperationAction,
+  DockerOperationProposal as SharedDockerOperationProposal,
   DockerOperationRecord,
   DockerOperationTargetType,
   DockerCreateResult,
@@ -209,22 +217,7 @@ export interface PiToolCallApproval {
   summary: string;
 }
 
-export interface DockerOperationProposal {
-  action: DockerOperationAction;
-  targetType: DockerOperationTargetType;
-  containerId?: string;
-  containerName?: string;
-  volumeName?: string;
-  networkName?: string;
-  composeProjectId?: string;
-  composeProjectName?: string;
-  composeRootId?: string;
-  composeFilePath?: string;
-  service?: string;
-  shell?: string;
-  risk: "low" | "medium" | "high";
-  summary: string;
-}
+export type DockerOperationProposal = SharedDockerOperationProposal;
 
 export type VmOperationProposal = SharedVmOperationProposal;
 
@@ -358,6 +351,8 @@ export type ShareSettingsInput = Omit<ShareSettings, "account" | "updatedAt"> & 
 export type DockerContainer = DockerSummary["containers"][number];
 export type DockerContainerDetails = SharedDockerContainerDetails;
 export type DockerComposeProject = DockerSummary["composeProjects"][number];
+export type DockerComposeApp = SharedDockerComposeAppSummary;
+export type DockerComposeAppDetail = SharedDockerComposeAppDetail;
 export type DockerOperation = DockerOperationRecord;
 export type ShareOperation = ShareOperationRecord;
 export type PlayerStatus = SharedPlayerStatus;
@@ -754,6 +749,67 @@ export async function getDockerContainerDetails(containerId: string): Promise<Do
   await ensureOk(response);
   const body = (await response.json()) as { container: DockerContainerDetails };
   return body.container;
+}
+
+export async function getDockerComposeApps(): Promise<DockerComposeApp[]> {
+  const response = await fetch("/api/docker/apps");
+  await ensureOk(response);
+  const body = (await response.json()) as { apps: DockerComposeApp[] };
+  return body.apps;
+}
+
+export async function getDockerComposeApp(appId: string): Promise<DockerComposeAppDetail> {
+  const response = await fetch(`/api/docker/apps/${encodeURIComponent(appId)}`);
+  await ensureOk(response);
+  const body = (await response.json()) as { app: DockerComposeAppDetail };
+  return body.app;
+}
+
+export async function validateDockerComposeApp(
+  input: DockerComposeAppValidateInput
+): Promise<DockerComposeAppValidationResult> {
+  const response = await fetch("/api/docker/apps/validate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  await ensureOk(response);
+  const body = (await response.json()) as { validation: DockerComposeAppValidationResult };
+  return body.validation;
+}
+
+export async function createDockerComposeApp(input: DockerComposeAppCreateInput): Promise<DockerComposeAppDetail> {
+  const response = await fetch("/api/docker/apps", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  await ensureOk(response);
+  const body = (await response.json()) as { app: DockerComposeAppDetail };
+  return body.app;
+}
+
+export async function updateDockerComposeApp(
+  appId: string,
+  input: DockerComposeAppUpdateInput
+): Promise<DockerComposeAppDetail> {
+  const response = await fetch(`/api/docker/apps/${encodeURIComponent(appId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  await ensureOk(response);
+  const body = (await response.json()) as { app: DockerComposeAppDetail };
+  return body.app;
+}
+
+export async function deleteDockerComposeApp(appId: string, input: DockerComposeAppDeleteInput): Promise<void> {
+  const response = await fetch(`/api/docker/apps/${encodeURIComponent(appId)}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  await ensureOk(response);
 }
 
 export async function executeDockerContainerAction(

@@ -100,3 +100,18 @@ sudo systemctl restart docker.service
 ```
 
 若 `baselineExists` 为 `false`，基线代表原先没有配置文件，应移走当前 `/etc/docker/daemon.json` 后再启动。确认 Docker 恢复前保留事务目录；恢复完成后再删除其中的 `transaction.json` 和 `baseline.json`。不要把这些文件的正文复制到日志或工单，它们可能包含 registry、proxy 或 credential 配置。
+
+## 托管 Compose App 恢复
+
+SQLite 是托管 App 的唯一数据源，`/srv/apps` 不单独备份。API 启动时会按数据库重建带匹配 App ID 标记的目录；它不会覆盖未知目录、跟随符号链接或删除管理员手工留下的目录。运行副本异常时先检查所有权和标记，不要直接递归删除整个 `/srv/apps`：
+
+```bash
+sudo stat -c '%U:%G %a %n' /srv/apps /srv/apps/* 2>/dev/null
+sudo systemctl show sigmaos-api.service -p ReadWritePaths
+sudo journalctl -u sigmaos-api.service -n 100 --no-pager
+sudo systemctl restart sigmaos-api.service
+```
+
+预期 `/srv/apps` 为 `sigmaos:sigmaos 0750`，API unit 仅新增该路径的写权限。生产环境的 NAS root 不得与 `/srv/apps` 上下级重叠，因此该目录不会进入文件面板或普通文件操作。若某项目目录缺少 `.sigmaos-app.json`、标记 App ID 不匹配或目录是符号链接，API 会拒绝覆盖；把未知目录移到经确认的隔离位置后再重启 API。不要在日志或工单中粘贴 `.env`、SQLite 行或完整 Compose 解析结果。
+
+升级前配置的旧 Compose roots 会被忽略，旧文件和容器不会自动删除。需要重新纳管时在页面使用相同 `projectKey` 创建 App，以重新关联带相同 Compose project label 的容器；先核对 YAML、环境变量和数据挂载，不能把旧目录直接复制进 `/srv/apps`。

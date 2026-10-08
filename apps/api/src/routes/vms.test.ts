@@ -2,10 +2,20 @@ import { mkdir, mkdtemp, realpath, rm, symlink, unlink, writeFile } from "node:f
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createSession, ensureNasRoots, listEvents, listOperationNotifications, openSigmaDb, type SigmaDatabase } from "@sigmaos/db";
+import {
+  createSession,
+  ensureNasRoots,
+  getApproval,
+  getJob,
+  listEvents,
+  listOperationNotifications,
+  openSigmaDb,
+  type SigmaDatabase
+} from "@sigmaos/db";
 import type { SigmaConfig } from "@sigmaos/shared";
 import { buildServer } from "../server.js";
 import { vmQemuCommand, type VmCommandRunner } from "../lib/vm-service.js";
+import { vmConsoleSpawnSpec } from "./vms.js";
 import type { SystemCommandRunner } from "../lib/system-management.js";
 
 const TEST_STORAGE_POOL_ID = "/dev/md/test-pool";
@@ -28,6 +38,21 @@ afterEach(async () => {
 });
 
 describe("VM routes", () => {
+  it("runs virsh console inside a PTY wrapper without interpolating configuration into the shell command", () => {
+    expect(vmConsoleSpawnSpec("qemu:///system; unsafe", "guest-name")).toEqual({
+      command: "script",
+      args: [
+        "-q", "-e", "-f", "-c",
+        'exec virsh -c "$SIGMAOS_VM_LIBVIRT_URI" console "$SIGMAOS_VM_DOMAIN"',
+        "/dev/null"
+      ],
+      env: {
+        SIGMAOS_VM_LIBVIRT_URI: "qemu:///system; unsafe",
+        SIGMAOS_VM_DOMAIN: "guest-name"
+      }
+    });
+  });
+
   it("creates a console approval and issues a one-shot console session after approval", async () => {
     const session = createSession(db, { rootId: "local", currentPath: "." });
     const server = await buildServer({ config: testConfig(), db, vm: { commandRunner: vmRunner(), kvmAvailable: true } });
@@ -64,6 +89,52 @@ describe("VM routes", () => {
       domainName: "guest",
       websocketUrl: expect.stringContaining("/api/vms/console/")
     });
+    expect((await server.inject({ method: "GET", url: `/api/vms/operations?sessionId=${session.id}` })).json().operations)
+      .toEqual([expect.objectContaining({ id: proposalBody.operation.id, status: "applied" })]);
+    expect(listOperationNotifications(db)).toMatchObject([
+      { jobId: proposed.json().job.id, kind: "vm", status: "succeeded" }
+    ]);
+    expect((await server.inject({
+      method: "POST",
+      url: "/api/vms/console-sessions",
+      payload: { operationId: proposalBody.operation.id }
+    })).statusCode).toBe(404);
+    await server.close();
+  });
+
+  it("expires approved console operations that were never opened", async () => {
+    const session = createSession(db, { rootId: "local", currentPath: "." });
+    const server = await buildServer({ config: testConfig(), db, vm: { commandRunner: vmRunner(), kvmAvailable: true } });
+
+    const proposed = await server.inject({
+      method: "POST",
+      url: "/api/vms/proposals",
+      payload: { sessionId: session.id, action: "console", domainName: "guest" }
+    });
+    const body = proposed.json() as {
+      approval: { id: string };
+      job: { id: string };
+      operation: { id: string };
+    };
+    expect((await server.inject({ method: "POST", url: `/api/approvals/${body.approval.id}/approve` })).statusCode)
+      .toBe(202);
+    db.prepare("UPDATE vm_operations SET updated_at = ? WHERE id = ?")
+      .run("2020-01-01T00:00:00.000Z", body.operation.id);
+
+    const notifications = await server.inject({ method: "GET", url: "/api/notifications" });
+    expect(notifications.statusCode).toBe(200);
+    expect(notifications.json().notifications).toEqual([
+      expect.objectContaining({ jobId: body.job.id, kind: "vm", status: "cancelled", error: expect.stringContaining("expired") })
+    ]);
+    expect(getApproval(db, body.approval.id)?.status).toBe("expired");
+    expect(getJob(db, body.job.id)).toMatchObject({ status: "cancelled", error: expect.stringContaining("expired") });
+    expect((await server.inject({ method: "GET", url: `/api/vms/operations?sessionId=${session.id}` })).json().operations)
+      .toEqual([expect.objectContaining({
+        id: body.operation.id,
+        status: "failed",
+        metadata: expect.objectContaining({ error: expect.stringContaining("expired") })
+      })]);
+
     await server.close();
   });
 
@@ -101,6 +172,29 @@ describe("VM routes", () => {
       expect.objectContaining({ id: rejectedOperationId, status: "failed" })
     ]));
 
+    await server.close();
+  });
+
+  it("rejects a second pending operation for the same virtual machine", async () => {
+    const session = createSession(db, { rootId: "local", currentPath: "." });
+    const server = await buildServer({ config: testConfig(), db, vm: { commandRunner: vmRunner(), kvmAvailable: true } });
+
+    const first = await server.inject({
+      method: "POST",
+      url: "/api/vms/proposals",
+      payload: { sessionId: session.id, action: "pause", domainName: "guest" }
+    });
+    const duplicate = await server.inject({
+      method: "POST",
+      url: "/api/vms/proposals",
+      payload: { sessionId: session.id, action: "restart", domainName: "guest" }
+    });
+
+    expect(first.statusCode).toBe(202);
+    expect(duplicate.statusCode).toBe(409);
+    expect(duplicate.json().error).toBe("A virtual machine operation is already pending for guest");
+    expect((await server.inject({ method: "GET", url: `/api/vms/operations?sessionId=${session.id}` })).json().operations)
+      .toEqual([expect.objectContaining({ id: first.json().operation.id, action: "pause", status: "proposed" })]);
     await server.close();
   });
 
@@ -289,8 +383,52 @@ describe("VM routes", () => {
     const virtInstall = calls.find((call) => call[0] === "virt-install");
     expect(virtInstall).toEqual(expect.arrayContaining([
       "--vcpus", "4,sockets=1,cores=2,threads=2", "--cpu", "Skylake-Client",
-      "--boot", "uefi,menu=on", "--graphics", "spice", "--video", "virtio", "--autostart"
+      "--boot", "uefi,firmware.feature0.name=secure-boot,firmware.feature0.enabled=no,menu=on", "--graphics", "spice", "--video", "virtio", "--autostart"
     ]));
+    await server.close();
+  });
+
+  it("uses compatible CPU and firmware defaults on arm64 hosts", async () => {
+    const isoDir = path.join(tempDir, "iso");
+    await mkdir(isoDir);
+    const isoPath = path.join(isoDir, "installer.iso");
+    await writeFile(isoPath, "iso-image");
+    const calls: string[][] = [];
+    const session = createSession(db, { rootId: "local", currentPath: "." });
+    const server = await buildServer({
+      config: testConfig(),
+      db,
+      vm: { commandRunner: vmRunner(calls), kvmAvailable: true, architecture: "arm64" }
+    });
+
+    const created = await server.inject({
+      method: "POST",
+      url: "/api/vms/proposals",
+      payload: { sessionId: session.id, action: "create", domainName: "arm-guest", isoPath }
+    });
+    expect(created.statusCode, JSON.stringify(created.json())).toBe(202);
+    expect(calls.find((call) => call[0] === "virt-install")).toEqual(expect.arrayContaining([
+      "--cpu",
+      "host-passthrough",
+      "--boot",
+      "uefi,firmware.feature0.name=secure-boot,firmware.feature0.enabled=no"
+    ]));
+
+    const rejected = await server.inject({
+      method: "POST",
+      url: "/api/vms/proposals",
+      payload: { sessionId: session.id, action: "create", domainName: "arm-bios", isoPath, firmware: "bios" }
+    });
+    expect(rejected.statusCode).toBe(400);
+    expect(rejected.json().error).toContain("UEFI");
+
+    const rejectedCpu = await server.inject({
+      method: "POST",
+      url: "/api/vms/proposals",
+      payload: { sessionId: session.id, action: "create", domainName: "arm-host-model", isoPath, cpuMode: "host-model" }
+    });
+    expect(rejectedCpu.statusCode).toBe(400);
+    expect(rejectedCpu.json().error).toContain("host-passthrough");
     await server.close();
   });
 
@@ -383,7 +521,7 @@ function testConfig(): SigmaConfig {
     worker: { pollMs: 50 },
     admin: { displayName: "Test Admin", authMode: "local-only" },
     model: { provider: "pi", piCommand: "pi", localEndpoint: null },
-    docker: { enabled: false, socketPath: "/var/run/docker.sock", composeCommand: "docker", operationTimeoutMs: 1000, consoleShells: [], composeRoots: [] },
+    docker: { enabled: false, socketPath: "/var/run/docker.sock", composeCommand: "docker", operationTimeoutMs: 1000, consoleShells: [] },
     vm: { enabled: true, libvirtUri: "qemu:///system", storagePath: path.join(tempDir, "vmstore"), networkName: "default", isoRoots: [path.join(tempDir, "iso")], operationTimeoutMs: 1000, consoleMode: "serial" },
     hostd: { socketPath: "/tmp/hostd.sock" },
     shares: { enabled: false, account: { username: "share", password: null }, shares: [] },
@@ -408,7 +546,7 @@ function vmRunner(calls: string[][] = []): VmCommandRunner {
       if (command === "virsh" && args.includes("dominfo")) return "State: running\nCPU(s): 2\nUsed memory: 2097152 KiB\nMax memory: 4194304 KiB\nUUID: guest-uuid";
       if (command === "virsh" && args.includes("net-list")) return " Name      State    Autostart\n--------------------------------\n default   active   yes\n";
       if (command === "virsh" && args.includes("pool-list")) return "";
-      if (command === vmQemuCommand()) return "QEMU emulator version 8.2.2";
+      if (command.startsWith("qemu-system-") || command === vmQemuCommand()) return "QEMU emulator version 8.2.2";
       if (command === "nproc") return "8";
       if (command === "free") return "Mem: 100 0 0 0 0 80";
       if (command === "df") return "size avail\n100000 50000";

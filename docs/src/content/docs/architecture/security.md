@@ -4,7 +4,7 @@ description: SigmaOS 的 loopback、NAS root、审批和宿主机权限边界。
 type: explanation
 status: current
 audience: [developer, operator]
-sourceOfTruth: [apps/api/src/server.ts, apps/api/src/lib/docker-registry.ts, apps/api/src/lib/docker-compose.ts, packages/db/src/repositories/docker-registry-credentials.ts, packages/nas-tools/src/path-safety.ts, apps/hostd/src/server.rs, apps/termux/src/server.rs, apps/termux/src/pty.rs]
+sourceOfTruth: [apps/api/src/server.ts, apps/api/src/lib/docker-registry.ts, apps/api/src/lib/docker-compose.ts, packages/db/src/repositories/docker-registry-credentials.ts, packages/db/src/repositories/docker-compose-apps.ts, packages/nas-tools/src/path-safety.ts, apps/hostd/src/server.rs, apps/termux/src/server.rs, apps/termux/src/pty.rs]
 sidebar:
   order: 3
 ---
@@ -18,5 +18,7 @@ Docker socket 近似 root 权限。Rust `hostd` 通过受限 root Unix socket �
 Docker Registry 密码和 access token 按产品选择以未加密形式保存在权限受限的 SQLite `system_settings` 记录中；数据库文件权限是静态保护边界，设备状态备份可能包含这些凭证。公开 API 只返回是否已配置，不回传明文；日志、operation metadata、错误与通知不得包含密码或认证头。
 
 Engine 拉取使用内存中的 `X-Registry-Auth`，不会调用 `docker login`。Compose `pull/up` 在 systemd `PrivateTmp` 内创建 `0700` 临时目录和 `0600 config.json`，只通过子进程 `DOCKER_CONFIG` 注入，并在成功、失败或超时后清理；没有 Registry 记录时也注入空认证配置，避免继承宿主机的旧凭证。不要在故障报告中粘贴 SQLite 记录或临时认证配置正文。该能力不修改 hostd、systemd capability 或 `/etc/docker/daemon.json` 的权限边界。
+
+托管 Compose App 的 YAML、环境变量与 revision 以 SQLite 为唯一数据源。环境变量同样是受限明文，设备状态备份可能包含这些值；公开接口只返回键名和是否配置。API 仅能写 `/srv/apps` 这一新增路径，以 `sigmaos:sigmaos 0750` 目录、`0640` Compose 文件、`0600` `.env` 和 App ID 管理标记发布运行副本，不获得 root、capability 或 hostd 权限。结构化校验拒绝额外本地项目文件和相对 bind mount；绝对 bind mount 必须落在已配置且在线的 NAS root。该边界防止 SigmaOS UI 误删，不能阻止拥有 SSH root 权限的管理员修改 `/srv/apps`。
 
 镜像删除必须显式确认。服务端先解析目标镜像 ID 并检查全部容器的引用，再以 `force=false`、`noprune=true` 请求 Engine；即使目标只是多标签镜像中的一个 tag，也拒绝操作被容器引用的镜像。

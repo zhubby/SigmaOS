@@ -158,8 +158,8 @@ node -e '
 
 1. **基础部署**：核对 dpkg/build-info/Web 版本，检查失败 unit、重启计数、NAS readiness、索引、终端身份及 `/docs/`。终端应以部署指定的非 root 用户（例如 `zhubby`）从其 home 启动 passwd shell 的交互登录模式，而不是 `/var/lib/sigmaos`。
 2. **网络与镜像**：从 CM5 检查 DNS/TLS、mirror `/v2/` 和真实 pull；确认 daemon 已加载 `registry-mirrors`。使用不可变的 `rustfs/rustfs@sha256:<verified-digest>` 并确认 arm64，`latest` 仅用于探索，不作为可重复发布依据。
-3. **功能路径**：使用临时、最小权限 Registry 账号分别验证手动私有 pull、创建容器的 `missing/always`、Compose `pull/up`；轮换/删除凭证后验证下一次执行使用新状态，并测试拉取失败不泄密。摘要中有镜像不能证明认证成功，匿名可拉取的公开镜像也不能验证凭证集成。
-4. **容器与应用**：通过页面创建独立测试 volume/容器，明确 `/data` 命令、非 root 用户、非 privileged、资源能力与重启策略。使用独立名字和测试端口；仅在 LAN 地址绑定 S3/console，不默认暴露到所有接口。确认 inspect、容器状态、重启数、实际日志、S3 health、浏览器登录与对象上传/下载，而非只检查“创建成功”。
+3. **功能路径**：使用临时、最小权限 Registry 账号分别验证手动私有 pull、创建容器的 `missing/always`、托管 Compose App 的 `pull/up`；轮换/删除凭证后验证下一次执行使用新状态，并测试拉取失败不泄密。摘要中有镜像不能证明认证成功，匿名可拉取的公开镜像也不能验证凭证集成。
+4. **容器与应用**：通过页面创建独立测试 volume/容器和托管 Compose App，检查 `/srv/apps/<project-key>` 的 `0750/0640/0600` 权限、保存后的 `needsDeploy`、Up approval、环境变量轮换、revision 漂移拒绝、Down 后二次确认删除。明确 `/data` 命令、非 root 用户、非 privileged、资源能力与重启策略。使用独立名字和测试端口；仅在 LAN 地址绑定 S3/console，不默认暴露到所有接口。确认 inspect、容器状态、重启数、实际日志、S3 health、浏览器登录与对象上传/下载，而非只检查“创建成功”。
 5. **删除保护与边界**：确认运行和已停止容器的 ImageID 占用都被统计；未知占用禁用 UI 删除，服务端占用冲突为 `409`。用独立未占用的多标签测试镜像检查具体 tag 删除、确认步骤、取消与失败；不要删除 RustFS 生产镜像。
 6. **持久化与恢复**：用隔离对象做 SHA-256 校验，验证测试容器重启、重建后数据保留；执行备份检查并恢复到新 volume，再读回校验。单独安排设备重启窗口，核对服务恢复、数据挂载、volume 与对象可读。执行方法见[Docker 数据备份演练](/docs/how-to/backup-restore/#docker-工作负载的数据)。
 

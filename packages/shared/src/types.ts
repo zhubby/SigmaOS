@@ -522,19 +522,12 @@ export interface SystemHealthSummary {
   backupFreshnessMs: number | null;
 }
 
-export interface DockerComposeRootConfig {
-  id: string;
-  name: string;
-  path: string;
-}
-
 export interface DockerConfig {
   enabled: boolean;
   socketPath: string;
   composeCommand: string;
   operationTimeoutMs: number;
   consoleShells: string[];
-  composeRoots: DockerComposeRootConfig[];
 }
 
 export interface DockerSettingsRecord extends DockerConfig {
@@ -816,7 +809,6 @@ export interface PublicSystemInfo {
     modelProvider: "pi" | "cloud" | "local";
     localEndpointConfigured: boolean;
     dockerEnabled: boolean;
-    dockerComposeRootCount: number;
     photos: {
       dataDir: string;
       maxFileSizeBytes: number;
@@ -1594,17 +1586,79 @@ export interface DockerVolumeSummary {
   mountpoint: string;
 }
 
-export interface DockerComposeProjectSummary {
+export type DockerComposeAppRisk = "medium" | "high";
+
+export interface DockerComposeEnvironmentSummary {
+  key: string;
+  valueConfigured: boolean;
+}
+
+export interface DockerComposeEnvironmentCreateInput {
+  key: string;
+  value: string;
+}
+
+export interface DockerComposeEnvironmentUpdateInput {
+  key: string;
+  value?: string;
+}
+
+export interface DockerComposeAppSummary {
   id: string;
   name: string;
-  rootId: string;
-  rootName: string;
-  filePath: string;
-  workingDir: string;
+  projectKey: string;
+  managedPath: string;
   services: string[];
-  containerCount: number;
-  runningCount: number;
+  warnings: string[];
+  risk: DockerComposeAppRisk;
+  revision: string;
+  deployedRevision: string | null;
+  needsDeploy: boolean;
+  containerCount: number | null;
+  runningCount: number | null;
   status: "configured" | "running" | "partial" | "stopped";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type DockerComposeProjectSummary = DockerComposeAppSummary;
+
+export interface DockerComposeAppDetail extends DockerComposeAppSummary {
+  composeContent: string;
+  environment: DockerComposeEnvironmentSummary[];
+}
+
+export interface DockerComposeAppValidateInput {
+  appId?: string;
+  expectedRevision?: string;
+  projectKey: string;
+  composeContent: string;
+  environment: DockerComposeEnvironmentUpdateInput[];
+}
+
+export interface DockerComposeAppValidationResult {
+  services: string[];
+  warnings: string[];
+  risk: DockerComposeAppRisk;
+}
+
+export interface DockerComposeAppCreateInput {
+  name: string;
+  projectKey: string;
+  composeContent: string;
+  environment: DockerComposeEnvironmentCreateInput[];
+}
+
+export interface DockerComposeAppUpdateInput {
+  name: string;
+  composeContent: string;
+  environment: DockerComposeEnvironmentUpdateInput[];
+  expectedRevision: string;
+}
+
+export interface DockerComposeAppDeleteInput {
+  expectedRevision: string;
+  confirmed: boolean;
 }
 
 export interface DockerSummary {
@@ -1786,8 +1840,7 @@ export interface DockerOperationProposal {
   networkName?: string;
   composeProjectId?: string;
   composeProjectName?: string;
-  composeRootId?: string;
-  composeFilePath?: string;
+  composeRevision?: string;
   service?: string;
   shell?: string;
   risk: "low" | "medium" | "high";
@@ -1836,6 +1889,7 @@ export interface VmHostSummary {
   libvirtUri: string;
   libvirtVersion: string | null;
   qemuVersion: string | null;
+  architecture: string;
   kvmAvailable: boolean;
   cpuCount: number | null;
   memoryTotalBytes: number | null;
@@ -1889,6 +1943,7 @@ export interface VmSummary {
 export interface VmOperationProposal {
   action: VmOperationAction;
   domainName?: string;
+  domainUuid?: string;
   snapshotName?: string;
   vcpu?: number;
   vcpuTopology?: { sockets: number; cores: number; threads: number };

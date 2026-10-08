@@ -500,5 +500,34 @@ export const productionMigrations: Migration[] = [
         DELETE FROM photo_metadata_fts WHERE asset_id = OLD.asset_id;
       END;
     `
+  },
+  {
+    id: "020_docker_compose_apps",
+    sql: `
+      CREATE TABLE IF NOT EXISTS docker_apps (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        project_key TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        compose_content TEXT NOT NULL,
+        services_json TEXT NOT NULL DEFAULT '[]',
+        warnings_json TEXT NOT NULL DEFAULT '[]',
+        risk TEXT NOT NULL CHECK (risk IN ('medium', 'high')),
+        revision TEXT NOT NULL,
+        deployed_revision TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS docker_app_environment (
+        app_id TEXT NOT NULL REFERENCES docker_apps(id) ON DELETE CASCADE,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (app_id, key)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_docker_apps_updated_at
+        ON docker_apps(updated_at DESC);
+    `
   }
 ];

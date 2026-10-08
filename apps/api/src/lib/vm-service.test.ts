@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { SigmaConfig, VmOperationRecord } from "@sigmaos/shared";
-import { applyVmOperation, buildVmCreateArgs, collectVmSummary, vmQemuCommand, type VmCommandRunner } from "./vm-service.js";
+import { applyVmOperation, buildVmCreateArgs, collectVmSummary, safeVmMessage, vmQemuCommand, type VmCommandRunner } from "./vm-service.js";
 
 function config(): SigmaConfig {
   return {
@@ -13,7 +13,7 @@ function config(): SigmaConfig {
     worker: { pollMs: 750 },
     admin: { displayName: "Admin", authMode: "local-only" },
     model: { provider: "pi", piCommand: "pi", localEndpoint: null },
-    docker: { enabled: false, socketPath: "/var/run/docker.sock", composeCommand: "docker", operationTimeoutMs: 1000, consoleShells: [], composeRoots: [] },
+    docker: { enabled: false, socketPath: "/var/run/docker.sock", composeCommand: "docker", operationTimeoutMs: 1000, consoleShells: [] },
     vm: { enabled: true, libvirtUri: "qemu:///system", storagePath: "/tmp/vmstore", networkName: "default", isoRoots: ["/tmp/iso"], operationTimeoutMs: 1000, consoleMode: "serial" },
     hostd: { socketPath: "/tmp/hostd.sock" },
     shares: { enabled: false, account: { username: "share", password: null }, shares: [] },
@@ -27,6 +27,14 @@ describe("VM service", () => {
   it("selects the native QEMU binary for the host architecture", () => {
     expect(vmQemuCommand("arm64")).toBe("qemu-system-aarch64");
     expect(vmQemuCommand("x64")).toBe("qemu-system-x86_64");
+  });
+
+  it("prefers command stderr so actionable VM errors are not hidden by long commands", () => {
+    const error = Object.assign(new Error(`Command failed: virt-install ${"x".repeat(600)}`), {
+      stderr: "WARNING: low memory\nERROR: unsupported CPU mode; password=secret"
+    });
+
+    expect(safeVmMessage(error)).toBe("WARNING: low memory\nERROR: unsupported CPU mode; password: [redacted]");
   });
 
   it("builds deterministic virt-install arguments for advanced VM options", () => {
@@ -58,10 +66,189 @@ describe("VM service", () => {
       "--disk", "path=/tmp/vmstore/guest.qcow2,format=qcow2,bus=scsi,cache=none,discard=unmap",
       "--network", "network=default,model=e1000,mac=52:54:00:12:34:56",
       "--cpu", "Skylake-Client",
+      "--osinfo", "detect=on,name=linux2024",
       "--memorybacking", "hugepages=yes",
-      "--boot", "uefi,menu=on",
+      "--boot", "uefi,firmware.feature0.name=secure-boot,firmware.feature0.enabled=no,menu=on",
       "--graphics", "spice", "--video", "qxl", "--autostart", "--import"
     ]));
+  });
+
+  it("uses the requested OS variant instead of the generic fallback", () => {
+    const args = buildVmCreateArgs(config().vm!, "guest", "/tmp/vmstore/guest.qcow2", {
+      action: "create",
+      domainName: "guest",
+      osVariant: "ubuntu24.04",
+      risk: "high",
+      summary: "Create virtual machine guest"
+    });
+
+    expect(args).toEqual(expect.arrayContaining(["--os-variant", "ubuntu24.04"]));
+    expect(args).not.toContain("--osinfo");
+  });
+
+  it("treats a force stop as successful when the guest already shut down", async () => {
+    const calls: string[][] = [];
+    const runner: VmCommandRunner = {
+      run: async (command, args) => {
+        calls.push([command, ...args]);
+        if (command === "virsh" && args.includes("version")) return "Using library: libvirt 11.3.0";
+        if (command === "virsh" && args.includes("list") && args.includes("--name")) return "guest\n";
+        if (command === "virsh" && args.includes("dominfo")) return "State: shut off\nCPU(s): 2\nMax memory: 2097152 KiB\nUUID: guest-id";
+        if (command === "virsh" && args.includes("domstate")) return "shut off\n";
+        if (command.startsWith("qemu-system-")) return "QEMU emulator version 10.0.0";
+        if (command === "nproc") return "4";
+        if (command === "free") return "Mem: 100 0 0 0 0 80";
+        if (command === "df") return "size avail\n100000 50000";
+        return "";
+      }
+    };
+    const operation: VmOperationRecord = {
+      id: "operation-stop",
+      approvalId: "approval-stop",
+      action: "stop",
+      targetId: "guest",
+      status: "approved",
+      metadata: {},
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString()
+    };
+
+    await expect(applyVmOperation(config(), operation, {
+      action: "stop",
+      domainName: "guest",
+      risk: "high",
+      summary: "Stop guest"
+    }, { commandRunner: runner, kvmAvailable: true })).resolves.toMatchObject({ action: "stop" });
+    expect(calls.some((call) => call.includes("destroy"))).toBe(false);
+  });
+
+  it("implements a hard reset as a deterministic power cycle", async () => {
+    const calls: string[][] = [];
+    let state = "running";
+    const runner: VmCommandRunner = {
+      run: async (command, args) => {
+        calls.push([command, ...args]);
+        if (command === "virsh" && args.includes("version")) return "Using library: libvirt 11.3.0";
+        if (command === "virsh" && args.includes("list") && args.includes("--name")) return "";
+        if (command === "virsh" && args.includes("domstate")) return `${state}\n`;
+        if (command === "virsh" && args.includes("destroy")) { state = "shut off"; return ""; }
+        if (command === "virsh" && args.includes("start")) { state = "running"; return ""; }
+        if (command.startsWith("qemu-system-")) return "QEMU emulator version 10.0.0";
+        if (command === "nproc") return "4";
+        if (command === "free") return "Mem: 100 0 0 0 0 80";
+        if (command === "df") return "size avail\n100000 50000";
+        return "";
+      }
+    };
+    const operation: VmOperationRecord = {
+      id: "operation-reset",
+      approvalId: "approval-reset",
+      action: "reset",
+      targetId: "guest",
+      status: "approved",
+      metadata: {},
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString()
+    };
+
+    await expect(applyVmOperation(config(), operation, {
+      action: "reset",
+      domainName: "guest",
+      risk: "medium",
+      summary: "Hard reset guest"
+    }, { commandRunner: runner, kvmAvailable: true })).resolves.toMatchObject({ action: "reset" });
+    expect(calls.filter((call) => call[0] === "virsh" && ["destroy", "start"].some((action) => call.includes(action))))
+      .toEqual([
+        ["virsh", "-c", "qemu:///system", "destroy", "guest"],
+        ["virsh", "-c", "qemu:///system", "start", "guest"]
+      ]);
+    expect(state).toBe("running");
+  });
+
+  it("reports storage pool paths and virtual disk capacities", async () => {
+    const runner: VmCommandRunner = {
+      run: async (command, args) => {
+        if (command === "virsh" && args.includes("version")) return "Using library: libvirt 11.3.0";
+        if (command === "virsh" && args.includes("list") && args.includes("--name")) return "guest\n";
+        if (command === "virsh" && args.includes("dominfo")) return "State: running\nCPU(s): 2\nUsed memory: 1048576 KiB\nMax memory: 2097152 KiB\nUUID: guest-id";
+        if (command === "virsh" && args.includes("domblklist")) return " Type   Device   Target   Source\n------------------------------------------------\n file   disk     vda      /tmp/vmstore/guest.qcow2\n file   cdrom    sda      /tmp/iso/installer.iso\n";
+        if (command === "virsh" && args.includes("domblkinfo")) return "Capacity:       21474836480\nAllocation:     1048576\nPhysical:       1048576\n";
+        if (command === "virsh" && args.includes("domiflist")) return "";
+        if (command === "virsh" && args.includes("pool-list")) return "default\n";
+        if (command === "virsh" && args.includes("pool-info")) return "State: running\nCapacity: 100.00 GiB\nAllocation: 20.00 GiB\nAvailable: 80.00 GiB\n";
+        if (command === "virsh" && args.includes("pool-dumpxml")) return "<pool><target><path>/var/lib/libvirt/images</path></target></pool>";
+        if (command === "virsh" && args.includes("net-list")) return " Name      State    Autostart\n--------------------------------\n default   active   yes\n";
+        if (command.startsWith("qemu-system-")) return "QEMU emulator version 10.0.0";
+        if (command === "nproc") return "4";
+        if (command === "free") return "Mem: 100 0 0 0 0 80";
+        if (command === "df") return "size avail\n100000 50000";
+        return "";
+      }
+    };
+
+    const summary = await collectVmSummary(config(), { commandRunner: runner, kvmAvailable: true });
+
+    expect(summary.host.architecture).toBe(process.arch);
+    expect(summary.storagePools).toEqual([
+      expect.objectContaining({ name: "default", path: "/var/lib/libvirt/images", state: "running" })
+    ]);
+    expect(summary.instances[0]?.disks).toEqual([
+      { source: "/tmp/vmstore/guest.qcow2", capacityBytes: 20 * 1024 ** 3 }
+    ]);
+    expect(summary.metrics.diskBytes).toBe(20 * 1024 ** 3);
+    expect(summary.metrics.memoryBytes).toBe(2 * 1024 ** 3);
+  });
+
+  it("removes a newly-created disk when virt-install fails before defining the domain", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-vm-create-"));
+    const storagePath = path.join(tempDir, "vmstore");
+    const isoPath = path.join(tempDir, "installer.iso");
+    const diskPath = path.join(storagePath, "guest.qcow2");
+    await mkdir(storagePath);
+    await writeFile(isoPath, "iso");
+    const runner: VmCommandRunner = {
+      run: async (command, args) => {
+        if (command === "qemu-img") {
+          await writeFile(diskPath, "qcow2");
+          return "";
+        }
+        if (command === "virt-install") throw new Error("virt-install failed");
+        if (command === "virsh" && args.includes("dominfo")) throw new Error("domain not found");
+        if (command === "virsh" && args.includes("version")) return "Using library: libvirt 11.3.0";
+        if (command === "virsh" && args.includes("list") && args.includes("--name")) return "";
+        if (command === "virsh" && args.includes("pool-list")) return "";
+        if (command === "virsh" && args.includes("net-list")) return " Name      State    Autostart\n--------------------------------\n default   active   yes\n";
+        if (command.startsWith("qemu-system-")) return "QEMU emulator version 10.0.0";
+        if (command === "nproc") return "4";
+        if (command === "free") return "Mem: 100 0 0 0 0 80";
+        if (command === "df") return "size avail\n100000 50000";
+        return "";
+      }
+    };
+    const nextConfig = { ...config(), vm: { ...config().vm!, storagePath, isoRoots: [tempDir] } };
+    const operation: VmOperationRecord = {
+      id: "operation-create",
+      approvalId: null,
+      action: "create",
+      targetId: "guest",
+      status: "proposed",
+      metadata: {},
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString()
+    };
+
+    try {
+      await expect(applyVmOperation(nextConfig, operation, {
+        action: "create",
+        domainName: "guest",
+        isoPath,
+        risk: "high",
+        summary: "Create virtual machine guest"
+      }, { commandRunner: runner, kvmAvailable: true })).rejects.toThrow("virt-install failed");
+      await expect(stat(diskPath)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("restricts an existing VM disk before handing it to virt-install", async () => {
