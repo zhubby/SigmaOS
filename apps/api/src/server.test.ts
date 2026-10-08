@@ -3897,6 +3897,23 @@ describe("API server", () => {
     await server.close();
   });
 
+  it("downloads file blobs with an attachment filename", async () => {
+    const fileName = "报告.txt";
+    await writeFile(path.join(rootDir, fileName), "report");
+    const server = await buildServer({ config: testConfig(tempDir), db });
+    const response = await server.inject({
+      method: "GET",
+      url: `/api/files/blob?rootId=local&storagePoolId=${encodeURIComponent(TEST_STORAGE_POOL_ID)}&path=${encodeURIComponent(fileName)}&download=1`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-disposition"]).toBe(
+      `attachment; filename="__.txt"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+    );
+    expect(response.payload).toBe("report");
+    await server.close();
+  });
+
   it("streams byte ranges for file blobs", async () => {
     const server = await buildServer({ config: testConfig(tempDir), db });
     const response = await server.inject({

@@ -398,7 +398,7 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, system
   });
 
   server.get<{
-    Querystring: { rootId?: string; storagePoolId?: string; path?: string };
+    Querystring: { rootId?: string; storagePoolId?: string; path?: string; download?: string };
   }>("/api/files/blob", async (request, reply) => {
     const scope = await resolveStoragePoolScope(db, system, request.query.rootId, request.query.storagePoolId);
     const safe = await resolveScopedExistingPath(scope, request.query.path ?? scope.mountpointPath);
@@ -406,6 +406,10 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, system
     if (!safeStat.isFile()) {
       reply.status(400).send({ error: "Path is not a file" });
       return;
+    }
+
+    if (request.query.download === "1") {
+      reply.header("Content-Disposition", contentDisposition(path.basename(safe.relativePath)));
     }
 
     return sendFileStream(reply, request.headers.range, safe.realPath, inferMimeType(safe.realPath));
@@ -516,6 +520,11 @@ export function registerFileRoutes(server: FastifyInstance, { config, db, system
       git: gitView.git
     });
   });
+}
+
+function contentDisposition(fileName: string): string {
+  const ascii = fileName.replace(/[^\x20-\x7E]/gu, "_").replace(/["\\]/gu, "_");
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
 }
 
 async function filterScopedSearchResults(scope: StoragePoolScope, matches: FileEntry[]): Promise<FileEntry[]> {

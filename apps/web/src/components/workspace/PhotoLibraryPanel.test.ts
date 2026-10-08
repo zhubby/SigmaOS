@@ -1,9 +1,33 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import type { PhotoAsset } from "../../api.js";
-import { groupPhotosByDate, photoMediaKindForAsset, PHOTO_ACCEPT } from "./PhotoLibraryPanel.js";
+import { i18n, initI18n } from "../../i18n/index.js";
+import { groupPhotosByDate, photoMediaKindForAsset, PhotoLibraryPanel, PHOTO_ACCEPT } from "./PhotoLibraryPanel.js";
 import { PHOTO_SUPPORTED_EXTENSIONS } from "@sigmaos/shared/photo-config";
 
+beforeAll(async () => {
+  await initI18n();
+  await i18n.changeLanguage("en");
+});
+
 describe("photo timeline grouping", () => {
+  it("allows selecting multiple media files for upload", () => {
+    const html = renderToStaticMarkup(createElement(PhotoLibraryPanel, {
+      pools: [],
+      selectedRootId: "local",
+      sessionId: null,
+      approvalRefreshKey: "",
+      locale: "en",
+      onWorkQueuesChanged: () => undefined,
+      onNotifyError: () => undefined,
+      onNotifySuccess: () => undefined,
+      onNotifyWarning: () => undefined
+    }));
+
+    expect(html).toMatch(/<input(?=[^>]*type="file")(?=[^>]*multiple="")[^>]*>/u);
+  });
+
   it("uses the shared image, video, and RAW extension list for upload filtering", () => {
     expect(PHOTO_ACCEPT.split(",")).toEqual([...PHOTO_SUPPORTED_EXTENSIONS]);
   });

@@ -866,12 +866,26 @@
   text-transform: capitalize;
 }
 
+.preview-pane > .panel-heading {
+  min-width: 0;
+}
+
 .preview-heading-actions {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+@container workspace-stage (max-width: 520px) {
+  .preview-heading-actions {
+    gap: 4px;
+  }
+
+  .preview-heading-actions .preview-kind {
+    display: none;
+  }
 }
 
 .preview-title-row {
@@ -896,6 +910,7 @@
   color: var(--muted);
   background: var(--surface);
   cursor: pointer;
+  text-decoration: none;
   transition:
     color 140ms ease,
     background 140ms ease,

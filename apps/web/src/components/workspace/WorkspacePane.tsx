@@ -266,6 +266,7 @@ export function WorkspacePane({
   previewError,
   textPreview,
   blobUrl,
+  downloadUrl,
   videoUrl,
   playerStatus,
   previewFileSizeLimitBytes,
@@ -330,6 +331,7 @@ export function WorkspacePane({
   previewError: string | null;
   textPreview: TextPreview | null;
   blobUrl: string;
+  downloadUrl: string;
   videoUrl: string;
   playerStatus: PlayerStatus | null;
   previewFileSizeLimitBytes: number;
@@ -1160,6 +1162,15 @@ export function WorkspacePane({
                               <ArchiveRestore aria-hidden="true" size={14} />
                             </button>
                           ) : null}
+                          <a
+                            className="preview-tool-button"
+                            href={downloadUrl}
+                            download={previewTitle || undefined}
+                            title={t("workspace.downloadFile")}
+                            aria-label={t("workspace.downloadFile")}
+                          >
+                            <Download aria-hidden="true" size={14} />
+                          </a>
                           <button
                             type="button"
                             className="preview-tool-button"

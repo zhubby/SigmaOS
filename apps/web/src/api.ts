@@ -1392,6 +1392,16 @@ export function getFileBlobUrl(rootId: string, currentPath: string, storagePoolI
   return `/api/files/blob?${params.toString()}`;
 }
 
+export function getFileDownloadUrl(rootId: string, currentPath: string, storagePoolId: string): string {
+  const params = new URLSearchParams({
+    rootId,
+    path: currentPath,
+    storagePoolId,
+    download: "1"
+  });
+  return `/api/files/blob?${params.toString()}`;
+}
+
 export function getFileVideoUrl(rootId: string, currentPath: string, storagePoolId: string): string {
   const params = new URLSearchParams({
     rootId,

@@ -14,6 +14,7 @@ import {
   getDockerSettings,
   getDownloadSettings,
   getFileBlobUrl,
+  getFileDownloadUrl,
   getFileVideoUrl,
   getPlayerStatus,
   getFileMeta,
@@ -324,6 +325,9 @@ export function App() {
   );
   const blobUrl = selectedRootId && selectedStoragePoolId && selectedFilePath
     ? getFileBlobUrl(selectedRootId, selectedFilePath, selectedStoragePoolId)
+    : "";
+  const downloadUrl = selectedRootId && selectedStoragePoolId && selectedFilePath
+    ? getFileDownloadUrl(selectedRootId, selectedFilePath, selectedStoragePoolId)
     : "";
   const videoUrl = selectedRootId && selectedStoragePoolId && selectedFilePath
     ? getFileVideoUrl(selectedRootId, selectedFilePath, selectedStoragePoolId)
@@ -2145,6 +2149,7 @@ export function App() {
         previewError={previewError}
         textPreview={textPreview}
         blobUrl={blobUrl}
+        downloadUrl={downloadUrl}
         videoUrl={videoUrl}
         playerStatus={playerStatus}
         previewFileSizeLimitBytes={previewFileSizeLimitBytes}
