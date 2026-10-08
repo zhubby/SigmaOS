@@ -12,12 +12,13 @@ import {
   listEvents,
   listPendingApprovals,
   openSigmaDb,
+  savePhotoLibrarySettings,
   upsertIndexedFile,
   type SigmaDatabase
 } from "@sigmaos/db";
 import type { PiAgentRunner } from "@sigmaos/agent";
 import type { SigmaConfig } from "@sigmaos/shared";
-import { processNextJob } from "./processor.js";
+import { photoAgentTools, processNextJob } from "./processor.js";
 
 let tempDir: string;
 let rootDir: string;
@@ -217,6 +218,20 @@ describe("worker processor", () => {
     await expect(processNextJob({ db, config: testConfig(), agentRunner: runner })).resolves.toBe(true);
 
     expect(seenProviderSessions).toEqual([null, "pi-session-reused"]);
+  });
+
+  it("only injects photo tools for sessions on the configured photo root", async () => {
+    savePhotoLibrarySettings(db, {
+      rootId: "local",
+      storagePoolId: "pool-a",
+      path: "Photos"
+    });
+
+    expect(photoAgentTools(db, "other")).toEqual({});
+    expect(photoAgentTools(db, "local").photoTools).toMatchObject({
+      searchPhotos: expect.any(Function),
+      getPhotoMetadata: expect.any(Function)
+    });
   });
 });
 

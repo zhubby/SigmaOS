@@ -5,10 +5,374 @@
 .photo-library {
   position: relative;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   background: var(--footer-bg);
+}
+
+.photo-query-panel {
+  display: grid;
+  gap: 8px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--footer-bg);
+}
+
+.photo-query-toolbar,
+.photo-common-filters,
+.photo-advanced-heading,
+.photo-map-toolbar,
+.photo-map-toolbar > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.photo-search-field {
+  display: flex;
+  flex: 1 1 260px;
+  align-items: center;
+  gap: 7px;
+  min-width: 160px;
+  height: 31px;
+  padding: 0 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  color: var(--muted);
+  background: var(--input-bg);
+}
+
+.photo-search-field input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font-size: 11px;
+}
+
+.photo-view-switch,
+.photo-condition-mode {
+  display: inline-grid;
+  grid-auto-flow: column;
+  padding: 2px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: var(--subtle-bg);
+}
+
+.photo-view-switch button,
+.photo-condition-mode button,
+.photo-advanced-toggle,
+.photo-advanced-heading > button,
+.photo-map-toolbar button,
+.photo-reveal-sensitive {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 27px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 10.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.photo-view-switch button[aria-selected="true"],
+.photo-condition-mode button[aria-pressed="true"],
+.photo-advanced-toggle[aria-expanded="true"] {
+  border-color: var(--line-soft);
+  color: var(--text);
+  background: var(--surface);
+}
+
+.photo-sort-field {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted-2);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.photo-sort-field select,
+.photo-sort-field button,
+.photo-common-filters select,
+.photo-common-filters input,
+.photo-condition-row select,
+.photo-condition-row input {
+  height: 29px;
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  color: var(--text);
+  background: var(--input-bg);
+  font-size: 10.5px;
+}
+
+.photo-sort-field button {
+  width: 29px;
+  padding: 0;
+}
+
+.photo-common-filters {
+  align-items: end;
+  flex-wrap: wrap;
+  padding-bottom: 1px;
+}
+
+.photo-common-filters > label {
+  display: grid;
+  flex: 1 1 116px;
+  gap: 4px;
+  min-width: 108px;
+  color: var(--muted-2);
+  font-size: 9.5px;
+  font-weight: 800;
+}
+
+.photo-common-filters > label:nth-child(2),
+.photo-common-filters > label:nth-child(3) {
+  flex-basis: 150px;
+}
+
+.photo-common-filters > label:nth-child(4) {
+  flex-basis: 232px;
+}
+
+.photo-range-inputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.photo-range-inputs input {
+  width: 100%;
+  padding: 0 5px;
+}
+
+.photo-common-filters .photo-location-filter {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  min-height: 29px;
+  padding: 0 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  color: var(--text);
+  background: var(--input-bg);
+}
+
+.photo-common-filters .photo-location-filter input {
+  width: 13px;
+  height: 13px;
+}
+
+.photo-keyword-facets {
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+}
+
+.photo-keyword-facets button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 25px;
+  padding: 0 7px;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  color: var(--muted);
+  background: var(--subtle-bg);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.photo-keyword-facets button[aria-pressed="true"] {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.photo-keyword-facets button span {
+  color: var(--muted-2);
+}
+
+.photo-advanced-builder {
+  display: grid;
+  gap: 6px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.photo-advanced-heading {
+  justify-content: space-between;
+}
+
+.photo-advanced-heading > button,
+.photo-reveal-sensitive,
+.photo-map-toolbar button {
+  border-color: var(--line-soft);
+  background: var(--surface);
+}
+
+.photo-condition-row {
+  display: grid;
+  grid-template-areas: "field operator value value-to remove";
+  grid-template-columns: minmax(170px, 1.4fr) minmax(110px, .8fr) minmax(120px, 1fr) minmax(90px, .7fr) 29px;
+  gap: 5px;
+}
+
+.photo-condition-field {
+  grid-area: field;
+}
+
+.photo-condition-operator {
+  grid-area: operator;
+}
+
+.photo-condition-value {
+  grid-area: value;
+}
+
+.photo-condition-value-to {
+  grid-area: value-to;
+}
+
+.photo-condition-row > button {
+  grid-area: remove;
+  display: grid;
+  width: 29px;
+  height: 29px;
+  place-items: center;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  color: var(--muted);
+  background: var(--surface);
+}
+
+.photo-query-summary {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted-2);
+  font-size: 9.5px;
+  font-weight: 800;
+}
+
+.photo-map-view {
+  display: grid;
+  grid-template-rows: auto minmax(300px, 1fr) auto;
+  min-height: 100%;
+}
+
+.photo-map-toolbar {
+  justify-content: space-between;
+  min-height: 40px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-family: var(--code-font-family);
+  font-size: 10px;
+}
+
+.photo-map-toolbar > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.photo-map-canvas {
+  position: relative;
+  min-height: 300px;
+  overflow: hidden;
+  background: var(--input-deep-bg);
+}
+
+.photo-maplibre,
+.photo-coordinate-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.photo-coordinate-canvas {
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  background: var(--channel-bg);
+}
+
+.photo-coordinate-grid::before,
+.photo-coordinate-grid::after {
+  position: absolute;
+  content: "";
+  background: var(--line-soft);
+}
+
+.photo-coordinate-grid::before {
+  inset: 50% 0 auto;
+  height: 1px;
+}
+
+.photo-coordinate-grid::after {
+  inset: 0 auto 0 50%;
+  width: 1px;
+}
+
+.photo-map-point {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  border: 2px solid var(--input-deep-bg);
+  border-radius: 50%;
+  color: #17191e;
+  background: #f4c95d;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.photo-map-empty-label,
+.photo-map-loading {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  transform: translate(-50%, -50%);
+  color: var(--muted-2);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.photo-map-empty-label {
+  opacity: .72;
+}
+
+.photo-map-loading {
+  z-index: 4;
+  padding: 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: var(--surface);
+}
+
+.photo-index-progress {
+  margin: 0;
+  padding: 7px 12px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted-2);
+  font-size: 10px;
 }
 
 .photo-library-bar {
@@ -450,7 +814,87 @@
   text-decoration: none;
 }
 
+.photo-metadata-inspector {
+  display: grid;
+  gap: 7px;
+  margin: 0 0 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.photo-metadata-inspector > header,
+.photo-metadata-inspector summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text);
+  font-size: 10.5px;
+}
+
+.photo-metadata-inspector details {
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  background: var(--subtle-bg);
+}
+
+.photo-metadata-inspector details.is-sensitive {
+  border-color: var(--warning-border, var(--line));
+}
+
+.photo-metadata-inspector summary {
+  min-height: 29px;
+  padding: 0 7px;
+  cursor: pointer;
+}
+
+.photo-metadata-inspector summary span {
+  color: var(--muted-2);
+  font-size: 9px;
+}
+
+.photo-metadata-inspector details dl {
+  gap: 8px;
+  max-height: 210px;
+  margin: 0;
+  overflow: auto;
+  padding: 7px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.photo-metadata-warnings {
+  padding: 7px;
+  border: 1px solid var(--warning-border, var(--line-soft));
+  border-radius: 4px;
+  color: var(--warning-text, var(--muted));
+  background: var(--warning-bg, var(--subtle-bg));
+  font-size: 10px;
+}
+
+.photo-metadata-warnings p {
+  margin: 0;
+}
+
+.photo-reveal-sensitive {
+  justify-self: start;
+}
+
 @container workspace-stage (max-width: 760px) {
+  .photo-query-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .photo-search-field {
+    flex-basis: 100%;
+  }
+
+  .photo-condition-row {
+    grid-template-areas:
+      "field operator remove"
+      "value value-to .";
+    grid-template-columns: minmax(0, 1.3fr) minmax(100px, .8fr) 29px;
+  }
+
   .photo-library-bar {
     align-items: stretch;
     flex-wrap: wrap;
@@ -493,6 +937,49 @@
 }
 
 @container workspace-stage (max-width: 520px) {
+  .photo-library {
+    grid-template-rows: max-content max-content max-content minmax(320px, max-content);
+    align-content: start;
+    overflow: auto;
+  }
+
+  .photo-library-content {
+    min-height: 320px;
+    overflow: visible;
+  }
+
+  .photo-query-panel {
+    padding: 8px;
+  }
+
+  .photo-view-switch button span,
+  .photo-sort-field > span,
+  .photo-advanced-toggle {
+    font-size: 0;
+  }
+
+  .photo-advanced-toggle svg {
+    margin: 0;
+  }
+
+  .photo-sort-field {
+    flex: 1 1 auto;
+  }
+
+  .photo-condition-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 29px;
+  }
+
+  .photo-map-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .photo-map-toolbar > div {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
   .photo-selection-actions button span,
   .photo-select-all span {
     display: none;

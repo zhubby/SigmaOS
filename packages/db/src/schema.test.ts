@@ -11,8 +11,11 @@ import {
   ensureNasRoots,
   getApproval,
   getDockerOperation,
+  getPhotoAsset,
   migrations,
   openSigmaDb,
+  savePhotoLibrarySettings,
+  upsertPhotoAsset,
   updateApprovalStatus,
   updateDockerOperationStatus
 } from "./index.js";
@@ -49,8 +52,82 @@ describe("SQLite schema migrations", () => {
       "015_terminal_tabs",
       "016_hostd_config",
       "017_photo_library",
-      "018_photo_upload_reservations"
+      "018_photo_upload_reservations",
+      "019_photo_metadata_index"
     ]);
+  });
+
+  it("adds photo metadata, scalar, text, and spatial indexes without replacing photo assets", () => {
+    const databasePath = path.join(tempDir, "photo-metadata.sqlite");
+    const database = openSigmaDb(databasePath);
+    try {
+      const tables = database.prepare(`
+        SELECT name FROM sqlite_master
+        WHERE type IN ('table', 'trigger')
+          AND (name LIKE 'photo_%' OR name = 'trg_photo_asset_metadata_delete_indexes')
+      `).pluck().all() as string[];
+      expect(tables).toEqual(expect.arrayContaining([
+        "photo_assets",
+        "photo_asset_metadata",
+        "photo_metadata_values",
+        "photo_metadata_fts",
+        "photo_geo_index",
+        "photo_keywords",
+        "trg_photo_asset_metadata_delete_indexes"
+      ]));
+    } finally {
+      database.close();
+    }
+  });
+
+  it("preserves existing photo assets when applying the metadata index migration", () => {
+    const databasePath = path.join(tempDir, "legacy-photo-assets.sqlite");
+    const current = openSigmaDb(databasePath);
+    ensureNasRoots(current, [{ id: "local", name: "Local", path: tempDir }]);
+    const settings = savePhotoLibrarySettings(current, {
+      rootId: "local",
+      storagePoolId: "pool-a",
+      path: "Photos"
+    });
+    const asset = upsertPhotoAsset(current, {
+      settings,
+      path: "Photos/legacy.jpg",
+      name: "legacy.jpg",
+      mimeType: "image/jpeg",
+      sizeBytes: 100,
+      mtimeMs: 1,
+      contentHash: "legacy-hash",
+      width: 10,
+      height: 10,
+      orientation: 1,
+      takenAt: "2025-01-01T00:00:00.000Z",
+      takenAtSource: "exif",
+      thumbnailKey: null,
+      previewKey: null,
+      status: "ready",
+      error: null
+    });
+    current.exec(`
+      DROP TABLE photo_asset_metadata;
+      DROP TABLE photo_keywords;
+      DROP TABLE photo_metadata_values;
+      DROP TABLE photo_metadata_fts;
+      DROP TABLE photo_geo_index;
+      DELETE FROM schema_migrations WHERE id = '019_photo_metadata_index';
+    `);
+    current.close();
+
+    const migrated = openSigmaDb(databasePath);
+    try {
+      expect(getPhotoAsset(migrated, asset.id, settings.updatedAt)).toMatchObject({
+        id: asset.id,
+        name: "legacy.jpg",
+        contentHash: "legacy-hash"
+      });
+      expect(migrated.pragma("foreign_key_check")).toEqual([]);
+    } finally {
+      migrated.close();
+    }
   });
 
   it("removes the legacy helper socket from persisted share settings", () => {

@@ -5,6 +5,10 @@ import {
   ChevronRight,
   Download,
   FolderInput,
+  List,
+  Map,
+  Search,
+  SlidersHorizontal,
   ImageOff,
   Images,
   LoaderCircle,
@@ -32,21 +36,36 @@ import {
 import { useTranslation } from "react-i18next";
 import {
   createPhotoExport,
+  getPhotoMetadata,
+  getPhotoMetadataFields,
+  getPhotoRecord,
   getPhotoLibrarySettings,
   getPhotoLibraryStatus,
-  getPhotoTimeline,
   proposePhotoOperation,
+  queryPhotos,
   requestPhotoScan,
+  savePhotoMapSettings,
   uploadPhoto,
   type PhotoAsset,
+  type PhotoMetadataDetail,
+  type PhotoMetadataField,
+  type PhotoQueryAsset,
   type PhotoLibrarySettings,
   type PhotoLibraryStatus
 } from "../../api.js";
 import {
-  PHOTO_SUPPORTED_EXTENSIONS,
+  PHOTO_UPLOAD_EXTENSIONS,
+  PHOTO_XMP_EXTENSION,
+  photoExtension,
   photoMediaKind,
   type PhotoMediaKind
 } from "@sigmaos/shared/photo-config";
+import type {
+  PhotoMetadataCondition,
+  PhotoQueryFacets,
+  PhotoQueryFilters,
+  PhotoQuerySortField
+} from "@sigmaos/shared";
 import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
 import { PanelHeader, PanelHeaderAction, PanelHeaderActions } from "./PanelHeader.js";
@@ -54,8 +73,9 @@ import {
   StorageFilePickerDialog,
   type StorageFilePickerPool
 } from "./StorageFilePickerDialog.js";
+import { PhotoMapView } from "./PhotoMapView.js";
 
-export const PHOTO_ACCEPT = PHOTO_SUPPORTED_EXTENSIONS.join(",");
+export const PHOTO_ACCEPT = PHOTO_UPLOAD_EXTENSIONS.join(",");
 
 export function PhotoLibraryPanel({
   pools,
@@ -88,12 +108,24 @@ export function PhotoLibraryPanel({
   const { t } = useTranslation();
   const [settings, setSettings] = useState<PhotoLibrarySettings | null>(null);
   const [status, setStatus] = useState<PhotoLibraryStatus | null>(null);
-  const [photos, setPhotos] = useState<PhotoAsset[]>([]);
+  const [photos, setPhotos] = useState<PhotoQueryAsset[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [total, setTotal] = useState(0);
+  const [facets, setFacets] = useState<PhotoQueryFacets | null>(null);
+  const [filters, setFilters] = useState<PhotoQueryFilters>({});
+  const [sortField, setSortField] = useState<PhotoQuerySortField>("captured_at");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [view, setView] = useState<"timeline" | "map">("timeline");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [metadataFields, setMetadataFields] = useState<PhotoMetadataField[]>([]);
+  const [metadata, setMetadata] = useState<PhotoMetadataDetail | null>(null);
+  const [metadataLoading, setMetadataLoading] = useState(false);
+  const [sensitiveRevealed, setSensitiveRevealed] = useState(false);
+  const [mapRefreshKey, setMapRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [picker, setPicker] = useState<"move" | null>(null);
+  const [picker, setPicker] = useState<"move" | "map" | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [lightboxId, setLightboxId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -106,6 +138,8 @@ export function PhotoLibraryPanel({
   const deleteDialogRef = useRef<HTMLDivElement | null>(null);
   const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
   const dragDepthRef = useRef(0);
+  const timelineRequestRef = useRef(0);
+  const metadataRequestRef = useRef(0);
 
   const configuredPool = pools.find((pool) => pool.id === settings?.storagePoolId) ?? null;
   const selected = photos.filter((photo) => selectedIds.has(photo.id));
@@ -115,12 +149,23 @@ export function PhotoLibraryPanel({
   const lightboxMediaKind = lightboxPhoto ? photoMediaKindForAsset(lightboxPhoto) : null;
   const canPropose = Boolean(sessionId && settings?.rootId === selectedRootId);
   const statusBusy = status?.state === "queued" || status?.state === "scanning";
+  const queryFilters = useMemo(() => readyPhotoQueryFilters(filters, metadataFields), [filters, metadataFields]);
 
   const loadTimeline = useCallback(async (cursor: string | null = null) => {
-    const page = await getPhotoTimeline(cursor);
+    const requestId = cursor ? timelineRequestRef.current : ++timelineRequestRef.current;
+    const page = await queryPhotos({
+      filters: queryFilters,
+      sort: { field: sortField, direction: sortDirection },
+      cursor,
+      limit: 60,
+      includeFacets: !cursor
+    });
+    if (requestId !== timelineRequestRef.current) return;
     setPhotos((current) => cursor ? mergePhotos(current, page.photos) : page.photos);
     setNextCursor(page.nextCursor);
-  }, []);
+    setTotal(page.total);
+    if (!cursor) setFacets(page.facets);
+  }, [queryFilters, sortDirection, sortField]);
 
   const loadLibrary = useCallback(async () => {
     setLoading(true);
@@ -132,10 +177,15 @@ export function PhotoLibraryPanel({
       ]);
       setSettings(nextSettings);
       setStatus(nextStatus);
-      if (nextSettings) await loadTimeline();
+      if (nextSettings) {
+        const [, fields] = await Promise.all([loadTimeline(), getPhotoMetadataFields()]);
+        setMetadataFields((current) => samePhotoMetadataFields(current, fields) ? current : fields);
+      }
       else {
         setPhotos([]);
         setNextCursor(null);
+        setTotal(0);
+        setFacets(null);
       }
     } catch (error) {
       const message = errorMessage(error);
@@ -191,6 +241,27 @@ export function PhotoLibraryPanel({
   }, [lightboxPhoto]);
 
   useEffect(() => {
+    const requestId = ++metadataRequestRef.current;
+    if (!lightboxPhoto) {
+      setMetadata(null);
+      setSensitiveRevealed(false);
+      return undefined;
+    }
+    let active = true;
+    setMetadataLoading(true);
+    setMetadata(null);
+    setSensitiveRevealed(false);
+    void getPhotoMetadata(lightboxPhoto.id).then((detail) => {
+      if (active && requestId === metadataRequestRef.current) setMetadata(detail);
+    }).catch((error) => {
+      if (active) onNotifyError(errorMessage(error));
+    }).finally(() => {
+      if (active && requestId === metadataRequestRef.current) setMetadataLoading(false);
+    });
+    return () => { active = false; };
+  }, [lightboxPhoto, onNotifyError]);
+
+  useEffect(() => {
     if (!deleteOpen) return undefined;
     const trigger = deleteTriggerRef.current;
     const frame = window.requestAnimationFrame(() => deleteDialogRef.current?.focus());
@@ -228,7 +299,9 @@ export function PhotoLibraryPanel({
 
   async function uploadFiles(files: File[]) {
     if (!settings || !files.length || busyAction) return;
-    const supported = files.filter((file) => photoMediaKind(file.name) !== null);
+    const supported = files
+      .filter((file) => photoMediaKind(file.name) !== null || photoExtension(file.name) === PHOTO_XMP_EXTENSION)
+      .sort((left, right) => Number(photoExtension(left.name) === PHOTO_XMP_EXTENSION) - Number(photoExtension(right.name) === PHOTO_XMP_EXTENSION));
     if (!supported.length) {
       onNotifyWarning(t("workspace.photos.unsupportedUpload"));
       return;
@@ -306,10 +379,69 @@ export function PhotoLibraryPanel({
     setSelectedIds(selectedIds.size === photos.length ? new Set() : new Set(photos.map((photo) => photo.id)));
   }
 
-  function openLightbox(photo: PhotoAsset, trigger: HTMLElement) {
+  function openLightbox(photo: PhotoQueryAsset, trigger: HTMLElement) {
     lightboxTriggerRef.current = trigger;
     setZoom(1);
     setLightboxId(photo.id);
+  }
+
+  async function openMapAsset(assetId: string) {
+    let photo = photos.find((candidate) => candidate.id === assetId);
+    if (!photo) {
+      try {
+        photo = await getPhotoRecord(assetId);
+        setPhotos((current) => mergePhotos(current, [photo!]));
+      } catch (error) {
+        onNotifyError(errorMessage(error));
+        return;
+      }
+    }
+    openLightbox(photo, document.activeElement instanceof HTMLElement ? document.activeElement : document.body);
+  }
+
+  async function revealSensitiveMetadata() {
+    if (!lightboxPhoto || metadataLoading) return;
+    const requestId = ++metadataRequestRef.current;
+    setMetadataLoading(true);
+    try {
+      const detail = await getPhotoMetadata(lightboxPhoto.id, true);
+      if (requestId !== metadataRequestRef.current) return;
+      setMetadata(detail);
+      setSensitiveRevealed(true);
+    } catch (error) {
+      onNotifyError(errorMessage(error));
+    } finally {
+      if (requestId === metadataRequestRef.current) setMetadataLoading(false);
+    }
+  }
+
+  function updateFilter<K extends keyof PhotoQueryFilters>(key: K, value: PhotoQueryFilters[K]) {
+    setFilters((current) => {
+      const next = { ...current, [key]: value };
+      if (value === undefined || value === "" || (Array.isArray(value) && value.length === 0)) delete next[key];
+      return next;
+    });
+    setSelectedIds(new Set());
+  }
+
+  function updateAdvancedCondition(index: number, patch: Partial<PhotoMetadataCondition>) {
+    const advanced = filters.advanced ?? { mode: "all" as const, conditions: [] };
+    updateFilter("advanced", {
+      ...advanced,
+      conditions: advanced.conditions.map((condition, conditionIndex) => conditionIndex === index
+        ? { ...condition, ...patch }
+        : condition)
+    });
+  }
+
+  function addAdvancedCondition() {
+    const advanced = filters.advanced ?? { mode: "all" as const, conditions: [] };
+    const firstField = metadataFields[0]?.key ?? "exif.ISO";
+    updateFilter("advanced", {
+      ...advanced,
+      conditions: [...advanced.conditions, { key: firstField, operator: "eq", value: "" }]
+    });
+    setAdvancedOpen(true);
   }
 
   function showAdjacent(offset: number) {
@@ -352,6 +484,20 @@ export function PhotoLibraryPanel({
       setSelectedIds(new Set());
       await onWorkQueuesChanged();
       onNotifyWarning(t("workspace.photos.approvalQueued"));
+    } catch (error) {
+      onNotifyError(errorMessage(error));
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function configureMap(selection: { rootId: string; storagePoolId: string; path: string }) {
+    setBusyAction("map");
+    try {
+      await savePhotoMapSettings(selection);
+      setPicker(null);
+      setMapRefreshKey((current) => current + 1);
+      onNotifySuccess(t("workspace.photos.mapConfigured"));
     } catch (error) {
       onNotifyError(errorMessage(error));
     } finally {
@@ -471,6 +617,117 @@ export function PhotoLibraryPanel({
         </div>
       ) : null}
 
+      {settings ? (
+        <div className="photo-query-panel">
+          <div className="photo-query-toolbar">
+            <label className="photo-search-field">
+              <Search aria-hidden="true" size={15} />
+              <input
+                type="search"
+                value={filters.text ?? ""}
+                onChange={(event) => updateFilter("text", event.target.value)}
+                placeholder={t("workspace.photos.searchPlaceholder")}
+                aria-label={t("workspace.photos.searchPlaceholder")}
+              />
+            </label>
+            <div className="photo-view-switch" role="tablist" aria-label={t("workspace.photos.views")}>
+              <button type="button" role="tab" aria-selected={view === "timeline"} onClick={() => setView("timeline")} title={t("workspace.photos.timelineView")}>
+                <List aria-hidden="true" size={15} /><span>{t("workspace.photos.timelineView")}</span>
+              </button>
+              <button type="button" role="tab" aria-selected={view === "map"} onClick={() => setView("map")} title={t("workspace.photos.mapView")}>
+                <Map aria-hidden="true" size={15} /><span>{t("workspace.photos.mapView")}</span>
+              </button>
+            </div>
+            <label className="photo-sort-field">
+              <span>{t("workspace.photos.sort")}</span>
+              <select value={sortField} onChange={(event) => setSortField(event.target.value as PhotoQuerySortField)}>
+                <option value="captured_at">{t("workspace.photos.sortCaptured")}</option>
+                <option value="indexed_at">{t("workspace.photos.sortIndexed")}</option>
+                <option value="name">{t("workspace.photos.sortName")}</option>
+                <option value="size_bytes">{t("workspace.photos.sortSize")}</option>
+                <option value="rating">{t("workspace.photos.sortRating")}</option>
+                {filters.location?.kind === "near" ? <option value="distance">{t("workspace.photos.sortDistance")}</option> : null}
+              </select>
+              <button type="button" onClick={() => setSortDirection((current) => current === "asc" ? "desc" : "asc")} title={t("workspace.photos.sortDirection")} aria-label={t("workspace.photos.sortDirection")}>
+                {sortDirection === "asc" ? "↑" : "↓"}
+              </button>
+            </label>
+            <button type="button" className="photo-advanced-toggle" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen((current) => !current)}>
+              <SlidersHorizontal aria-hidden="true" size={15} />{t("workspace.photos.advanced")}
+            </button>
+          </div>
+          <div className="photo-common-filters">
+            <PhotoFacetSelect
+              label={t("workspace.photos.mediaType")}
+              options={facets?.mediaKinds ?? []}
+              selected={filters.mediaKinds ?? []}
+              allLabel={t("workspace.photos.allValues")}
+              selectedLabel={(count) => t("workspace.photos.selectedValues", { count })}
+              onChange={(value) => updateFilter("mediaKinds", value as PhotoMediaKind[])}
+            />
+            <PhotoFacetSelect
+              label={t("workspace.photos.camera")}
+              options={facets?.cameraModels ?? []}
+              selected={filters.cameraModels ?? []}
+              allLabel={t("workspace.photos.allValues")}
+              selectedLabel={(count) => t("workspace.photos.selectedValues", { count })}
+              onChange={(value) => updateFilter("cameraModels", value)}
+            />
+            <PhotoFacetSelect
+              label={t("workspace.photos.lens")}
+              options={facets?.lensModels ?? []}
+              selected={filters.lensModels ?? []}
+              allLabel={t("workspace.photos.allValues")}
+              selectedLabel={(count) => t("workspace.photos.selectedValues", { count })}
+              onChange={(value) => updateFilter("lensModels", value)}
+            />
+            <label><span>{t("workspace.photos.takenAt")}</span><div className="photo-range-inputs"><input type="date" value={filters.capturedAt?.from?.slice(0, 10) ?? ""} aria-label={t("workspace.photos.min")} onChange={(event) => updateFilter("capturedAt", dateRange(event.target.value, filters.capturedAt?.to))} /><input type="date" value={filters.capturedAt?.to?.slice(0, 10) ?? ""} aria-label={t("workspace.photos.max")} onChange={(event) => updateFilter("capturedAt", dateRange(filters.capturedAt?.from, event.target.value))} /></div></label>
+            <label><span>ISO</span><div className="photo-range-inputs"><input type="number" min="0" value={filters.iso?.min ?? ""} placeholder={t("workspace.photos.min")} onChange={(event) => updateFilter("iso", numberRange(event.target.value, filters.iso?.max))} /><input type="number" min="0" value={filters.iso?.max ?? ""} placeholder={t("workspace.photos.max")} onChange={(event) => updateFilter("iso", numberRange(filters.iso?.min, event.target.value))} /></div></label>
+            <label><span>{t("workspace.photos.aperture")}</span><div className="photo-range-inputs"><input type="number" min="0" step="0.1" value={filters.aperture?.min ?? ""} placeholder={t("workspace.photos.min")} onChange={(event) => updateFilter("aperture", numberRange(event.target.value, filters.aperture?.max))} /><input type="number" min="0" step="0.1" value={filters.aperture?.max ?? ""} placeholder={t("workspace.photos.max")} onChange={(event) => updateFilter("aperture", numberRange(filters.aperture?.min, event.target.value))} /></div></label>
+            <label><span>{t("workspace.photos.shutter")}</span><div className="photo-range-inputs"><input type="number" min="0" step="any" value={filters.exposureTimeSeconds?.min ?? ""} placeholder={t("workspace.photos.min")} onChange={(event) => updateFilter("exposureTimeSeconds", numberRange(event.target.value, filters.exposureTimeSeconds?.max))} /><input type="number" min="0" step="any" value={filters.exposureTimeSeconds?.max ?? ""} placeholder={t("workspace.photos.max")} onChange={(event) => updateFilter("exposureTimeSeconds", numberRange(filters.exposureTimeSeconds?.min, event.target.value))} /></div></label>
+            <label><span>{t("workspace.photos.focalLength")}</span><div className="photo-range-inputs"><input type="number" min="0" value={filters.focalLengthMm?.min ?? ""} placeholder={t("workspace.photos.min")} onChange={(event) => updateFilter("focalLengthMm", numberRange(event.target.value, filters.focalLengthMm?.max))} /><input type="number" min="0" value={filters.focalLengthMm?.max ?? ""} placeholder={t("workspace.photos.max")} onChange={(event) => updateFilter("focalLengthMm", numberRange(filters.focalLengthMm?.min, event.target.value))} /></div></label>
+            <label><span>{t("workspace.photos.rating")}</span><select value={filters.rating?.min ?? ""} onChange={(event) => updateFilter("rating", event.target.value ? { min: Number(event.target.value) } : undefined)}><option value="">{t("workspace.photos.allValues")}</option>{[1, 2, 3, 4, 5].map((rating) => <option key={rating} value={rating}>{rating}+ ({facets?.ratings.find((item) => Number(item.value) === rating)?.count ?? 0})</option>)}</select></label>
+            <label className="photo-location-filter"><input type="checkbox" checked={filters.hasLocation === true} onChange={(event) => updateFilter("hasLocation", event.target.checked ? true : undefined)} /><span>{t("workspace.photos.hasLocation")}</span></label>
+          </div>
+          {facets?.keywords.length ? (
+            <div className="photo-keyword-facets" aria-label={t("workspace.photos.keywords")}>
+              {facets.keywords.slice(0, 12).map((item) => {
+                const active = filters.keywords?.includes(item.value) ?? false;
+                return <button key={item.value} type="button" aria-pressed={active} onClick={() => updateFilter("keywords", active ? filters.keywords?.filter((value) => value !== item.value) : [...(filters.keywords ?? []), item.value])}>{item.value}<span>{item.count}</span></button>;
+              })}
+            </div>
+          ) : null}
+          {advancedOpen ? (
+            <div className="photo-advanced-builder">
+              <div className="photo-advanced-heading">
+                <div className="photo-condition-mode" role="group" aria-label={t("workspace.photos.conditionMode")}>
+                  <button type="button" aria-pressed={(filters.advanced?.mode ?? "all") === "all"} onClick={() => updateFilter("advanced", { mode: "all", conditions: filters.advanced?.conditions ?? [] })}>{t("workspace.photos.matchAll")}</button>
+                  <button type="button" aria-pressed={filters.advanced?.mode === "any"} onClick={() => updateFilter("advanced", { mode: "any", conditions: filters.advanced?.conditions ?? [] })}>{t("workspace.photos.matchAny")}</button>
+                </div>
+                <button type="button" onClick={addAdvancedCondition} disabled={!metadataFields.length || (filters.advanced?.conditions.length ?? 0) >= 25}><Plus aria-hidden="true" size={14} />{t("workspace.photos.addCondition")}</button>
+              </div>
+              {(filters.advanced?.conditions ?? []).map((condition, index) => (
+                <div className="photo-condition-row" key={`${index}:${condition.key}`}>
+                  <select className="photo-condition-field" value={condition.key} onChange={(event) => updateAdvancedCondition(index, { key: event.target.value })} aria-label={t("workspace.photos.metadataField")}>
+                    {metadataFields.map((field) => <option key={`${field.key}:${field.valueType}`} value={field.key}>{field.key} ({field.count})</option>)}
+                  </select>
+                  <select className="photo-condition-operator" value={condition.operator} onChange={(event) => updateAdvancedCondition(index, { operator: event.target.value as PhotoMetadataCondition["operator"] })} aria-label={t("workspace.photos.operator")}>
+                    {metadataOperatorOptions(t).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                  {condition.operator !== "exists" && condition.operator !== "not_exists" ? <input className="photo-condition-value" value={String(Array.isArray(condition.value) ? condition.value.join(",") : condition.value ?? "")} onChange={(event) => updateAdvancedCondition(index, { value: condition.operator === "in" ? event.target.value.split(",").map((value) => value.trim()).filter(Boolean) : event.target.value })} aria-label={t("workspace.photos.value")} /> : <span className="photo-condition-value" />}
+                  {condition.operator === "between" ? <input className="photo-condition-value-to" value={String(condition.valueTo ?? "")} onChange={(event) => updateAdvancedCondition(index, { valueTo: event.target.value })} aria-label={t("workspace.photos.max")} /> : <span className="photo-condition-value-to" />}
+                  <button type="button" onClick={() => {
+                    const remaining = filters.advanced?.conditions.filter((_, conditionIndex) => conditionIndex !== index) ?? [];
+                    updateFilter("advanced", remaining.length ? { mode: filters.advanced?.mode ?? "all", conditions: remaining } : undefined);
+                  }} title={t("workspace.photos.removeCondition")} aria-label={t("workspace.photos.removeCondition")}><X aria-hidden="true" size={14} /></button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <div className="photo-query-summary"><span>{t("workspace.photos.resultCount", { count: total })}</span>{status?.metadataIndex?.pending ? <span>{t("workspace.photos.metadataProgress", { indexed: status.metadataIndex.indexed, total: status.metadataIndex.total })}</span> : null}</div>
+        </div>
+      ) : null}
+
       <div className="photo-library-content">
         {dropActive ? (
           <div className="workspace-drop-overlay" role="presentation" aria-hidden="true">
@@ -488,6 +745,15 @@ export function PhotoLibraryPanel({
           <div className="workspace-empty-state" role="alert"><ImageOff aria-hidden="true" size={28} /><strong>{t("workspace.photos.loadFailed")}</strong><p>{loadError}</p><button className="secondary-button" type="button" onClick={() => void loadLibrary()}>{t("common.actions.refresh")}</button></div>
         ) : !settings ? (
           <div className="workspace-empty-state photo-library-empty"><Images aria-hidden="true" size={34} /><strong>{t("workspace.photos.unconfiguredTitle")}</strong><p>{t("workspace.photos.unconfiguredBody")}</p></div>
+        ) : view === "map" ? (
+          <PhotoMapView
+            filters={queryFilters}
+            refreshKey={mapRefreshKey}
+            onConfigure={() => setPicker("map")}
+            onOpenAsset={openMapAsset}
+            onSearchBounds={(nextBounds) => updateFilter("location", nextBounds)}
+            onError={(message) => onNotifyError(message)}
+          />
         ) : photos.length === 0 ? (
           <div className="workspace-empty-state photo-library-empty" role="status">
             {statusBusy ? <LoaderCircle className="is-spinning" aria-hidden="true" size={30} /> : <ImageOff aria-hidden="true" size={30} />}
@@ -537,6 +803,18 @@ export function PhotoLibraryPanel({
           onCancel={() => setPicker(null)}
           onSelect={(selection) => void proposeBatch("move", selection.path)}
           {...(onRequestCreateFolder ? { onRequestCreateFolder } : {})}
+        />
+      ) : null}
+
+      {picker === "map" ? (
+        <StorageFilePickerDialog
+          pools={pools}
+          initialPoolId={settings?.storagePoolId ?? pools[0]?.id ?? ""}
+          {...(settings?.path ? { initialPath: settings.path } : {})}
+          locale={locale}
+          mode="pmtiles"
+          onCancel={() => setPicker(null)}
+          onSelect={(selection) => void configureMap(selection)}
         />
       ) : null}
 
@@ -598,12 +876,35 @@ export function PhotoLibraryPanel({
               <button className="photo-lightbox-nav is-next" type="button" onClick={() => showAdjacent(1)} disabled={lightboxIndex >= photos.length - 1} title={t("workspace.photos.next")} aria-label={t("workspace.photos.next")}><ChevronRight aria-hidden="true" size={24} /></button>
               <aside className="photo-lightbox-meta">
                 <dl>
-                  <div><dt>{t("workspace.photos.takenAt")}</dt><dd>{formatPhotoDateTime(lightboxPhoto.takenAt, locale)}</dd></div>
+                  <div><dt>{t("workspace.photos.takenAt")}</dt><dd>{formatPhotoDateTime(lightboxPhoto.metadata?.capturedAtLocal ?? lightboxPhoto.takenAt, locale)}</dd></div>
                   <div><dt>{t("workspace.photos.dimensions")}</dt><dd>{lightboxPhoto.width && lightboxPhoto.height ? `${lightboxPhoto.width} × ${lightboxPhoto.height}` : t("common.states.unknown")}</dd></div>
                   <div><dt>{t("workspace.photos.fileSize")}</dt><dd>{formatBytes(lightboxPhoto.sizeBytes, locale)}</dd></div>
                   <div><dt>{t("workspace.photos.format")}</dt><dd>{lightboxPhoto.mimeType}</dd></div>
                   <div><dt>{t("workspace.photos.path")}</dt><dd title={lightboxPhoto.path}>{lightboxPhoto.path}</dd></div>
+                  {lightboxPhoto.metadata?.cameraModel ? <div><dt>{t("workspace.photos.camera")}</dt><dd>{lightboxPhoto.metadata.cameraModel}</dd></div> : null}
+                  {lightboxPhoto.metadata?.lensModel ? <div><dt>{t("workspace.photos.lens")}</dt><dd>{lightboxPhoto.metadata.lensModel}</dd></div> : null}
+                  {lightboxPhoto.metadata?.iso ? <div><dt>ISO</dt><dd>{lightboxPhoto.metadata.iso}</dd></div> : null}
+                  {lightboxPhoto.metadata?.aperture ? <div><dt>{t("workspace.photos.aperture")}</dt><dd>f/{lightboxPhoto.metadata.aperture}</dd></div> : null}
+                  {lightboxPhoto.metadata?.exposureTimeSeconds ? <div><dt>{t("workspace.photos.shutter")}</dt><dd>{formatExposure(lightboxPhoto.metadata.exposureTimeSeconds)}</dd></div> : null}
+                  {lightboxPhoto.metadata?.focalLengthMm ? <div><dt>{t("workspace.photos.focalLength")}</dt><dd>{lightboxPhoto.metadata.focalLengthMm} mm</dd></div> : null}
                 </dl>
+                <section className="photo-metadata-inspector">
+                  <header><strong>{t("workspace.photos.metadata")}</strong>{metadataLoading ? <LoaderCircle className="is-spinning" aria-hidden="true" size={14} /> : null}</header>
+                  {metadata?.warnings.length ? <div className="photo-metadata-warnings">{metadata.warnings.map((warning) => <p key={warning}>{warning}</p>)}</div> : null}
+                  {Object.entries(metadata?.groups ?? {}).map(([source, entries]) => (
+                    <details key={source}>
+                      <summary>{source}<span>{Object.keys(entries).length}</span></summary>
+                      <dl>{Object.entries(entries).map(([key, values]) => <div key={key}><dt>{key}</dt><dd>{values.join(", ")}</dd></div>)}</dl>
+                    </details>
+                  ))}
+                  {metadata?.sensitiveOmitted && !sensitiveRevealed ? <button type="button" className="photo-reveal-sensitive" onClick={() => void revealSensitiveMetadata()} disabled={metadataLoading}><SlidersHorizontal aria-hidden="true" size={14} />{t("workspace.photos.revealSensitive")}</button> : null}
+                  {Object.entries(metadata?.sensitiveGroups ?? {}).map(([source, entries]) => (
+                    <details className="is-sensitive" key={source}>
+                      <summary>{source}<span>{Object.keys(entries).length}</span></summary>
+                      <dl>{Object.entries(entries).map(([key, values]) => <div key={key}><dt>{key}</dt><dd>{values.join(", ")}</dd></div>)}</dl>
+                    </details>
+                  ))}
+                </section>
                 <a className="secondary-button" href={`/api/photos/${encodeURIComponent(lightboxPhoto.id)}/original?download=1`} download={lightboxPhoto.name}><Download aria-hidden="true" size={15} />{t("workspace.photos.downloadOriginal")}</a>
               </aside>
             </div>
@@ -614,13 +915,18 @@ export function PhotoLibraryPanel({
   );
 }
 
-export function groupPhotosByDate(photos: PhotoAsset[], locale: SupportedLocale) {
+export function groupPhotosByDate<T extends PhotoAsset & {
+  metadata?: { capturedAtLocal?: string | null } | null;
+}>(photos: T[], locale: SupportedLocale) {
   const formatter = new Intl.DateTimeFormat(locale, { dateStyle: "full" });
-  const groups: Array<{ key: string; label: string; photos: PhotoAsset[] }> = [];
+  const groups: Array<{ key: string; label: string; photos: T[] }> = [];
   for (const photo of photos) {
-    const date = new Date(photo.takenAt);
-    const validDate = Number.isFinite(date.getTime()) ? date : new Date(photo.mtimeMs);
-    const key = [validDate.getFullYear(), String(validDate.getMonth() + 1).padStart(2, "0"), String(validDate.getDate()).padStart(2, "0")].join("-");
+    const localCaptureDate = localCalendarDate(photo.metadata?.capturedAtLocal);
+    const takenAt = new Date(photo.takenAt);
+    const validDate = localCaptureDate ?? (Number.isFinite(takenAt.getTime()) ? takenAt : new Date(photo.mtimeMs));
+    const key = localCaptureDate
+      ? photo.metadata!.capturedAtLocal!.slice(0, 10)
+      : [validDate.getFullYear(), String(validDate.getMonth() + 1).padStart(2, "0"), String(validDate.getDate()).padStart(2, "0")].join("-");
     const previous = groups.at(-1);
     if (previous?.key === key) previous.photos.push(photo);
     else groups.push({ key, label: formatter.format(validDate), photos: [photo] });
@@ -628,13 +934,182 @@ export function groupPhotosByDate(photos: PhotoAsset[], locale: SupportedLocale)
   return groups;
 }
 
+function localCalendarDate(value: string | null | undefined): Date | null {
+  const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})T/u);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day, 12);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day ? date : null;
+}
+
 export function photoMediaKindForAsset(photo: Pick<PhotoAsset, "name" | "mimeType">): PhotoMediaKind {
   return photoMediaKind(photo.name) ?? (photo.mimeType.startsWith("video/") ? "video" : "image");
 }
 
-function mergePhotos(current: PhotoAsset[], incoming: PhotoAsset[]): PhotoAsset[] {
+function PhotoFacetSelect({
+  label,
+  options,
+  selected,
+  allLabel,
+  selectedLabel,
+  onChange
+}: {
+  label: string;
+  options: Array<{ value: string; count: number }>;
+  selected: string[];
+  allLabel: string;
+  selectedLabel: (count: number) => string;
+  onChange: (value: string[] | undefined) => void;
+}) {
+  const summary = selected.length === 0
+    ? allLabel
+    : selected.length === 1
+      ? selected[0]!
+      : selectedLabel(selected.length);
+  return (
+    <label className="photo-facet-filter">
+      <span>{label}</span>
+      <select
+        value=""
+        aria-label={label}
+        onChange={(event) => {
+          const value = event.target.value;
+          if (value === "__clear__") onChange(undefined);
+          else if (value) onChange(togglePhotoFacetValue(selected, value));
+        }}
+      >
+        <option value="" disabled>{summary}</option>
+        {selected.length ? <option value="__clear__">{allLabel}</option> : null}
+        {options.map((item) => (
+          <option key={item.value} value={item.value}>
+            {selected.includes(item.value) ? "[x] " : ""}{item.value} ({item.count})
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+export function togglePhotoFacetValue<T extends string>(selected: T[] | undefined, value: T): T[] | undefined {
+  const current = selected ?? [];
+  const next = current.includes(value)
+    ? current.filter((entry) => entry !== value)
+    : [...current, value];
+  return next.length ? next : undefined;
+}
+
+function samePhotoMetadataFields(left: PhotoMetadataField[], right: PhotoMetadataField[]): boolean {
+  return left.length === right.length && left.every((field, index) => {
+    const other = right[index];
+    return other !== undefined && field.key === other.key && field.valueType === other.valueType &&
+      field.count === other.count && field.sensitive === other.sensitive;
+  });
+}
+
+export function readyPhotoQueryFilters(
+  filters: PhotoQueryFilters,
+  metadataFields: PhotoMetadataField[] = []
+): PhotoQueryFilters {
+  const advanced = filters.advanced;
+  if (!advanced) return filters;
+  const conditions: PhotoMetadataCondition[] = [];
+  for (const condition of advanced.conditions) {
+    if (condition.operator === "exists" || condition.operator === "not_exists") {
+      conditions.push(condition);
+      continue;
+    }
+    const values = Array.isArray(condition.value) ? condition.value : [condition.value];
+    if (!values.length || values.some((value) => value === undefined || String(value).trim() === "")) continue;
+    if (condition.operator === "between" && (condition.valueTo === undefined || String(condition.valueTo).trim() === "")) continue;
+    const valueType = metadataFields.find((field) => field.key === condition.key)?.valueType;
+    const coercedValues = values.map((value) => value === undefined ? undefined : coerceMetadataScalar(value, valueType));
+    if (coercedValues.some((value) => value === undefined)) continue;
+    const valueTo = condition.valueTo === undefined ? undefined : coerceMetadataScalar(condition.valueTo, valueType);
+    if (condition.valueTo !== undefined && valueTo === undefined) continue;
+    const nextCondition: PhotoMetadataCondition = {
+      ...condition,
+      value: Array.isArray(condition.value)
+        ? coercedValues as Array<string | number | boolean>
+        : coercedValues[0] as string | number | boolean
+    };
+    if (valueTo !== undefined && typeof valueTo !== "boolean") nextCondition.valueTo = valueTo;
+    conditions.push(nextCondition);
+  }
+  if (!conditions.length) {
+    const { advanced: _advanced, ...rest } = filters;
+    return rest;
+  }
+  return { ...filters, advanced: { ...advanced, conditions } };
+}
+
+function coerceMetadataScalar(
+  value: string | number | boolean,
+  valueType: PhotoMetadataField["valueType"] | undefined
+): string | number | boolean | undefined {
+  if (valueType === "number") {
+    const parsed = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  if (valueType === "boolean") {
+    if (typeof value === "boolean") return value;
+    const normalized = String(value).trim().toLowerCase();
+    if (normalized === "true" || normalized === "1") return true;
+    if (normalized === "false" || normalized === "0") return false;
+    return undefined;
+  }
+  return value;
+}
+
+function mergePhotos(current: PhotoQueryAsset[], incoming: PhotoQueryAsset[]): PhotoQueryAsset[] {
   const ids = new Set(current.map((photo) => photo.id));
   return [...current, ...incoming.filter((photo) => !ids.has(photo.id))];
+}
+
+function numberRange(
+  min: string | number | undefined,
+  max: string | number | undefined
+): { min?: number; max?: number } | undefined {
+  const minValue = min === "" || min === undefined ? undefined : Number(min);
+  const maxValue = max === "" || max === undefined ? undefined : Number(max);
+  if (minValue === undefined && maxValue === undefined) return undefined;
+  return {
+    ...(minValue !== undefined && Number.isFinite(minValue) ? { min: minValue } : {}),
+    ...(maxValue !== undefined && Number.isFinite(maxValue) ? { max: maxValue } : {})
+  };
+}
+
+function dateRange(
+  from: string | undefined,
+  to: string | undefined
+): { from?: string; to?: string } | undefined {
+  const fromDate = from?.slice(0, 10) || undefined;
+  const toDate = to?.slice(0, 10) || undefined;
+  if (!fromDate && !toDate) return undefined;
+  return {
+    ...(fromDate ? { from: `${fromDate}T00:00:00` } : {}),
+    ...(toDate ? { to: `${toDate}T23:59:59.999` } : {})
+  };
+}
+
+function metadataOperatorOptions(translate: (key: string) => string): Array<{
+  value: PhotoMetadataCondition["operator"];
+  label: string;
+}> {
+  return [
+    ["eq", "equals"], ["contains", "contains"], ["prefix", "prefix"], ["in", "oneOf"],
+    ["exists", "exists"], ["not_exists", "notExists"], ["lt", "lessThan"],
+    ["lte", "lessOrEqual"], ["gt", "greaterThan"], ["gte", "greaterOrEqual"], ["between", "between"]
+  ].map(([value, label]) => ({
+    value: value as PhotoMetadataCondition["operator"],
+    label: translate(`workspace.photos.operators.${label}`)
+  }));
+}
+
+function formatExposure(seconds: number): string {
+  if (seconds >= 1) return `${seconds.toFixed(seconds % 1 ? 1 : 0)} s`;
+  return `1/${Math.max(1, Math.round(1 / seconds))} s`;
 }
 
 function formatPhotoDateTime(value: string, locale: SupportedLocale): string {

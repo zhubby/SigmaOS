@@ -6,14 +6,16 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   claimNextPhotoJob,
   createSession,
+  enqueuePhotoJob,
   ensureNasRoots,
   finishPhotoJob,
   getPhotoLibrarySettings,
   openSigmaDb,
   upsertPhotoAsset,
+  type PhotoMetadataWriteInput,
   type SigmaDatabase
 } from "@sigmaos/db";
-import type { PhotoLibrarySettingsRecord, SigmaConfig } from "@sigmaos/shared";
+import { PHOTO_METADATA_SCHEMA_VERSION, type PhotoLibrarySettingsRecord, type SigmaConfig } from "@sigmaos/shared";
 import { buildServer } from "../server.js";
 
 const poolId = "/dev/md/test-photos";
@@ -48,6 +50,33 @@ describe("photo API", () => {
     const second = await app.inject({ method: "GET", url: `/api/photos?limit=1&cursor=${encodeURIComponent(first.json().nextCursor)}` });
     expect(second.json().photos.map((photo: { name: string }) => photo.name)).toEqual(["two.jpg"]);
     expect((await app.inject({ method: "GET", url: "/api/photos?cursor=bad" })).statusCode).toBe(400);
+    await app.close();
+  });
+
+  it("paginates filename sorting with the same SQLite case folding used by the cursor", async () => {
+    const { app, root } = await setup();
+    await configure(app);
+    const settings = getPhotoLibrarySettings(db!)!;
+    completeInitialScan(settings);
+    await addPhoto(root, settings, "Ä-first.jpg", "2025-01-02T00:00:00.000Z");
+    await addPhoto(root, settings, "Ö-second.jpg", "2025-01-01T00:00:00.000Z");
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/photos/query",
+      payload: { sort: { field: "name", direction: "asc" }, limit: 1 }
+    });
+    expect(first.json().photos.map((photo: { name: string }) => photo.name)).toEqual(["Ä-first.jpg"]);
+    const second = await app.inject({
+      method: "POST",
+      url: "/api/photos/query",
+      payload: {
+        sort: { field: "name", direction: "asc" },
+        limit: 1,
+        cursor: first.json().nextCursor
+      }
+    });
+    expect(second.json().photos.map((photo: { name: string }) => photo.name)).toEqual(["Ö-second.jpg"]);
     await app.close();
   });
 
@@ -297,6 +326,178 @@ describe("photo API", () => {
     expect(response.json().error).toContain("same target");
     await app.close();
   });
+
+  it("queries indexed metadata with stable cursors and redacts sensitive details by default", async () => {
+    const { app, root } = await setup();
+    await configure(app);
+    const settings = getPhotoLibrarySettings(db!)!;
+    completeInitialScan(settings);
+    const first = await addPhoto(
+      root,
+      settings,
+      "metadata-one.jpg",
+      "2025-01-02T00:00:00.000Z",
+      Buffer.from("metadata-one"),
+      "image/jpeg",
+      indexedMetadata({ cameraModel: "Alpha 1", iso: 800, gpsLatitude: 31.23, gpsLongitude: 121.47 })
+    );
+    await addPhoto(
+      root,
+      settings,
+      "metadata-two.jpg",
+      "2025-01-01T00:00:00.000Z",
+      Buffer.from("metadata-two"),
+      "image/jpeg",
+      indexedMetadata({ cameraModel: "Alpha 7", iso: 100 })
+    );
+
+    const query = await app.inject({
+      method: "POST",
+      url: "/api/photos/query",
+      payload: {
+        filters: { iso: { min: 400 } },
+        sort: { field: "captured_at", direction: "desc" },
+        includeFacets: true,
+        limit: 1
+      }
+    });
+    expect(query.statusCode).toBe(200);
+    expect(query.json()).toMatchObject({
+      total: 1,
+      photos: [{ id: first.id, metadata: { cameraModel: "Alpha 1", hasLocation: true } }],
+      metadataIndex: { total: 2, indexed: 2, pending: 0 }
+    });
+    const firstPage = await app.inject({
+      method: "POST",
+      url: "/api/photos/query",
+      payload: { sort: { field: "name", direction: "asc" }, limit: 1, includeFacets: true }
+    });
+    expect(firstPage.json().nextCursor).toEqual(expect.any(String));
+    const secondPage = await app.inject({
+      method: "POST",
+      url: "/api/photos/query",
+      payload: { sort: { field: "name", direction: "asc" }, limit: 2, includeFacets: false, cursor: firstPage.json().nextCursor }
+    });
+    expect(secondPage.statusCode).toBe(200);
+    expect(secondPage.json().photos[0].id).not.toBe(firstPage.json().photos[0].id);
+    const mismatchedCursor = await app.inject({
+      method: "POST",
+      url: "/api/photos/query",
+      payload: { filters: { text: "different" }, sort: { field: "name", direction: "asc" }, limit: 1, cursor: firstPage.json().nextCursor }
+    });
+    expect(mismatchedCursor.statusCode).toBe(400);
+
+    const fields = await app.inject({ method: "GET", url: "/api/photos/metadata/fields?q=ISO" });
+    expect(fields.json().fields).toContainEqual(expect.objectContaining({ key: "exif.ISO", count: 2 }));
+    const redacted = await app.inject({ method: "GET", url: `/api/photos/${first.id}/metadata` });
+    expect(redacted.json().metadata).toMatchObject({ sensitiveOmitted: true });
+    expect(redacted.json().metadata.sensitiveGroups).toBeUndefined();
+    const revealed = await app.inject({ method: "GET", url: `/api/photos/${first.id}/metadata?includeSensitive=1` });
+    expect(revealed.json().metadata.sensitiveGroups.exif.GPSLatitude).toEqual([31.23]);
+
+    const tooManyConditions = await app.inject({
+      method: "POST",
+      url: "/api/photos/query",
+      payload: {
+        filters: {
+          advanced: {
+            mode: "all",
+            conditions: Array.from({ length: 26 }, () => ({ key: "exif.ISO", operator: "exists" }))
+          }
+        }
+      }
+    });
+    expect(tooManyConditions.statusCode).toBe(400);
+    const unknownField = await app.inject({
+      method: "POST",
+      url: "/api/photos/query",
+      payload: { filters: { iso: { min: 100, typo: true } } }
+    });
+    expect(unknownField.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it("uploads XMP sidecars, pairs them for operations and exports, and serves local PMTiles ranges", async () => {
+    const { app, root } = await setup();
+    await configure(app);
+    const settings = getPhotoLibrarySettings(db!)!;
+    completeInitialScan(settings);
+    const first = await addPhoto(root, settings, "paired.jpg", "2025-01-02T00:00:00.000Z");
+    const second = await addPhoto(root, settings, "other.jpg", "2025-01-01T00:00:00.000Z");
+    const runningRefresh = enqueuePhotoJob(db!, { settings, kind: "path_refresh", path: settings.path });
+    expect(claimNextPhotoJob(db!, { workerId: "upload-race", leaseMs: 30_000 })?.id).toBe(runningRefresh.id);
+    const sidecarBody = Buffer.from("<x:xmpmeta>paired</x:xmpmeta>");
+    const upload = await app.inject({
+      method: "PUT",
+      url: "/api/photos/upload?name=paired.jpg.xmp",
+      headers: { "content-type": "application/octet-stream" },
+      payload: sidecarBody
+    });
+    expect(upload.statusCode).toBe(201);
+    finishPhotoJob(db!, { id: runningRefresh.id, workerId: "upload-race" });
+    expect(claimNextPhotoJob(db!, { workerId: "follow-up", leaseMs: 30_000 })).toMatchObject({
+      kind: "path_refresh",
+      path: settings.path,
+      status: "running"
+    });
+
+    const session = createSession(db!, { rootId: "local" });
+    const proposal = await app.inject({
+      method: "POST",
+      url: "/api/photos/proposals",
+      payload: { sessionId: session.id, assetIds: [first.id], operation: "trash" }
+    });
+    expect(proposal.statusCode).toBe(202);
+    expect(proposal.json().approval.proposal.map((item: { sourcePath: string }) => item.sourcePath)).toEqual([
+      path.join("Photos", "paired.jpg"),
+      path.join("Photos", "paired.jpg.xmp")
+    ]);
+
+    const exportRequest = await app.inject({
+      method: "POST",
+      url: "/api/photos/exports",
+      payload: { assetIds: [first.id, second.id] }
+    });
+    const archive = await app.inject({ method: "GET", url: exportRequest.json().url });
+    expect(archive.rawPayload.includes(Buffer.from("paired.jpg.xmp"))).toBe(true);
+
+    const rasterPath = path.join(root, "Photos", "offline.pmtiles");
+    await writeFile(rasterPath, pmtilesFixture(2));
+    const mapSettings = await app.inject({
+      method: "PUT",
+      url: "/api/photos/map/settings",
+      payload: { rootId: "local", storagePoolId: poolId, path: path.join("Photos", "offline.pmtiles") }
+    });
+    expect(mapSettings.statusCode).toBe(200);
+    expect(mapSettings.json().settings).toMatchObject({ tileType: "png", minZoom: 0, maxZoom: 4 });
+    const range = await app.inject({
+      method: "GET",
+      url: "/api/photos/map/archive",
+      headers: { range: "bytes=0-7" }
+    });
+    expect(range.statusCode).toBe(206);
+    expect(range.rawPayload.toString()).toBe("PMTiles\u0003");
+
+    await writeFile(rasterPath, pmtilesFixture(1));
+    const replacedArchive = await app.inject({ method: "GET", url: "/api/photos/map/archive" });
+    expect(replacedArchive.statusCode).toBe(503);
+
+    await writeFile(path.join(root, "Photos", "vector.pmtiles"), pmtilesFixture(1));
+    const vector = await app.inject({
+      method: "PUT",
+      url: "/api/photos/map/settings",
+      payload: { rootId: "local", storagePoolId: poolId, path: path.join("Photos", "vector.pmtiles") }
+    });
+    expect(vector.statusCode).toBe(400);
+    expect(vector.json().error).toContain("raster");
+    await writeFile(path.join(root, "Photos", "broken.pmtiles"), "broken");
+    expect((await app.inject({
+      method: "PUT",
+      url: "/api/photos/map/settings",
+      payload: { rootId: "local", storagePoolId: poolId, path: path.join("Photos", "broken.pmtiles") }
+    })).statusCode).toBe(400);
+    await app.close();
+  });
 });
 
 async function setup(storageState = { mounted: true }) {
@@ -330,7 +531,8 @@ async function addPhoto(
   name: string,
   takenAt: string,
   body = Buffer.from(name),
-  mimeType = "image/jpeg"
+  mimeType = "image/jpeg",
+  metadata?: PhotoMetadataWriteInput
 ) {
   const photoPath = path.join(root, "Photos", name);
   await mkdir(path.dirname(photoPath), { recursive: true });
@@ -352,8 +554,100 @@ async function addPhoto(
     thumbnailKey: `thumbnail/${fileName}.webp`,
     previewKey: `preview/${fileName}.webp`,
     status: "ready",
-    error: null
+    error: null,
+    ...(metadata ? { metadata } : {})
   });
+}
+
+function indexedMetadata(overrides: {
+  cameraModel: string;
+  iso: number;
+  gpsLatitude?: number;
+  gpsLongitude?: number;
+}): PhotoMetadataWriteInput {
+  const latitude = overrides.gpsLatitude ?? null;
+  const longitude = overrides.gpsLongitude ?? null;
+  return {
+    schemaVersion: PHOTO_METADATA_SCHEMA_VERSION,
+    status: "ready",
+    mediaKind: "image",
+    capturedAt: "2025-01-02T00:00:00.000Z",
+    capturedAtLocal: "2025-01-02T08:00:00",
+    captureOffsetMinutes: 480,
+    captureSource: "exif",
+    durationMs: null,
+    container: null,
+    videoCodec: null,
+    audioCodec: null,
+    cameraMake: "Sony",
+    cameraModel: overrides.cameraModel,
+    software: null,
+    bodySerial: null,
+    lensMake: "Sony",
+    lensModel: "35mm F1.4",
+    lensSerial: null,
+    iso: overrides.iso,
+    exposureTimeSeconds: 0.01,
+    aperture: 2.8,
+    focalLengthMm: 35,
+    focalLength35Mm: 35,
+    exposureBiasEv: 0,
+    exposureProgram: null,
+    meteringMode: null,
+    flash: null,
+    whiteBalance: null,
+    title: null,
+    description: null,
+    creator: null,
+    copyright: null,
+    rating: 4,
+    gpsLatitude: latitude,
+    gpsLongitude: longitude,
+    gpsAltitudeM: null,
+    gpsDirectionDeg: null,
+    rawMetadata: {
+      exif: {
+        ISO: [overrides.iso],
+        ...(latitude !== null ? { GPSLatitude: [latitude] } : {}),
+        ...(longitude !== null ? { GPSLongitude: [longitude] } : {})
+      }
+    },
+    warnings: [],
+    keywords: ["Travel"],
+    values: [
+      { source: "exif", key: "exif.ISO", valueType: "number", value: overrides.iso, sensitive: false, ordinal: 0 },
+      ...(latitude !== null ? [{ source: "exif", key: "exif.GPSLatitude", valueType: "number" as const, value: latitude, sensitive: true, ordinal: 0 }] : []),
+      ...(longitude !== null ? [{ source: "exif", key: "exif.GPSLongitude", valueType: "number" as const, value: longitude, sensitive: true, ordinal: 0 }] : [])
+    ],
+    sidecarPath: null,
+    sidecarSizeBytes: null,
+    sidecarMtimeMs: null
+  };
+}
+
+function pmtilesFixture(tileType: 1 | 2): Buffer {
+  const buffer = Buffer.alloc(128);
+  buffer.write("PMTiles", 0, "ascii");
+  buffer.writeUInt8(3, 7);
+  buffer.writeBigUInt64LE(127n, 8);
+  buffer.writeBigUInt64LE(1n, 16);
+  buffer.writeBigUInt64LE(128n, 24);
+  buffer.writeBigUInt64LE(0n, 32);
+  buffer.writeBigUInt64LE(128n, 40);
+  buffer.writeBigUInt64LE(0n, 48);
+  buffer.writeBigUInt64LE(128n, 56);
+  buffer.writeBigUInt64LE(0n, 64);
+  buffer.writeUInt8(1, 97);
+  buffer.writeUInt8(1, 98);
+  buffer.writeUInt8(tileType, 99);
+  buffer.writeUInt8(0, 100);
+  buffer.writeUInt8(4, 101);
+  buffer.writeInt32LE(-1800000000, 102);
+  buffer.writeInt32LE(-850000000, 106);
+  buffer.writeInt32LE(1800000000, 110);
+  buffer.writeInt32LE(850000000, 114);
+  buffer.writeUInt8(2, 118);
+  return buffer;
 }
 
 function testConfig(root: string): SigmaConfig {

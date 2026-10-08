@@ -17,14 +17,18 @@ Agent 事件通过 session SSE stream 传递；terminal、Docker console 和 VM 
 
 - `GET/PUT /api/photos/settings` 读取或设置唯一照片库。设置请求必须携带 `rootId`、`storagePoolId` 和池内现有目录；变更后旧索引失效并排队完整扫描。
 - `GET /api/photos` 使用不透明 cursor 返回按 `takenAt DESC, id DESC` 稳定排序的页面；`GET /api/photos/status` 返回 `unconfigured/queued/scanning/ready/degraded/offline` 状态，`POST /api/photos/scans` 排队手动扫描。
+- `POST /api/photos/query` 接收最多 64 KiB、25 个高级条件，支持文本、日期、媒体类型、相机、镜头、曝光、评分、关键词、位置和任意标量字段。排序 cursor 绑定查询指纹；响应包含精确总数、元数据升级进度、排除自身条件的分类分面和当前结果的数值范围。
+- `GET /api/photos/metadata/fields` 返回可查询字段目录；`GET /api/photos/:id/metadata` 默认排除 GPS、设备/镜头序列号、联系信息和人物区域，只有显式 `includeSensitive=1` 才返回敏感组。
+- `POST /api/photos/map/query` 在视口内返回最多 4096 个本地聚合点。地理查询先用 RTree 缩小候选，再用规范坐标或 Haversine 精确计算，支持反经线；距离排序必须提供附近查询中心。
+- `GET/PUT /api/photos/map/settings` 读取或配置 NAS 上的栅格 PNG/JPEG/WebP PMTiles；`GET /api/photos/map/archive` 重新验证挂载和路径后提供 Range 流。矢量、损坏、越界或离线归档会被拒绝。
 - `GET /api/photos/:id/thumbnail|preview|original` 只解析当前照片库中的资源。缩略图和预览来自 data directory 的 hash-addressed WebP cache；GIF preview 保留动画原文件，视频 preview 是首帧海报。
 - `GET /api/photos/:id/video` 为视频资源提供带 Range 的播放流；MP4/WebM 直接流式返回，其他支持容器通过 FFmpeg 缓存为 MP4。
-- `PUT /api/photos/upload` 使用 `application/octet-stream`，查询参数传文件名和可选目录。服务端限制 512 MiB、原子发布并按 SHA-256 拒绝当前库中的重复内容；支持常见图片、视频和 RAW 扩展名。
+- `PUT /api/photos/upload` 使用 `application/octet-stream`，查询参数传文件名和可选目录。媒体限制 512 MiB、原子发布并按 SHA-256 拒绝当前库中的重复内容；XMP sidecar 限制 16 MiB。
 - Photos 支持图片 `.jpg`、`.jpeg`、`.png`、`.webp`、`.gif`、`.heic`、`.heif`，视频 `.mp4`、`.mov`、`.m4v`、`.avi`、`.mkv`、`.webm`、`.mpeg`、`.mpg`，以及 RAW `.cr2`、`.cr3`、`.crw`、`.nef`、`.nrw`、`.arw`、`.srf`、`.sr2`、`.dng`、`.raf`、`.orf`、`.rw2`、`.pef`、`.rwl`、`.3fr`、`.x3f`、`.erf`、`.kdc`、`.mos`、`.mrw`、`.bay`。
-- `POST /api/photos/exports` 为单张原图或最多 100 张照片的短时 ZIP 创建下载地址；ZIP token 使用一次后失效。
-- `POST /api/photos/proposals` 为最多 100 张照片创建一组 move 或 trash 文件提案。目标必须仍在照片库内，执行前继续走现有 approval，不提供绕过入口。
+- `POST /api/photos/exports` 为单张原图或最多 100 张照片的短时 ZIP 创建下载地址；ZIP 会去重并包含关联 XMP，单张 original 仍只返回原媒体字节，token 使用一次后失效。
+- `POST /api/photos/proposals` 为最多 100 张照片创建一组 move 或 trash 文件提案，并去重加入关联 XMP。目标必须仍在照片库内，执行前继续走现有 approval，不提供绕过入口。
 
-JPEG、PNG、WebP、GIF、HEIC、HEIF、常见视频和 RAW 由照片 worker 处理。视频缩略图由 FFmpeg 提取首帧，RAW 缩略图由 `dcraw_emu` 渲染。原图、视频流和文件变更每次访问都重新经过 root、storage pool、挂载、遍历和 symlink 校验；当前配置版本的缓存 WebP 缩略图与预览可以在存储池离线时继续读取。不要把索引记录当成原文件存在性的授权依据。
+JPEG、PNG、WebP、GIF、HEIC、HEIF、常见视频和 RAW 由照片 worker 处理。`exifr` 提取 EXIF/IPTC/XMP/ICC/JFIF/RAW 标量，视频复用一次完整 `ffprobe`；同目录精确媒体名和同 stem XMP 按确定性规则关联。视频缩略图由 FFmpeg 提取首帧，RAW 缩略图由 `dcraw_emu` 渲染。原图、视频流和文件变更每次访问都重新经过 root、storage pool、挂载、遍历和 symlink 校验；当前配置版本的缓存 WebP 缩略图与预览可以在存储池离线时继续读取。不要把索引记录当成原文件存在性的授权依据。
 
 ## Wi-Fi 与热点
 

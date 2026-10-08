@@ -8,6 +8,7 @@ import {
   FolderPlus,
   HardDrive,
   LoaderCircle,
+  Map as MapIcon,
   RefreshCw,
   X
 } from "lucide-react";
@@ -47,7 +48,7 @@ export function StorageFilePickerDialog({
   pools: StorageFilePickerPool[];
   initialPoolId: string;
   locale: SupportedLocale;
-  mode?: "iso" | "directory";
+  mode?: "iso" | "directory" | "pmtiles";
   directoryPurpose?: "downloads" | "photoMove";
   initialPath?: string;
   boundaryPath?: string;
@@ -92,6 +93,25 @@ export function StorageFilePickerDialog({
         empty: t("workspace.downloads.directoryPickerEmpty"),
         select: t("workspace.downloads.selectCurrentDirectory")
       };
+  const fileCopy = mode === "pmtiles"
+    ? {
+        eyebrow: t("workspace.photos.mapArchive"),
+        title: t("workspace.photos.mapPickerTitle"),
+        description: t("workspace.photos.mapPickerDescription"),
+        list: t("workspace.photos.mapPickerFiles"),
+        empty: t("workspace.photos.mapPickerEmpty"),
+        none: t("workspace.photos.mapPickerNone"),
+        select: t("workspace.photos.mapPickerSelect")
+      }
+    : {
+        eyebrow: t("workspace.management.virtualMachines.createIsoSource"),
+        title: t("workspace.management.virtualMachines.isoPickerTitle"),
+        description: t("workspace.management.virtualMachines.isoPickerDescription"),
+        list: t("workspace.management.virtualMachines.isoPickerFiles"),
+        empty: t("workspace.management.virtualMachines.isoPickerEmpty"),
+        none: t("workspace.management.virtualMachines.isoPickerNoneSelected"),
+        select: t("workspace.management.virtualMachines.isoPickerSelect")
+      };
   const pickerRootPath = boundaryPath && selectedPool?.id === initialPool?.id ? boundaryPath : selectedPool?.path ?? ".";
 
   const loadDirectory = useCallback(async () => {
@@ -105,7 +125,11 @@ export function StorageFilePickerDialog({
     try {
       const listing = await getFiles(selectedPool.rootId, currentPath, selectedPool.id);
       if (requestId !== loadRequestId.current) return;
-      setEntries(listing.entries.filter((entry) => mode === "directory" ? isDirectoryPickerEntry(entry) : isIsoPickerEntry(entry)));
+      setEntries(listing.entries.filter((entry) => mode === "directory"
+        ? isDirectoryPickerEntry(entry)
+        : mode === "pmtiles"
+          ? isPmtilesPickerEntry(entry)
+          : isIsoPickerEntry(entry)));
     } catch (nextError) {
       if (requestId !== loadRequestId.current) return;
       setEntries([]);
@@ -251,22 +275,22 @@ export function StorageFilePickerDialog({
       >
         <header className="storage-file-picker-header">
           <div className="storage-file-picker-heading">
-            <span className="vm-create-icon" aria-hidden="true">{mode === "directory" ? <FolderOpen size={20} /> : <Disc3 size={20} />}</span>
+            <span className="vm-create-icon" aria-hidden="true">{mode === "directory" ? <FolderOpen size={20} /> : mode === "pmtiles" ? <MapIcon size={20} /> : <Disc3 size={20} />}</span>
             <div>
               <span className="eyebrow">
                 {mode === "directory"
                   ? directoryCopy.eyebrow
-                  : t("workspace.management.virtualMachines.createIsoSource")}
+                  : fileCopy.eyebrow}
               </span>
               <h3 id="storage-file-picker-title">
                 {mode === "directory"
                   ? directoryCopy.title
-                  : t("workspace.management.virtualMachines.isoPickerTitle")}
+                  : fileCopy.title}
               </h3>
               <p>
                 {mode === "directory"
                   ? directoryCopy.description
-                  : t("workspace.management.virtualMachines.isoPickerDescription")}
+                  : fileCopy.description}
               </p>
             </div>
           </div>
@@ -276,7 +300,7 @@ export function StorageFilePickerDialog({
             onClick={onCancel}
             aria-label={mode === "directory"
               ? t("common.actions.close")
-              : t("workspace.management.virtualMachines.isoPickerClose")}
+              : mode === "pmtiles" ? t("common.actions.close") : t("workspace.management.virtualMachines.isoPickerClose")}
           >
             <X aria-hidden="true" size={16} />
           </button>
@@ -322,7 +346,7 @@ export function StorageFilePickerDialog({
           <section className="storage-file-picker-browser">
             <div className="storage-file-picker-toolbar">
               <div className="storage-file-picker-location">
-                <span>{mode === "directory" ? directoryCopy.eyebrow : t("workspace.management.virtualMachines.isoPickerFiles")}</span>
+                <span>{mode === "directory" ? directoryCopy.eyebrow : fileCopy.list}</span>
                 <nav className="storage-file-picker-breadcrumbs" aria-label={t("workspace.breadcrumbs")}>
                   {selectedPool ? (
                     <button type="button" onClick={() => openDirectory(pickerRootPath)}>
@@ -381,7 +405,7 @@ export function StorageFilePickerDialog({
               role="listbox"
               aria-label={mode === "directory"
                 ? directoryCopy.list
-                : t("workspace.management.virtualMachines.isoPickerFiles")}
+                : fileCopy.list}
             >
               {loading ? (
                 <div className="storage-file-picker-state"><LoaderCircle className="is-spinning" aria-hidden="true" size={19} /><span>{t("common.states.loading")}</span></div>
@@ -394,8 +418,8 @@ export function StorageFilePickerDialog({
                 <div className="storage-file-picker-state"><HardDrive aria-hidden="true" size={19} /><span>{t("workspace.management.virtualMachines.isoPickerNoPools")}</span></div>
               ) : entries.length === 0 ? (
                 <div className="storage-file-picker-state">
-                  {mode === "directory" ? <Folder aria-hidden="true" size={19} /> : <Disc3 aria-hidden="true" size={19} />}
-                  <span>{mode === "directory" ? directoryCopy.empty : t("workspace.management.virtualMachines.isoPickerEmpty")}</span>
+                  {mode === "directory" ? <Folder aria-hidden="true" size={19} /> : mode === "pmtiles" ? <MapIcon aria-hidden="true" size={19} /> : <Disc3 aria-hidden="true" size={19} />}
+                  <span>{mode === "directory" ? directoryCopy.empty : fileCopy.empty}</span>
                 </div>
               ) : (
                 entries.map((entry) => {
@@ -411,7 +435,7 @@ export function StorageFilePickerDialog({
                       onClick={() => isDirectory ? openDirectory(entry.path) : setSelection(entry)}
                     >
                       <span className="storage-file-picker-file-icon" data-kind={isDirectory ? "directory" : "iso"}>
-                        {isDirectory ? <Folder aria-hidden="true" size={17} /> : <Disc3 aria-hidden="true" size={17} />}
+                        {isDirectory ? <Folder aria-hidden="true" size={17} /> : mode === "pmtiles" ? <MapIcon aria-hidden="true" size={17} /> : <Disc3 aria-hidden="true" size={17} />}
                       </span>
                       <span className="storage-file-picker-file-name">{entry.name}</span>
                       <span className="storage-file-picker-file-meta">
@@ -434,12 +458,12 @@ export function StorageFilePickerDialog({
           {mode === "directory" ? (
             <span title={currentPath}>{currentPath}</span>
           ) : (
-            <span title={selection?.path}>{selection?.name ?? t("workspace.management.virtualMachines.isoPickerNoneSelected")}</span>
+            <span title={selection?.path}>{selection?.name ?? fileCopy.none}</span>
           )}
           <div>
             <button type="button" onClick={onCancel}>{t("common.actions.cancel")}</button>
-            <button type="button" className="vm-create-submit" onClick={confirmSelection} disabled={mode === "iso" && !selection}>
-              {mode === "directory" ? directoryCopy.select : t("workspace.management.virtualMachines.isoPickerSelect")}
+            <button type="button" className="vm-create-submit" onClick={confirmSelection} disabled={mode !== "directory" && !selection}>
+              {mode === "directory" ? directoryCopy.select : fileCopy.select}
             </button>
           </div>
         </footer>
@@ -454,6 +478,10 @@ export function isIsoPickerEntry(entry: FileEntry): boolean {
 
 export function isDirectoryPickerEntry(entry: FileEntry): boolean {
   return entry.isSafe && entry.kind === "directory";
+}
+
+export function isPmtilesPickerEntry(entry: FileEntry): boolean {
+  return entry.isSafe && (entry.kind === "directory" || (entry.kind === "file" && entry.name.toLowerCase().endsWith(".pmtiles")));
 }
 
 export function parentPickerPath(poolPath: string, currentPath: string): string {

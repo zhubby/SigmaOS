@@ -16,7 +16,7 @@ import {
 } from "@sigmaos/db";
 import type { SigmaConfig } from "@sigmaos/shared";
 import { MAX_PHOTO_BYTES } from "./media.js";
-import { processPhotoJob } from "./processor.js";
+import { buildPhotoSidecarAssociations, processPhotoJob } from "./processor.js";
 
 let tempDir: string | null = null;
 let db: SigmaDatabase | null = null;
@@ -29,6 +29,19 @@ afterEach(async () => {
 });
 
 describe("photo worker", () => {
+  it("associates exact XMP sidecars and resolves same-stem RAW/JPEG ambiguity to RAW", () => {
+    const associations = buildPhotoSidecarAssociations([
+      "IMG_1.CR3",
+      "IMG_1.JPG",
+      "IMG_1.xmp",
+      "IMG_2.JPG",
+      "IMG_2.JPG.XMP"
+    ]);
+    expect(associations.get("IMG_1.CR3")).toEqual({ sidecarName: "IMG_1.xmp", warning: null });
+    expect(associations.get("IMG_1.JPG")?.sidecarName).toBeNull();
+    expect(associations.get("IMG_1.JPG")?.warning).toContain("Ambiguous XMP sidecar");
+    expect(associations.get("IMG_2.JPG")).toEqual({ sidecarName: "IMG_2.JPG.XMP", warning: null });
+  });
   it("scans a configured library and generates timeline derivatives", async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-photo-worker-"));
     const root = path.join(tempDir, "nas");

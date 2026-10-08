@@ -370,5 +370,135 @@ export const productionMigrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_photo_upload_reservations_created_at
         ON photo_upload_reservations(library_updated_at, created_at);
     `
+  },
+  {
+    id: "019_photo_metadata_index",
+    sql: `
+      CREATE TABLE IF NOT EXISTS photo_asset_metadata (
+        asset_id TEXT PRIMARY KEY REFERENCES photo_assets(id) ON DELETE CASCADE,
+        schema_version INTEGER NOT NULL CHECK (schema_version > 0),
+        status TEXT NOT NULL CHECK (status IN ('ready', 'partial')),
+        media_kind TEXT NOT NULL CHECK (media_kind IN ('image', 'video', 'raw')),
+        captured_at TEXT,
+        captured_at_local TEXT,
+        capture_offset_minutes INTEGER,
+        capture_source TEXT NOT NULL CHECK (
+          capture_source IN ('sidecar_xmp', 'embedded_xmp', 'iptc', 'exif', 'video', 'file_mtime')
+        ),
+        duration_ms INTEGER CHECK (duration_ms IS NULL OR duration_ms >= 0),
+        container TEXT,
+        video_codec TEXT,
+        audio_codec TEXT,
+        camera_make TEXT,
+        camera_model TEXT,
+        software TEXT,
+        body_serial TEXT,
+        lens_make TEXT,
+        lens_model TEXT,
+        lens_serial TEXT,
+        iso REAL CHECK (iso IS NULL OR iso >= 0),
+        exposure_time_seconds REAL CHECK (exposure_time_seconds IS NULL OR exposure_time_seconds >= 0),
+        aperture REAL CHECK (aperture IS NULL OR aperture >= 0),
+        focal_length_mm REAL CHECK (focal_length_mm IS NULL OR focal_length_mm >= 0),
+        focal_length_35_mm REAL CHECK (focal_length_35_mm IS NULL OR focal_length_35_mm >= 0),
+        exposure_bias_ev REAL,
+        exposure_program TEXT,
+        metering_mode TEXT,
+        flash TEXT,
+        white_balance TEXT,
+        title TEXT,
+        description TEXT,
+        creator TEXT,
+        copyright TEXT,
+        rating REAL,
+        gps_latitude REAL CHECK (gps_latitude IS NULL OR (gps_latitude >= -90 AND gps_latitude <= 90)),
+        gps_longitude REAL CHECK (gps_longitude IS NULL OR (gps_longitude >= -180 AND gps_longitude <= 180)),
+        gps_altitude_m REAL,
+        gps_direction_deg REAL,
+        raw_metadata_json TEXT NOT NULL,
+        warnings_json TEXT NOT NULL,
+        sidecar_path TEXT,
+        sidecar_size_bytes INTEGER CHECK (sidecar_size_bytes IS NULL OR sidecar_size_bytes >= 0),
+        sidecar_mtime_ms INTEGER CHECK (sidecar_mtime_ms IS NULL OR sidecar_mtime_ms >= 0),
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_photo_asset_metadata_version
+        ON photo_asset_metadata(schema_version, status);
+      CREATE INDEX IF NOT EXISTS idx_photo_asset_metadata_camera
+        ON photo_asset_metadata(camera_model, asset_id);
+      CREATE INDEX IF NOT EXISTS idx_photo_asset_metadata_lens
+        ON photo_asset_metadata(lens_model, asset_id);
+      CREATE INDEX IF NOT EXISTS idx_photo_asset_metadata_capture
+        ON photo_asset_metadata(captured_at, asset_id);
+      CREATE INDEX IF NOT EXISTS idx_photo_asset_metadata_rating
+        ON photo_asset_metadata(rating, asset_id);
+
+      CREATE TABLE IF NOT EXISTS photo_keywords (
+        asset_id TEXT NOT NULL REFERENCES photo_assets(id) ON DELETE CASCADE,
+        keyword TEXT NOT NULL,
+        normalized_keyword TEXT NOT NULL,
+        PRIMARY KEY(asset_id, normalized_keyword)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_photo_keywords_value
+        ON photo_keywords(normalized_keyword, asset_id);
+
+      CREATE TABLE IF NOT EXISTS photo_metadata_values (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id TEXT NOT NULL REFERENCES photo_assets(id) ON DELETE CASCADE,
+        source TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value_type TEXT NOT NULL CHECK (value_type IN ('text', 'number', 'date', 'boolean')),
+        text_value TEXT,
+        normalized_text_value TEXT,
+        number_value REAL,
+        date_value TEXT,
+        boolean_value INTEGER CHECK (boolean_value IS NULL OR boolean_value IN (0, 1)),
+        sensitive INTEGER NOT NULL DEFAULT 0 CHECK (sensitive IN (0, 1)),
+        ordinal INTEGER NOT NULL CHECK (ordinal >= 0)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_photo_metadata_values_key_type
+        ON photo_metadata_values(key, value_type, asset_id);
+      CREATE INDEX IF NOT EXISTS idx_photo_metadata_values_text
+        ON photo_metadata_values(key, normalized_text_value, asset_id)
+        WHERE normalized_text_value IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_photo_metadata_values_number
+        ON photo_metadata_values(key, number_value, asset_id)
+        WHERE number_value IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_photo_metadata_values_date
+        ON photo_metadata_values(key, date_value, asset_id)
+        WHERE date_value IS NOT NULL;
+
+      CREATE VIRTUAL TABLE IF NOT EXISTS photo_metadata_fts USING fts5(
+        asset_id UNINDEXED,
+        name,
+        path,
+        title,
+        description,
+        creator,
+        copyright,
+        keywords,
+        camera,
+        lens,
+        tokenize = 'unicode61 remove_diacritics 2'
+      );
+
+      CREATE VIRTUAL TABLE IF NOT EXISTS photo_geo_index USING rtree(
+        metadata_rowid,
+        min_latitude,
+        max_latitude,
+        min_longitude,
+        max_longitude
+      );
+
+      CREATE TRIGGER IF NOT EXISTS trg_photo_asset_metadata_delete_indexes
+      BEFORE DELETE ON photo_asset_metadata
+      BEGIN
+        DELETE FROM photo_geo_index WHERE metadata_rowid = OLD.rowid;
+        DELETE FROM photo_metadata_fts WHERE asset_id = OLD.asset_id;
+      END;
+    `
   }
 ];

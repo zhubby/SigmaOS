@@ -20,7 +20,8 @@
     "@sigmaos/shared": "0.8.7",
     "archiver": "^8.0.0",
     "fast-xml-parser": "^5.11.1",
-    "fastify": "^5.5.0"
+    "fastify": "^5.5.0",
+    "pmtiles": "^4.5.0"
   },
   "devDependencies": {
     "@types/archiver": "^8.0.0"

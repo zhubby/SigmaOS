@@ -1,11 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { link, lstat, realpath, stat, unlink } from "node:fs/promises";
+import { link, lstat, open, readdir, realpath, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { ZipArchive } from "archiver";
 import type { FastifyInstance, FastifyReply } from "fastify";
+import { PMTiles, TileType, type Source } from "pmtiles";
 import {
   appendEvent,
   createActionMessageAndJob,
@@ -14,21 +15,40 @@ import {
   getPhotoAsset,
   getPhotoLibrarySettings,
   getPhotoLibraryStatus,
+  getPhotoMapSettings,
+  getPhotoMetadataDetail,
+  getPhotoMetadataIndexStatus,
   getSession,
   hasCompletedPhotoScan,
   listPhotoAssets,
+  listPhotoMetadataFields,
+  photoQueryFingerprint,
+  queryPhotoAssets,
+  queryPhotoMap,
   recordAppliedOperation,
   releasePhotoUploadReservation,
   reservePhotoUpload,
+  savePhotoMapSettings,
   savePhotoLibrarySettings
 } from "@sigmaos/db";
 import { isPathInside } from "@sigmaos/nas-tools";
 import {
   PHOTO_DATA_DIRECTORY_NAME,
   PHOTO_MAX_FILE_SIZE_BYTES,
+  PHOTO_METADATA_SCHEMA_VERSION,
+  PHOTO_XMP_EXTENSION,
+  PHOTO_XMP_MAX_FILE_SIZE_BYTES,
+  photoExtension,
   photoMediaKind,
   type FileOperationProposal,
   type PhotoAssetRecord,
+  type PhotoLocationBounds,
+  type PhotoLocationNear,
+  type PhotoMapQueryRequest,
+  type PhotoMapSettingsRecord,
+  type PhotoMetadataCondition,
+  type PhotoQueryAsset,
+  type PhotoQueryRequest,
   type PhotoTimelinePage
 } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
@@ -42,6 +62,7 @@ import {
 } from "../lib/storage-scope.js";
 
 const MAX_BATCH_SIZE = 100;
+const PHOTO_QUERY_BODY_LIMIT = 64 * 1024;
 const EXPORT_TTL_MS = 5 * 60 * 1_000;
 interface PhotoExport {
   expiresAt: number;
@@ -100,6 +121,187 @@ export function registerPhotoRoutes(server: FastifyInstance, context: ApiRouteCo
       photos: result.photos,
       nextCursor: result.hasMore && last ? encodeCursor({ takenAt: last.takenAt, id: last.id }) : null
     } satisfies PhotoTimelinePage);
+  });
+
+  server.post<{ Body: PhotoQueryRequest }>(
+    "/api/photos/query",
+    { bodyLimit: PHOTO_QUERY_BODY_LIMIT },
+    async (request, reply) => {
+      const settings = getPhotoLibrarySettings(db);
+      if (!settings) {
+        reply.send({
+          photos: [],
+          nextCursor: null,
+          total: 0,
+          facets: null,
+          metadataIndex: emptyMetadataIndexStatus()
+        });
+        return;
+      }
+      const query = validatePhotoQuery(request.body);
+      if (!query.ok) {
+        reply.status(400).send({ error: query.error });
+        return;
+      }
+      const requestWithoutCursor = { ...query.value, cursor: undefined };
+      const fingerprint = photoQueryFingerprint(requestWithoutCursor);
+      const cursor = decodePhotoQueryCursor(query.value.cursor);
+      if (query.value.cursor && (!cursor || cursor.fingerprint !== fingerprint)) {
+        reply.status(400).send({ error: "Photo query cursor is invalid or belongs to another query" });
+        return;
+      }
+      const result = queryPhotoAssets(db, {
+        libraryUpdatedAt: settings.updatedAt,
+        request: query.value,
+        cursor
+      });
+      const last = result.photos.at(-1);
+      reply.send({
+        photos: result.photos,
+        nextCursor: result.hasMore && last
+          ? encodePhotoQueryCursor({ fingerprint, sortValue: photoSortValue(last, query.value), id: last.id })
+          : null,
+        total: result.total,
+        facets: result.facets,
+        metadataIndex: getPhotoMetadataIndexStatus(db, settings.updatedAt)
+      });
+    }
+  );
+
+  server.get<{ Querystring: { q?: string; limit?: string } }>(
+    "/api/photos/metadata/fields",
+    async (request, reply) => {
+      const settings = getPhotoLibrarySettings(db);
+      if (!settings) {
+        reply.send({ fields: [] });
+        return;
+      }
+      const requestedLimit = Number(request.query.limit ?? "100");
+      const limit = Number.isInteger(requestedLimit) ? Math.max(1, Math.min(requestedLimit, 200)) : 100;
+      reply.send({
+        fields: listPhotoMetadataFields(db, {
+          libraryUpdatedAt: settings.updatedAt,
+          ...(request.query.q !== undefined ? { query: request.query.q } : {}),
+          limit
+        })
+      });
+    }
+  );
+
+  server.get<{
+    Params: { id: string };
+    Querystring: { includeSensitive?: string };
+  }>("/api/photos/:id/metadata", async (request, reply) => {
+    const settings = getPhotoLibrarySettings(db);
+    const detail = settings ? getPhotoMetadataDetail(db, {
+      assetId: request.params.id,
+      libraryUpdatedAt: settings.updatedAt,
+      includeSensitive: request.query.includeSensitive === "1"
+    }) : null;
+    if (!detail) {
+      reply.status(404).send({ error: "Photo not found" });
+      return;
+    }
+    reply.send({ metadata: detail });
+  });
+
+  server.get<{ Params: { id: string } }>("/api/photos/:id/record", async (request, reply) => {
+    const settings = getPhotoLibrarySettings(db);
+    const asset = settings ? getPhotoAsset(db, request.params.id, settings.updatedAt) : null;
+    if (!settings || !asset) {
+      reply.status(404).send({ error: "Photo not found" });
+      return;
+    }
+    const detail = getPhotoMetadataDetail(db, {
+      assetId: asset.id,
+      libraryUpdatedAt: settings.updatedAt,
+      includeSensitive: false
+    });
+    reply.send({
+      photo: {
+        ...asset,
+        metadata: detail?.summary ?? null,
+        keywords: detail?.keywords ?? [],
+        distanceMeters: null
+      } satisfies PhotoQueryAsset
+    });
+  });
+
+  server.post<{ Body: PhotoMapQueryRequest }>(
+    "/api/photos/map/query",
+    { bodyLimit: PHOTO_QUERY_BODY_LIMIT },
+    async (request, reply) => {
+      const settings = getPhotoLibrarySettings(db);
+      if (!settings) {
+        reply.send({ clusters: [], metadataIndex: emptyMetadataIndexStatus() });
+        return;
+      }
+      const mapQuery = validatePhotoMapQuery(request.body);
+      if (!mapQuery.ok) {
+        reply.status(400).send({ error: mapQuery.error });
+        return;
+      }
+      reply.send({
+        clusters: queryPhotoMap(db, { libraryUpdatedAt: settings.updatedAt, request: mapQuery.value }),
+        metadataIndex: getPhotoMetadataIndexStatus(db, settings.updatedAt)
+      });
+    }
+  );
+
+  server.get("/api/photos/map/settings", async (_request, reply) => {
+    const settings = getPhotoMapSettings(db);
+    if (!settings) {
+      reply.send({ settings: null });
+      return;
+    }
+    try {
+      await resolvePhotoMapArchive(context, settings);
+      reply.send({ settings });
+    } catch (error) {
+      if (error instanceof StorageScopeError) {
+        reply.send({ settings, unavailable: true, error: error.message });
+        return;
+      }
+      throw error;
+    }
+  });
+
+  server.put<{
+    Body: { rootId?: string; storagePoolId?: string; path?: string; attribution?: string | null };
+  }>("/api/photos/map/settings", { bodyLimit: PHOTO_QUERY_BODY_LIMIT }, async (request, reply) => {
+    const scope = await resolveStoragePoolScope(db, system, request.body?.rootId, request.body?.storagePoolId);
+    const safe = await resolveScopedExistingPath(scope, request.body?.path ?? "");
+    const archiveStat = await stat(safe.realPath);
+    if (!archiveStat.isFile() || path.extname(safe.relativePath).toLowerCase() !== ".pmtiles") {
+      reply.status(400).send({ error: "Select a PMTiles archive file" });
+      return;
+    }
+    const header = await readRasterPmtilesHeader(safe.realPath);
+    if (!header.ok) {
+      reply.status(400).send({ error: header.error });
+      return;
+    }
+    const settings = savePhotoMapSettings(db, {
+      rootId: scope.root.id,
+      storagePoolId: scope.pool.id,
+      path: safe.relativePath,
+      tileType: header.value.tileType,
+      minZoom: header.value.minZoom,
+      maxZoom: header.value.maxZoom,
+      bounds: header.value.bounds,
+      attribution: request.body?.attribution?.trim() || null
+    });
+    reply.send({ settings });
+  });
+
+  server.get("/api/photos/map/archive", async (request, reply) => {
+    const settings = getPhotoMapSettings(db);
+    if (!settings) {
+      reply.status(404).send({ error: "Photo map is not configured" });
+      return;
+    }
+    const archive = await resolvePhotoMapArchive(context, settings);
+    return sendFileStream(reply, request.headers.range, archive.safe.realPath, "application/vnd.pmtiles");
   });
 
   server.get("/api/photos/status", async (_request, reply) => {
@@ -217,11 +419,13 @@ export function registerPhotoRoutes(server: FastifyInstance, context: ApiRouteCo
         reply.status(409).send({ error: "Wait for the initial photo scan to finish before uploading" });
         return;
       }
-      const fileName = normalizeFileName(request.query.name);
+      const fileName = normalizeUploadFileName(request.query.name);
       if (!fileName) {
-        reply.status(400).send({ error: "A supported media file name is required" });
+        reply.status(400).send({ error: "A supported media or XMP file name is required" });
         return;
       }
+      const isSidecar = photoExtension(fileName) === PHOTO_XMP_EXTENSION;
+      const uploadLimit = isSidecar ? PHOTO_XMP_MAX_FILE_SIZE_BYTES : PHOTO_MAX_FILE_SIZE_BYTES;
       const { scope, library } = await resolveLibraryScope(context, settings);
       const directory = await resolveScopedExistingPath(scope, request.query.directory ?? settings.path);
       if (!isPathInside(library.realPath, directory.realPath) || !(await stat(directory.realPath)).isDirectory()) {
@@ -245,8 +449,10 @@ export function registerPhotoRoutes(server: FastifyInstance, context: ApiRouteCo
       const limiter = new Transform({
         transform(chunk: Buffer, _encoding, callback) {
           written += chunk.length;
-          if (written > PHOTO_MAX_FILE_SIZE_BYTES) {
-            callback(Object.assign(new Error("Photo exceeds the 512 MiB upload limit"), { statusCode: 413, expose: true }));
+          if (written > uploadLimit) {
+            callback(Object.assign(new Error(isSidecar
+              ? "XMP sidecar exceeds the 16 MiB upload limit"
+              : "Photo exceeds the 512 MiB upload limit"), { statusCode: 413, expose: true }));
             return;
           }
           hash.update(chunk);
@@ -258,26 +464,28 @@ export function registerPhotoRoutes(server: FastifyInstance, context: ApiRouteCo
       try {
         await pipeline(request.body as NodeJS.ReadableStream, limiter, output);
         const contentHash = hash.digest("hex");
-        const reserved = reservePhotoUpload(db, {
-          settings,
-          path: target.relativePath,
-          contentHash
-        });
-        if (reserved.duplicate) {
-          await unlink(temporaryPath);
-          reply.status(409).send({
-            error: reserved.conflict === "path" ? "Upload target already exists" : "This media already exists in the library",
-            duplicate: reserved.duplicate
+        if (!isSidecar) {
+          const reserved = reservePhotoUpload(db, {
+            settings,
+            path: target.relativePath,
+            contentHash
           });
-          return;
+          if (reserved.duplicate) {
+            await unlink(temporaryPath);
+            reply.status(409).send({
+              error: reserved.conflict === "path" ? "Upload target already exists" : "This media already exists in the library",
+              duplicate: reserved.duplicate
+            });
+            return;
+          }
+          reservation = reserved.reservation;
+          if (!reservation) throw new Error("Photo upload reservation was not created");
         }
-        reservation = reserved.reservation;
-        if (!reservation) throw new Error("Photo upload reservation was not created");
         try {
           await link(temporaryPath, target.absolutePath);
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-            releasePhotoUploadReservation(db, { id: reservation.id, libraryUpdatedAt: settings.updatedAt });
+            if (reservation) releasePhotoUploadReservation(db, { id: reservation.id, libraryUpdatedAt: settings.updatedAt });
             reservation = null;
             await unlink(temporaryPath).catch(() => undefined);
             reply.status(409).send({ error: "Upload target already exists" });
@@ -287,7 +495,12 @@ export function registerPhotoRoutes(server: FastifyInstance, context: ApiRouteCo
         }
         published = true;
         await unlink(temporaryPath).catch(() => undefined);
-        enqueuePhotoJob(db, { settings, kind: "path_refresh", path: settings.path });
+        enqueuePhotoJob(db, {
+          settings,
+          kind: "path_refresh",
+          path: settings.path,
+          queueAfterRunning: isSidecar
+        });
         const operation = recordAppliedOperation(db, {
           approvalId: null,
           operation: "upload",
@@ -342,17 +555,18 @@ export function registerPhotoRoutes(server: FastifyInstance, context: ApiRouteCo
       return;
     }
     const assets = resolved as Array<NonNullable<(typeof resolved)[number]>>;
+    const operationFiles = await filesWithAssociatedSidecars(assets);
     const proposals: FileOperationProposal[] = [];
     if (operation === "trash") {
-      for (const item of assets) {
+      for (const item of operationFiles) {
         proposals.push({
           operation: "trash",
           rootId: settings.rootId,
           storagePoolId: settings.storagePoolId,
-          sourcePath: item.asset.path,
+          sourcePath: item.relativePath,
           risk: "medium",
           reversible: true,
-          summary: `Move ${item.asset.path} to SigmaOS trash`
+          summary: `Move ${item.relativePath} to SigmaOS trash`
         });
       }
     } else {
@@ -363,31 +577,32 @@ export function registerPhotoRoutes(server: FastifyInstance, context: ApiRouteCo
         return;
       }
       const targetPaths = new Set<string>();
-      for (const item of assets) {
-        const target = await resolveScopedTargetPath(scope, path.join(targetDirectory.relativePath, item.asset.name));
+      for (const item of operationFiles) {
+        const target = await resolveScopedTargetPath(scope, path.join(targetDirectory.relativePath, item.name));
         if (targetPaths.has(target.relativePath)) {
-          reply.status(409).send({ error: `Multiple selected photos would use the same target: ${item.asset.name}` });
+          reply.status(409).send({ error: `Multiple selected files would use the same target: ${item.name}` });
           return;
         }
         targetPaths.add(target.relativePath);
         if (await exists(target.absolutePath)) {
-          reply.status(409).send({ error: `Move target already exists: ${item.asset.name}` });
+          reply.status(409).send({ error: `Move target already exists: ${item.name}` });
           return;
         }
         proposals.push({
           operation: "move",
           rootId: settings.rootId,
           storagePoolId: settings.storagePoolId,
-          sourcePath: item.asset.path,
+          sourcePath: item.relativePath,
           targetPath: target.relativePath,
           risk: "medium",
           reversible: true,
-          summary: `Move ${item.asset.path} to ${target.relativePath}`
+          summary: `Move ${item.relativePath} to ${target.relativePath}`
         });
       }
     }
 
-    const summary = `${operation === "trash" ? "Delete" : "Move"} ${proposals.length} photo${proposals.length === 1 ? "" : "s"}`;
+    const sidecarCount = Math.max(0, proposals.length - assets.length);
+    const summary = `${operation === "trash" ? "Delete" : "Move"} ${assets.length} photo${assets.length === 1 ? "" : "s"}${sidecarCount ? ` with ${sidecarCount} XMP sidecar${sidecarCount === 1 ? "" : "s"}` : ""}`;
     const { message, job } = createActionMessageAndJob(db, {
       sessionId: session.id,
       content: summary,
@@ -450,8 +665,9 @@ export function registerPhotoRoutes(server: FastifyInstance, context: ApiRouteCo
     const archive = new ZipArchive({ zlib: { level: 6 } });
     archive.once("error", (error: Error) => archive.destroy(error));
     const usedNames = new Set<string>();
-    for (const item of resolved as Array<NonNullable<(typeof resolved)[number]>>) {
-      archive.file(item.safe.realPath, { name: uniqueArchiveName(item.asset.name, usedNames) });
+    const exportFiles = await filesWithAssociatedSidecars(resolved as Array<NonNullable<(typeof resolved)[number]>>);
+    for (const item of exportFiles) {
+      archive.file(item.realPath, { name: uniqueArchiveName(item.name, usedNames) });
     }
     reply.header("Content-Type", "application/zip");
     reply.header("Content-Disposition", contentDisposition("sigmaos-photos.zip"));
@@ -563,10 +779,13 @@ function decodeCursor(value: string | undefined): { takenAt: string; id: string 
   }
 }
 
-function normalizeFileName(value: string | undefined): string | null {
+function normalizeUploadFileName(value: string | undefined): string | null {
   const name = value?.trim() ?? "";
   if (!name || name === "." || name === ".." || name.includes("/") || name.includes("\\") || name.includes("\0")) return null;
-  if (Buffer.byteLength(name, "utf8") > 255 || !photoMediaKind(name)) return null;
+  if (
+    Buffer.byteLength(name, "utf8") > 255 ||
+    (!photoMediaKind(name) && photoExtension(name) !== PHOTO_XMP_EXTENSION)
+  ) return null;
   return name;
 }
 
@@ -611,4 +830,374 @@ function uniqueArchiveName(fileName: string, used: Set<string>): string {
   const unique = `${stem}-${index}${extension}`;
   used.add(unique);
   return unique;
+}
+
+type ResolvedPhotoAsset = NonNullable<Awaited<ReturnType<typeof resolveCurrentAsset>>>;
+
+async function filesWithAssociatedSidecars(assets: ResolvedPhotoAsset[]): Promise<Array<{
+  relativePath: string;
+  realPath: string;
+  name: string;
+}>> {
+  const files = new Map<string, { relativePath: string; realPath: string; name: string }>();
+  for (const item of assets) {
+    files.set(item.asset.path, {
+      relativePath: item.asset.path,
+      realPath: item.safe.realPath,
+      name: item.asset.name
+    });
+    const sidecar = await resolveAssociatedSidecar(item);
+    if (sidecar) files.set(sidecar.relativePath, sidecar);
+  }
+  return [...files.values()];
+}
+
+async function resolveAssociatedSidecar(item: ResolvedPhotoAsset): Promise<{
+  relativePath: string;
+  realPath: string;
+  name: string;
+} | null> {
+  const directoryPath = path.dirname(item.safe.realPath);
+  const entries = await readdir(directoryPath, { withFileTypes: true });
+  const names = entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
+  const actualByLower = new Map(names.map((name) => [name.toLocaleLowerCase("und"), name]));
+  const exact = actualByLower.get(`${item.asset.name}.xmp`.toLocaleLowerCase("und"));
+  let sidecarName = exact ?? null;
+  if (!sidecarName) {
+    const stem = path.parse(item.asset.name).name.toLocaleLowerCase("und");
+    const shared = actualByLower.get(`${stem}.xmp`);
+    if (shared) {
+      const siblings = names.filter((name) => photoMediaKind(name) && path.parse(name).name.toLocaleLowerCase("und") === stem);
+      const rawSiblings = siblings.filter((name) => photoMediaKind(name) === "raw");
+      if (siblings.length === 1 || (rawSiblings.length === 1 && rawSiblings[0] === item.asset.name)) {
+        sidecarName = shared;
+      }
+    }
+  }
+  if (!sidecarName) return null;
+  const relativePath = path.join(path.dirname(item.asset.path), sidecarName);
+  const sidecar = await resolveScopedExistingPath(item.scope, relativePath);
+  if (!isPathInside(item.library.realPath, sidecar.realPath)) return null;
+  const sidecarStat = await lstat(path.join(directoryPath, sidecarName));
+  if (sidecarStat.isSymbolicLink() || !sidecarStat.isFile()) return null;
+  return { relativePath: sidecar.relativePath, realPath: sidecar.realPath, name: sidecarName };
+}
+
+function emptyMetadataIndexStatus() {
+  return { schemaVersion: PHOTO_METADATA_SCHEMA_VERSION, total: 0, indexed: 0, partial: 0, pending: 0 };
+}
+
+function encodePhotoQueryCursor(cursor: { fingerprint: string; sortValue: string | number | null; id: string }): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function decodePhotoQueryCursor(value: string | null | undefined): {
+  fingerprint: string;
+  sortValue: string | number | null;
+  id: string;
+} | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Record<string, unknown>;
+    if (
+      typeof parsed.fingerprint !== "string" || !parsed.fingerprint ||
+      typeof parsed.id !== "string" || !parsed.id ||
+      (parsed.sortValue !== null && typeof parsed.sortValue !== "string" && typeof parsed.sortValue !== "number")
+    ) return null;
+    return {
+      fingerprint: parsed.fingerprint,
+      sortValue: parsed.sortValue as string | number | null,
+      id: parsed.id
+    };
+  } catch {
+    return null;
+  }
+}
+
+function photoSortValue(photo: PhotoQueryAsset, request: PhotoQueryRequest): string | number | null {
+  switch (request.sort?.field ?? "captured_at") {
+    case "indexed_at": return photo.indexedAt;
+    case "name": return sqliteLower(photo.name);
+    case "size_bytes": return photo.sizeBytes;
+    case "rating": return photo.metadata?.rating ?? null;
+    case "distance": return photo.distanceMeters;
+    case "captured_at": return photo.metadata?.capturedAt ?? photo.metadata?.capturedAtLocal ?? photo.takenAt;
+  }
+}
+
+function sqliteLower(value: string): string {
+  return value.replace(/[A-Z]/gu, (character) => character.toLowerCase());
+}
+
+type ValidationResult<T> = { ok: true; value: T } | { ok: false; error: string };
+
+function validatePhotoQuery(body: unknown): ValidationResult<PhotoQueryRequest> {
+  if (!isObject(body)) return invalid("Photo query body must be an object");
+  if (!hasOnlyKeys(body, ["filters", "sort", "cursor", "limit", "includeFacets"])) {
+    return invalid("Photo query body contains unknown fields");
+  }
+  const request = body as Partial<PhotoQueryRequest>;
+  if (request.limit !== undefined && (!Number.isInteger(request.limit) || request.limit < 1 || request.limit > 100)) {
+    return invalid("Photo query limit must be an integer between 1 and 100");
+  }
+  if (request.cursor !== undefined && request.cursor !== null && typeof request.cursor !== "string") {
+    return invalid("Photo query cursor must be a string");
+  }
+  if (request.includeFacets !== undefined && typeof request.includeFacets !== "boolean") {
+    return invalid("includeFacets must be a boolean");
+  }
+  const sortFields = new Set(["captured_at", "indexed_at", "name", "size_bytes", "rating", "distance"]);
+  if (request.sort && (!isObject(request.sort) || !hasOnlyKeys(request.sort, ["field", "direction"]) ||
+    !sortFields.has(request.sort.field) || !["asc", "desc"].includes(request.sort.direction))) {
+    return invalid("Photo query sort is invalid");
+  }
+  const filters = validatePhotoFilters(request.filters);
+  if (!filters.ok) return filters;
+  const normalized: PhotoQueryRequest = {
+    ...(filters.value ? { filters: filters.value } : {}),
+    ...(request.sort ? { sort: request.sort } : {}),
+    ...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
+    ...(request.limit !== undefined ? { limit: request.limit } : {}),
+    ...(request.includeFacets !== undefined ? { includeFacets: request.includeFacets } : {})
+  };
+  if (normalized.sort?.field === "distance" && normalized.filters?.location?.kind !== "near") {
+    return invalid("Distance sorting requires a nearby location filter");
+  }
+  return { ok: true, value: normalized };
+}
+
+function validatePhotoFilters(value: unknown): ValidationResult<PhotoQueryRequest["filters"]> {
+  if (value === undefined) return { ok: true, value: undefined };
+  if (!isObject(value)) return invalid("Photo filters must be an object");
+  if (!hasOnlyKeys(value, [
+    "text", "capturedAt", "mediaKinds", "cameraModels", "lensModels", "iso", "aperture",
+    "exposureTimeSeconds", "focalLengthMm", "rating", "keywords", "hasLocation", "location", "advanced"
+  ])) return invalid("Photo filters contain unknown fields");
+  const filters = value as NonNullable<PhotoQueryRequest["filters"]>;
+  if (filters.text !== undefined && (typeof filters.text !== "string" || filters.text.length > 512)) {
+    return invalid("Photo text filter is invalid");
+  }
+  for (const [key, list] of Object.entries({
+    mediaKinds: filters.mediaKinds,
+    cameraModels: filters.cameraModels,
+    lensModels: filters.lensModels,
+    keywords: filters.keywords
+  })) {
+    if (list !== undefined && (!Array.isArray(list) || list.length > 100 || list.some((entry) => typeof entry !== "string" || !entry || entry.length > 512))) {
+      return invalid(`${key} must be an array of at most 100 non-empty strings`);
+    }
+  }
+  if (filters.mediaKinds?.some((kind) => !["image", "video", "raw"].includes(kind))) {
+    return invalid("Photo media type filter is invalid");
+  }
+  for (const [key, range] of Object.entries({
+    iso: filters.iso,
+    aperture: filters.aperture,
+    exposureTimeSeconds: filters.exposureTimeSeconds,
+    focalLengthMm: filters.focalLengthMm,
+    rating: filters.rating
+  })) {
+    const min = range?.min;
+    const max = range?.max;
+    if (range !== undefined && (!isObject(range) || !hasOnlyKeys(range, ["min", "max"]) ||
+      !validOptionalNumber(min) || !validOptionalNumber(max) ||
+      (typeof min === "number" && typeof max === "number" && min > max))) {
+      return invalid(`${key} range is invalid`);
+    }
+  }
+  if (filters.capturedAt !== undefined && (!isObject(filters.capturedAt) ||
+    !hasOnlyKeys(filters.capturedAt, ["from", "to"]) ||
+    !validOptionalDate(filters.capturedAt.from) || !validOptionalDate(filters.capturedAt.to) ||
+    (typeof filters.capturedAt.from === "string" && typeof filters.capturedAt.to === "string" &&
+      Date.parse(filters.capturedAt.from) > Date.parse(filters.capturedAt.to)))) {
+    return invalid("Capture date range is invalid");
+  }
+  if (filters.hasLocation !== undefined && typeof filters.hasLocation !== "boolean") {
+    return invalid("hasLocation must be a boolean");
+  }
+  if (filters.location !== undefined && !validLocation(filters.location)) {
+    return invalid("Photo location filter is invalid");
+  }
+  if (filters.advanced !== undefined) {
+    if (!isObject(filters.advanced) || !hasOnlyKeys(filters.advanced, ["mode", "conditions"]) ||
+      !["all", "any"].includes(filters.advanced.mode) ||
+      !Array.isArray(filters.advanced.conditions) || filters.advanced.conditions.length > 25) {
+      return invalid("Advanced metadata filters must contain at most 25 conditions");
+    }
+    for (const condition of filters.advanced.conditions) {
+      const conditionError = validateMetadataCondition(condition);
+      if (conditionError) return invalid(conditionError);
+    }
+  }
+  return { ok: true, value: filters };
+}
+
+function validateMetadataCondition(value: unknown): string | null {
+  if (!isObject(value)) return "Metadata condition must be an object";
+  if (!hasOnlyKeys(value, ["key", "operator", "value", "valueTo"])) return "Metadata condition contains unknown fields";
+  const condition = value as Partial<PhotoMetadataCondition>;
+  const operators = new Set(["eq", "contains", "prefix", "in", "exists", "not_exists", "lt", "lte", "gt", "gte", "between"]);
+  if (typeof condition.key !== "string" || !/^[a-z0-9_.:-]{1,256}$/iu.test(condition.key)) return "Metadata field key is invalid";
+  if (!condition.operator || !operators.has(condition.operator)) return "Metadata condition operator is invalid";
+  if (condition.operator === "exists" || condition.operator === "not_exists") return null;
+  const values = Array.isArray(condition.value) ? condition.value : [condition.value];
+  if (!values.length || values.length > 100 || values.some((entry) => !isMetadataScalar(entry))) return "Metadata condition value is invalid";
+  if (condition.operator !== "in" && Array.isArray(condition.value)) return "Only set conditions accept multiple values";
+  if (condition.operator === "in" && new Set(values.map((entry) => typeof entry)).size !== 1) {
+    return "Metadata set values must have the same type";
+  }
+  if ((condition.operator === "contains" || condition.operator === "prefix") && typeof condition.value !== "string") {
+    return "Metadata text conditions require a string value";
+  }
+  if (["lt", "lte", "gt", "gte", "between"].includes(condition.operator) && typeof condition.value === "boolean") {
+    return "Metadata comparison value must be a number or date string";
+  }
+  if (condition.operator === "between" && (typeof condition.valueTo !== "string" && typeof condition.valueTo !== "number")) {
+    return "Metadata between condition requires an upper value";
+  }
+  return null;
+}
+
+function validatePhotoMapQuery(body: unknown): ValidationResult<PhotoMapQueryRequest> {
+  if (!isObject(body)) return invalid("Photo map bounds are invalid");
+  if (!hasOnlyKeys(body, ["filters", "bounds", "columns", "rows"])) {
+    return invalid("Photo map query contains unknown fields");
+  }
+  const bounds = body.bounds;
+  if (!validLocation(bounds) || bounds.kind !== "bounds") {
+    return invalid("Photo map bounds are invalid");
+  }
+  const filters = validatePhotoFilters(body.filters);
+  if (!filters.ok) return filters;
+  const columns = body.columns;
+  const rows = body.rows;
+  for (const [key, value] of Object.entries({ columns, rows })) {
+    if (value !== undefined && (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 64)) {
+      return invalid(`${key} must be between 1 and 64`);
+    }
+  }
+  return {
+    ok: true,
+    value: {
+      ...(filters.value ? { filters: filters.value } : {}),
+      bounds,
+      ...(typeof columns === "number" ? { columns } : {}),
+      ...(typeof rows === "number" ? { rows } : {})
+    }
+  };
+}
+
+function validLocation(value: unknown): value is PhotoLocationBounds | PhotoLocationNear {
+  if (!isObject(value)) return false;
+  if (value.kind === "bounds") {
+    return hasOnlyKeys(value, ["kind", "west", "south", "east", "north"]) &&
+      validLongitude(value.west) && validLongitude(value.east) && validLatitude(value.south) &&
+      validLatitude(value.north) && value.south <= value.north;
+  }
+  return value.kind === "near" && hasOnlyKeys(value, ["kind", "latitude", "longitude", "radiusMeters"]) &&
+    validLatitude(value.latitude) && validLongitude(value.longitude) &&
+    typeof value.radiusMeters === "number" && Number.isFinite(value.radiusMeters) && value.radiusMeters > 0 && value.radiusMeters <= 40_100_000;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: string[]): boolean {
+  const keys = new Set(allowed);
+  return Object.keys(value).every((key) => keys.has(key));
+}
+
+function validOptionalNumber(value: unknown): boolean {
+  return value === undefined || (typeof value === "number" && Number.isFinite(value));
+}
+
+function validOptionalDate(value: unknown): boolean {
+  return value === undefined || (typeof value === "string" && value.length <= 64 && Number.isFinite(Date.parse(value)));
+}
+
+function validLatitude(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= -90 && value <= 90;
+}
+
+function validLongitude(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= -180 && value <= 180;
+}
+
+function isMetadataScalar(value: unknown): value is string | number | boolean {
+  return typeof value === "boolean" ||
+    (typeof value === "number" && Number.isFinite(value)) ||
+    (typeof value === "string" && value.length <= 64 * 1024);
+}
+
+function invalid<T>(error: string): ValidationResult<T> {
+  return { ok: false, error };
+}
+
+async function readRasterPmtilesHeader(filePath: string): Promise<ValidationResult<{
+  tileType: PhotoMapSettingsRecord["tileType"];
+  minZoom: number;
+  maxZoom: number;
+  bounds: [number, number, number, number] | null;
+}>> {
+  try {
+    const archive = new PMTiles(new NodeFileRangeSource(filePath));
+    const header = await archive.getHeader();
+    const tileType = header.tileType === TileType.Png ? "png"
+      : header.tileType === TileType.Jpeg ? "jpeg"
+        : header.tileType === TileType.Webp ? "webp"
+          : null;
+    if (!tileType) return invalid("Only raster PNG, JPEG, or WebP PMTiles archives are supported");
+    return {
+      ok: true,
+      value: {
+        tileType,
+        minZoom: header.minZoom,
+        maxZoom: header.maxZoom,
+        bounds: [header.minLon, header.minLat, header.maxLon, header.maxLat]
+      }
+    };
+  } catch {
+    return invalid("The PMTiles archive is damaged or unsupported");
+  }
+}
+
+class NodeFileRangeSource implements Source {
+  constructor(private readonly filePath: string) {}
+
+  getKey(): string {
+    return this.filePath;
+  }
+
+  async getBytes(offset: number, length: number): Promise<{ data: ArrayBuffer }> {
+    if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0) {
+      throw new Error("Invalid PMTiles byte range");
+    }
+    const handle = await open(this.filePath, "r");
+    try {
+      const fileStat = await handle.stat();
+      if (offset >= fileStat.size && length > 0) throw new Error("PMTiles byte range exceeds archive size");
+      const readLength = Math.min(length, Math.max(0, fileStat.size - offset));
+      const buffer = Buffer.alloc(readLength);
+      const { bytesRead } = await handle.read(buffer, 0, readLength, offset);
+      if (bytesRead !== readLength) throw new Error("PMTiles archive ended unexpectedly");
+      return { data: buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) };
+    } finally {
+      await handle.close();
+    }
+  }
+}
+
+async function resolvePhotoMapArchive(context: ApiRouteContext, settings: PhotoMapSettingsRecord) {
+  const scope = await resolveStoragePoolScope(context.db, context.system, settings.rootId, settings.storagePoolId);
+  const safe = await resolveScopedExistingPath(scope, settings.path);
+  const archiveStat = await stat(safe.realPath);
+  if (!archiveStat.isFile() || path.extname(safe.realPath).toLowerCase() !== ".pmtiles") {
+    throw new StorageScopeError("Photo map archive is unavailable", 503);
+  }
+  const header = await readRasterPmtilesHeader(safe.realPath);
+  if (!header.ok || header.value.tileType !== settings.tileType) {
+    throw new StorageScopeError("Photo map archive changed or is no longer a supported raster archive", 503);
+  }
+  return { scope, safe };
 }

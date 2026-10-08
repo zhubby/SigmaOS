@@ -71,6 +71,14 @@ import type {
   PhotoJobRecord as SharedPhotoJob,
   PhotoLibrarySettingsRecord as SharedPhotoLibrarySettings,
   PhotoLibraryStatus as SharedPhotoLibraryStatus,
+  PhotoMapQueryRequest as SharedPhotoMapQueryRequest,
+  PhotoMapQueryResult as SharedPhotoMapQueryResult,
+  PhotoMapSettingsRecord as SharedPhotoMapSettings,
+  PhotoMetadataDetail as SharedPhotoMetadataDetail,
+  PhotoMetadataField as SharedPhotoMetadataField,
+  PhotoQueryAsset as SharedPhotoQueryAsset,
+  PhotoQueryPage as SharedPhotoQueryPage,
+  PhotoQueryRequest as SharedPhotoQueryRequest,
   PhotoTimelinePage as SharedPhotoTimelinePage,
   TerminalTab as SharedTerminalTab,
   TerminalTabState as SharedTerminalTabState
@@ -125,6 +133,14 @@ export type PhotoAsset = SharedPhotoAsset;
 export type PhotoJob = SharedPhotoJob;
 export type PhotoLibrarySettings = SharedPhotoLibrarySettings;
 export type PhotoLibraryStatus = SharedPhotoLibraryStatus;
+export type PhotoMapQueryRequest = SharedPhotoMapQueryRequest;
+export type PhotoMapQueryResult = SharedPhotoMapQueryResult;
+export type PhotoMapSettings = SharedPhotoMapSettings;
+export type PhotoMetadataDetail = SharedPhotoMetadataDetail;
+export type PhotoMetadataField = SharedPhotoMetadataField;
+export type PhotoQueryAsset = SharedPhotoQueryAsset;
+export type PhotoQueryPage = SharedPhotoQueryPage;
+export type PhotoQueryRequest = SharedPhotoQueryRequest;
 export type PhotoTimelinePage = SharedPhotoTimelinePage;
 export type TerminalTab = SharedTerminalTab;
 export type TerminalTabState = SharedTerminalTabState;
@@ -1008,6 +1024,64 @@ export async function getPhotoTimeline(cursor?: string | null, limit = 60): Prom
   const response = await fetch(`/api/photos?${params.toString()}`);
   await ensureOk(response);
   return (await response.json()) as PhotoTimelinePage;
+}
+
+export async function queryPhotos(input: PhotoQueryRequest): Promise<PhotoQueryPage> {
+  const response = await fetch("/api/photos/query", jsonRequest("POST", input));
+  await ensureOk(response);
+  return (await response.json()) as PhotoQueryPage;
+}
+
+export async function getPhotoMetadata(assetId: string, includeSensitive = false): Promise<PhotoMetadataDetail> {
+  const params = includeSensitive ? "?includeSensitive=1" : "";
+  const response = await fetch(`/api/photos/${encodeURIComponent(assetId)}/metadata${params}`);
+  await ensureOk(response);
+  return ((await response.json()) as { metadata: PhotoMetadataDetail }).metadata;
+}
+
+export async function getPhotoRecord(assetId: string): Promise<PhotoQueryAsset> {
+  const response = await fetch(`/api/photos/${encodeURIComponent(assetId)}/record`);
+  await ensureOk(response);
+  return ((await response.json()) as { photo: PhotoQueryAsset }).photo;
+}
+
+export async function getPhotoMetadataFields(query = ""): Promise<PhotoMetadataField[]> {
+  const params = new URLSearchParams();
+  if (query) params.set("q", query);
+  const response = await fetch(`/api/photos/metadata/fields?${params.toString()}`);
+  await ensureOk(response);
+  return ((await response.json()) as { fields: PhotoMetadataField[] }).fields;
+}
+
+export async function queryPhotoMap(input: PhotoMapQueryRequest): Promise<PhotoMapQueryResult> {
+  const response = await fetch("/api/photos/map/query", jsonRequest("POST", input));
+  await ensureOk(response);
+  return (await response.json()) as PhotoMapQueryResult;
+}
+
+export async function getPhotoMapSettings(): Promise<{
+  settings: PhotoMapSettings | null;
+  unavailable?: boolean;
+  error?: string;
+}> {
+  const response = await fetch("/api/photos/map/settings");
+  await ensureOk(response);
+  return (await response.json()) as {
+    settings: PhotoMapSettings | null;
+    unavailable?: boolean;
+    error?: string;
+  };
+}
+
+export async function savePhotoMapSettings(input: {
+  rootId: string;
+  storagePoolId: string;
+  path: string;
+  attribution?: string | null;
+}): Promise<PhotoMapSettings> {
+  const response = await fetch("/api/photos/map/settings", jsonRequest("PUT", input));
+  await ensureOk(response);
+  return ((await response.json()) as { settings: PhotoMapSettings }).settings;
 }
 
 export async function getPhotoLibraryStatus(): Promise<PhotoLibraryStatus> {

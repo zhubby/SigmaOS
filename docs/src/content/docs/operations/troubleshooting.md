@@ -21,13 +21,16 @@ sidebar:
 sudo systemctl status sigmaos-photo-worker.service --no-pager
 sudo journalctl -u sigmaos-photo-worker.service -n 100 --no-pager
 curl -fsS http://127.0.0.1:3010/api/photos/status
+curl -fsS http://127.0.0.1:3010/api/photos/map/settings
 command -v heif-convert
 command -v dcraw_emu
 command -v ffmpeg
 command -v ffprobe
 ```
 
-`offline` 表示照片设置对应的 root、storage pool 或目录当前不可用；先恢复相同挂载，不要把其他目录挂到原路径伪装成照片库。单个 HEIC/HEIF 失败时确认 `libheif-examples` 已安装；单个 RAW 失败时确认 `libraw-bin`/`dcraw_emu` 可执行并验证源文件；视频海报或播放失败时确认 `ffmpeg` 和 `ffprobe` 已安装。JPEG/PNG 等全部失败时检查 `/var/lib/sigmaos/photos` 与照片目录对 `sigmaos` 用户的读写权限。WebP 衍生图位于 `/var/lib/sigmaos/photos/thumbnail` 和 `/var/lib/sigmaos/photos/preview`，视频转码缓存位于 `/var/lib/sigmaos/media-cache/videos`。单个文件解码失败只会将该媒体标记为 `failed`，其他媒体继续处理，原文件仍可下载；完整遍历失败不会清理未确认的旧资源。
+`offline` 表示照片设置对应的 root、storage pool 或目录当前不可用；先恢复相同挂载，不要把其他目录挂到原路径伪装成照片库。元数据 `pending` 长时间不下降时检查 worker 日志中的 schema/sidecar 解析警告并手动排队一次扫描；单个资源 `partial` 不会阻止浏览。XMP 超过 16 MiB、结构化元数据超过限额或 sidecar 关联有歧义时会记录警告而不猜测。
+
+单个 HEIC/HEIF 失败时确认 `libheif-examples` 已安装；单个 RAW 失败时确认 `libraw-bin`/`dcraw_emu` 可执行并验证源文件；视频海报或播放失败时确认 `ffmpeg` 和 `ffprobe` 已安装。JPEG/PNG 等全部失败时检查 `/var/lib/sigmaos/photos` 与照片目录对 `sigmaos` 用户的读写权限。WebP 衍生图位于 `/var/lib/sigmaos/photos/thumbnail` 和 `/var/lib/sigmaos/photos/preview`，视频转码缓存位于 `/var/lib/sigmaos/media-cache/videos`。地图空白时确认 PMTiles 为栅格格式、归档路径仍位于在线 NAS pool，并用带 Range 的 `/api/photos/map/archive` 请求检查 `206`。单个文件解码失败只会将该媒体标记为 `failed`，其他媒体继续处理，原文件仍可下载；完整遍历失败不会清理未确认的旧资源。
 
 ## 服务目录所有权与启动顺序
 

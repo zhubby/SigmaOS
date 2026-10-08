@@ -9,6 +9,7 @@
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.82.1",
     "@sigmaos/nas-tools": "0.8.7",
-    "@sigmaos/shared": "0.8.7"
+    "@sigmaos/shared": "0.8.7",
+    "typebox": "1.1.38"
   }
 }

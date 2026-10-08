@@ -1,4 +1,9 @@
-import { runPiAgentTurn, runReadOnlyAgentTurn, type PiAgentRunner } from "@sigmaos/agent";
+import {
+  runPiAgentTurn,
+  runReadOnlyAgentTurn,
+  type PhotoAgentToolService,
+  type PiAgentRunner
+} from "@sigmaos/agent";
 import {
   appendEvent,
   claimNextJob,
@@ -11,9 +16,13 @@ import {
   getMessage,
   getModelProviderSettings,
   getNasRoot,
+  getPhotoLibrarySettings,
+  getPhotoMetadataDetail,
+  getPhotoMetadataIndexStatus,
   getPiToolPolicySettings,
   getSession,
   queryIndexedText,
+  queryPhotoAssets,
   saveAgentProviderSession,
   updateJobStatus,
   type SigmaDatabase
@@ -137,7 +146,8 @@ export async function processNextJob({ db, config, agentRunner, allowLocalFallba
           getApprovalStatus: (approvalId) => getApproval(db, approvalId)?.status ?? null,
           markWaitingForApproval: () => {
             updateJobStatus(db, job.id, "waiting_approval", null, ["running"]);
-          }
+          },
+          ...photoAgentTools(db, root.id)
         });
 
     if (result.status === "cancelled" || getJob(db, job.id)?.status === "cancelled") {
@@ -190,6 +200,39 @@ export async function processNextJob({ db, config, agentRunner, allowLocalFallba
   }
 
   return true;
+}
+
+export function photoAgentTools(db: SigmaDatabase, sessionRootId: string): { photoTools?: PhotoAgentToolService } {
+  const settings = getPhotoLibrarySettings(db);
+  if (!settings || settings.rootId !== sessionRootId) return {};
+  return {
+    photoTools: {
+      searchPhotos: async (request) => {
+        const safeRequest = {
+          ...request,
+          cursor: null,
+          limit: Math.max(1, Math.min(request.limit ?? 25, 25)),
+          includeFacets: false
+        };
+        const result = queryPhotoAssets(db, {
+          libraryUpdatedAt: settings.updatedAt,
+          request: safeRequest
+        });
+        return {
+          photos: result.photos,
+          nextCursor: null,
+          total: result.total,
+          facets: null,
+          metadataIndex: getPhotoMetadataIndexStatus(db, settings.updatedAt)
+        };
+      },
+      getPhotoMetadata: async (assetId) => getPhotoMetadataDetail(db, {
+        assetId,
+        libraryUpdatedAt: settings.updatedAt,
+        includeSensitive: false
+      })
+    }
+  };
 }
 
 function defaultModelProviderSettings(config: SigmaConfig): ModelProviderSettingsRecord {

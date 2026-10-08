@@ -36,9 +36,11 @@ sidebar:
 
 ## 使用相册
 
-Photos 面板使用系统配置中指定的唯一媒体目录，不在面板内切换目录。原文件保持原位，`sigmaos-photo-worker.service` 会递归扫描常见图片、视频和 RAW，优先使用 EXIF 拍摄时间并生成本地 WebP 缩略图与预览。视频缩略图取自首帧，点击视频后在查看器内播放；RAW 由 `dcraw_emu` 渲染预览。扫描状态会显示 queued、scanning、ready、degraded 或 storage offline；新增文件后可以手动扫描，服务也会每 30 分钟确保一次完整扫描。
+Photos 面板使用系统配置中指定的唯一媒体目录，不在面板内切换目录。原媒体和 XMP sidecar 始终保持原字节；`sigmaos-photo-worker.service` 递归扫描图片、视频和 RAW，索引 EXIF、IPTC、XMP、ICC/JFIF、RAW 与视频标签，并生成不携带原元数据的本地 WebP 缩略图与预览。版本过旧或 sidecar 变化会在 worker 启动后立即排队重建，界面显示完成、部分成功和待处理数量；旧时间线在重建期间仍可浏览。
 
-媒体墙按日期分页并统一混排图片、视频和 RAW。支持图片 `.jpg/.jpeg/.png/.webp/.gif/.heic/.heif`、视频 `.mp4/.mov/.m4v/.avi/.mkv/.webm/.mpeg/.mpg` 和 RAW `.cr2/.cr3/.crw/.nef/.nrw/.arw/.srf/.sr2/.dng/.raf/.orf/.rw2/.pef/.rwl/.3fr/.x3f/.erf/.kdc/.mos/.mrw/.bay`。点击项目打开支持前后切换的查看器，图片和 RAW 支持缩放，视频显示原生播放控件；选择多项后可以下载原文件/ZIP。移动和删除会创建现有文件 approval，批准前不会改变原文件；移动目标限定在当前媒体库内，删除进入 SigmaOS trash。上传直接写入媒体库并按 SHA-256 拒绝重复内容，单文件上限为 512 MiB。
+时间线支持全文、日期、类型、相机、镜头、ISO、光圈、快门、焦距、评分、关键词、位置和高级字段条件，并提供分面计数与稳定排序。查看器异步加载完整元数据；敏感组默认隐藏，需主动揭示。多文件上传先处理媒体再处理 `.xmp`；移动、trash 和 ZIP 会将确定关联的 sidecar 去重后成对处理，单独下载原图不附带 sidecar。
+
+地图视图只使用本机数据。可从 NAS 选择栅格 PNG/JPEG/WebP PMTiles，未配置底图时仍显示本地坐标画布和照片点；当前位置仅在点击按钮后请求浏览器权限。SigmaOS 不请求在线瓦片、遥测、反向地理编码或第三方坐标服务。
 
 ## 使用 Agent
 

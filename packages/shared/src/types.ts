@@ -1,3 +1,5 @@
+import type { PhotoMediaKind } from "./photo-config.js";
+
 export type JobStatus =
   | "queued"
   | "running"
@@ -129,6 +131,206 @@ export interface PhotoTimelinePage {
   nextCursor: string | null;
 }
 
+export type PhotoMetadataStatus = "ready" | "partial";
+export type PhotoMetadataScalar = string | number | boolean;
+export type PhotoMetadataValueType = "text" | "number" | "date" | "boolean";
+export type PhotoMetadataCaptureSource = "sidecar_xmp" | "embedded_xmp" | "iptc" | "exif" | "video" | "file_mtime";
+
+export interface PhotoMetadataSummary {
+  schemaVersion: number;
+  status: PhotoMetadataStatus;
+  mediaKind: PhotoMediaKind;
+  capturedAt: string | null;
+  capturedAtLocal: string | null;
+  captureOffsetMinutes: number | null;
+  captureSource: PhotoMetadataCaptureSource;
+  durationMs: number | null;
+  container: string | null;
+  videoCodec: string | null;
+  audioCodec: string | null;
+  cameraMake: string | null;
+  cameraModel: string | null;
+  software: string | null;
+  lensMake: string | null;
+  lensModel: string | null;
+  iso: number | null;
+  exposureTimeSeconds: number | null;
+  aperture: number | null;
+  focalLengthMm: number | null;
+  focalLength35Mm: number | null;
+  exposureBiasEv: number | null;
+  exposureProgram: string | null;
+  meteringMode: string | null;
+  flash: string | null;
+  whiteBalance: string | null;
+  title: string | null;
+  description: string | null;
+  creator: string | null;
+  copyright: string | null;
+  rating: number | null;
+  hasLocation: boolean;
+  hasSensitiveMetadata: boolean;
+}
+
+export interface PhotoMetadataIndexStatus {
+  schemaVersion: number;
+  total: number;
+  indexed: number;
+  partial: number;
+  pending: number;
+}
+
+export type PhotoMetadataOperator =
+  | "eq"
+  | "contains"
+  | "prefix"
+  | "in"
+  | "exists"
+  | "not_exists"
+  | "lt"
+  | "lte"
+  | "gt"
+  | "gte"
+  | "between";
+
+export interface PhotoMetadataCondition {
+  key: string;
+  operator: PhotoMetadataOperator;
+  value?: PhotoMetadataScalar | PhotoMetadataScalar[];
+  valueTo?: string | number;
+}
+
+export interface PhotoNumberRange {
+  min?: number;
+  max?: number;
+}
+
+export interface PhotoDateRange {
+  from?: string;
+  to?: string;
+}
+
+export interface PhotoLocationBounds {
+  kind: "bounds";
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}
+
+export interface PhotoLocationNear {
+  kind: "near";
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+}
+
+export interface PhotoQueryFilters {
+  text?: string;
+  capturedAt?: PhotoDateRange;
+  mediaKinds?: PhotoMediaKind[];
+  cameraModels?: string[];
+  lensModels?: string[];
+  iso?: PhotoNumberRange;
+  aperture?: PhotoNumberRange;
+  exposureTimeSeconds?: PhotoNumberRange;
+  focalLengthMm?: PhotoNumberRange;
+  rating?: PhotoNumberRange;
+  keywords?: string[];
+  hasLocation?: boolean;
+  location?: PhotoLocationBounds | PhotoLocationNear;
+  advanced?: {
+    mode: "all" | "any";
+    conditions: PhotoMetadataCondition[];
+  };
+}
+
+export type PhotoQuerySortField = "captured_at" | "indexed_at" | "name" | "size_bytes" | "rating" | "distance";
+
+export interface PhotoQueryRequest {
+  filters?: PhotoQueryFilters;
+  sort?: { field: PhotoQuerySortField; direction: "asc" | "desc" };
+  cursor?: string | null;
+  limit?: number;
+  includeFacets?: boolean;
+}
+
+export interface PhotoQueryAsset extends PhotoAssetRecord {
+  metadata: PhotoMetadataSummary | null;
+  keywords: string[];
+  distanceMeters: number | null;
+}
+
+export interface PhotoFacetValue {
+  value: string;
+  count: number;
+}
+
+export interface PhotoQueryFacets {
+  mediaKinds: PhotoFacetValue[];
+  cameraModels: PhotoFacetValue[];
+  lensModels: PhotoFacetValue[];
+  ratings: PhotoFacetValue[];
+  keywords: PhotoFacetValue[];
+  numeric: Record<string, { min: number | null; max: number | null }>;
+}
+
+export interface PhotoQueryPage {
+  photos: PhotoQueryAsset[];
+  nextCursor: string | null;
+  total: number;
+  facets: PhotoQueryFacets | null;
+  metadataIndex: PhotoMetadataIndexStatus;
+}
+
+export interface PhotoMetadataField {
+  key: string;
+  valueType: PhotoMetadataValueType;
+  count: number;
+  sensitive: boolean;
+}
+
+export interface PhotoMetadataDetail {
+  assetId: string;
+  summary: PhotoMetadataSummary | null;
+  keywords: string[];
+  groups: Record<string, Record<string, PhotoMetadataScalar[]>>;
+  sensitiveGroups?: Record<string, Record<string, PhotoMetadataScalar[]>>;
+  sensitiveOmitted: boolean;
+  warnings: string[];
+}
+
+export interface PhotoMapQueryRequest {
+  filters?: PhotoQueryFilters;
+  bounds: PhotoLocationBounds;
+  columns?: number;
+  rows?: number;
+}
+
+export interface PhotoMapCluster {
+  latitude: number;
+  longitude: number;
+  count: number;
+  assetId: string | null;
+}
+
+export interface PhotoMapQueryResult {
+  clusters: PhotoMapCluster[];
+  metadataIndex: PhotoMetadataIndexStatus;
+}
+
+export interface PhotoMapSettingsRecord {
+  rootId: string;
+  storagePoolId: string;
+  path: string;
+  tileType: "png" | "jpeg" | "webp";
+  minZoom: number;
+  maxZoom: number;
+  bounds: [number, number, number, number] | null;
+  attribution: string | null;
+  updatedAt: string;
+}
+
 export interface PhotoJobRecord {
   id: string;
   kind: PhotoJobKind;
@@ -153,6 +355,7 @@ export interface PhotoJobRecord {
 export interface PhotoLibraryStatus {
   state: "unconfigured" | "queued" | "scanning" | "ready" | "degraded" | "offline";
   total: number;
+  metadataIndex?: PhotoMetadataIndexStatus;
   failed: number;
   scanned: number;
   processed: number;

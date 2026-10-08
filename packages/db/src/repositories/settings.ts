@@ -2,6 +2,7 @@ import type {
   DownloadSettingsRecord,
   DockerSettingsRecord,
   ModelProviderSettingsRecord,
+  PhotoMapSettingsRecord,
   PiToolPolicySettingsRecord,
   ShareSettingsRecord
 } from "@sigmaos/shared";
@@ -22,6 +23,7 @@ const PI_TOOL_POLICY_SETTING_KEY = "pi_tool_policy";
 const DOCKER_SETTING_KEY = "docker_settings";
 const SHARE_SETTING_KEY = "share_settings";
 const DOWNLOAD_SETTING_KEY = "download_settings";
+const PHOTO_MAP_SETTING_KEY = "photo_map_settings";
 
 export const DEFAULT_DOWNLOAD_CONCURRENCY = 1;
 
@@ -189,6 +191,51 @@ export function saveDownloadSettings(
       value_json = excluded.value_json,
       updated_at = excluded.updated_at
   `).run(DOWNLOAD_SETTING_KEY, JSON.stringify(record), updatedAt);
+  return record;
+}
+
+export function getPhotoMapSettings(db: SigmaDatabase): PhotoMapSettingsRecord | null {
+  const row = db
+    .prepare("SELECT value_json, updated_at FROM system_settings WHERE key = ?")
+    .get(PHOTO_MAP_SETTING_KEY) as Pick<DbSystemSettingRow, "value_json" | "updated_at"> | undefined;
+  if (!row) return null;
+  const parsed = JSON.parse(row.value_json) as Partial<PhotoMapSettingsRecord>;
+  if (
+    typeof parsed.rootId !== "string" ||
+    typeof parsed.storagePoolId !== "string" ||
+    typeof parsed.path !== "string" ||
+    (parsed.tileType !== "png" && parsed.tileType !== "jpeg" && parsed.tileType !== "webp") ||
+    typeof parsed.minZoom !== "number" ||
+    typeof parsed.maxZoom !== "number"
+  ) return null;
+  return {
+    rootId: parsed.rootId,
+    storagePoolId: parsed.storagePoolId,
+    path: parsed.path,
+    tileType: parsed.tileType,
+    minZoom: parsed.minZoom,
+    maxZoom: parsed.maxZoom,
+    bounds: Array.isArray(parsed.bounds) && parsed.bounds.length === 4
+      ? parsed.bounds as [number, number, number, number]
+      : null,
+    attribution: typeof parsed.attribution === "string" ? parsed.attribution : null,
+    updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : row.updated_at
+  };
+}
+
+export function savePhotoMapSettings(
+  db: SigmaDatabase,
+  settings: Omit<PhotoMapSettingsRecord, "updatedAt">
+): PhotoMapSettingsRecord {
+  const updatedAt = new Date().toISOString();
+  const record: PhotoMapSettingsRecord = { ...settings, updatedAt };
+  db.prepare(`
+    INSERT INTO system_settings (key, value_json, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET
+      value_json = excluded.value_json,
+      updated_at = excluded.updated_at
+  `).run(PHOTO_MAP_SETTING_KEY, JSON.stringify(record), updatedAt);
   return record;
 }
 

@@ -10,6 +10,12 @@ import type {
 } from "@sigmaos/shared";
 import type { SigmaDatabase } from "../connection.js";
 import type { DbPhotoAssetRow, DbPhotoJobRow, DbSystemSettingRow } from "./repository-rows.js";
+import {
+  getPhotoMetadataIndexStatus,
+  hasStalePhotoMetadata,
+  replacePhotoAssetMetadata,
+  type PhotoMetadataWriteInput
+} from "./photo-metadata.js";
 
 const PHOTO_LIBRARY_SETTING_KEY = "photo_library";
 const PHOTO_ASSET_COLUMNS = `
@@ -119,7 +125,13 @@ export function savePhotoLibrarySettings(
 
 export function enqueuePhotoJob(
   db: SigmaDatabase,
-  input: { settings: PhotoLibrarySettingsRecord; kind?: PhotoJobKind; path?: string; now?: Date }
+  input: {
+    settings: PhotoLibrarySettingsRecord;
+    kind?: PhotoJobKind;
+    path?: string;
+    now?: Date;
+    queueAfterRunning?: boolean;
+  }
 ): PhotoJobRecord {
   const kind = input.kind ?? "full_scan";
   const jobPath = input.path ?? input.settings.path;
@@ -128,7 +140,8 @@ export function enqueuePhotoJob(
     const existing = db.prepare(`
       SELECT ${PHOTO_JOB_COLUMNS}
       FROM photo_jobs
-      WHERE library_updated_at = ? AND kind = ? AND path = ? AND status IN ('queued', 'running')
+      WHERE library_updated_at = ? AND kind = ? AND path = ?
+        AND ${input.queueAfterRunning ? "status = 'queued'" : "status IN ('queued', 'running')"}
       ORDER BY created_at ASC LIMIT 1
     `).get(input.settings.updatedAt, kind, jobPath) as DbPhotoJobRow | undefined;
     if (existing) return mapPhotoJob(existing);
@@ -166,6 +179,7 @@ export function ensurePeriodicPhotoScan(
     ORDER BY created_at DESC LIMIT 1
   `).get(settings.updatedAt) as DbPhotoJobRow | undefined;
   if (latest && (latest.status === "queued" || latest.status === "running")) return mapPhotoJob(latest);
+  if (hasStalePhotoMetadata(db, settings.updatedAt)) return enqueuePhotoJob(db, { settings, now });
   if (latest && now.getTime() - new Date(latest.created_at).getTime() < input.intervalMs) return null;
   return enqueuePhotoJob(db, { settings, now });
 }
@@ -272,6 +286,7 @@ export function upsertPhotoAsset(
     previewKey: string | null;
     status: PhotoAssetStatus;
     error: string | null;
+    metadata?: PhotoMetadataWriteInput;
     indexedAt?: Date;
   }
 ): PhotoAssetRecord {
@@ -327,7 +342,9 @@ export function upsertPhotoAsset(
       DELETE FROM photo_upload_reservations
       WHERE library_updated_at = ? AND path = ?
     `).run(input.settings.updatedAt, input.path);
-    return mapPhotoAsset(row);
+    const asset = mapPhotoAsset(row);
+    if (input.metadata) replacePhotoAssetMetadata(db, asset, input.metadata, input.indexedAt);
+    return asset;
   });
   return tx();
 }
@@ -488,8 +505,9 @@ export function getPhotoLibraryStatus(
   `).get(settings.updatedAt) as DbPhotoJobRow | undefined;
   const total = counts.total ?? 0;
   const failed = counts.failed ?? 0;
+  const metadataIndex = getPhotoMetadataIndexStatus(db, settings.updatedAt);
   if (!row) {
-    return { state: "queued", total, failed, scanned: 0, processed: 0, currentPath: null, error: null, updatedAt: settings.updatedAt };
+    return { state: "queued", total, failed, metadataIndex, scanned: 0, processed: 0, currentPath: null, error: null, updatedAt: settings.updatedAt };
   }
   const job = mapPhotoJob(row);
   const state = job.status === "queued"
@@ -505,6 +523,7 @@ export function getPhotoLibraryStatus(
     state,
     total,
     failed,
+    metadataIndex,
     scanned: job.scanned,
     processed: job.processed,
     currentPath: job.currentPath,

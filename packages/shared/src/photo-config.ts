@@ -2,6 +2,13 @@ export const PHOTO_DATA_DIRECTORY_NAME = "photos";
 export const PHOTO_MAX_FILE_SIZE_BYTES = 512 * 1024 * 1024;
 export const PHOTO_THUMBNAIL_SIZE_PX = 512;
 export const PHOTO_PREVIEW_MAX_EDGE_PX = 2048;
+export const PHOTO_METADATA_SCHEMA_VERSION = 1;
+export const PHOTO_METADATA_MAX_LEAVES = 4096;
+export const PHOTO_METADATA_MAX_SCALAR_BYTES = 64 * 1024;
+export const PHOTO_METADATA_MAX_JSON_BYTES = 512 * 1024;
+export const PHOTO_METADATA_MAX_DEPTH = 16;
+export const PHOTO_XMP_MAX_FILE_SIZE_BYTES = 16 * 1024 * 1024;
+export const PHOTO_XMP_EXTENSION = ".xmp";
 export const PHOTO_IMAGE_EXTENSIONS = [
   ".jpg",
   ".jpeg",
@@ -51,6 +58,11 @@ export const PHOTO_SUPPORTED_EXTENSIONS = [
   ...PHOTO_IMAGE_EXTENSIONS,
   ...PHOTO_VIDEO_EXTENSIONS,
   ...PHOTO_RAW_EXTENSIONS
+] as const;
+
+export const PHOTO_UPLOAD_EXTENSIONS = [
+  ...PHOTO_SUPPORTED_EXTENSIONS,
+  PHOTO_XMP_EXTENSION
 ] as const;
 
 export type PhotoMediaKind = "image" | "video" | "raw";

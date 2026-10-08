@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import type { Dirent } from "node:fs";
 import { lstat, opendir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -6,6 +7,7 @@ import {
   finishPhotoJob,
   getNasRoot,
   getPhotoAssetByPath,
+  getPhotoMetadataState,
   getPhotoLibrarySettings,
   listPhotoDerivativeKeys,
   removeStalePhotoUploadReservations,
@@ -15,9 +17,15 @@ import {
   type SigmaDatabase
 } from "@sigmaos/db";
 import { isPathInside, resolveSafeExistingPath } from "@sigmaos/nas-tools";
-import { PHOTO_DATA_DIRECTORY_NAME, type PhotoJobRecord, type SigmaConfig } from "@sigmaos/shared";
+import {
+  PHOTO_DATA_DIRECTORY_NAME,
+  PHOTO_METADATA_SCHEMA_VERSION,
+  type PhotoJobRecord,
+  type SigmaConfig
+} from "@sigmaos/shared";
 import {
   MAX_PHOTO_BYTES,
+  photoMediaKind,
   photoMimeType,
   processPhotoFile,
   removeStalePhotoDerivatives,
@@ -99,7 +107,10 @@ export async function processPhotoJob(input: {
       if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) throw new Error("Photo scan encountered an unsafe directory");
       if (directoryStat.dev !== initialIdentity.device) return;
       const directory = await opendir(directoryPath);
-      for await (const entry of directory) {
+      const entries: Dirent[] = [];
+      for await (const entry of directory) entries.push(entry);
+      const sidecars = buildPhotoSidecarAssociations(entries.map((entry) => entry.name));
+      for (const entry of entries) {
         const absolutePath = path.join(directoryPath, entry.name);
         const relativePath = path.relative(safeLibrary.rootRealPath, absolutePath);
         scanned += 1;
@@ -119,12 +130,26 @@ export async function processPhotoJob(input: {
           if (fileStat.dev !== initialIdentity.device) continue;
           if (fileStat.size > MAX_PHOTO_BYTES) throw new Error("Photo exceeds the 512 MiB processing limit");
           const mtimeMs = Math.trunc(fileStat.mtimeMs);
+          const sidecarAssociation = sidecars.get(entry.name) ?? null;
+          const sidecar = sidecarAssociation?.sidecarName
+            ? await resolvePhotoSidecar({
+                directoryPath,
+                relativeMediaPath: relativePath,
+                sidecarName: sidecarAssociation.sidecarName,
+                device: initialIdentity.device
+              })
+            : null;
           const existing = getPhotoAssetByPath(db, {
             rootId: settings.rootId,
             storagePoolId: settings.storagePoolId,
             path: relativePath
           });
-          if (existing && existing.status === "ready" && existing.sizeBytes === fileStat.size && existing.mtimeMs === mtimeMs) {
+          const metadataState = existing ? getPhotoMetadataState(db, existing.id) : null;
+          const metadataCurrent = metadataState?.schemaVersion === PHOTO_METADATA_SCHEMA_VERSION &&
+            metadataState.sidecarPath === (sidecar?.relativePath ?? null) &&
+            metadataState.sidecarSizeBytes === (sidecar?.sizeBytes ?? null) &&
+            metadataState.sidecarMtimeMs === (sidecar?.mtimeMs ?? null);
+          if (existing && existing.status === "ready" && existing.sizeBytes === fileStat.size && existing.mtimeMs === mtimeMs && metadataCurrent) {
             upsertPhotoAsset(db, {
               settings,
               path: existing.path,
@@ -148,7 +173,9 @@ export async function processPhotoJob(input: {
               sourcePath: safe.realPath,
               cacheRoot: path.join(config.dataDir, PHOTO_DATA_DIRECTORY_NAME),
               mtimeMs,
-              ...(input.mediaCommandRunner ? { commandRunner: input.mediaCommandRunner } : {})
+              ...(input.mediaCommandRunner ? { commandRunner: input.mediaCommandRunner } : {}),
+              ...(sidecar ? { sidecar } : {}),
+              ...(sidecarAssociation?.warning ? { metadataWarnings: [sidecarAssociation.warning] } : {})
             });
             upsertPhotoAsset(db, {
               settings,
@@ -166,7 +193,8 @@ export async function processPhotoJob(input: {
               thumbnailKey: photo.thumbnailKey,
               previewKey: photo.previewKey,
               status: "ready",
-              error: null
+              error: null,
+              metadata: photo.metadata
             });
           }
           processed += 1;
@@ -216,6 +244,58 @@ export async function processPhotoJob(input: {
   } catch (error) {
     finishPhotoJob(db, { id: job.id, workerId: job.workerId, error: safeError(error) });
   }
+}
+
+export function buildPhotoSidecarAssociations(fileNames: string[]): Map<string, { sidecarName: string | null; warning: string | null }> {
+  const result = new Map<string, { sidecarName: string | null; warning: string | null }>();
+  const actualByLower = new Map(fileNames.map((name) => [name.toLocaleLowerCase("und"), name]));
+  const mediaNames = fileNames.filter((name) => photoMediaKind(name));
+  const mediaByStem = new Map<string, string[]>();
+  for (const name of mediaNames) {
+    const stem = path.parse(name).name.toLocaleLowerCase("und");
+    const names = mediaByStem.get(stem) ?? [];
+    names.push(name);
+    mediaByStem.set(stem, names);
+  }
+  for (const name of mediaNames) {
+    const exact = actualByLower.get(`${name}.xmp`.toLocaleLowerCase("und"));
+    if (exact) {
+      result.set(name, { sidecarName: exact, warning: null });
+      continue;
+    }
+    const stem = path.parse(name).name.toLocaleLowerCase("und");
+    const sidecar = actualByLower.get(`${stem}.xmp`);
+    if (!sidecar) continue;
+    const siblings = mediaByStem.get(stem) ?? [];
+    if (siblings.length === 1) {
+      result.set(name, { sidecarName: sidecar, warning: null });
+      continue;
+    }
+    const rawSiblings = siblings.filter((candidate) => photoMediaKind(candidate) === "raw");
+    if (rawSiblings.length === 1 && rawSiblings[0] === name) {
+      result.set(name, { sidecarName: sidecar, warning: null });
+    } else {
+      result.set(name, { sidecarName: null, warning: `Ambiguous XMP sidecar ${sidecar} was not attached` });
+    }
+  }
+  return result;
+}
+
+async function resolvePhotoSidecar(input: {
+  directoryPath: string;
+  relativeMediaPath: string;
+  sidecarName: string;
+  device: number;
+}) {
+  const absolutePath = path.join(input.directoryPath, input.sidecarName);
+  const fileStat = await lstat(absolutePath);
+  if (fileStat.isSymbolicLink() || !fileStat.isFile() || fileStat.dev !== input.device) return null;
+  return {
+    path: absolutePath,
+    relativePath: path.join(path.dirname(input.relativeMediaPath), input.sidecarName),
+    sizeBytes: fileStat.size,
+    mtimeMs: Math.trunc(fileStat.mtimeMs)
+  };
 }
 
 export async function verifyPhotoLibraryMount(input: {

@@ -3,8 +3,16 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { PhotoAsset } from "../../api.js";
 import { i18n, initI18n } from "../../i18n/index.js";
-import { groupPhotosByDate, photoMediaKindForAsset, PhotoLibraryPanel, PHOTO_ACCEPT } from "./PhotoLibraryPanel.js";
-import { PHOTO_SUPPORTED_EXTENSIONS } from "@sigmaos/shared/photo-config";
+import {
+  groupPhotosByDate,
+  photoMediaKindForAsset,
+  PhotoLibraryPanel,
+  PHOTO_ACCEPT,
+  readyPhotoQueryFilters,
+  togglePhotoFacetValue
+} from "./PhotoLibraryPanel.js";
+import { photoViewportBounds } from "./PhotoMapView.js";
+import { PHOTO_UPLOAD_EXTENSIONS } from "@sigmaos/shared/photo-config";
 
 beforeAll(async () => {
   await initI18n();
@@ -28,8 +36,14 @@ describe("photo timeline grouping", () => {
     expect(html).toMatch(/<input(?=[^>]*type="file")(?=[^>]*multiple="")[^>]*>/u);
   });
 
-  it("uses the shared image, video, and RAW extension list for upload filtering", () => {
-    expect(PHOTO_ACCEPT.split(",")).toEqual([...PHOTO_SUPPORTED_EXTENSIONS]);
+  it("uses the shared media and XMP extension list for upload filtering", () => {
+    expect(PHOTO_ACCEPT.split(",")).toEqual([...PHOTO_UPLOAD_EXTENSIONS]);
+  });
+
+  it("toggles multiple values within one facet as an OR set", () => {
+    expect(togglePhotoFacetValue(["Alpha 1"], "Alpha 7")).toEqual(["Alpha 1", "Alpha 7"]);
+    expect(togglePhotoFacetValue(["Alpha 1", "Alpha 7"], "Alpha 1")).toEqual(["Alpha 7"]);
+    expect(togglePhotoFacetValue(["Alpha 1"], "Alpha 1")).toBeUndefined();
   });
 
   it("classifies video and RAW assets for timeline presentation", () => {
@@ -57,6 +71,67 @@ describe("photo timeline grouping", () => {
     asset.mtimeMs = Date.parse("2026-06-15T12:00:00.000Z");
 
     expect(groupPhotosByDate([asset], "en")[0]?.key).toMatch(/^2026-06-1[45]$/u);
+  });
+
+  it("groups indexed photos by their original wall-clock date", () => {
+    const asset = {
+      ...photo("wall-clock", "2026-06-15T23:00:00.000Z"),
+      metadata: { capturedAtLocal: "2026-06-16T07:00:00" }
+    };
+
+    expect(groupPhotosByDate([asset], "en")[0]?.key).toBe("2026-06-16");
+  });
+
+  it("keeps incomplete advanced conditions editable without sending invalid queries", () => {
+    expect(readyPhotoQueryFilters({
+      text: "coast",
+      advanced: {
+        mode: "all",
+        conditions: [
+          { key: "exif.ISO", operator: "between", value: "100" },
+          { key: "xmp.dc.creator", operator: "exists" },
+          { key: "exif.Model", operator: "contains", value: "" }
+        ]
+      }
+    })).toEqual({
+      text: "coast",
+      advanced: { mode: "all", conditions: [{ key: "xmp.dc.creator", operator: "exists" }] }
+    });
+  });
+
+  it("coerces advanced numeric and boolean values using the metadata field catalog", () => {
+    expect(readyPhotoQueryFilters({
+      advanced: {
+        mode: "all",
+        conditions: [
+          { key: "exif.ISO", operator: "between", value: "100", valueTo: "800" },
+          { key: "xmp.Flagged", operator: "eq", value: "false" }
+        ]
+      }
+    }, [
+      { key: "exif.ISO", valueType: "number", count: 1, sensitive: false },
+      { key: "xmp.Flagged", valueType: "boolean", count: 1, sensitive: false }
+    ])).toEqual({
+      advanced: {
+        mode: "all",
+        conditions: [
+          { key: "exif.ISO", operator: "between", value: 100, valueTo: 800 },
+          { key: "xmp.Flagged", operator: "eq", value: false }
+        ]
+      }
+    });
+  });
+
+  it("keeps whole-world and antimeridian map viewports queryable", () => {
+    expect(photoViewportBounds(-180, -85, 180, 85)).toEqual({
+      kind: "bounds", west: -180, south: -85, east: 180, north: 85
+    });
+    expect(photoViewportBounds(170, -10, 190, 10)).toEqual({
+      kind: "bounds", west: 170, south: -10, east: -170, north: 10
+    });
+    expect(photoViewportBounds(0, -10, 180, 10)).toEqual({
+      kind: "bounds", west: 0, south: -10, east: 180, north: 10
+    });
   });
 });
 

@@ -5,7 +5,6 @@ import { execFile } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import * as exifr from "exifr";
 import sharp from "sharp";
 import {
   PHOTO_MAX_FILE_SIZE_BYTES,
@@ -16,6 +15,13 @@ import {
   type PhotoMediaKind,
   type PhotoTakenAtSource
 } from "@sigmaos/shared";
+import type { PhotoMetadataWriteInput } from "@sigmaos/db";
+import {
+  extractPhotoMetadata,
+  readVideoMetadataProbe,
+  type PhotoSidecarInput,
+  type VideoProbe
+} from "./metadata.js";
 
 const execFileAsync = promisify(execFile);
 export const MAX_PHOTO_BYTES = PHOTO_MAX_FILE_SIZE_BYTES;
@@ -48,6 +54,7 @@ export interface ProcessedPhoto {
   takenAtSource: PhotoTakenAtSource;
   thumbnailKey: string;
   previewKey: string;
+  metadata: PhotoMetadataWriteInput;
 }
 
 export function photoMimeType(filePath: string): string | null {
@@ -96,6 +103,8 @@ export async function processPhotoFile(input: {
   cacheRoot: string;
   mtimeMs: number;
   commandRunner?: PhotoMediaCommandRunner;
+  sidecar?: PhotoSidecarInput | null;
+  metadataWarnings?: string[];
 }): Promise<ProcessedPhoto> {
   const mimeType = photoMimeType(input.sourcePath);
   const mediaKind = photoMediaKind(input.sourcePath);
@@ -108,7 +117,6 @@ export async function processPhotoFile(input: {
   const previewPath = path.join(input.cacheRoot, previewKey);
   await Promise.all([mkdir(path.dirname(thumbnailPath), { recursive: true }), mkdir(path.dirname(previewPath), { recursive: true })]);
 
-  const exif = await readPhotoExif(input.sourcePath);
   const temporaryDirectory = mediaKind === "raw" || mediaKind === "video" || mimeType === "image/heic" || mimeType === "image/heif"
     ? await mkdtemp(path.join(os.tmpdir(), "sigmaos-photo-"))
     : null;
@@ -116,12 +124,14 @@ export async function processPhotoFile(input: {
   try {
     let imagePath = input.sourcePath;
     let videoDimensions: { width: number; height: number } | null = null;
+    let videoProbe: VideoProbe | null = null;
     if (mediaKind === "raw") {
       if (!temporaryDirectory) throw new Error("RAW temporary directory is unavailable");
       imagePath = await convertRaw(input.sourcePath, path.join(temporaryDirectory, "decoded.tiff"), commandRunner);
     } else if (mediaKind === "video") {
       if (!temporaryDirectory) throw new Error("Video temporary directory is unavailable");
-      videoDimensions = await readVideoDimensions(input.sourcePath, commandRunner);
+      videoProbe = await readVideoMetadataProbe(input.sourcePath, commandRunner, MEDIA_COMMAND_OPTIONS);
+      videoDimensions = videoDimensionsFromProbe(videoProbe);
       imagePath = await extractVideoFrame(input.sourcePath, path.join(temporaryDirectory, "frame.jpg"), commandRunner);
     } else if (mimeType === "image/heic" || mimeType === "image/heif") {
       if (!temporaryDirectory) throw new Error("HEIF temporary directory is unavailable");
@@ -165,17 +175,28 @@ export async function processPhotoFile(input: {
       });
     }
 
-    const taken = selectTakenAt(exif, input.mtimeMs);
+    const photoMetadata = await extractPhotoMetadata({
+      sourcePath: input.sourcePath,
+      mediaKind,
+      mtimeMs: input.mtimeMs,
+      commandRunner,
+      commandOptions: MEDIA_COMMAND_OPTIONS,
+      ...(input.sidecar !== undefined ? { sidecar: input.sidecar } : {}),
+      ...(input.metadataWarnings ? { initialWarnings: input.metadataWarnings } : {}),
+      ...(videoProbe ? { videoProbe } : {})
+    });
+    const takenAt = photoMetadata.capturedAt ?? new Date(input.mtimeMs).toISOString();
     return {
       contentHash,
       mimeType,
       width,
       height,
-      orientation: mediaKind === "video" ? null : finiteInteger(exif.Orientation) ?? finiteInteger(metadata.orientation),
-      takenAt: taken.takenAt,
-      takenAtSource: taken.source,
+      orientation: mediaKind === "video" ? null : finiteInteger(firstMetadataValue(photoMetadata, "exif.Orientation")) ?? finiteInteger(metadata.orientation),
+      takenAt,
+      takenAtSource: photoMetadata.captureSource === "file_mtime" ? "file_mtime" : "exif",
       thumbnailKey,
-      previewKey
+      previewKey,
+      metadata: photoMetadata
     };
   } finally {
     if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true });
@@ -191,15 +212,6 @@ export function selectTakenAt(
     if (date) return { takenAt: date.toISOString(), source: "exif" };
   }
   return { takenAt: new Date(mtimeMs).toISOString(), source: "file_mtime" };
-}
-
-async function readPhotoExif(filePath: string): Promise<Record<string, unknown>> {
-  try {
-    const value = await exifr.parse(filePath, ["DateTimeOriginal", "CreateDate", "Orientation"]);
-    return value && typeof value === "object" ? value as Record<string, unknown> : {};
-  } catch {
-    return {};
-  }
 }
 
 async function convertHeif(sourcePath: string, outputPath: string, commandRunner: PhotoMediaCommandRunner): Promise<string> {
@@ -227,29 +239,16 @@ async function convertRaw(sourcePath: string, outputPath: string, commandRunner:
   }
 }
 
-async function readVideoDimensions(sourcePath: string, commandRunner: PhotoMediaCommandRunner): Promise<{ width: number; height: number }> {
-  try {
-    const output = await commandRunner.run("ffprobe", [
-      "-v",
-      "error",
-      "-select_streams",
-      "v:0",
-      "-show_entries",
-      "stream=width,height",
-      "-of",
-      "json",
-      sourcePath
-    ], MEDIA_COMMAND_OPTIONS);
-    const parsed = JSON.parse(output) as { streams?: Array<{ width?: unknown; height?: unknown }> };
-    const width = finitePositiveInteger(parsed.streams?.[0]?.width);
-    const height = finitePositiveInteger(parsed.streams?.[0]?.height);
-    if (!width || !height) throw new Error("Video dimensions are unavailable");
-    return { width, height };
-  } catch (error) {
-    const wrapped = new Error("Video metadata could not be read") as Error & { cause?: unknown };
-    wrapped.cause = error;
-    throw wrapped;
-  }
+function videoDimensionsFromProbe(probe: VideoProbe): { width: number; height: number } {
+  const stream = probe.streams?.find((candidate) => candidate.codec_type === "video") ?? probe.streams?.[0];
+  const width = finitePositiveInteger(stream?.width);
+  const height = finitePositiveInteger(stream?.height);
+  if (!width || !height) throw new Error("Video dimensions are unavailable");
+  return { width, height };
+}
+
+function firstMetadataValue(metadata: PhotoMetadataWriteInput, key: string): unknown {
+  return metadata.values.find((value) => value.key === key)?.value;
 }
 
 async function extractVideoFrame(sourcePath: string, outputPath: string, commandRunner: PhotoMediaCommandRunner): Promise<string> {
