@@ -1,3 +1,9 @@
+sigmaos (0.9.1) unstable; urgency=medium
+
+  * Fix cross-platform disk space accounting for the Rust downloader.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Fri, 09 Oct 2026 13:30:38 +0000
+
 sigmaos (0.9.0) unstable; urgency=medium
 
   * Replace the downloader with a resilient Rust service and add Docker inspect details.
