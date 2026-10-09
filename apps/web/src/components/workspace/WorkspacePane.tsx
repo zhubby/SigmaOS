@@ -38,6 +38,11 @@ import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
 import { sortEntries, type FileSortDirection, type FileSortKey, type FileSortState } from "../../lib/file-listing-sort.js";
 import { formatFileModifiedAt } from "../../lib/format.js";
+import {
+  readStoredWorkspacePanel,
+  writeStoredWorkspacePanel,
+  type WorkspacePanelId
+} from "../../lib/workspace-panel-settings.js";
 import { ActivityMenu } from "../activity/ActivityMenu.js";
 import { FileTypeIcon } from "../file/FileTypeIcon.js";
 import { PreviewContent, previewIcon } from "../preview/PreviewContent.js";
@@ -49,7 +54,7 @@ import {
   type UploadBatchState,
   type UploadSource
 } from "../../lib/uploads.js";
-import { WorkspaceManagementPanel, type ManagementPanelId } from "./WorkspaceManagementPanel.js";
+import { WorkspaceManagementPanel } from "./WorkspaceManagementPanel.js";
 import { LocalTerminalPanel } from "./LocalTerminalPanel.js";
 import { HttpDownloaderPanel } from "./HttpDownloaderPanel.js";
 import { PhotoLibraryPanel } from "./PhotoLibraryPanel.js";
@@ -59,7 +64,6 @@ import type { CodeFontSettings } from "../../lib/editor-settings.js";
 import type { ResolvedTheme } from "../../lib/theme-settings.js";
 
 const EPOCH_DATE = new Date(0).toISOString();
-type WorkspacePanelId = "files" | "photos" | "terminal" | "downloads" | ManagementPanelId;
 
 const WORKSPACE_PANELS = [
   {
@@ -392,8 +396,8 @@ export function WorkspacePane({
   const [transferState, setTransferState] = useState<{ entry: FileEntry; operation: "move" | "copy" } | null>(null);
   const [transferTargetDirectory, setTransferTargetDirectory] = useState(currentPath);
   const [operationSubmitting, setOperationSubmitting] = useState(false);
-  const [activePanel, setActivePanel] = useState<WorkspacePanelId>("files");
-  const [terminalMounted, setTerminalMounted] = useState(false);
+  const [activePanel, setActivePanel] = useState<WorkspacePanelId>(() => readStoredWorkspacePanel());
+  const [terminalMounted, setTerminalMounted] = useState(activePanel === "terminal");
   const [compactLayout, setCompactLayout] = useState(() =>
     typeof window !== "undefined" && window.matchMedia("(max-width: 1040px)").matches
   );
@@ -515,6 +519,10 @@ export function WorkspacePane({
     input.setAttribute("webkitdirectory", "");
     input.setAttribute("directory", "");
   }, []);
+
+  useEffect(() => {
+    writeStoredWorkspacePanel(activePanel);
+  }, [activePanel]);
 
   useEffect(() => {
     dragDepthRef.current = 0;
