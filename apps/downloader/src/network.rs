@@ -1,4 +1,5 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 
 use reqwest::header::{ACCEPT_ENCODING, HOST, IF_RANGE, LOCATION, RANGE, RETRY_AFTER, USER_AGENT};
@@ -10,6 +11,7 @@ use crate::error::{DownloadError, ErrorCode};
 use crate::retry::parse_retry_after;
 
 const MAX_REDIRECTS: usize = 5;
+static RUSTLS_PROVIDER: OnceLock<()> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct RequestOptions {
@@ -136,6 +138,7 @@ async fn send_once(
     options: &RequestOptions,
     range: &RangeRequest,
 ) -> Result<Response, DownloadError> {
+    install_rustls_provider();
     let host = url.host_str().expect("validated URL has a host");
     let port = url
         .port_or_known_default()
@@ -193,6 +196,14 @@ async fn send_once(
             )
         })?
         .map_err(classify_reqwest_error)
+}
+
+fn install_rustls_provider() {
+    RUSTLS_PROVIDER.get_or_init(|| {
+        if rustls::crypto::CryptoProvider::get_default().is_none() {
+            let _ = rustls::crypto::ring::default_provider().install_default();
+        }
+    });
 }
 
 fn host_header(url: &Url) -> String {
