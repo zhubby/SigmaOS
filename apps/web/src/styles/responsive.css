@@ -112,6 +112,40 @@
 }
 
 @container workspace-stage (max-width: 760px) {
+  .workspace-grid {
+    min-width: 0;
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 0fr);
+  }
+
+  .workspace-grid.has-preview {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(280px, 0.9fr) minmax(320px, 1.1fr);
+  }
+
+  .workspace-grid.has-preview.is-preview-collapsed {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) 44px;
+  }
+
+  .preview-pane {
+    transform: translateY(14px) scaleY(0.97);
+    transform-origin: center top;
+  }
+
+  .preview-expand-button {
+    grid-template-columns: 34px minmax(0, 1fr);
+    grid-template-rows: 1fr;
+    justify-items: start;
+    padding: 0 12px;
+  }
+
+  .preview-expand-button span {
+    max-width: 100%;
+    transform: none;
+    writing-mode: horizontal-tb;
+  }
+
   .management-body,
   .management-skeleton-body,
   .management-lower-grid,
@@ -122,6 +156,19 @@
   .docker-pressure-section,
   .docker-compose-section {
     grid-column: auto;
+  }
+}
+
+@container workspace-stage (max-width: 520px) {
+  .files-navigation-bar,
+  .files-navigation-bar.has-root-switcher,
+  .files-navigation-bar.has-storage-pool-switcher,
+  .files-navigation-bar.has-root-switcher.has-storage-pool-switcher.has-multiple-switchers {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .files-navigation-bar .search {
+    grid-column: 1;
   }
 }
 
