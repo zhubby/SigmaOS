@@ -3,6 +3,8 @@ import path from "node:path";
 
 const INTERNAL_PACKAGE_PREFIX = "@sigmaos/";
 const DEPENDENCY_FIELDS = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"];
+const DOWNLOADER_CARGO_MANIFEST = "apps/downloader/Cargo.toml";
+const DOWNLOADER_CARGO_PACKAGE = "sigmaos-downloader";
 const STABLE_SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 
 export function parseStableVersion(value) {
@@ -60,6 +62,8 @@ export async function readVersionState(repoRoot) {
     version: rootManifest.value.version,
     manifests,
     lock: await readJson(path.join(repoRoot, "package-lock.json")),
+    downloaderCargoManifest: await readFile(path.join(repoRoot, DOWNLOADER_CARGO_MANIFEST), "utf8"),
+    cargoLock: await readFile(path.join(repoRoot, "Cargo.lock"), "utf8"),
     debianChangelog: await readFile(path.join(repoRoot, "packaging/debian/changelog"), "utf8"),
     applianceManifest: await readFile(path.join(repoRoot, "packaging/appliance/manifest.toml"), "utf8")
   };
@@ -78,6 +82,26 @@ export function versionStateErrors(state) {
 
   if (state.lock.version !== version) {
     errors.push(`package-lock.json has top-level version ${JSON.stringify(state.lock.version)}; expected ${version}`);
+  }
+
+  const downloaderManifestVersion = readTomlPackageVersion(
+    state.downloaderCargoManifest,
+    "[package]",
+    DOWNLOADER_CARGO_PACKAGE,
+    DOWNLOADER_CARGO_MANIFEST
+  );
+  if (downloaderManifestVersion !== version) {
+    errors.push(`${DOWNLOADER_CARGO_MANIFEST} has version ${JSON.stringify(downloaderManifestVersion)}; expected ${version}`);
+  }
+
+  const downloaderLockVersion = readTomlPackageVersion(
+    state.cargoLock,
+    "[[package]]",
+    DOWNLOADER_CARGO_PACKAGE,
+    "Cargo.lock"
+  );
+  if (downloaderLockVersion !== version) {
+    errors.push(`Cargo.lock package ${JSON.stringify(DOWNLOADER_CARGO_PACKAGE)} has version ${JSON.stringify(downloaderLockVersion)}; expected ${version}`);
   }
 
   for (const { relativePath } of state.manifests) {
@@ -133,6 +157,26 @@ export async function prepareRelease(repoRoot, { increment, note, now = new Date
     updateInternalDependencies(lockEntry, nextVersion);
   }
   files.set("package-lock.json", `${JSON.stringify(state.lock, null, 2)}\n`);
+  files.set(
+    DOWNLOADER_CARGO_MANIFEST,
+    replaceTomlPackageVersion(
+      state.downloaderCargoManifest,
+      "[package]",
+      DOWNLOADER_CARGO_PACKAGE,
+      nextVersion,
+      DOWNLOADER_CARGO_MANIFEST
+    )
+  );
+  files.set(
+    "Cargo.lock",
+    replaceTomlPackageVersion(
+      state.cargoLock,
+      "[[package]]",
+      DOWNLOADER_CARGO_PACKAGE,
+      nextVersion,
+      "Cargo.lock"
+    )
+  );
   files.set("packaging/debian/changelog", prependDebianChangelog(state.debianChangelog, nextVersion, note, now));
   files.set(
     "packaging/appliance/manifest.toml",
@@ -222,6 +266,46 @@ function readDebianVersion(changelog) {
 
 function readApplianceVersion(manifest) {
   return /^version\s*=\s*"([^"]+)"/mu.exec(manifest)?.[1] ?? null;
+}
+
+function readTomlPackageVersion(document, tableHeader, packageName, source) {
+  const location = locateTomlPackageVersion(document, tableHeader, packageName);
+  if (!location) {
+    throw new Error(`${source} is missing package ${JSON.stringify(packageName)}`);
+  }
+  return location.version;
+}
+
+function replaceTomlPackageVersion(document, tableHeader, packageName, version, source) {
+  const location = locateTomlPackageVersion(document, tableHeader, packageName);
+  if (!location) {
+    throw new Error(`${source} is missing package ${JSON.stringify(packageName)}`);
+  }
+  return `${document.slice(0, location.start)}${version}${document.slice(location.end)}`;
+}
+
+function locateTomlPackageVersion(document, tableHeader, packageName) {
+  const escapedHeader = tableHeader.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const tablePattern = new RegExp(
+    `^${escapedHeader}\\s*$([\\s\\S]*?)(?=^\\[|(?![\\s\\S]))`,
+    "gmu"
+  );
+
+  for (const tableMatch of document.matchAll(tablePattern)) {
+    const body = tableMatch[1];
+    const name = /^name\s*=\s*"([^"]+)"\s*$/mu.exec(body)?.[1] ?? null;
+    if (name !== packageName) continue;
+
+    const versionMatch = /^version\s*=\s*"([^"]+)"\s*$/mu.exec(body);
+    if (!versionMatch || tableMatch.index === undefined || versionMatch.index === undefined) return null;
+
+    const bodyStart = tableMatch.index + tableMatch[0].length - body.length;
+    const valueOffset = versionMatch[0].indexOf(versionMatch[1]);
+    const start = bodyStart + versionMatch.index + valueOffset;
+    return { version: versionMatch[1], start, end: start + versionMatch[1].length };
+  }
+
+  return null;
 }
 
 function prependDebianChangelog(changelog, version, note, now) {
