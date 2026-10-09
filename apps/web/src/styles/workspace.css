@@ -3439,6 +3439,10 @@
   min-width: 760px;
 }
 
+.management-table-virtualMachines {
+  min-width: 680px;
+}
+
 .management-table-docker th:nth-child(1),
 .management-table-docker td:nth-child(1) {
   width: 19%;
@@ -3471,34 +3475,32 @@
 
 .management-table-virtualMachines th:nth-child(1),
 .management-table-virtualMachines td:nth-child(1) {
-  width: 17%;
+  width: 24%;
 }
 
 .management-table-virtualMachines th:nth-child(2),
 .management-table-virtualMachines td:nth-child(2) {
-  width: 12%;
+  width: 16%;
 }
 
 .management-table-virtualMachines th:nth-child(3),
 .management-table-virtualMachines td:nth-child(3) {
-  width: 13%;
+  width: 10%;
 }
 
 .management-table-virtualMachines th:nth-child(4),
 .management-table-virtualMachines td:nth-child(4) {
-  width: 9%;
+  width: 16%;
 }
 
 .management-table-virtualMachines th:nth-child(5),
-.management-table-virtualMachines td:nth-child(5),
-.management-table-virtualMachines th:nth-child(6),
-.management-table-virtualMachines td:nth-child(6) {
-  width: 10%;
+.management-table-virtualMachines td:nth-child(5) {
+  width: 16%;
 }
 
-.management-table-virtualMachines th:nth-child(7),
-.management-table-virtualMachines td:nth-child(7) {
-  width: 29%;
+.management-table-virtualMachines th:nth-child(6),
+.management-table-virtualMachines td:nth-child(6) {
+  width: 18%;
 }
 
 .management-table-network th:nth-child(1),
@@ -3568,10 +3570,6 @@
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.management-table-virtualMachines td:nth-child(8) {
-  overflow: visible;
 }
 
 .storage-pool-name-button,
@@ -6939,6 +6937,10 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.vm-instance-detail-stat-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .docker-container-detail-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -7063,6 +7065,10 @@
   border-top: 1px solid var(--line-soft);
 }
 
+.vm-instance-detail-resources > div {
+  grid-template-columns: minmax(110px, .55fr) minmax(0, 1.45fr) auto;
+}
+
 .docker-container-detail-mounts > div:first-child {
   padding-top: 0;
   border-top: 0;
@@ -7126,6 +7132,10 @@
   gap: 6px;
 }
 
+.vm-instance-detail-action-buttons {
+  max-width: 620px;
+}
+
 .docker-detail-action {
   display: inline-flex;
   align-items: center;
@@ -7179,6 +7189,10 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .vm-instance-detail-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .docker-container-detail-actions {
     align-items: stretch;
     flex-direction: column;
@@ -7195,6 +7209,10 @@
 }
 
 @media (max-width: 430px) {
+  .vm-instance-detail-stat-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .docker-container-detail-heading h2 {
     max-width: 180px;
   }

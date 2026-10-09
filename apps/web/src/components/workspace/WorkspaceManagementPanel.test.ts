@@ -4,7 +4,11 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { DockerContainer, DockerContainerDetails, VmSummary } from "../../api.js";
 import { i18n, initI18n } from "../../i18n/index.js";
 import { DockerComposeAppDialog } from "./DockerComposeAppDialog.js";
-import { DockerContainerDetailsDialog, VmInstanceActions } from "./WorkspaceManagementPanel.js";
+import {
+  DockerContainerDetailsDialog,
+  VmInstanceActions,
+  VmInstanceDetailsDialog
+} from "./WorkspaceManagementPanel.js";
 
 beforeAll(async () => {
   await initI18n();
@@ -88,6 +92,47 @@ describe("DockerComposeAppDialog", () => {
     expect(html).toContain("/srv/apps/...");
     expect(html).toContain("Validate");
     expect(html).toContain("Save and deploy");
+  });
+});
+
+describe("VmInstanceDetailsDialog", () => {
+  it("renders instance identity, resources, attachments, and running actions", () => {
+    const vm: VmSummary["instances"][number] = {
+      id: "guest-id",
+      name: "arch-linux",
+      state: "running",
+      uuid: "6bf3ae63-a248-4a98-8c30-479e75d06c82",
+      vcpu: 4,
+      memoryBytes: 4 * 1024 ** 3,
+      maxMemoryBytes: 8 * 1024 ** 3,
+      os: "Arch Linux",
+      disks: [{ source: "/var/lib/sigmaos/vmstore/arch-linux.qcow2", capacityBytes: 20 * 1024 ** 3 }],
+      networks: [{ name: "vnet7", source: "default", mac: "52:54:00:12:34:56" }]
+    };
+    const html = renderToStaticMarkup(createElement(VmInstanceDetailsDialog, {
+      vm,
+      hostArchitecture: "arm64",
+      locale: "en",
+      pendingApproval: null,
+      approvedConsole: null,
+      canMutate: true,
+      canConsole: true,
+      pendingAction: null,
+      onClose: vi.fn(),
+      onRequest: vi.fn(),
+      onRequestConsole: vi.fn()
+    }));
+
+    expect(html).toContain("arch-linux");
+    expect(html).toContain("6bf3ae63-a248-4a98-8c30-479e75d06c82");
+    expect(html).toContain("Arch Linux");
+    expect(html).toContain("arm64");
+    expect(html).toContain("/var/lib/sigmaos/vmstore/arch-linux.qcow2");
+    expect(html).toContain("52:54:00:12:34:56");
+    expect(html).toContain("20.0 GB");
+    expect(html).toContain('title="Stop"');
+    expect(html).toContain('title="Console"');
+    expect(html).toContain('title="Remove"');
   });
 });
 
