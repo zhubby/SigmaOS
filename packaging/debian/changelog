@@ -1,3 +1,9 @@
+sigmaos (0.9.2) unstable; urgency=medium
+
+  * Use a Debian-compatible rustls crypto provider for the Rust downloader.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Fri, 09 Oct 2026 13:46:21 +0000
+
 sigmaos (0.9.1) unstable; urgency=medium
 
   * Fix cross-platform disk space accounting for the Rust downloader.
