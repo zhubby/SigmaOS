@@ -155,8 +155,8 @@ export type TerminalTabState = SharedTerminalTabState;
 export type VmSummary = PublicVmSummary;
 export type VmOperation = VmOperationRecord;
 export type VmAction = VmOperationAction;
-export interface VmProposalResult { message: AgentMessage; job: Job; approval: PendingApproval | null; operation: VmOperation; }
-export interface VmConsoleSession { id: string; operationId: string; approvalId: string; domainName: string; status: string; createdAt: string; expiresAt: string; usedAt: string | null; websocketUrl: string; }
+export interface VmActionResult { message: AgentMessage; job: Job; approval: null; operation: VmOperation; consoleSession?: VmConsoleSession; }
+export interface VmConsoleSession { id: string; operationId: string; approvalId: string | null; domainName: string; status: string; createdAt: string; expiresAt: string; usedAt: string | null; websocketUrl: string; }
 
 export interface Session {
   id: string;
@@ -672,7 +672,7 @@ export async function getVmOperations(sessionId?: string | null): Promise<VmOper
   return ((await response.json()) as { operations: VmOperation[] }).operations;
 }
 
-export async function proposeVmOperation(input: {
+export async function executeVmOperation(input: {
   sessionId: string;
   action: VmAction;
   domainName?: string;
@@ -701,10 +701,10 @@ export async function proposeVmOperation(input: {
   videoModel?: VmVideoModel;
   bootMenu?: boolean;
   autostart?: boolean;
-}): Promise<VmProposalResult> {
-  const response = await fetch("/api/vms/proposals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
+}): Promise<VmActionResult> {
+  const response = await fetch("/api/vms/actions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
   await ensureOk(response);
-  return (await response.json()) as VmProposalResult;
+  return (await response.json()) as VmActionResult;
 }
 
 export async function createVmConsoleSession(operationId: string): Promise<VmConsoleSession> {

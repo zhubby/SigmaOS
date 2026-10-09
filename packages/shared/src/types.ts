@@ -1988,7 +1988,7 @@ export interface VmOperationRecord {
 export interface VmConsoleAuthorizationRecord {
   id: string;
   operationId: string;
-  approvalId: string;
+  approvalId: string | null;
   domainName: string;
   status: "active" | "used" | "expired" | "failed";
   createdAt: string;

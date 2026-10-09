@@ -42,12 +42,11 @@ import "@xterm/xterm/css/xterm.css";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   createDockerConsoleSession,
-  createVmConsoleSession,
+  executeVmOperation,
+  type VmActionResult,
   type VmConsoleSession,
   getVmSummary,
   type VmOperation,
-  type VmOperationProposal,
-  proposeVmOperation,
   getDockerContainerLogs,
   getDockerContainerDetails,
   getDockerSummary,
@@ -374,13 +373,11 @@ export function WorkspaceManagementPanel({
         storagePools={storagePools}
         selectedStoragePoolId={selectedStoragePoolId}
         sessionId={sessionId}
-        pendingApprovals={pendingApprovals}
         vmOperations={vmOperations}
         locale={locale}
         onWorkQueuesChanged={onWorkQueuesChanged}
         onNotifyError={onNotifyError}
         onNotifySuccess={onNotifySuccess}
-        onNotifyWarning={onNotifyWarning}
       />
     );
   }
@@ -494,24 +491,20 @@ function VirtualMachineManagementPanel({
   storagePools,
   selectedStoragePoolId,
   sessionId,
-  pendingApprovals,
   vmOperations,
   locale,
   onWorkQueuesChanged,
   onNotifyError,
-  onNotifySuccess,
-  onNotifyWarning
+  onNotifySuccess
 }: {
   storagePools: StorageFilePickerPool[];
   selectedStoragePoolId: string;
   sessionId: string | null;
-  pendingApprovals: PendingApproval[];
   vmOperations: VmOperation[];
   locale: SupportedLocale;
   onWorkQueuesChanged: () => void | Promise<void>;
   onNotifyError: (message: string | null) => void;
   onNotifySuccess: (message: string | null) => void;
-  onNotifyWarning: (message: string | null) => void;
 }) {
   const { t } = useTranslation();
   const dashboard = useManagementDashboard("virtualMachines");
@@ -544,42 +537,26 @@ function VirtualMachineManagementPanel({
     return () => timers.forEach((timer) => window.clearTimeout(timer));
   }, [vmOperations[0]?.updatedAt]);
 
-  async function request(action: Parameters<typeof proposeVmOperation>[0]["action"], domainName: string, extra: Partial<Parameters<typeof proposeVmOperation>[0]> = {}): Promise<boolean> {
-    if (!sessionId) { onNotifyError(t("workspace.management.virtualMachines.noSession")); return false; }
+  async function request(action: Parameters<typeof executeVmOperation>[0]["action"], domainName: string, extra: Partial<Parameters<typeof executeVmOperation>[0]> = {}): Promise<VmActionResult | null> {
+    if (!sessionId) { onNotifyError(t("workspace.management.virtualMachines.noSession")); return null; }
     setPendingAction(`${action}:${domainName}`);
     try {
-      await proposeVmOperation({ sessionId, action, domainName, ...extra });
-      if (action === "create") {
-        onNotifySuccess(t("workspace.management.virtualMachines.created"));
-      } else {
-        onNotifyWarning(t("workspace.management.virtualMachines.proposalCreated"));
-      }
-      await onWorkQueuesChanged();
-      return true;
-    } catch (nextError) { onNotifyError(errorMessage(nextError)); return false; }
+      const result = await executeVmOperation({ sessionId, action, domainName, ...extra });
+      onNotifySuccess(t(action === "create" ? "workspace.management.virtualMachines.created" : "workspace.management.virtualMachines.actionCompleted"));
+      await Promise.all([onWorkQueuesChanged(), refresh()]);
+      return result;
+    } catch (nextError) { onNotifyError(errorMessage(nextError)); return null; }
     finally { setPendingAction(null); }
   }
 
   async function requestConsole(vm: VmSummary["instances"][number]) {
     const domainName = vm.name;
-    const approvedOperation = approvedVmConsoleOperation(vm, vmOperations);
-    if (approvedOperation) {
-      setPendingAction(`console-open:${domainName}`);
-      try {
-        setConsoleSession(await createVmConsoleSession(approvedOperation.id));
-        await onWorkQueuesChanged();
-      } catch (nextError) {
-        onNotifyError(errorMessage(nextError));
-      } finally {
-        setPendingAction(null);
-      }
-      return;
-    }
     if (!canConsole) {
       onNotifyError(host?.issues?.[0] ?? t("workspace.management.virtualMachines.unavailableDetail"));
       return;
     }
-    await request("console", domainName);
+    const result = await request("console", domainName);
+    if (result?.consoleSession) setConsoleSession(result.consoleSession);
   }
 
   async function createVm(event: FormEvent) {
@@ -588,7 +565,7 @@ function VirtualMachineManagementPanel({
     if (validation) { setWizardError(validation); return; }
     const mediaPath = form.mediaMode === "iso" ? form.isoPath.trim() : form.diskPath.trim();
     if (!form.name.trim() || !mediaPath) return;
-    const proposed = await request("create", form.name.trim(), {
+    const created = await request("create", form.name.trim(), {
       vcpu: Number(form.vcpu), memoryBytes: Number(form.memoryGiB) * 1024 ** 3,
       diskSizeBytes: Number(form.diskGiB) * 1024 ** 3,
       ...(form.osVariant.trim() ? { osVariant: form.osVariant.trim() } : {}),
@@ -614,7 +591,7 @@ function VirtualMachineManagementPanel({
       bootMenu: form.bootMenu,
       autostart: form.autostart
     });
-    if (proposed) setCreateOpen(false);
+    if (created) setCreateOpen(false);
   }
 
   function openCreateVm() {
@@ -753,8 +730,6 @@ function VirtualMachineManagementPanel({
           vm={selectedVm}
           hostArchitecture={host?.architecture ?? null}
           locale={locale}
-          pendingApproval={pendingVmApprovalForTarget(pendingApprovals, selectedVm.name)}
-          approvedConsole={approvedVmConsoleOperation(selectedVm, vmOperations)}
           canMutate={canMutate}
           canConsole={canConsole}
           pendingAction={pendingAction}
@@ -864,8 +839,6 @@ export function VmInstanceDetailsDialog({
   vm,
   hostArchitecture,
   locale,
-  pendingApproval,
-  approvedConsole,
   canMutate,
   canConsole,
   pendingAction,
@@ -876,16 +849,14 @@ export function VmInstanceDetailsDialog({
   vm: VmSummary["instances"][number];
   hostArchitecture: string | null;
   locale: SupportedLocale;
-  pendingApproval: PendingApproval | null;
-  approvedConsole: VmOperation | null;
   canMutate: boolean;
   canConsole: boolean;
   pendingAction: string | null;
   onClose: () => void;
   onRequest: (
-    action: Parameters<typeof proposeVmOperation>[0]["action"],
+    action: Parameters<typeof executeVmOperation>[0]["action"],
     domainName: string,
-    extra?: Partial<Parameters<typeof proposeVmOperation>[0]>
+    extra?: Partial<Parameters<typeof executeVmOperation>[0]>
   ) => void | Promise<unknown>;
   onRequestConsole: (vm: VmSummary["instances"][number]) => void | Promise<unknown>;
 }) {
@@ -1040,12 +1011,10 @@ export function VmInstanceDetailsDialog({
         <footer className="docker-container-detail-actions">
           <div className="docker-container-detail-action-note">
             <Info aria-hidden="true" size={14} />
-            <span>{pendingApproval ? t("workspace.management.virtualMachines.pendingApprovalNote") : t("workspace.management.virtualMachines.actionsNote")}</span>
+            <span>{t("workspace.management.virtualMachines.actionsNote")}</span>
           </div>
           <VmInstanceActions
             vm={vm}
-            pendingApproval={pendingApproval}
-            approvedConsole={approvedConsole}
             canMutate={canMutate}
             canConsole={canConsole}
             pendingAction={pendingAction}
@@ -1060,8 +1029,6 @@ export function VmInstanceDetailsDialog({
 
 export function VmInstanceActions({
   vm,
-  pendingApproval,
-  approvedConsole,
   canMutate,
   canConsole,
   pendingAction,
@@ -1069,22 +1036,27 @@ export function VmInstanceActions({
   onRequestConsole
 }: {
   vm: VmSummary["instances"][number];
-  pendingApproval: PendingApproval | null;
-  approvedConsole: VmOperation | null;
   canMutate: boolean;
   canConsole: boolean;
   pendingAction: string | null;
   onRequest: (
-    action: Parameters<typeof proposeVmOperation>[0]["action"],
+    action: Parameters<typeof executeVmOperation>[0]["action"],
     domainName: string,
-    extra?: Partial<Parameters<typeof proposeVmOperation>[0]>
+    extra?: Partial<Parameters<typeof executeVmOperation>[0]>
   ) => void | Promise<unknown>;
   onRequestConsole: (vm: VmSummary["instances"][number]) => void | Promise<unknown>;
 }) {
   const { t } = useTranslation();
-  const actionDisabled = !canMutate || pendingAction !== null || Boolean(pendingApproval);
-  const consoleDisabled = !canConsole || pendingAction !== null || Boolean(pendingApproval);
+  const actionDisabled = !canMutate || pendingAction !== null;
+  const consoleDisabled = !canConsole || pendingAction !== null;
   const domainName = vm.name;
+
+  function remove() {
+    if (window.confirm(String(t("workspace.management.virtualMachines.removeConfirm", { name: domainName })))) {
+      void onRequest("delete", domainName);
+    }
+  }
+
   return (
     <div className="docker-container-detail-action-buttons vm-instance-detail-action-buttons">
       {vm.state === "running" ? (
@@ -1105,8 +1077,8 @@ export function VmInstanceActions({
         <ManagementDetailActionButton label={t("workspace.management.actions.start")} disabled={actionDisabled} pending={pendingAction === `start:${domainName}`} Icon={Play} onClick={() => onRequest("start", domainName)} />
       )}
       {vm.state === "running" || vm.state === "paused" ? <ManagementDetailActionButton label={t("workspace.management.actions.snapshot")} disabled={actionDisabled} pending={pendingAction === `snapshot:${domainName}`} Icon={Database} onClick={() => onRequest("snapshot", domainName, { snapshotName: vmSnapshotName(domainName) })} /> : null}
-      {vm.state === "running" || vm.state === "paused" ? <ManagementDetailActionButton label={approvedConsole ? t("workspace.management.actions.openConsole") : t("workspace.management.actions.console")} disabled={consoleDisabled} pending={pendingAction === `console:${domainName}` || pendingAction === `console-open:${domainName}`} Icon={TerminalSquare} onClick={() => onRequestConsole(vm)} /> : null}
-      <ManagementDetailActionButton label={t("workspace.management.actions.remove")} disabled={actionDisabled} pending={pendingAction === `delete:${domainName}`} Icon={Trash2} danger onClick={() => onRequest("delete", domainName)} />
+      {vm.state === "running" || vm.state === "paused" ? <ManagementDetailActionButton label={t("workspace.management.actions.console")} disabled={consoleDisabled} pending={pendingAction === `console:${domainName}`} Icon={TerminalSquare} onClick={() => onRequestConsole(vm)} /> : null}
+      <ManagementDetailActionButton label={t("workspace.management.actions.remove")} disabled={actionDisabled} pending={pendingAction === `delete:${domainName}`} Icon={Trash2} danger onClick={remove} />
     </div>
   );
 }
@@ -2418,30 +2390,6 @@ function approvedConsoleOperation(container: DockerContainer, operations: Docker
         operation.targetId === container.id
     ) ?? null
   );
-}
-
-function pendingVmApprovalForTarget(approvals: PendingApproval[], domainName: string): PendingApproval | null {
-  return (
-    approvals.find((approval) => {
-      if (approval.kind !== "vm_operation") {
-        return false;
-      }
-      return approval.proposal.some(
-        (proposal) => isVmOperationProposal(proposal) && proposal.domainName === domainName
-      );
-    }) ?? null
-  );
-}
-
-function isVmOperationProposal(proposal: PendingApproval["proposal"][number]): proposal is VmOperationProposal {
-  return "action" in proposal && "risk" in proposal && "summary" in proposal && (proposal as { action?: unknown }).action !== undefined;
-}
-
-function approvedVmConsoleOperation(vm: VmSummary["instances"][number], operations: VmOperation[]): VmOperation | null {
-  return operations.find((operation) => {
-    const proposal = operation.metadata.proposal as VmOperationProposal | undefined;
-    return operation.action === "console" && operation.status === "approved" && operation.targetId === vm.name && proposal?.domainUuid === vm.uuid;
-  }) ?? null;
 }
 
 function containerTone(container: DockerContainer): StatusTone {

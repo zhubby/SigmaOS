@@ -8,7 +8,7 @@ export const VM_CONSOLE_AUTHORIZATION_TTL_MS = 5 * 60_000;
 
 export function createVmConsoleAuthorization(
   db: SigmaDatabase,
-  input: { operationId: string; approvalId: string; domainName: string }
+  input: { operationId: string; approvalId: string | null; domainName: string }
 ): VmConsoleAuthorizationRecord {
   const now = new Date();
   const record: VmConsoleAuthorizationRecord = {

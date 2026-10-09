@@ -4,20 +4,27 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  createActionMessageAndJob,
   createDockerConsoleAuthorization,
   createDockerOperationApproval,
   createSession,
   createUserMessageAndJob,
+  createVmConsoleAuthorization,
+  createVmOperationApproval,
   ensureNasRoots,
   getApproval,
   getDockerOperation,
+  getJob,
   getPhotoAsset,
+  getVmOperation,
+  listOperationNotifications,
   migrations,
   openSigmaDb,
   savePhotoLibrarySettings,
   upsertPhotoAsset,
   updateApprovalStatus,
-  updateDockerOperationStatus
+  updateDockerOperationStatus,
+  updateVmOperationStatus
 } from "./index.js";
 
 let tempDir: string;
@@ -54,8 +61,81 @@ describe("SQLite schema migrations", () => {
       "017_photo_library",
       "018_photo_upload_reservations",
       "019_photo_metadata_index",
-      "020_docker_compose_apps"
+      "020_docker_compose_apps",
+      "021_vm_direct_actions"
     ]);
+  });
+
+  it("retires pending VM approvals and preserves console authorizations for direct actions", () => {
+    const databasePath = path.join(tempDir, "vm-direct-actions.sqlite");
+    const current = openSigmaDb(databasePath);
+    ensureNasRoots(current, [{ id: "local", name: "Local", path: tempDir }]);
+    const session = createSession(current, { rootId: "local" });
+    const { job } = createActionMessageAndJob(current, {
+      sessionId: session.id,
+      content: "Open VM console",
+      kind: "vm",
+      status: "waiting_approval"
+    });
+    const { approval, operation } = createVmOperationApproval(current, {
+      jobId: job.id,
+      proposal: {
+        action: "console",
+        domainName: "guest",
+        domainUuid: "guest-uuid",
+        risk: "medium",
+        summary: "Open VM console"
+      }
+    });
+    updateApprovalStatus(current, approval.id, "approved");
+    updateVmOperationStatus(current, operation.id, "approved");
+    const authorization = createVmConsoleAuthorization(current, {
+      operationId: operation.id,
+      approvalId: approval.id,
+      domainName: "guest"
+    });
+
+    current.pragma("foreign_keys = OFF");
+    current.exec(`
+      PRAGMA legacy_alter_table = ON;
+      ALTER TABLE vm_console_authorizations RENAME TO vm_console_authorizations_new;
+      CREATE TABLE vm_console_authorizations (
+        id TEXT PRIMARY KEY,
+        operation_id TEXT NOT NULL REFERENCES vm_operations(id) ON DELETE CASCADE,
+        approval_id TEXT NOT NULL REFERENCES pending_approvals(id) ON DELETE CASCADE,
+        domain_name TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('active', 'used', 'expired', 'failed')),
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        used_at TEXT
+      );
+      INSERT INTO vm_console_authorizations
+      SELECT * FROM vm_console_authorizations_new;
+      DROP TABLE vm_console_authorizations_new;
+      DELETE FROM schema_migrations WHERE id = '021_vm_direct_actions';
+    `);
+    current.close();
+
+    const migrated = openSigmaDb(databasePath);
+    try {
+      expect(getApproval(migrated, approval.id)?.status).toBe("expired");
+      expect(getVmOperation(migrated, operation.id)).toMatchObject({
+        status: "failed",
+        metadata: expect.objectContaining({ error: expect.stringContaining("execute directly") })
+      });
+      expect(getJob(migrated, job.id)).toMatchObject({ status: "cancelled", error: expect.stringContaining("execute directly") });
+      expect(listOperationNotifications(migrated)).toEqual([
+        expect.objectContaining({ jobId: job.id, status: "cancelled", error: expect.stringContaining("execute directly") })
+      ]);
+      expect(migrated.prepare("SELECT approval_id FROM vm_console_authorizations WHERE id = ?").pluck().get(authorization.id))
+        .toBe(approval.id);
+      const approvalColumn = migrated.prepare("PRAGMA table_info(vm_console_authorizations)").all()
+        .find((column) => (column as { name: string }).name === "approval_id") as { notnull: number };
+      expect(approvalColumn.notnull).toBe(0);
+      expect(migrated.pragma("foreign_key_check")).toEqual([]);
+    } finally {
+      migrated.close();
+    }
   });
 
   it("adds photo metadata, scalar, text, and spatial indexes without replacing photo assets", () => {

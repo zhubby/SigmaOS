@@ -7,7 +7,6 @@ import {
   createVmOperationRecord,
   createActionMessageAndJob,
   createVmConsoleAuthorization,
-  createVmOperationApproval,
   expireStaleVmConsoleOperations,
   getApproval,
   getJob,
@@ -38,7 +37,7 @@ import type { ApiRouteContext } from "../context.js";
 import { applyVmOperation, collectVmSummary, safeVmMessage, DEFAULT_VM_CONFIG } from "../lib/vm-service.js";
 import { resolveScopedExistingPath, resolveStoragePoolScope } from "../lib/storage-scope.js";
 
-type VmProposalBody = {
+type VmActionBody = {
   sessionId?: string;
   action?: VmOperationAction;
   domainName?: string;
@@ -92,54 +91,82 @@ export function registerVmRoutes(server: FastifyInstance, context: ApiRouteConte
       operations: listVmOperations(context.db, { ...(request.query.sessionId ? { sessionId: request.query.sessionId } : {}), limit: 100 })
     };
   });
-  server.post<{ Body: VmProposalBody }>("/api/vms/proposals", async (request, reply) => {
-    const session = getSession(context.db, request.body?.sessionId ?? "");
-    if (!session) { reply.status(404).send({ error: "Session not found" }); return; }
-    try {
-      const proposal = await buildVmProposal(request.body ?? {}, context);
-      if (proposal.action === "create") {
-        const { message, job } = createActionMessageAndJob(context.db, { sessionId: session.id, content: proposal.summary, kind: "vm", status: "running" });
+  for (const url of ["/api/vms/actions", "/api/vms/proposals"]) {
+    server.post<{ Body: VmActionBody }>(url, async (request, reply) => {
+      const session = getSession(context.db, request.body?.sessionId ?? "");
+      if (!session) { reply.status(404).send({ error: "Session not found" }); return; }
+      try {
+        const proposal = await buildVmProposal(request.body ?? {}, context);
+        if (getProposedVmOperationForTarget(context.db, proposal.domainName ?? "new-vm")) {
+          reply.status(409).send({ error: `A virtual machine operation is already running for ${proposal.domainName}` });
+          return;
+        }
+        const { message, job } = createActionMessageAndJob(context.db, {
+          sessionId: session.id,
+          content: proposal.summary,
+          kind: "vm",
+          status: "running"
+        });
         const operation = createVmOperationRecord(context.db, { jobId: job.id, proposal });
-        appendEvent(context.db, { sessionId: session.id, jobId: job.id, type: "job.running", payload: { jobId: job.id, vmOperation: operation } });
+        appendEvent(context.db, {
+          sessionId: session.id,
+          jobId: job.id,
+          type: "job.running",
+          payload: { jobId: job.id, vmOperation: operation }
+        });
         try {
-          let executionConfig = context.config;
-          let executionProposal = proposal;
-          if (proposal.isoRootId || proposal.isoStoragePoolId || proposal.isoSourcePath) {
-            const storageIso = await resolveStorageIso({
-              ...(proposal.isoSourcePath ? { isoPath: proposal.isoSourcePath } : {}),
-              ...(proposal.isoRootId ? { isoRootId: proposal.isoRootId } : {}),
-              ...(proposal.isoStoragePoolId ? { isoStoragePoolId: proposal.isoStoragePoolId } : {})
-            }, context);
-            if (!storageIso) throw new Error("Stored ISO selection is incomplete");
-            const vmConfig = context.config.vm ?? DEFAULT_VM_CONFIG;
-            executionConfig = { ...context.config, vm: { ...vmConfig, isoRoots: [...vmConfig.isoRoots, storageIso.mountpointPath] } };
-            executionProposal = { ...proposal, isoPath: storageIso.absolutePath };
-          }
-          const metadata = await applyVmOperation(executionConfig, operation, executionProposal, context.vm);
-          const applied = updateVmOperationStatus(context.db, operation.id, "applied", { ...metadata, appliedAt: new Date().toISOString() });
+          const prepared = await prepareVmExecution(context, proposal);
+          const metadata = await applyVmOperation(prepared.config, operation, prepared.proposal, context.vm);
+          const authorization = proposal.action === "console"
+            ? createVmConsoleAuthorization(context.db, {
+              operationId: operation.id,
+              approvalId: null,
+              domainName: proposal.domainName!
+            })
+            : null;
+          const applied = updateVmOperationStatus(context.db, operation.id, "applied", {
+            ...metadata,
+            ...(authorization ? { consoleSessionId: authorization.id } : {}),
+            appliedAt: new Date().toISOString()
+          });
           if (!applied) throw new Error("VM operation record disappeared before completion");
           updateJobStatus(context.db, job.id, "completed", null, ["running"]);
-          appendEvent(context.db, { sessionId: session.id, jobId: job.id, type: "job.completed", payload: { jobId: job.id, vmOperation: applied } });
-          reply.status(202).send({ message, job: getJob(context.db, job.id) ?? job, approval: null, operation: applied });
+          appendEvent(context.db, {
+            sessionId: session.id,
+            jobId: job.id,
+            type: "job.completed",
+            payload: { jobId: job.id, vmOperation: applied }
+          });
+          reply.status(202).send({
+            message,
+            job: getJob(context.db, job.id) ?? job,
+            approval: null,
+            operation: applied,
+            ...(authorization ? {
+              consoleSession: {
+                ...authorization,
+                websocketUrl: `/api/vms/console/${authorization.id}`
+              }
+            } : {})
+          });
         } catch (error) {
           const messageText = safeVmMessage(error);
-          const failed = updateVmOperationStatus(context.db, operation.id, "failed", { error: messageText, failedAt: new Date().toISOString() });
+          const failed = updateVmOperationStatus(context.db, operation.id, "failed", {
+            error: messageText,
+            failedAt: new Date().toISOString()
+          });
           updateJobStatus(context.db, job.id, "failed", messageText, ["running"]);
-          appendEvent(context.db, { sessionId: session.id, jobId: job.id, type: "job.failed", payload: { jobId: job.id, error: messageText, vmOperation: failed } });
+          appendEvent(context.db, {
+            sessionId: session.id,
+            jobId: job.id,
+            type: "job.failed",
+            payload: { jobId: job.id, error: messageText, vmOperation: failed }
+          });
           reply.status(400).send({ error: messageText });
         }
-        return;
-      }
-      if (getProposedVmOperationForTarget(context.db, proposal.domainName ?? "new-vm")) {
-        reply.status(409).send({ error: `A virtual machine operation is already pending for ${proposal.domainName}` });
-        return;
-      }
-      const { message, job } = createActionMessageAndJob(context.db, { sessionId: session.id, content: proposal.summary, kind: "vm", status: "waiting_approval" });
-      const { approval, operation } = createVmOperationApproval(context.db, { jobId: job.id, proposal });
-      appendEvent(context.db, { sessionId: session.id, jobId: job.id, type: "approval.pending", payload: { approvalId: approval.id, proposal: approval.proposal, summary: proposal.summary } });
-      reply.status(202).send({ message, job, approval, operation });
-    } catch (error) { reply.status(400).send({ error: safeVmMessage(error) }); }
-  });
+      } catch (error) { reply.status(400).send({ error: safeVmMessage(error) }); }
+    });
+  }
   server.post<{ Body: { operationId?: string } }>("/api/vms/console-sessions", async (request, reply) => {
     const operation = getVmOperation(context.db, request.body?.operationId ?? "");
     if (!operation || operation.action !== "console" || operation.status !== "approved" || !operation.approvalId) { reply.status(404).send({ error: "Approved VM console operation not found" }); return; }
@@ -188,7 +215,7 @@ export function registerVmRoutes(server: FastifyInstance, context: ApiRouteConte
   });
 }
 
-async function buildVmProposal(body: VmProposalBody, context: ApiRouteContext): Promise<VmOperationProposal> {
+async function buildVmProposal(body: VmActionBody, context: ApiRouteContext): Promise<VmOperationProposal> {
   const action = body.action;
   if (!action) throw new Error("Virtual machine action is required");
   const summary = await collectVmSummary(context.config, context.vm);
@@ -228,7 +255,7 @@ async function buildVmProposal(body: VmProposalBody, context: ApiRouteContext): 
   };
 }
 
-function validateCreateOptions(body: VmProposalBody, architecture: string): Partial<VmOperationProposal> {
+function validateCreateOptions(body: VmActionBody, architecture: string): Partial<VmOperationProposal> {
   if (body.bootMenu !== undefined && typeof body.bootMenu !== "boolean") throw new Error("Boot menu must be a boolean");
   if (body.autostart !== undefined && typeof body.autostart !== "boolean") throw new Error("Autostart must be a boolean");
   if (body.vcpuTopology && (body.vcpuTopology.sockets === undefined || body.vcpuTopology.cores === undefined || body.vcpuTopology.threads === undefined)) {
@@ -311,8 +338,14 @@ export async function applyApprovedVmOperation(context: ApiRouteContext, approva
   const operation = getVmOperationByApproval(context.db, approvalId);
   const proposal = approval ? vmOperationProposal(approval) : null;
   if (!approval || !operation || !proposal) throw new Error("VM approval is missing operation metadata");
-  let executionConfig = context.config;
-  let executionProposal = proposal;
+  const prepared = await prepareVmExecution(context, proposal);
+  const metadata = await applyVmOperation(prepared.config, operation, prepared.proposal, context.vm);
+  return updateVmOperationStatus(context.db, operation.id, "applied", { ...metadata, appliedAt: new Date().toISOString() });
+}
+
+async function prepareVmExecution(context: ApiRouteContext, proposal: VmOperationProposal) {
+  let config = context.config;
+  let preparedProposal = proposal;
   if (proposal.isoRootId || proposal.isoStoragePoolId || proposal.isoSourcePath) {
     const storageIso = await resolveStorageIso({
       ...(proposal.isoSourcePath ? { isoPath: proposal.isoSourcePath } : {}),
@@ -321,18 +354,17 @@ export async function applyApprovedVmOperation(context: ApiRouteContext, approva
     }, context);
     if (!storageIso) throw new Error("Stored ISO selection is incomplete");
     const vmConfig = context.config.vm ?? DEFAULT_VM_CONFIG;
-    executionConfig = {
+    config = {
       ...context.config,
       vm: { ...vmConfig, isoRoots: [...vmConfig.isoRoots, storageIso.mountpointPath] }
     };
-    executionProposal = { ...proposal, isoPath: storageIso.absolutePath };
+    preparedProposal = { ...proposal, isoPath: storageIso.absolutePath };
   }
-  const metadata = await applyVmOperation(executionConfig, operation, executionProposal, context.vm);
-  return updateVmOperationStatus(context.db, operation.id, "applied", { ...metadata, appliedAt: new Date().toISOString() });
+  return { config, proposal: preparedProposal };
 }
 
 async function resolveStorageIso(
-  source: Pick<VmProposalBody, "isoPath" | "isoRootId" | "isoStoragePoolId">,
+  source: Pick<VmActionBody, "isoPath" | "isoRootId" | "isoStoragePoolId">,
   context: ApiRouteContext
 ): Promise<{
   absolutePath: string;

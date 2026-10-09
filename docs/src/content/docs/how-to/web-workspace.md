@@ -53,7 +53,7 @@ Photos 面板使用系统配置中指定的唯一媒体目录，不在面板内�
 
 ## 审批与可逆操作
 
-创建目录、移动、复制、重命名、trash、tag、Docker 生命周期/Compose、VM/share/storage 操作以及危险 Pi tool call 会显示 approval 卡片。卡片至少包含操作类型、目标路径、风险和可逆性。Docker 面板中的容器、卷、网络创建在最终确认后直接执行，并写入 operation/job 历史；容器启动失败时会保留已创建容器并显示部分成功警告。
+创建目录、移动、复制、重命名、trash、tag、Docker 生命周期/Compose、share/storage 操作以及危险 Pi tool call 会显示 approval 卡片。卡片至少包含操作类型、目标路径、风险和可逆性。Docker 面板中的容器、卷、网络创建在最终确认后直接执行，并写入 operation/job 历史；容器启动失败时会保留已创建容器并显示部分成功警告。VM 创建、生命周期、快照、控制台和删除操作均直接执行，不创建 approval，同时保留 operation/job 历史；永久删除托管磁盘前仍会显示本地二次确认。
 
 - 点击 **Approve** 后 API 才会执行对应操作；
 - 点击 **Reject** 不改变文件系统；
@@ -71,7 +71,7 @@ Workspace 的 Terminal 使用 Rust termux 和 tmux 承载受限 PTY。每个 NAS
 
 同一标签同时只允许一个控制端。另一个浏览器连接时，原连接会显示“会话已在其他位置打开”并停止自动重连；点击重新接管会把控制权取回。整机重启后 SQLite 中的标签、名称、顺序和活动项仍保留，但 tmux 进程和 scrollback 不会恢复，首次重新连接会启动新的 shell。连接失败时检查 `tmux`、`sigmaos-termux.service` 和 termux identity drop-in。
 
-Downloads 面板使用独立 `sigmaos-downloader.service`，支持公网 HTTP/HTTPS 地址、目录选择、排队、暂停/继续、取消、重试和历史；失败任务保留 `.part` 文件，取消任务清理临时文件，同名目标不会覆盖。Docker、VM、Shares、Storage 面板只在配置和宿主机能力可用时展示完整操作；Docker 资源创建是直接执行的管理流程，生命周期和 Compose 变更仍通过 approval。
+Downloads 面板使用独立 `sigmaos-downloader.service`，支持公网 HTTP/HTTPS 地址、目录选择、排队、暂停/继续、取消、重试和历史；失败任务保留 `.part` 文件，取消任务清理临时文件，同名目标不会覆盖。Docker、VM、Shares、Storage 面板只在配置和宿主机能力可用时展示完整操作；Docker 资源创建和全部 VM 操作是直接执行的管理流程，Docker 生命周期和 Compose 变更仍通过 approval。
 
 Docker 面板的镜像区域可以搜索本地镜像、查看完整 ID/tags/digests/占用信息、拉取镜像和删除未被容器引用的具体 tag。删除需要在详情弹窗中再次确认，不会强制删除，也不进入 agent approval。多标签镜像必须先选择要删除的具体 tag；无标签镜像使用完整 ID。
 

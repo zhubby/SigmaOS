@@ -113,8 +113,6 @@ describe("VmInstanceDetailsDialog", () => {
       vm,
       hostArchitecture: "arm64",
       locale: "en",
-      pendingApproval: null,
-      approvedConsole: null,
       canMutate: true,
       canConsole: true,
       pendingAction: null,
@@ -130,6 +128,8 @@ describe("VmInstanceDetailsDialog", () => {
     expect(html).toContain("/var/lib/sigmaos/vmstore/arch-linux.qcow2");
     expect(html).toContain("52:54:00:12:34:56");
     expect(html).toContain("20.0 GB");
+    expect(html).toContain("VM actions run immediately");
+    expect(html).not.toContain("approval");
     expect(html).toContain('title="Stop"');
     expect(html).toContain('title="Console"');
     expect(html).toContain('title="Remove"');
@@ -150,8 +150,6 @@ describe("VmInstanceActions", () => {
     networks: []
   };
   const props = {
-    pendingApproval: null,
-    approvedConsole: null,
     canMutate: true,
     canConsole: true,
     pendingAction: null,

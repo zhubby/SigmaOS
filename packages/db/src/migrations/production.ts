@@ -529,5 +529,78 @@ export const productionMigrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_docker_apps_updated_at
         ON docker_apps(updated_at DESC);
     `
+  },
+  {
+    id: "021_vm_direct_actions",
+    disableForeignKeys: true,
+    sql: `
+      UPDATE vm_operations
+      SET status = 'failed',
+          metadata_json = json_set(
+            metadata_json,
+            '$.error',
+            'VM approval retired because VM actions now execute directly',
+            '$.failedAt',
+            strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          ),
+          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      WHERE status IN ('proposed', 'approved')
+        AND approval_id IN (
+          SELECT id FROM pending_approvals
+          WHERE kind = 'vm_operation' AND status IN ('pending', 'approved')
+        );
+
+      UPDATE jobs
+      SET status = 'cancelled',
+          error = 'VM approval retired because VM actions now execute directly',
+          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      WHERE status = 'waiting_approval'
+        AND id IN (
+          SELECT job_id FROM pending_approvals
+          WHERE kind = 'vm_operation' AND status IN ('pending', 'approved')
+        );
+
+      UPDATE operation_notifications
+      SET status = 'cancelled',
+          error = 'VM approval retired because VM actions now execute directly',
+          read_at = NULL,
+          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      WHERE job_id IN (
+        SELECT job_id FROM pending_approvals
+        WHERE kind = 'vm_operation' AND status IN ('pending', 'approved')
+      );
+
+      UPDATE pending_approvals
+      SET status = 'expired',
+          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      WHERE kind = 'vm_operation' AND status IN ('pending', 'approved');
+
+      PRAGMA legacy_alter_table = ON;
+
+      ALTER TABLE vm_console_authorizations RENAME TO vm_console_authorizations_old;
+
+      CREATE TABLE vm_console_authorizations (
+        id TEXT PRIMARY KEY,
+        operation_id TEXT NOT NULL REFERENCES vm_operations(id) ON DELETE CASCADE,
+        approval_id TEXT REFERENCES pending_approvals(id) ON DELETE CASCADE,
+        domain_name TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('active', 'used', 'expired', 'failed')),
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        used_at TEXT
+      );
+
+      INSERT INTO vm_console_authorizations
+        (id, operation_id, approval_id, domain_name, status, created_at, expires_at, used_at)
+      SELECT id, operation_id, approval_id, domain_name, status, created_at, expires_at, used_at
+      FROM vm_console_authorizations_old;
+
+      DROP TABLE vm_console_authorizations_old;
+
+      PRAGMA legacy_alter_table = OFF;
+
+      CREATE INDEX idx_vm_console_authorizations_status_expires_at
+        ON vm_console_authorizations(status, expires_at);
+    `
   }
 ];

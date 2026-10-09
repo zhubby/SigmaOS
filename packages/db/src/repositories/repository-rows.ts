@@ -328,7 +328,7 @@ export type DbVmOperationRow = {
 export type DbVmConsoleAuthorizationRow = {
   id: string;
   operation_id: string;
-  approval_id: string;
+  approval_id: string | null;
   domain_name: string;
   status: "active" | "used" | "expired" | "failed";
   created_at: string;

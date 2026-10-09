@@ -3,10 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  consumeVmConsoleAuthorization,
   createSession,
   ensureNasRoots,
-  getApproval,
-  getJob,
   listEvents,
   listOperationNotifications,
   openSigmaDb,
@@ -53,148 +52,96 @@ describe("VM routes", () => {
     });
   });
 
-  it("creates a console approval and issues a one-shot console session after approval", async () => {
+  it("issues a direct one-shot console session without an approval", async () => {
     const session = createSession(db, { rootId: "local", currentPath: "." });
     const server = await buildServer({ config: testConfig(), db, vm: { commandRunner: vmRunner(), kvmAvailable: true } });
 
-    const proposed = await server.inject({
+    const response = await server.inject({
       method: "POST",
-      url: "/api/vms/proposals",
+      url: "/api/vms/actions",
       payload: { sessionId: session.id, action: "console", domainName: "guest" }
     });
-    expect(proposed.statusCode).toBe(202);
-    expect(proposed.json().message.role).toBe("system");
-    expect(listOperationNotifications(db)).toMatchObject([
-      { jobId: proposed.json().job.id, kind: "vm", status: "pending_approval" }
-    ]);
-    const proposalBody = proposed.json() as { approval: { id: string }; operation: { id: string; status: string } };
-    expect(proposalBody.operation.status).toBe("proposed");
-
-    const listed = await server.inject({ method: "GET", url: `/api/vms/operations?sessionId=${session.id}` });
-    expect(listed.statusCode).toBe(200);
-    expect(listed.json().operations).toHaveLength(1);
-
-    const approved = await server.inject({ method: "POST", url: `/api/approvals/${proposalBody.approval.id}/approve` });
-    expect(approved.statusCode).toBe(202);
-    expect(approved.json().operation.status).toBe("approved");
-
-    const consoleSession = await server.inject({
-      method: "POST",
-      url: "/api/vms/console-sessions",
-      payload: { operationId: proposalBody.operation.id }
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({
+      approval: null,
+      job: { status: "completed" },
+      operation: { action: "console", status: "applied", approvalId: null },
+      consoleSession: {
+        approvalId: null,
+        domainName: "guest",
+        websocketUrl: expect.stringContaining("/api/vms/console/")
+      }
     });
-    expect(consoleSession.statusCode).toBe(201);
-    expect(consoleSession.json().consoleSession).toMatchObject({
-      operationId: proposalBody.operation.id,
-      domainName: "guest",
-      websocketUrl: expect.stringContaining("/api/vms/console/")
-    });
-    expect((await server.inject({ method: "GET", url: `/api/vms/operations?sessionId=${session.id}` })).json().operations)
-      .toEqual([expect.objectContaining({ id: proposalBody.operation.id, status: "applied" })]);
     expect(listOperationNotifications(db)).toMatchObject([
-      { jobId: proposed.json().job.id, kind: "vm", status: "succeeded" }
+      { jobId: response.json().job.id, kind: "vm", status: "succeeded" }
     ]);
-    expect((await server.inject({
-      method: "POST",
-      url: "/api/vms/console-sessions",
-      payload: { operationId: proposalBody.operation.id }
-    })).statusCode).toBe(404);
+    expect(listEvents(db, { sessionId: session.id }).map((event) => event.type)).toEqual(["job.running", "job.completed"]);
+    expect((await server.inject({ method: "GET", url: "/api/approvals" })).json().approvals).toHaveLength(0);
+    const authorizationId = response.json().consoleSession.id as string;
+    expect(consumeVmConsoleAuthorization(db, authorizationId)).toMatchObject({ status: "used", approvalId: null });
+    expect(consumeVmConsoleAuthorization(db, authorizationId)).toBeNull();
     await server.close();
   });
 
-  it("expires approved console operations that were never opened", async () => {
-    const session = createSession(db, { rootId: "local", currentPath: "." });
-    const server = await buildServer({ config: testConfig(), db, vm: { commandRunner: vmRunner(), kvmAvailable: true } });
-
-    const proposed = await server.inject({
-      method: "POST",
-      url: "/api/vms/proposals",
-      payload: { sessionId: session.id, action: "console", domainName: "guest" }
-    });
-    const body = proposed.json() as {
-      approval: { id: string };
-      job: { id: string };
-      operation: { id: string };
-    };
-    expect((await server.inject({ method: "POST", url: `/api/approvals/${body.approval.id}/approve` })).statusCode)
-      .toBe(202);
-    db.prepare("UPDATE vm_operations SET updated_at = ? WHERE id = ?")
-      .run("2020-01-01T00:00:00.000Z", body.operation.id);
-
-    const notifications = await server.inject({ method: "GET", url: "/api/notifications" });
-    expect(notifications.statusCode).toBe(200);
-    expect(notifications.json().notifications).toEqual([
-      expect.objectContaining({ jobId: body.job.id, kind: "vm", status: "cancelled", error: expect.stringContaining("expired") })
-    ]);
-    expect(getApproval(db, body.approval.id)?.status).toBe("expired");
-    expect(getJob(db, body.job.id)).toMatchObject({ status: "cancelled", error: expect.stringContaining("expired") });
-    expect((await server.inject({ method: "GET", url: `/api/vms/operations?sessionId=${session.id}` })).json().operations)
-      .toEqual([expect.objectContaining({
-        id: body.operation.id,
-        status: "failed",
-        metadata: expect.objectContaining({ error: expect.stringContaining("expired") })
-      })]);
-
-    await server.close();
-  });
-
-  it("applies an approved lifecycle operation and records rejected operations", async () => {
+  it("keeps the proposals endpoint as a direct-execution compatibility alias", async () => {
     const calls: string[][] = [];
-    const runner = vmRunner(calls);
     const session = createSession(db, { rootId: "local", currentPath: "." });
-    const server = await buildServer({ config: testConfig(), db, vm: { commandRunner: runner, kvmAvailable: true } });
+    const server = await buildServer({ config: testConfig(), db, vm: { commandRunner: vmRunner(calls), kvmAvailable: true } });
 
-    const startProposal = await server.inject({
+    const response = await server.inject({
       method: "POST",
       url: "/api/vms/proposals",
       payload: { sessionId: session.id, action: "start", domainName: "guest" }
     });
-    const startApprovalId = startProposal.json().approval.id as string;
-    const startOperationId = startProposal.json().operation.id as string;
-    const applied = await server.inject({ method: "POST", url: `/api/approvals/${startApprovalId}/approve` });
-    expect(applied.statusCode).toBe(202);
-    expect(applied.json()).toMatchObject({ status: "applied", operation: { id: startOperationId, status: "applied" } });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({ approval: null, job: { status: "completed" }, operation: { status: "applied", approvalId: null } });
     expect(calls.some((args) => args.includes("start"))).toBe(true);
-
-    const rejectedProposal = await server.inject({
-      method: "POST",
-      url: "/api/vms/proposals",
-      payload: { sessionId: session.id, action: "shutdown", domainName: "guest" }
-    });
-    const rejectedApprovalId = rejectedProposal.json().approval.id as string;
-    const rejectedOperationId = rejectedProposal.json().operation.id as string;
-    const rejected = await server.inject({ method: "POST", url: `/api/approvals/${rejectedApprovalId}/reject` });
-    expect(rejected.statusCode).toBe(202);
-    expect(listOperationNotifications(db).find((notification) => notification.jobId === rejectedProposal.json().job.id))
-      .toMatchObject({ status: "rejected", readAt: null });
-    const operations = await server.inject({ method: "GET", url: `/api/vms/operations?sessionId=${session.id}` });
-    expect(operations.json().operations).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: rejectedOperationId, status: "failed" })
-    ]));
-
     await server.close();
   });
 
-  it("rejects a second pending operation for the same virtual machine", async () => {
+  it("applies a lifecycle operation directly and records its history", async () => {
+    const calls: string[][] = [];
     const session = createSession(db, { rootId: "local", currentPath: "." });
-    const server = await buildServer({ config: testConfig(), db, vm: { commandRunner: vmRunner(), kvmAvailable: true } });
+    const server = await buildServer({ config: testConfig(), db, vm: { commandRunner: vmRunner(calls), kvmAvailable: true } });
 
-    const first = await server.inject({
+    const response = await server.inject({
       method: "POST",
-      url: "/api/vms/proposals",
-      payload: { sessionId: session.id, action: "pause", domainName: "guest" }
-    });
-    const duplicate = await server.inject({
-      method: "POST",
-      url: "/api/vms/proposals",
-      payload: { sessionId: session.id, action: "restart", domainName: "guest" }
+      url: "/api/vms/actions",
+      payload: { sessionId: session.id, action: "start", domainName: "guest" }
     });
 
-    expect(first.statusCode).toBe(202);
-    expect(duplicate.statusCode).toBe(409);
-    expect(duplicate.json().error).toBe("A virtual machine operation is already pending for guest");
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({ approval: null, job: { status: "completed" }, operation: { action: "start", status: "applied", approvalId: null } });
+    expect(calls.some((args) => args.includes("start"))).toBe(true);
+    expect(listEvents(db, { sessionId: session.id }).map((event) => event.type)).toEqual(["job.running", "job.completed"]);
+    expect((await server.inject({ method: "GET", url: "/api/approvals" })).json().approvals).toHaveLength(0);
+    await server.close();
+  });
+
+  it("records a failed direct lifecycle operation without creating an approval", async () => {
+    const session = createSession(db, { rootId: "local", currentPath: "." });
+    const runner = vmRunner();
+    const failingRunner: VmCommandRunner = {
+      async run(command, args) {
+        if (command === "virsh" && args.includes("start")) throw new Error("start failed");
+        return runner.run(command, args);
+      }
+    };
+    const server = await buildServer({ config: testConfig(), db, vm: { commandRunner: failingRunner, kvmAvailable: true } });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/vms/actions",
+      payload: { sessionId: session.id, action: "start", domainName: "guest" }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toContain("start failed");
     expect((await server.inject({ method: "GET", url: `/api/vms/operations?sessionId=${session.id}` })).json().operations)
-      .toEqual([expect.objectContaining({ id: first.json().operation.id, action: "pause", status: "proposed" })]);
+      .toEqual([expect.objectContaining({ action: "start", status: "failed", approvalId: null })]);
+    expect((await server.inject({ method: "GET", url: "/api/approvals" })).json().approvals).toHaveLength(0);
+    expect(listEvents(db, { sessionId: session.id }).map((event) => event.type)).toEqual(["job.running", "job.failed"]);
     await server.close();
   });
 
