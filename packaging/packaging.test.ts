@@ -15,7 +15,6 @@ describe("native packaging artifacts", () => {
       "sigmaos-api.service",
       "sigmaos-worker@.service",
       "sigmaos-photo-worker.service",
-      "sigmaos-downloader.service",
       "sigmaos-indexer.service",
       "sigmaos-scheduler.service",
       "sigmaos-maintenance.service",
@@ -41,6 +40,21 @@ describe("native packaging artifacts", () => {
     );
     await expect(readPackagingFile("systemd", "sigmaos-downloader.service")).resolves.toContain(
       "RequiresMountsFor=/srv/nas"
+    );
+    await expect(readPackagingFile("systemd", "sigmaos-downloader.service")).resolves.toContain(
+      "ExecStart=/usr/lib/sigmaos/bin/sigmaos-downloader"
+    );
+    await expect(readPackagingFile("systemd", "sigmaos-downloader.service")).resolves.toContain(
+      "TimeoutStopSec=30"
+    );
+    await expect(readPackagingFile("systemd", "sigmaos-downloader.service")).resolves.toContain(
+      "User=sigmaos"
+    );
+    await expect(readPackagingFile("systemd", "sigmaos-downloader.service")).resolves.toContain(
+      "ProtectSystem=strict"
+    );
+    await expect(readPackagingFile("systemd", "sigmaos-downloader.service")).resolves.toContain(
+      "NoNewPrivileges=yes"
     );
     await expect(readPackagingFile("systemd", "sigmaos-hostd.service")).resolves.toContain(
       "After=network-online.target local-fs.target systemd-tmpfiles-setup.service"
@@ -87,7 +101,8 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("usr/lib/sigmaos/apps/backup/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/scheduler/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/player-helper/dist/");
-    expect(install).toContain("usr/lib/sigmaos/apps/downloader/dist/");
+    expect(install).toContain("target/release/sigmaos-downloader usr/lib/sigmaos/bin/");
+    expect(install).not.toContain("apps/downloader/dist/");
     expect(install).toContain("node_modules/* usr/lib/sigmaos/node_modules/");
     expect(install).toContain("docs/dist/* usr/lib/sigmaos/docs/dist/");
     expect(install).toContain(".sigmaos/build-info.json usr/lib/sigmaos/");

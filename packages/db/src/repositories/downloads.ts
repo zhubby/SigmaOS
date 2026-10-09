@@ -1,5 +1,13 @@
 import { randomUUID } from "node:crypto";
-import type { DownloadTaskRecord, DownloadTaskStatus } from "@sigmaos/shared";
+import type {
+  DownloadControlRequest,
+  DownloadErrorCode,
+  DownloadMode,
+  DownloadTaskPhase,
+  DownloadTaskRecord,
+  DownloadTaskStatus,
+  DownloadWorkerHealth
+} from "@sigmaos/shared";
 import type { SigmaDatabase } from "../connection.js";
 import type { DbDownloadTaskRow } from "./repository-rows.js";
 
@@ -8,7 +16,9 @@ const DOWNLOAD_COLUMNS = `
   target_path, partial_path, status, received_bytes, total_bytes,
   speed_bytes_per_second, etag, last_modified, error, worker_id,
   lease_expires_at, created_at, updated_at, started_at, finished_at,
-  last_progress_at, file_operation_id
+  last_progress_at, file_operation_id, phase, download_mode,
+  expected_sha256, actual_sha256, error_code, error_retryable,
+  retry_count, next_retry_at, control_requested, segment_count
 `;
 
 export function createDownloadTask(
@@ -20,6 +30,7 @@ export function createDownloadTask(
     targetDirectory: string;
     targetFileName: string;
     targetPath: string;
+    expectedSha256?: string | null;
     partialPath?: string;
     now?: Date;
   }
@@ -30,9 +41,9 @@ export function createDownloadTask(
   db.prepare(`
     INSERT INTO download_tasks (
       id, url, root_id, storage_pool_id, target_directory, target_file_name,
-      target_path, partial_path, status, created_at, updated_at
+      target_path, partial_path, status, expected_sha256, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)
   `).run(
     id,
     input.url,
@@ -42,6 +53,7 @@ export function createDownloadTask(
     input.targetFileName,
     input.targetPath,
     partialPath,
+    input.expectedSha256 ?? null,
     now,
     now
   );
@@ -78,15 +90,29 @@ export function recoverExpiredDownloadTasks(db: SigmaDatabase, now = new Date())
   const nowIso = now.toISOString();
   const result = db.prepare(`
     UPDATE download_tasks
-    SET status = 'queued',
+    SET status = CASE control_requested
+          WHEN 'pause' THEN 'paused'
+          WHEN 'cancel' THEN 'cancelled'
+          ELSE 'queued'
+        END,
         worker_id = NULL,
         lease_expires_at = NULL,
         speed_bytes_per_second = 0,
-        error = NULL,
+        phase = NULL,
+        control_requested = NULL,
+        finished_at = CASE WHEN control_requested = 'cancel' THEN ? ELSE NULL END,
         updated_at = ?
     WHERE status = 'running'
       AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
-  `).run(nowIso, nowIso);
+      AND NOT EXISTS (
+        SELECT 1 FROM download_publish_journal journal
+        WHERE journal.task_id = download_tasks.id
+      )
+  `).run(nowIso, nowIso, nowIso);
+  db.prepare(`
+    DELETE FROM download_space_reservations
+    WHERE task_id IN (SELECT id FROM download_tasks WHERE status <> 'running')
+  `).run();
   return result.changes;
 }
 
@@ -106,17 +132,27 @@ export function claimNextDownloadTask(
         started_at = COALESCE(started_at, ?),
         finished_at = NULL,
         error = NULL,
+        error_code = NULL,
+        error_retryable = 0,
+        phase = 'probing',
+        next_retry_at = NULL,
+        control_requested = NULL,
         updated_at = ?
     WHERE id = (
       SELECT id
       FROM download_tasks
       WHERE status = 'queued'
-      ORDER BY created_at ASC
+        AND (next_retry_at IS NULL OR next_retry_at <= ?)
+        AND NOT EXISTS (
+          SELECT 1 FROM download_publish_journal journal
+          WHERE journal.task_id = download_tasks.id
+        )
+      ORDER BY COALESCE(next_retry_at, created_at) ASC, created_at ASC
       LIMIT 1
     )
       AND status = 'queued'
     RETURNING ${DOWNLOAD_COLUMNS}
-  `).get(input.workerId, leaseExpiresAt, nowIso, nowIso) as DbDownloadTaskRow | undefined;
+  `).get(input.workerId, leaseExpiresAt, nowIso, nowIso, nowIso) as DbDownloadTaskRow | undefined;
   return row ? mapDownloadTask(row) : null;
 }
 
@@ -128,7 +164,7 @@ export function renewDownloadTaskLease(
   const result = db.prepare(`
     UPDATE download_tasks
     SET lease_expires_at = ?, updated_at = ?
-    WHERE id = ? AND status = 'running' AND worker_id = ?
+    WHERE id = ? AND status = 'running' AND worker_id = ? AND control_requested IS NULL
   `).run(
     new Date(now.getTime() + input.leaseMs).toISOString(),
     now.toISOString(),
@@ -148,6 +184,9 @@ export function updateDownloadTaskProgress(
     speedBytesPerSecond: number;
     etag?: string | null;
     lastModified?: string | null;
+    phase?: DownloadTaskPhase;
+    downloadMode?: DownloadMode;
+    segmentCount?: number;
     leaseMs: number;
     now?: Date;
   }
@@ -161,16 +200,22 @@ export function updateDownloadTaskProgress(
         speed_bytes_per_second = ?,
         etag = COALESCE(?, etag),
         last_modified = COALESCE(?, last_modified),
+        phase = COALESCE(?, phase),
+        download_mode = COALESCE(?, download_mode),
+        segment_count = COALESCE(?, segment_count),
         lease_expires_at = ?,
         last_progress_at = ?,
         updated_at = ?
-    WHERE id = ? AND status = 'running' AND worker_id = ?
+    WHERE id = ? AND status = 'running' AND worker_id = ? AND control_requested IS NULL
   `).run(
     Math.max(0, Math.floor(input.receivedBytes)),
     input.totalBytes === null ? null : Math.max(0, Math.floor(input.totalBytes)),
     Math.max(0, Math.floor(input.speedBytesPerSecond)),
     input.etag ?? null,
     input.lastModified ?? null,
+    input.phase ?? null,
+    input.downloadMode ?? null,
+    input.segmentCount ?? null,
     new Date(now.getTime() + input.leaseMs).toISOString(),
     nowIso,
     nowIso,
@@ -187,6 +232,8 @@ export function transitionDownloadTask(
     from: DownloadTaskStatus[];
     to: DownloadTaskStatus;
     error?: string | null;
+    errorCode?: DownloadErrorCode | null;
+    errorRetryable?: boolean;
     resetProgress?: boolean;
     now?: Date;
   }
@@ -203,6 +250,8 @@ export function transitionDownloadTask(
     UPDATE download_tasks
     SET status = ?,
         error = ?,
+        error_code = ?,
+        error_retryable = ?,
         worker_id = NULL,
         lease_expires_at = NULL,
         speed_bytes_per_second = 0,
@@ -210,6 +259,13 @@ export function transitionDownloadTask(
         total_bytes = CASE WHEN ? THEN NULL ELSE total_bytes END,
         etag = CASE WHEN ? THEN NULL ELSE etag END,
         last_modified = CASE WHEN ? THEN NULL ELSE last_modified END,
+        actual_sha256 = CASE WHEN ? THEN NULL ELSE actual_sha256 END,
+        phase = NULL,
+        download_mode = CASE WHEN ? THEN NULL ELSE download_mode END,
+        segment_count = CASE WHEN ? THEN 0 ELSE segment_count END,
+        retry_count = CASE WHEN ? THEN 0 ELSE retry_count END,
+        next_retry_at = NULL,
+        control_requested = NULL,
         finished_at = ?,
         updated_at = ?
     WHERE id = ?
@@ -218,6 +274,12 @@ export function transitionDownloadTask(
   `).get(
     input.to,
     input.error ?? null,
+    input.errorCode ?? null,
+    input.errorRetryable ? 1 : 0,
+    reset ? 1 : 0,
+    reset ? 1 : 0,
+    reset ? 1 : 0,
+    reset ? 1 : 0,
     reset ? 1 : 0,
     reset ? 1 : 0,
     reset ? 1 : 0,
@@ -227,6 +289,10 @@ export function transitionDownloadTask(
     input.id,
     ...input.from
   ) as DbDownloadTaskRow | undefined;
+  if (row && reset) {
+    db.prepare("DELETE FROM download_segments WHERE task_id = ?").run(input.id);
+    db.prepare("DELETE FROM download_space_reservations WHERE task_id = ?").run(input.id);
+  }
   return row ? mapDownloadTask(row) : null;
 }
 
@@ -251,6 +317,11 @@ export function completeDownloadTask(
         worker_id = NULL,
         lease_expires_at = NULL,
         error = NULL,
+        error_code = NULL,
+        error_retryable = 0,
+        phase = NULL,
+        control_requested = NULL,
+        next_retry_at = NULL,
         finished_at = ?,
         last_progress_at = ?,
         file_operation_id = ?,
@@ -283,11 +354,59 @@ export function resetDownloadTaskPartialState(
         speed_bytes_per_second = 0,
         etag = NULL,
         last_modified = NULL,
+        actual_sha256 = NULL,
+        download_mode = NULL,
+        segment_count = 0,
         last_progress_at = ?,
         updated_at = ?
     WHERE id = ? AND status = 'running' AND worker_id = ?
   `).run(nowIso, nowIso, input.id, input.workerId);
   return result.changes === 1;
+}
+
+export function requestDownloadTaskControl(
+  db: SigmaDatabase,
+  input: { id: string; request: DownloadControlRequest; now?: Date }
+): DownloadTaskRecord | null {
+  const row = db.prepare(`
+    UPDATE download_tasks
+    SET control_requested = CASE
+          WHEN control_requested = 'cancel' THEN 'cancel'
+          ELSE ?
+        END,
+        updated_at = ?
+    WHERE id = ? AND status = 'running'
+    RETURNING ${DOWNLOAD_COLUMNS}
+  `).get(input.request, (input.now ?? new Date()).toISOString(), input.id) as DbDownloadTaskRow | undefined;
+  return row ? mapDownloadTask(row) : null;
+}
+
+export function getDownloadWorkerHealth(db: SigmaDatabase, now = new Date()): DownloadWorkerHealth {
+  const readyCutoff = new Date(now.getTime() - 15_000).toISOString();
+  const staleCutoff = new Date(now.getTime() - 60_000).toISOString();
+  const workers = db.prepare(`
+    SELECT COUNT(*) AS fresh_workers, MAX(heartbeat_at) AS last_heartbeat_at
+    FROM download_workers
+    WHERE heartbeat_at >= ?
+  `).get(readyCutoff) as { fresh_workers: number; last_heartbeat_at: string | null };
+  const last = workers.last_heartbeat_at ?? (db.prepare(
+    "SELECT MAX(heartbeat_at) FROM download_workers"
+  ).pluck().get() as string | null | undefined) ?? null;
+  const counts = db.prepare(`
+    SELECT
+      SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS active_tasks,
+      SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) AS queued_tasks,
+      SUM(CASE WHEN status = 'queued' AND phase = 'retry_wait' THEN 1 ELSE 0 END) AS retry_wait_tasks
+    FROM download_tasks
+  `).get() as { active_tasks: number | null; queued_tasks: number | null; retry_wait_tasks: number | null };
+  return {
+    status: workers.fresh_workers > 0 ? "ready" : last && last >= staleCutoff ? "stale" : "unavailable",
+    freshWorkers: workers.fresh_workers,
+    lastHeartbeatAt: last,
+    activeTasks: counts.active_tasks ?? 0,
+    queuedTasks: counts.queued_tasks ?? 0,
+    retryWaitTasks: counts.retry_wait_tasks ?? 0
+  };
 }
 
 export function deleteDownloadTask(db: SigmaDatabase, id: string): boolean {
@@ -327,6 +446,16 @@ function mapDownloadTask(row: DbDownloadTaskRow): DownloadTaskRecord {
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     lastProgressAt: row.last_progress_at,
-    fileOperationId: row.file_operation_id
+    fileOperationId: row.file_operation_id,
+    phase: row.phase,
+    downloadMode: row.download_mode,
+    expectedSha256: row.expected_sha256,
+    actualSha256: row.actual_sha256,
+    errorCode: row.error_code,
+    errorRetryable: row.error_retryable === 1,
+    retryCount: row.retry_count,
+    nextRetryAt: row.next_retry_at,
+    controlRequested: row.control_requested,
+    segmentCount: row.segment_count
   };
 }

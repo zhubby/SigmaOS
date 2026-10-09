@@ -6,7 +6,9 @@ import {
   createDownloadTask,
   deleteDownloadTask,
   getDownloadTask,
+  getDownloadWorkerHealth,
   listDownloadTasks,
+  requestDownloadTaskControl,
   transitionDownloadTask,
   getNasRoot,
   type SigmaDatabase
@@ -33,11 +35,13 @@ export function registerDownloadRoutes(server: FastifyInstance, { db, system }: 
       storagePoolId?: string;
       targetDirectory?: string;
       fileName?: string;
+      sha256?: string;
     };
   }>("/api/downloads", async (request, reply) => {
     const url = normalizeDownloadUrl(request.body?.url);
     const targetDirectory = normalizeTargetDirectory(request.body?.targetDirectory);
     const fileName = normalizeFileName(request.body?.fileName);
+    const sha256 = normalizeSha256(request.body?.sha256);
     if ("error" in url) {
       reply.status(400).send({ error: url.error });
       return;
@@ -48,6 +52,10 @@ export function registerDownloadRoutes(server: FastifyInstance, { db, system }: 
     }
     if ("error" in fileName) {
       reply.status(400).send({ error: fileName.error });
+      return;
+    }
+    if ("error" in sha256) {
+      reply.status(400).send({ error: sha256.error });
       return;
     }
 
@@ -90,7 +98,8 @@ export function registerDownloadRoutes(server: FastifyInstance, { db, system }: 
         storagePoolId: scope.pool.id,
         targetDirectory: normalizedDirectory,
         targetFileName: fileName.name,
-        targetPath
+        targetPath,
+        expectedSha256: sha256.value
       });
       reply.status(201).send({ task });
     } catch (error) {
@@ -103,16 +112,24 @@ export function registerDownloadRoutes(server: FastifyInstance, { db, system }: 
   });
 
   server.get("/api/downloads", async () => ({
-    tasks: listDownloadTasks(db, { limit: 500 })
+    tasks: listDownloadTasks(db, { limit: 500 }),
+    health: getDownloadWorkerHealth(db)
   }));
 
   server.post<{
     Params: { id: string };
   }>("/api/downloads/:id/pause", async (request, reply) => {
-    await transitionTaskStatus(db, system, request.params.id, {
-      from: ["queued", "running"],
-      to: "paused"
-    }, reply);
+    const task = getDownloadTask(db, request.params.id);
+    if (!task) {
+      reply.status(404).send({ error: "Download task not found" });
+      return;
+    }
+    if (task.status === "running") {
+      const requested = requestDownloadTaskControl(db, { id: task.id, request: "pause" });
+      reply.send({ task: requested ?? task });
+      return;
+    }
+    await transitionTaskStatus(db, system, request.params.id, { from: ["queued"], to: "paused" }, reply);
   });
 
   server.post<{
@@ -133,6 +150,11 @@ export function registerDownloadRoutes(server: FastifyInstance, { db, system }: 
       return;
     }
     const wasRunning = task.status === "running";
+    if (wasRunning) {
+      const requested = requestDownloadTaskControl(db, { id: task.id, request: "cancel" });
+      reply.send({ task: requested ?? task });
+      return;
+    }
     const cancelled = transitionDownloadTask(db, {
       id: task.id,
       from: ["queued", "running", "paused"],
@@ -160,7 +182,7 @@ export function registerDownloadRoutes(server: FastifyInstance, { db, system }: 
       reply.status(404).send({ error: "Download task not found" });
       return;
     }
-    const resetProgress = task.status === "cancelled";
+    const resetProgress = task.status === "cancelled" || task.errorCode === "checksum_mismatch";
     if (resetProgress && !(await removePartialFile(db, system, task))) {
       reply.status(409).send({ error: "Download partial file could not be removed" });
       return;
@@ -247,7 +269,10 @@ export function registerDownloadRoutes(server: FastifyInstance, { db, system }: 
       if (raw.destroyed) {
         return;
       }
-      const snapshot = { tasks: listDownloadTasks(db, { limit: 500 }) };
+      const snapshot = {
+        tasks: listDownloadTasks(db, { limit: 500 }),
+        health: getDownloadWorkerHealth(db)
+      };
       const serialized = JSON.stringify(snapshot);
       if (serialized === lastSnapshot) {
         return;
@@ -350,6 +375,17 @@ function normalizeFileName(raw: string | undefined): { name: string } | { error:
     return { error: "Download file name must be a single file name" };
   }
   return { name };
+}
+
+function normalizeSha256(raw: string | undefined): { value: string | null } | { error: string } {
+  const value = raw?.trim().toLowerCase() ?? "";
+  if (!value) {
+    return { value: null };
+  }
+  if (!/^[a-f0-9]{64}$/u.test(value)) {
+    return { error: "SHA-256 must be exactly 64 hexadecimal characters" };
+  }
+  return { value };
 }
 
 async function exists(absolutePath: string): Promise<boolean> {

@@ -14,7 +14,7 @@ import {
   saveModelProviderSettings,
   savePiToolPolicySettings
 } from "@sigmaos/db";
-import type { ModelProviderName, PiToolPolicySettingsRecord } from "@sigmaos/shared";
+import type { DownloadSettingsRecord, ModelProviderName, PiToolPolicySettingsRecord } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
 import {
   defaultDockerSettings,
@@ -36,18 +36,28 @@ export function registerSettingsRoutes(server: FastifyInstance, { config, db }: 
   }));
 
   server.patch<{
-    Body: { concurrency?: number | string };
+    Body: Partial<Record<keyof Omit<DownloadSettingsRecord, "updatedAt">, number | string | null>>;
   }>("/api/settings/downloads", async (request, reply) => {
     try {
-      const existing = getDownloadSettings(db);
-      const value = request.body?.concurrency ?? existing?.concurrency ?? 1;
-      const concurrency = Number(value);
-      if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 3) {
-        reply.status(400).send({ error: "Download concurrency must be an integer from 1 to 3" });
-        return;
+      const existing = getDownloadSettings(db) ?? defaultDownloadSettings();
+      const numericKeys = [
+        "concurrency", "parallelRequestsPerTask", "segmentedDownloadMinBytes", "maxAutoRetries",
+        "retryBaseDelayMs", "retryMaxDelayMs", "retryAfterMaxDelayMs", "connectTimeoutMs",
+        "responseHeaderTimeoutMs", "readIdleTimeoutMs", "minFreeSpaceBytes"
+      ] as const;
+      const next: Omit<DownloadSettingsRecord, "updatedAt"> = { ...existing };
+      for (const key of numericKeys) {
+        if (request.body?.[key] !== undefined && request.body[key] !== null) {
+          next[key] = Number(request.body[key]);
+        }
+      }
+      if (request.body?.maxFileSizeBytes !== undefined) {
+        next.maxFileSizeBytes = request.body.maxFileSizeBytes === null
+          ? null
+          : Number(request.body.maxFileSizeBytes);
       }
       reply.send({
-        settings: saveDownloadSettings(db, { concurrency })
+        settings: saveDownloadSettings(db, next)
       });
     } catch (error) {
       reply.status(400).send({ error: error instanceof Error ? error.message : String(error) });

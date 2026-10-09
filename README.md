@@ -188,7 +188,7 @@ npm run dev
 
 Open [http://127.0.0.1:5173](http://127.0.0.1:5173). Vite proxies `/api`, `/health`, and WebSocket traffic to the API at `127.0.0.1:3010`.
 
-`npm run dev` starts the API, agent worker, photo worker, downloader, and web UI. The indexer and scheduled tasks remain explicit during development:
+`npm run dev` starts the API, agent worker, photo worker, Rust downloader, and web UI. The downloader uses the same SQLite schema as the Node services and waits for the API-owned migrations before claiming work. The indexer and scheduled tasks remain explicit during development:
 
 ```bash
 npm run index

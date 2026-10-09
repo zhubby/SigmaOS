@@ -99,6 +99,31 @@ describe("DownloadTaskRow progress states", () => {
       expect(renderDownloadRow({ status })).toContain(`data-status="${status}"`);
     }
   });
+
+  it("shows segmented, retry, control, checksum, and stable error details", () => {
+    const retryAt = new Date(Date.now() + 30_000).toISOString();
+    const html = renderDownloadRow({
+      status: "queued",
+      phase: "retry_wait",
+      downloadMode: "segmented",
+      segmentCount: 4,
+      retryCount: 2,
+      nextRetryAt: retryAt,
+      controlRequested: "pause",
+      expectedSha256: "a".repeat(64),
+      actualSha256: "b".repeat(64),
+      errorCode: "checksum_mismatch",
+      error: "SHA-256 mismatch"
+    });
+
+    expect(html).toContain("Segmented");
+    expect(html).toContain("Waiting to retry");
+    expect(html).toContain("4 segments");
+    expect(html).toContain("Pausing");
+    expect(html).toContain("Retry 2 in");
+    expect(html).toContain("SHA-256 mismatch");
+    expect(html).toContain("Checksum mismatch");
+  });
 });
 
 function renderDownloadButton({
@@ -162,7 +187,17 @@ const baseTask: DownloadTask = {
   startedAt: "2026-09-24T00:00:00.000Z",
   finishedAt: null,
   lastProgressAt: "2026-09-24T00:00:00.000Z",
-  fileOperationId: null
+  fileOperationId: null,
+  phase: "downloading",
+  downloadMode: "single",
+  expectedSha256: null,
+  actualSha256: null,
+  errorCode: null,
+  errorRetryable: false,
+  retryCount: 0,
+  nextRetryAt: null,
+  controlRequested: null,
+  segmentCount: 0
 };
 
 function renderDownloadRow(overrides: Partial<DownloadTask> = {}): string {

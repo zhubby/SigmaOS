@@ -1024,6 +1024,18 @@
   line-height: 1.1;
 }
 
+.download-header-stat[data-state="ready"] strong {
+  color: var(--green);
+}
+
+.download-header-stat[data-state="stale"] strong {
+  color: var(--yellow);
+}
+
+.download-header-stat[data-state="unavailable"] strong {
+  color: var(--red);
+}
+
 .download-header-stat span {
   color: var(--muted-2);
   font-size: 10px;

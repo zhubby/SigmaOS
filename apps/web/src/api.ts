@@ -60,6 +60,7 @@ import type {
   RootReadiness,
   IndexerAlert,
   SystemHealthSummary,
+  DownloadWorkerHealth as SharedDownloadWorkerHealth,
   DownloadTaskRecord as SharedDownloadTask,
   PublicDownloadSettings,
   VmSummary as PublicVmSummary,
@@ -139,6 +140,7 @@ export interface ReadinessResponse { roots: RootReadiness[]; }
 export type SystemHealth = SystemHealthSummary;
 export type DownloadTask = SharedDownloadTask;
 export type DownloadSettings = PublicDownloadSettings;
+export type DownloadWorkerHealth = SharedDownloadWorkerHealth;
 export type PhotoAsset = SharedPhotoAsset;
 export type PhotoJob = SharedPhotoJob;
 export type PhotoLibrarySettings = SharedPhotoLibrarySettings;
@@ -1199,11 +1201,13 @@ export async function createPhotoExport(assetIds: string[]): Promise<PhotoExport
   return (await response.json()) as PhotoExportResult;
 }
 
-export async function getDownloads(): Promise<DownloadTask[]> {
+export async function getDownloads(): Promise<{
+  tasks: DownloadTask[];
+  health: DownloadWorkerHealth;
+}> {
   const response = await fetch("/api/downloads");
   await ensureOk(response);
-  const body = (await response.json()) as { tasks: DownloadTask[] };
-  return body.tasks;
+  return (await response.json()) as { tasks: DownloadTask[]; health: DownloadWorkerHealth };
 }
 
 export async function createDownload(input: {
@@ -1212,6 +1216,7 @@ export async function createDownload(input: {
   storagePoolId: string;
   targetDirectory: string;
   fileName: string;
+  sha256?: string;
 }): Promise<DownloadTask> {
   const response = await fetch("/api/downloads", {
     method: "POST",
@@ -1301,14 +1306,30 @@ export async function getDownloadSettings(): Promise<DownloadSettings> {
   const response = await fetch("/api/settings/downloads");
   await ensureOk(response);
   const body = (await response.json()) as { settings: DownloadSettings | null };
-  return body.settings ?? { concurrency: 1, updatedAt: new Date(0).toISOString() };
+  return body.settings ?? {
+    concurrency: 1,
+    parallelRequestsPerTask: 4,
+    segmentedDownloadMinBytes: 64 * 1024 * 1024,
+    maxAutoRetries: 5,
+    retryBaseDelayMs: 2_000,
+    retryMaxDelayMs: 300_000,
+    retryAfterMaxDelayMs: 900_000,
+    connectTimeoutMs: 15_000,
+    responseHeaderTimeoutMs: 30_000,
+    readIdleTimeoutMs: 60_000,
+    minFreeSpaceBytes: 0,
+    maxFileSizeBytes: null,
+    updatedAt: new Date(0).toISOString()
+  };
 }
 
-export async function updateDownloadSettings(concurrency: number): Promise<DownloadSettings> {
+export async function updateDownloadSettings(
+  patch: Partial<Omit<DownloadSettings, "updatedAt">>
+): Promise<DownloadSettings> {
   const response = await fetch("/api/settings/downloads", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ concurrency })
+    body: JSON.stringify(patch)
   });
   await ensureOk(response);
   const body = (await response.json()) as { settings: DownloadSettings };

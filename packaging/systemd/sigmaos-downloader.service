@@ -1,8 +1,9 @@
 [Unit]
 Description=SigmaOS HTTP downloader
 Documentation=file:///usr/share/doc/sigmaos/README.md
-After=network-online.target local-fs.target
+After=network-online.target local-fs.target sigmaos-api.service
 Wants=network-online.target
+Requires=sigmaos-api.service
 RequiresMountsFor=/srv/nas
 
 [Service]
@@ -13,9 +14,10 @@ Environment=SIGMAOS_CONFIG=/etc/sigmaos/config.toml
 WorkingDirectory=/var/lib/sigmaos
 StateDirectory=sigmaos
 LogsDirectory=sigmaos
-ExecStart=/usr/local/bin/node /usr/lib/sigmaos/apps/downloader/dist/index.js
+ExecStart=/usr/lib/sigmaos/bin/sigmaos-downloader
 Restart=on-failure
 RestartSec=3
+TimeoutStopSec=30
 ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/var/lib/sigmaos /var/log/sigmaos /srv/nas

@@ -71,7 +71,7 @@ Workspace 的 Terminal 使用 Rust termux 和 tmux 承载受限 PTY。每个 NAS
 
 同一标签同时只允许一个控制端。另一个浏览器连接时，原连接会显示“会话已在其他位置打开”并停止自动重连；点击重新接管会把控制权取回。整机重启后 SQLite 中的标签、名称、顺序和活动项仍保留，但 tmux 进程和 scrollback 不会恢复，首次重新连接会启动新的 shell。连接失败时检查 `tmux`、`sigmaos-termux.service` 和 termux identity drop-in。
 
-Downloads 面板使用独立 `sigmaos-downloader.service`，支持公网 HTTP/HTTPS 地址、目录选择、排队、暂停/继续、取消、重试和历史；失败任务保留 `.part` 文件，取消任务清理临时文件，同名目标不会覆盖。Docker、VM、Shares、Storage 面板只在配置和宿主机能力可用时展示完整操作；Docker 资源创建和全部 VM 操作是直接执行的管理流程，Docker 生命周期和 Compose 变更仍通过 approval。
+Downloads 面板使用独立 Rust `sigmaos-downloader.service`，支持公网 HTTP/HTTPS 地址、可选 SHA-256、目录选择、排队、协作式暂停/继续、取消、自动重试和历史。任务行显示 worker health、单流/分段模式、校验/发布阶段、重试倒计时和稳定错误码；失败任务保留 `.part` 文件，取消任务清理临时文件，同名目标不会覆盖。大文件在来源提供可靠 validator 时最多使用设置中指定的 Range 并发；设置页还可调整分段阈值、重试、超时、最低剩余空间和最大文件大小。Docker、VM、Shares、Storage 面板只在配置和宿主机能力可用时展示完整操作；Docker 资源创建和全部 VM 操作是直接执行的管理流程，Docker 生命周期和 Compose 变更仍通过 approval。
 
 Docker 面板的镜像区域可以搜索本地镜像、查看完整 ID/tags/digests/占用信息、拉取镜像和删除未被容器引用的具体 tag。删除需要在详情弹窗中再次确认，不会强制删除，也不进入 agent approval。多标签镜像必须先选择要删除的具体 tag；无标签镜像使用完整 ID。
 

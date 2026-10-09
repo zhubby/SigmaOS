@@ -102,7 +102,9 @@ interface SettingsModalProps {
   onClose: () => void;
   onFormChange: (form: ModelProviderFormState) => void;
   onDockerFormChange: (form: DockerSettingsFormState) => void;
-  onDownloadConcurrencyChange: (concurrency: number) => Promise<void>;
+  onDownloadSettingsChange: (
+    patch: Partial<Omit<DownloadSettings, "updatedAt">>
+  ) => Promise<void>;
   onToolPolicyFormChange: (form: ToolPolicyFormState) => void;
   onLanguagePreferenceChange: (preference: LanguagePreference) => void;
   onThemePreferenceChange: (preference: ThemePreference) => void;
@@ -148,7 +150,7 @@ export function SettingsModal({
   onClose,
   onFormChange,
   onDockerFormChange,
-  onDownloadConcurrencyChange,
+  onDownloadSettingsChange,
   onToolPolicyFormChange,
   onLanguagePreferenceChange,
   onThemePreferenceChange,
@@ -564,7 +566,7 @@ export function SettingsModal({
               settings={downloadSettings}
               loading={loading}
               locale={resolvedLocale}
-              onConcurrencyChange={onDownloadConcurrencyChange}
+              onSettingsChange={onDownloadSettingsChange}
               onClose={onClose}
             />
           ) : null}
@@ -1667,28 +1669,30 @@ export function SettingsPhotosPage({
   );
 }
 
-function SettingsDownloadsPage({
+type DownloadSettingsDraft = Omit<DownloadSettings, "updatedAt">;
+
+export function SettingsDownloadsPage({
   settings,
   loading,
   locale,
-  onConcurrencyChange,
+  onSettingsChange,
   onClose
 }: {
   settings: DownloadSettings | null;
   loading: boolean;
   locale: SupportedLocale;
-  onConcurrencyChange: (concurrency: number) => Promise<void>;
+  onSettingsChange: (patch: Partial<DownloadSettingsDraft>) => Promise<void>;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const [draftConcurrency, setDraftConcurrency] = useState(settings?.concurrency ?? 1);
+  const [draft, setDraft] = useState<DownloadSettingsDraft>(() => downloadSettingsDraft(settings));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    setDraftConcurrency(settings?.concurrency ?? 1);
+    setDraft(downloadSettingsDraft(settings));
     setSaved(false);
-  }, [settings?.concurrency]);
+  }, [settings]);
 
   const statusState: SettingsState = loading && !settings ? "loading" : settings ? "ready" : "missing";
   const statusLabel = loading && !settings
@@ -1703,7 +1707,7 @@ function SettingsDownloadsPage({
     setSaving(true);
     setSaved(false);
     try {
-      await onConcurrencyChange(draftConcurrency);
+      await onSettingsChange(draft);
       setSaved(true);
     } finally {
       setSaving(false);
@@ -1728,8 +1732,11 @@ function SettingsDownloadsPage({
                 <label className="settings-preference-field">
                   <span>{t("settings.downloads.concurrencyField")}</span>
                   <select
-                    value={String(draftConcurrency)}
-                    onChange={(event) => setDraftConcurrency(Number(event.target.value))}
+                    value={String(draft.concurrency)}
+                    onChange={(event) => setDraft((current) => ({
+                      ...current,
+                      concurrency: Number(event.target.value)
+                    }))}
                   >
                     {[1, 2, 3].map((value) => (
                       <option key={value} value={value}>
@@ -1741,34 +1748,71 @@ function SettingsDownloadsPage({
                 </label>
                 <div className="settings-download-visual" aria-hidden="true">
                   <Download size={22} />
-                  <strong>{draftConcurrency}</strong>
+                  <strong>{draft.concurrency}</strong>
                   <span>{t("settings.downloads.connectionUnit")}</span>
                 </div>
+              </fieldset>
+              <fieldset className="settings-field-grid settings-download-fields" disabled={loading || saving}>
+                <DownloadNumberField
+                  label={t("settings.downloads.parallelRequests")}
+                  help={t("settings.downloads.parallelRequestsHelp")}
+                  value={draft.parallelRequestsPerTask}
+                  min={1}
+                  max={8}
+                  onChange={(value) => setDraft((current) => ({ ...current, parallelRequestsPerTask: value ?? 1 }))}
+                />
+                <DownloadNumberField
+                  label={t("settings.downloads.segmentedMinBytes")}
+                  help={t("settings.downloads.segmentedMinBytesHelp")}
+                  value={draft.segmentedDownloadMinBytes}
+                  min={1024 * 1024}
+                  max={1024 ** 4}
+                  step={1024 * 1024}
+                  onChange={(value) => setDraft((current) => ({ ...current, segmentedDownloadMinBytes: value ?? 1024 * 1024 }))}
+                />
               </fieldset>
             </section>
 
             <section className="settings-section-card">
               <header>
                 <div>
-                  <h3>{t("settings.downloads.behaviorTitle")}</h3>
-                  <p>{t("settings.downloads.behaviorDescription")}</p>
+                  <h3>{t("settings.downloads.retryTitle")}</h3>
+                  <p>{t("settings.downloads.retryDescription")}</p>
                 </div>
-                <span data-state="ready">{t("common.states.configured")}</span>
               </header>
-              <div className="settings-download-facts">
+              <fieldset className="settings-field-grid settings-download-fields" disabled={loading || saving}>
+                <DownloadNumberField label={t("settings.downloads.maxAutoRetries")} value={draft.maxAutoRetries} min={0} max={20} onChange={(value) => setDraft((current) => ({ ...current, maxAutoRetries: value ?? 0 }))} />
+                <DownloadNumberField label={t("settings.downloads.retryBaseDelayMs")} value={draft.retryBaseDelayMs} min={500} max={60_000} step={500} onChange={(value) => setDraft((current) => ({ ...current, retryBaseDelayMs: value ?? 500 }))} />
+                <DownloadNumberField label={t("settings.downloads.retryMaxDelayMs")} value={draft.retryMaxDelayMs} min={draft.retryBaseDelayMs} max={1_800_000} step={1000} onChange={(value) => setDraft((current) => ({ ...current, retryMaxDelayMs: value ?? current.retryBaseDelayMs }))} />
+                <DownloadNumberField label={t("settings.downloads.retryAfterMaxDelayMs")} value={draft.retryAfterMaxDelayMs} min={1000} max={3_600_000} step={1000} onChange={(value) => setDraft((current) => ({ ...current, retryAfterMaxDelayMs: value ?? 1000 }))} />
+              </fieldset>
+            </section>
+
+            <section className="settings-section-card">
+              <header>
                 <div>
-                  <strong>{t("settings.downloads.singleConnection")}</strong>
-                  <span>{t("settings.downloads.singleConnectionDetail")}</span>
+                  <h3>{t("settings.downloads.timeoutsTitle")}</h3>
+                  <p>{t("settings.downloads.timeoutsDescription")}</p>
                 </div>
+              </header>
+              <fieldset className="settings-field-grid settings-download-fields" disabled={loading || saving}>
+                <DownloadNumberField label={t("settings.downloads.connectTimeoutMs")} value={draft.connectTimeoutMs} min={1000} max={120_000} step={1000} onChange={(value) => setDraft((current) => ({ ...current, connectTimeoutMs: value ?? 1000 }))} />
+                <DownloadNumberField label={t("settings.downloads.responseHeaderTimeoutMs")} value={draft.responseHeaderTimeoutMs} min={5000} max={300_000} step={1000} onChange={(value) => setDraft((current) => ({ ...current, responseHeaderTimeoutMs: value ?? 5000 }))} />
+                <DownloadNumberField label={t("settings.downloads.readIdleTimeoutMs")} value={draft.readIdleTimeoutMs} min={5000} max={900_000} step={1000} onChange={(value) => setDraft((current) => ({ ...current, readIdleTimeoutMs: value ?? 5000 }))} />
+              </fieldset>
+            </section>
+
+            <section className="settings-section-card">
+              <header>
                 <div>
-                  <strong>{t("settings.downloads.resumeSupport")}</strong>
-                  <span>{t("settings.downloads.resumeSupportDetail")}</span>
+                  <h3>{t("settings.downloads.storageTitle")}</h3>
+                  <p>{t("settings.downloads.storageDescription")}</p>
                 </div>
-                <div>
-                  <strong>{t("settings.downloads.conflictPolicy")}</strong>
-                  <span>{t("settings.downloads.conflictPolicyDetail")}</span>
-                </div>
-              </div>
+              </header>
+              <fieldset className="settings-field-grid settings-download-fields" disabled={loading || saving}>
+                <DownloadNumberField label={t("settings.downloads.minFreeSpaceBytes")} help={t("settings.downloads.minFreeSpaceHelp")} value={draft.minFreeSpaceBytes} min={0} max={Number.MAX_SAFE_INTEGER} step={1024 * 1024} onChange={(value) => setDraft((current) => ({ ...current, minFreeSpaceBytes: value ?? 0 }))} />
+                <DownloadNumberField label={t("settings.downloads.maxFileSizeBytes")} help={t("settings.downloads.maxFileSizeHelp")} value={draft.maxFileSizeBytes} min={1} max={Number.MAX_SAFE_INTEGER} step={1024 * 1024} nullable onChange={(value) => setDraft((current) => ({ ...current, maxFileSizeBytes: value }))} />
+              </fieldset>
             </section>
           </div>
 
@@ -1784,6 +1828,18 @@ function SettingsDownloadsPage({
                 <div>
                   <dt>{t("settings.downloads.concurrencyField")}</dt>
                   <dd>{settings ? t("settings.downloads.connectionCount", { count: settings.concurrency }) : t("settings.downloads.notLoaded")}</dd>
+                </div>
+                <div>
+                  <dt>{t("settings.downloads.parallelRequests")}</dt>
+                  <dd>{settings?.parallelRequestsPerTask ?? t("settings.downloads.notLoaded")}</dd>
+                </div>
+                <div>
+                  <dt>{t("settings.downloads.segmentedMinBytes")}</dt>
+                  <dd>{settings ? formatBytes(settings.segmentedDownloadMinBytes, locale) : t("settings.downloads.notLoaded")}</dd>
+                </div>
+                <div>
+                  <dt>{t("settings.downloads.maxAutoRetries")}</dt>
+                  <dd>{settings?.maxAutoRetries ?? t("settings.downloads.notLoaded")}</dd>
                 </div>
                 <div>
                   <dt>{t("settings.modelProvider.updated")}</dt>
@@ -1813,6 +1869,66 @@ function SettingsDownloadsPage({
         </div>
       </footer>
     </form>
+  );
+}
+
+function downloadSettingsDraft(settings: DownloadSettings | null): DownloadSettingsDraft {
+  if (settings) {
+    const { updatedAt: _updatedAt, ...draft } = settings;
+    return draft;
+  }
+  return {
+    concurrency: 1,
+    parallelRequestsPerTask: 4,
+    segmentedDownloadMinBytes: 64 * 1024 * 1024,
+    maxAutoRetries: 5,
+    retryBaseDelayMs: 2_000,
+    retryMaxDelayMs: 300_000,
+    retryAfterMaxDelayMs: 900_000,
+    connectTimeoutMs: 15_000,
+    responseHeaderTimeoutMs: 30_000,
+    readIdleTimeoutMs: 60_000,
+    minFreeSpaceBytes: 0,
+    maxFileSizeBytes: null
+  };
+}
+
+function DownloadNumberField({
+  label,
+  help,
+  value,
+  min,
+  max,
+  step = 1,
+  nullable = false,
+  onChange
+}: {
+  label: ReactNode;
+  help?: ReactNode;
+  value: number | null;
+  min: number;
+  max: number;
+  step?: number;
+  nullable?: boolean;
+  onChange: (value: number | null) => void;
+}) {
+  return (
+    <label className="settings-preference-field">
+      <span>{label}</span>
+      <input
+        type="number"
+        value={value ?? ""}
+        min={min}
+        max={max}
+        step={step}
+        placeholder={nullable ? "-" : undefined}
+        onChange={(event) => {
+          const next = event.target.value;
+          onChange(next === "" && nullable ? null : Number(next));
+        }}
+      />
+      {help ? <small>{help}</small> : null}
+    </label>
   );
 }
 
