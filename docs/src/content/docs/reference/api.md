@@ -55,10 +55,11 @@ JPEG、PNG、WebP、GIF、HEIC、HEIF、常见视频和 RAW 由照片 worker 处
 
 ## HTTP 下载
 
-- `POST /api/downloads` 接收 HTTP/HTTPS 地址、`rootId`、`storagePoolId`、目标目录和文件名；只接受无凭据的公网下载地址，目标同名或重复任务返回 `409`。
-- `GET /api/downloads` 返回全局历史；`POST /api/downloads/:id/pause|resume|cancel|retry` 按任务状态执行控制，`DELETE /api/downloads/:id` 只移除非运行任务。
-- `GET /api/downloads/events` 是按变化推送任务快照的 SSE stream。`GET/PATCH /api/settings/downloads` 管理 `1–3` 的并发数，降低并发不会终止已经运行的任务。
-- `sigmaos-downloader.service` 从 SQLite 领取队列任务，使用 NAS 路径安全校验、隐藏 `.part` 文件和无覆盖原子发布；服务重启后过期租约会恢复为队列。
+- `POST /api/downloads` 接收 HTTP/HTTPS 地址、`rootId`、`storagePoolId`、目标目录、文件名和可选的 64 位 `sha256`；SHA-256 会归一化为小写。只接受无凭据的公网下载地址，目标同名或重复任务返回 `409`。
+- `GET /api/downloads` 返回全局历史和 downloader worker health；任务记录包含 phase、单流/分段模式、checksum、稳定错误码、重试计数/时间、控制请求和分段数。`GET /api/downloads/events` 用 SSE 推送相同快照。
+- `POST /api/downloads/:id/pause|cancel` 对运行任务写入协作式控制请求；`resume|retry` 按状态重新排队。发布已完成原子 rename 时最终状态始终为 `completed`。`DELETE /api/downloads/:id` 只移除非运行任务。
+- `GET/PATCH /api/settings/downloads` 管理任务并发、每任务 Range 并发、分段阈值、自动重试/退避、连接/响应头/空闲读取超时、最低剩余空间和可选最大文件大小。旧的 `{ concurrency }` 设置会自动补齐默认值。
+- Rust `sigmaos-downloader.service` 从 SQLite 领取带 30 秒租约的任务，每 5 秒写 worker/任务心跳。服务使用逐跳 DNS 公网校验、固定地址、最多五次安全重定向、持久化分段、空间预留、dirfd/`openat2` 路径边界、SHA-256 和 publish journal；崩溃或掉电后不会覆盖 identity 不匹配的用户文件。
 
 ## Docker daemon
 

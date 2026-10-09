@@ -110,7 +110,85 @@ describe("download API", () => {
     await app.close();
   });
 
-  it("persists and validates download concurrency settings", async () => {
+  it("normalizes optional SHA-256 values and rejects malformed checksums", async () => {
+    const { app } = await setup();
+    const checksum = "ABCDEF0123456789".repeat(4);
+    const valid = await app.inject({
+      method: "POST",
+      url: "/api/downloads",
+      payload: {
+        url: "https://example.com/checked.bin",
+        rootId: "local",
+        storagePoolId: poolId,
+        targetDirectory: ".",
+        fileName: "checked.bin",
+        sha256: `  ${checksum}  `
+      }
+    });
+    expect(valid.statusCode).toBe(201);
+    expect(valid.json().task.expectedSha256).toBe(checksum.toLowerCase());
+
+    const invalid = await app.inject({
+      method: "POST",
+      url: "/api/downloads",
+      payload: {
+        url: "https://example.com/invalid.bin",
+        rootId: "local",
+        storagePoolId: poolId,
+        targetDirectory: ".",
+        fileName: "invalid.bin",
+        sha256: "not-a-checksum"
+      }
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json().error).toMatch(/64 hexadecimal/u);
+    await app.close();
+  });
+
+  it("records cooperative pause and cancel requests without stealing running tasks", async () => {
+    const { app } = await setup();
+    const createRunningTask = async (fileName: string) => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/downloads",
+        payload: {
+          url: `https://example.com/${fileName}`,
+          rootId: "local",
+          storagePoolId: poolId,
+          targetDirectory: ".",
+          fileName
+        }
+      });
+      const id = response.json().task.id as string;
+      db?.prepare(`
+        UPDATE download_tasks
+        SET status = 'running', worker_id = 'rust-worker', lease_expires_at = ?, phase = 'downloading'
+        WHERE id = ?
+      `).run(new Date(Date.now() + 30_000).toISOString(), id);
+      return id;
+    };
+
+    const pauseId = await createRunningTask("pause.bin");
+    const pause = await app.inject({ method: "POST", url: `/api/downloads/${pauseId}/pause` });
+    expect(pause.statusCode).toBe(200);
+    expect(pause.json().task).toMatchObject({
+      status: "running",
+      workerId: "rust-worker",
+      controlRequested: "pause"
+    });
+
+    const cancelId = await createRunningTask("cancel.bin");
+    const cancel = await app.inject({ method: "POST", url: `/api/downloads/${cancelId}/cancel` });
+    expect(cancel.statusCode).toBe(200);
+    expect(cancel.json().task).toMatchObject({
+      status: "running",
+      workerId: "rust-worker",
+      controlRequested: "cancel"
+    });
+    await app.close();
+  });
+
+  it("persists all reliability settings, validates bounds, and upgrades legacy records", async () => {
     const { app } = await setup();
     const initial = await app.inject({ method: "GET", url: "/api/settings/downloads" });
     expect(initial.statusCode).toBe(200);
@@ -126,10 +204,67 @@ describe("download API", () => {
     const updated = await app.inject({
       method: "PATCH",
       url: "/api/settings/downloads",
-      payload: { concurrency: 3 }
+      payload: {
+        concurrency: 3,
+        parallelRequestsPerTask: 8,
+        segmentedDownloadMinBytes: 128 * 1024 * 1024,
+        maxAutoRetries: 9,
+        retryBaseDelayMs: 3_000,
+        retryMaxDelayMs: 600_000,
+        retryAfterMaxDelayMs: 1_200_000,
+        connectTimeoutMs: 20_000,
+        responseHeaderTimeoutMs: 45_000,
+        readIdleTimeoutMs: 90_000,
+        minFreeSpaceBytes: 1024 * 1024 * 1024,
+        maxFileSizeBytes: 4 * 1024 * 1024 * 1024
+      }
     });
     expect(updated.statusCode).toBe(200);
-    expect(updated.json().settings.concurrency).toBe(3);
+    expect(updated.json().settings).toMatchObject({
+      concurrency: 3,
+      parallelRequestsPerTask: 8,
+      segmentedDownloadMinBytes: 128 * 1024 * 1024,
+      maxAutoRetries: 9,
+      retryBaseDelayMs: 3_000,
+      retryMaxDelayMs: 600_000,
+      retryAfterMaxDelayMs: 1_200_000,
+      connectTimeoutMs: 20_000,
+      responseHeaderTimeoutMs: 45_000,
+      readIdleTimeoutMs: 90_000,
+      minFreeSpaceBytes: 1024 * 1024 * 1024,
+      maxFileSizeBytes: 4 * 1024 * 1024 * 1024
+    });
+
+    db?.prepare(`
+      UPDATE system_settings SET value_json = ?, updated_at = ? WHERE key = 'download_settings'
+    `).run(JSON.stringify({ concurrency: 2 }), new Date().toISOString());
+    const legacy = await app.inject({ method: "GET", url: "/api/settings/downloads" });
+    expect(legacy.json().settings).toMatchObject({
+      concurrency: 2,
+      parallelRequestsPerTask: 4,
+      maxAutoRetries: 5,
+      maxFileSizeBytes: null
+    });
+    await app.close();
+  });
+
+  it("returns downloader worker health with list snapshots", async () => {
+    const { app } = await setup();
+    const unavailable = await app.inject({ method: "GET", url: "/api/downloads" });
+    expect(unavailable.json().health).toMatchObject({
+      status: "unavailable",
+      freshWorkers: 0,
+      activeTasks: 0,
+      queuedTasks: 0
+    });
+
+    const now = new Date().toISOString();
+    db?.prepare(`
+      INSERT INTO download_workers (worker_id, version, started_at, heartbeat_at)
+      VALUES ('worker-health', 'test', ?, ?)
+    `).run(now, now);
+    const ready = await app.inject({ method: "GET", url: "/api/downloads" });
+    expect(ready.json().health).toMatchObject({ status: "ready", freshWorkers: 1 });
     await app.close();
   });
 

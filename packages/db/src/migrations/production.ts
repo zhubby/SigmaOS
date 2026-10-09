@@ -602,5 +602,67 @@ export const productionMigrations: Migration[] = [
       CREATE INDEX idx_vm_console_authorizations_status_expires_at
         ON vm_console_authorizations(status, expires_at);
     `
+  },
+  {
+    id: "022_downloader_reliability",
+    sql: `
+      ALTER TABLE download_tasks ADD COLUMN phase TEXT
+        CHECK (phase IS NULL OR phase IN ('probing', 'downloading', 'verifying', 'publishing', 'retry_wait'));
+      ALTER TABLE download_tasks ADD COLUMN download_mode TEXT
+        CHECK (download_mode IS NULL OR download_mode IN ('single', 'segmented'));
+      ALTER TABLE download_tasks ADD COLUMN expected_sha256 TEXT
+        CHECK (expected_sha256 IS NULL OR (length(expected_sha256) = 64 AND expected_sha256 = lower(expected_sha256)));
+      ALTER TABLE download_tasks ADD COLUMN actual_sha256 TEXT
+        CHECK (actual_sha256 IS NULL OR (length(actual_sha256) = 64 AND actual_sha256 = lower(actual_sha256)));
+      ALTER TABLE download_tasks ADD COLUMN error_code TEXT;
+      ALTER TABLE download_tasks ADD COLUMN error_retryable INTEGER NOT NULL DEFAULT 0
+        CHECK (error_retryable IN (0, 1));
+      ALTER TABLE download_tasks ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0
+        CHECK (retry_count >= 0);
+      ALTER TABLE download_tasks ADD COLUMN next_retry_at TEXT;
+      ALTER TABLE download_tasks ADD COLUMN control_requested TEXT
+        CHECK (control_requested IS NULL OR control_requested IN ('pause', 'cancel'));
+      ALTER TABLE download_tasks ADD COLUMN segment_count INTEGER NOT NULL DEFAULT 0
+        CHECK (segment_count >= 0);
+
+      CREATE TABLE download_segments (
+        task_id TEXT NOT NULL REFERENCES download_tasks(id) ON DELETE CASCADE,
+        start_byte INTEGER NOT NULL CHECK (start_byte >= 0),
+        end_byte INTEGER NOT NULL CHECK (end_byte > start_byte),
+        next_byte INTEGER NOT NULL CHECK (next_byte >= start_byte AND next_byte <= end_byte),
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (task_id, start_byte)
+      );
+
+      CREATE TABLE download_publish_journal (
+        task_id TEXT PRIMARY KEY REFERENCES download_tasks(id) ON DELETE CASCADE,
+        operation_id TEXT NOT NULL UNIQUE,
+        worker_id TEXT NOT NULL,
+        device INTEGER NOT NULL,
+        inode INTEGER NOT NULL,
+        size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+        sha256 TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE download_space_reservations (
+        task_id TEXT PRIMARY KEY REFERENCES download_tasks(id) ON DELETE CASCADE,
+        storage_pool_id TEXT NOT NULL,
+        reserved_bytes INTEGER NOT NULL CHECK (reserved_bytes >= 0),
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE download_workers (
+        worker_id TEXT PRIMARY KEY,
+        version TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        heartbeat_at TEXT NOT NULL
+      );
+
+      CREATE INDEX idx_download_tasks_claim
+        ON download_tasks(status, next_retry_at, created_at);
+      CREATE INDEX idx_download_workers_heartbeat
+        ON download_workers(heartbeat_at DESC);
+    `
   }
 ];

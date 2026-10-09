@@ -51,6 +51,34 @@ export type DownloadTaskStatus =
   | "failed"
   | "cancelled";
 
+export type DownloadTaskPhase =
+  | "probing"
+  | "downloading"
+  | "verifying"
+  | "publishing"
+  | "retry_wait";
+
+export type DownloadMode = "single" | "segmented";
+export type DownloadControlRequest = "pause" | "cancel";
+export type DownloadErrorCode =
+  | "dns"
+  | "ssrf_blocked"
+  | "connect"
+  | "timeout"
+  | "tls"
+  | "http_status"
+  | "redirect_policy"
+  | "range_protocol"
+  | "source_changed"
+  | "size_limit"
+  | "disk_space"
+  | "storage"
+  | "target_conflict"
+  | "checksum_mismatch"
+  | "permission"
+  | "database"
+  | "internal";
+
 export interface DownloadTaskRecord {
   id: string;
   url: string;
@@ -75,6 +103,16 @@ export interface DownloadTaskRecord {
   finishedAt: string | null;
   lastProgressAt: string | null;
   fileOperationId: string | null;
+  phase: DownloadTaskPhase | null;
+  downloadMode: DownloadMode | null;
+  expectedSha256: string | null;
+  actualSha256: string | null;
+  errorCode: DownloadErrorCode | null;
+  errorRetryable: boolean;
+  retryCount: number;
+  nextRetryAt: string | null;
+  controlRequested: DownloadControlRequest | null;
+  segmentCount: number;
 }
 
 export interface DownloadTaskCreateInput {
@@ -83,14 +121,35 @@ export interface DownloadTaskCreateInput {
   storagePoolId: string;
   targetDirectory: string;
   targetFileName: string;
+  expectedSha256?: string | null;
 }
 
 export interface DownloadSettingsRecord {
   concurrency: number;
+  parallelRequestsPerTask: number;
+  segmentedDownloadMinBytes: number;
+  maxAutoRetries: number;
+  retryBaseDelayMs: number;
+  retryMaxDelayMs: number;
+  retryAfterMaxDelayMs: number;
+  connectTimeoutMs: number;
+  responseHeaderTimeoutMs: number;
+  readIdleTimeoutMs: number;
+  minFreeSpaceBytes: number;
+  maxFileSizeBytes: number | null;
   updatedAt: string;
 }
 
 export type PublicDownloadSettings = DownloadSettingsRecord;
+
+export interface DownloadWorkerHealth {
+  status: "ready" | "stale" | "unavailable";
+  freshWorkers: number;
+  lastHeartbeatAt: string | null;
+  activeTasks: number;
+  queuedTasks: number;
+  retryWaitTasks: number;
+}
 
 export type PhotoTakenAtSource = "exif" | "file_mtime";
 export type PhotoAssetStatus = "ready" | "failed";
@@ -520,6 +579,7 @@ export interface SystemHealthSummary {
   roots: RootReadiness[];
   indexerFreshnessMs: number | null;
   backupFreshnessMs: number | null;
+  downloader: DownloadWorkerHealth;
 }
 
 export interface DockerConfig {

@@ -1,6 +1,6 @@
 import { lstat, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { acquireExecutionLock, detectDuplicateIndexedFiles, getIndexRootStatus, heartbeatExecutionLock, listBackupRuns, listIndexRunHistory, listNasRoots, listRootReadiness, pruneOperationNotifications, releaseExecutionLock, resolveHealthAlert, upsertHealthAlert, type SigmaDatabase } from "@sigmaos/db";
+import { acquireExecutionLock, detectDuplicateIndexedFiles, getDownloadWorkerHealth, getIndexRootStatus, heartbeatExecutionLock, listBackupRuns, listIndexRunHistory, listNasRoots, listRootReadiness, pruneOperationNotifications, releaseExecutionLock, resolveHealthAlert, upsertHealthAlert, type SigmaDatabase } from "@sigmaos/db";
 import { randomUUID } from "node:crypto";
 import type { SigmaConfig, SystemHealthSummary } from "@sigmaos/shared";
 import { checkMountReadiness, type MountCommandRunner } from "@sigmaos/nas-tools";
@@ -159,7 +159,8 @@ export async function runHealthOnce(input: { db: SigmaDatabase; config: SigmaCon
     issues,
     roots: readiness,
     indexerFreshnessMs: roots.map((root) => getIndexRootStatus(input.db, root.id, now).metrics?.freshnessMs ?? null).filter((value): value is number => value !== null).reduce((max, value) => Math.max(max, value), 0) || null,
-    backupFreshnessMs: latestBackup?.finishedAt ? Math.max(0, now.getTime() - Date.parse(latestBackup.finishedAt)) : null
+    backupFreshnessMs: latestBackup?.finishedAt ? Math.max(0, now.getTime() - Date.parse(latestBackup.finishedAt)) : null,
+    downloader: getDownloadWorkerHealth(input.db, now)
   };
   console.log(JSON.stringify({ event: "health.run.completed", status: summary.status, issueCount: summary.issues.length }));
   return summary;

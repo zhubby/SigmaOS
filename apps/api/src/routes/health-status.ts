@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { listHealthAlerts, listNasRoots, listRootReadiness, getIndexRootStatus, listBackupRuns } from "@sigmaos/db";
+import { getDownloadWorkerHealth, listHealthAlerts, listNasRoots, listRootReadiness, getIndexRootStatus, listBackupRuns } from "@sigmaos/db";
 import type { SystemHealthSummary } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
 
@@ -31,6 +31,14 @@ export function registerHealthStatusRoutes(server: FastifyInstance, { db }: ApiR
     const backupFreshnessMs = backup?.finishedAt
       ? Math.max(0, checkedAtMs - Date.parse(backup.finishedAt))
       : null;
-    return { status: issues.some((issue) => issue.severity === "critical") ? "failed" : issues.length ? "degraded" : "ready", checkedAt, issues, roots: readiness, indexerFreshnessMs: indexerFreshness.length ? Math.max(...indexerFreshness) : null, backupFreshnessMs };
+    const downloader = getDownloadWorkerHealth(db);
+    if (downloader.status !== "ready") {
+      issues.push({
+        code: "downloader_unavailable",
+        severity: downloader.activeTasks + downloader.queuedTasks > 0 ? "critical" : "warning",
+        message: downloader.status === "stale" ? "Downloader heartbeat is stale" : "Downloader is unavailable"
+      });
+    }
+    return { status: issues.some((issue) => issue.severity === "critical") ? "failed" : issues.length ? "degraded" : "ready", checkedAt, issues, roots: readiness, indexerFreshnessMs: indexerFreshness.length ? Math.max(...indexerFreshness) : null, backupFreshnessMs, downloader };
   });
 }

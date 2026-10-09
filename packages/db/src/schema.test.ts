@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
@@ -62,8 +62,130 @@ describe("SQLite schema migrations", () => {
       "018_photo_upload_reservations",
       "019_photo_metadata_index",
       "020_docker_compose_apps",
-      "021_vm_direct_actions"
+      "021_vm_direct_actions",
+      "022_downloader_reliability"
     ]);
+  });
+
+  it("installs downloader reliability state, journals, reservations, workers, and claim index", () => {
+    const database = openSigmaDb(path.join(tempDir, "downloader-reliability.sqlite"));
+    try {
+      const columns = database.prepare("PRAGMA table_info(download_tasks)").all()
+        .map((column) => (column as { name: string }).name);
+      expect(columns).toEqual(expect.arrayContaining([
+        "phase",
+        "download_mode",
+        "expected_sha256",
+        "actual_sha256",
+        "error_code",
+        "error_retryable",
+        "retry_count",
+        "next_retry_at",
+        "control_requested",
+        "segment_count"
+      ]));
+      const tables = database.prepare(`
+        SELECT name FROM sqlite_master
+        WHERE type = 'table' AND name LIKE 'download_%'
+      `).pluck().all();
+      expect(tables).toEqual(expect.arrayContaining([
+        "download_segments",
+        "download_publish_journal",
+        "download_space_reservations",
+        "download_workers"
+      ]));
+      const indexes = database.prepare(`
+        SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'download_tasks'
+      `).pluck().all();
+      expect(indexes).toContain("idx_download_tasks_claim");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("upgrades legacy downloader tasks and partial files without data loss", async () => {
+    const databasePath = path.join(tempDir, "legacy-downloader.sqlite");
+    const nasRoot = path.join(tempDir, "nas");
+    const partialPath = path.join(nasRoot, ".running.part");
+    await mkdir(nasRoot);
+    await writeFile(partialPath, "abc");
+    const legacy = new Database(databasePath);
+    const appliedAt = "2026-01-01T00:00:00.000Z";
+    legacy.pragma("foreign_keys = OFF");
+    legacy.exec(`
+      CREATE TABLE schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at TEXT NOT NULL
+      );
+    `);
+    const recordMigration = legacy.prepare(
+      "INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)"
+    );
+    const reliabilityIndex = migrations.findIndex((item) => item.id === "022_downloader_reliability");
+    for (const migration of migrations.slice(0, reliabilityIndex)) {
+      legacy.exec(migration.sql);
+      recordMigration.run(migration.id, appliedAt);
+    }
+    legacy.prepare(`
+      INSERT INTO nas_roots (id, name, path, created_at, updated_at, enabled)
+      VALUES ('local', 'Local', ?, ?, ?, 1)
+    `).run(nasRoot, appliedAt, appliedAt);
+    const insertTask = legacy.prepare(`
+      INSERT INTO download_tasks (
+        id, url, root_id, storage_pool_id, target_directory, target_file_name,
+        target_path, partial_path, status, received_bytes, total_bytes, error,
+        worker_id, lease_expires_at, created_at, updated_at
+      ) VALUES (?, ?, 'local', ?, '.', ?, ?, ?, ?, ?, 10, ?, ?, ?, ?, ?)
+    `);
+    for (const status of ["queued", "running", "paused", "failed"] as const) {
+      const received = status === "running" ? 3 : 0;
+      insertTask.run(
+        status,
+        `https://example.com/${status}.bin`,
+        nasRoot,
+        `${status}.bin`,
+        `${status}.bin`,
+        status === "running" ? ".running.part" : `.${status}.part`,
+        status,
+        received,
+        status === "failed" ? "legacy failure" : null,
+        status === "running" ? "node-worker" : null,
+        status === "running" ? "2026-01-01T00:00:30.000Z" : null,
+        appliedAt,
+        appliedAt
+      );
+    }
+    legacy.close();
+
+    const upgraded = openSigmaDb(databasePath);
+    try {
+      const rows = upgraded.prepare(`
+        SELECT id, status, received_bytes, phase, download_mode, retry_count,
+          control_requested, segment_count
+        FROM download_tasks ORDER BY id
+      `).all() as Array<Record<string, unknown>>;
+      expect(rows).toEqual([
+        expect.objectContaining({ id: "failed", status: "failed", received_bytes: 0 }),
+        expect.objectContaining({ id: "paused", status: "paused", received_bytes: 0 }),
+        expect.objectContaining({ id: "queued", status: "queued", received_bytes: 0 }),
+        expect.objectContaining({
+          id: "running",
+          status: "running",
+          received_bytes: 3,
+          phase: null,
+          download_mode: null,
+          retry_count: 0,
+          control_requested: null,
+          segment_count: 0
+        })
+      ]);
+      expect(upgraded.prepare(
+        "SELECT 1 FROM schema_migrations WHERE id = '022_downloader_reliability'"
+      ).pluck().get()).toBe(1);
+      await expect(readFile(partialPath, "utf8")).resolves.toBe("abc");
+    } finally {
+      upgraded.close();
+    }
   });
 
   it("retires pending VM approvals and preserves console authorizations for direct actions", () => {

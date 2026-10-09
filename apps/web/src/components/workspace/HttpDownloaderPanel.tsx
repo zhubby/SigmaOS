@@ -18,7 +18,8 @@ import {
   createDownload,
   deleteDownload,
   getDownloads,
-  type DownloadTask
+  type DownloadTask,
+  type DownloadWorkerHealth
 } from "../../api.js";
 import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
@@ -67,10 +68,12 @@ export function HttpDownloaderPanel({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [url, setUrl] = useState("");
   const [fileName, setFileName] = useState("");
+  const [sha256, setSha256] = useState("");
   const [fileNameEdited, setFileNameEdited] = useState(false);
   const [target, setTarget] = useState<StorageFileSelection | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [workerHealth, setWorkerHealth] = useState<DownloadWorkerHealth | null>(null);
   const createDialogRef = useRef<HTMLFormElement | null>(null);
   const createUrlInputRef = useRef<HTMLInputElement | null>(null);
   const selectedPool = pools.find((pool) => pool.id === (target?.storagePoolId ?? selectedStoragePoolId)) ?? null;
@@ -78,9 +81,10 @@ export function HttpDownloaderPanel({
   useEffect(() => {
     let active = true;
     void getDownloads()
-      .then((nextTasks) => {
+      .then((snapshot) => {
         if (!active) return;
-        setTasks(nextTasks);
+        setTasks(snapshot.tasks);
+        setWorkerHealth(snapshot.health);
       })
       .catch((error: unknown) => {
         if (!active) return;
@@ -98,9 +102,15 @@ export function HttpDownloaderPanel({
     const source = new EventSource("/api/downloads/events");
     const handleSnapshot = (event: MessageEvent<string>) => {
       try {
-        const snapshot = JSON.parse(event.data) as { tasks?: DownloadTask[] };
+        const snapshot = JSON.parse(event.data) as {
+          tasks?: DownloadTask[];
+          health?: DownloadWorkerHealth;
+        };
         if (Array.isArray(snapshot.tasks)) {
           setTasks(snapshot.tasks);
+        }
+        if (snapshot.health) {
+          setWorkerHealth(snapshot.health);
         }
       } catch {
         // Keep the last valid task snapshot when an event cannot be decoded.
@@ -159,6 +169,7 @@ export function HttpDownloaderPanel({
     setTarget(pool ? { rootId: pool.rootId, storagePoolId: pool.id, path: pool.path, name: pool.name } : null);
     setUrl("");
     setFileName("");
+    setSha256("");
     setFileNameEdited(false);
     setCreateOpen(true);
   }
@@ -218,7 +229,8 @@ export function HttpDownloaderPanel({
         rootId: target.rootId,
         storagePoolId: target.storagePoolId,
         targetDirectory: target.path,
-        fileName: fileName.trim()
+        fileName: fileName.trim(),
+        ...(sha256.trim() ? { sha256: sha256.trim() } : {})
       });
       setTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
       setCreateOpen(false);
@@ -315,6 +327,10 @@ export function HttpDownloaderPanel({
               <strong>{formatBytes(totalSpeed, locale)}/s</strong>
               <span>{t("workspace.downloads.speed")}</span>
             </div>
+            <div className="download-header-stat" data-state={workerHealth?.status ?? "unavailable"}>
+              <strong>{t(`workspace.downloads.workerStatus.${workerHealth?.status ?? "unavailable"}`)}</strong>
+              <span>{t("workspace.downloads.worker")}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -385,6 +401,18 @@ export function HttpDownloaderPanel({
                   <span>{t("workspace.downloads.fileName")}</span>
                   <input value={fileName} onChange={(event) => { setFileNameEdited(true); setFileName(event.target.value); }} />
                   <small>{t("workspace.downloads.fileNameHint")}</small>
+                </label>
+                <label className="download-form-field download-form-field-wide">
+                  <span>{t("workspace.downloads.sha256")}</span>
+                  <input
+                    value={sha256}
+                    onChange={(event) => setSha256(event.target.value)}
+                    placeholder={t("workspace.downloads.sha256Placeholder")}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                  />
+                  <small>{t("workspace.downloads.sha256Hint")}</small>
                 </label>
               </section>
 
@@ -466,6 +494,8 @@ export function DownloadTaskRow({
   const canCancel = task.status === "queued" || task.status === "running" || task.status === "paused";
   const canRetry = task.status === "failed" || task.status === "cancelled";
   const actionBusy = pendingAction?.endsWith(`:${task.id}`) === true;
+  const retryLabel = formatRetry(task, locale, t);
+  const checksumLabel = formatChecksum(task, t);
 
   return (
     <article className="download-task-row" data-status={task.status}>
@@ -496,7 +526,21 @@ export function DownloadTaskRow({
           <span>{formatProgress(task, locale, t)}</span>
           <span>{formatSpeed(task.speedBytesPerSecond, locale, t)}</span>
           <span>{formatEta(task, locale, t)}</span>
-          {task.error ? <span className="download-task-error" title={task.error}>{task.error}</span> : null}
+          {task.downloadMode ? <span>{t(`workspace.downloads.mode.${task.downloadMode}`)}</span> : null}
+          {task.phase ? <span>{t(`workspace.downloads.phase.${task.phase}`)}</span> : null}
+          {task.downloadMode === "segmented" && task.segmentCount > 0
+            ? <span>{t("workspace.downloads.segments", { count: task.segmentCount })}</span>
+            : null}
+          {task.controlRequested
+            ? <span>{t(`workspace.downloads.control.${task.controlRequested}`)}</span>
+            : null}
+          {retryLabel ? <span>{retryLabel}</span> : null}
+          {checksumLabel ? <span title={task.actualSha256 ?? task.expectedSha256 ?? undefined}>{checksumLabel}</span> : null}
+          {task.errorCode
+            ? <span className="download-task-error" title={task.error ?? undefined}>{t(`workspace.downloads.errorCode.${task.errorCode}`)}</span>
+            : task.error
+              ? <span className="download-task-error" title={task.error}>{task.error}</span>
+              : null}
         </div>
       </div>
       <div className="download-task-actions" aria-label={t("workspace.downloads.actions")}>
@@ -574,6 +618,30 @@ function formatEta(task: DownloadTask, locale: SupportedLocale, t: (key: string)
   if (seconds >= 3_600) return `${Math.floor(seconds / 3_600)}h ${Math.floor(seconds / 60) % 60}m`;
   if (seconds >= 60) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
   return `${seconds}s`;
+}
+
+function formatRetry(
+  task: DownloadTask,
+  locale: SupportedLocale,
+  t: (key: string, options?: Record<string, unknown>) => string
+): string | null {
+  if (!task.nextRetryAt) return null;
+  const remainingSeconds = Math.max(0, Math.ceil((Date.parse(task.nextRetryAt) - Date.now()) / 1000));
+  return t("workspace.downloads.retryCountdown", {
+    count: formatLocaleNumber(remainingSeconds, locale),
+    retry: task.retryCount
+  });
+}
+
+function formatChecksum(
+  task: DownloadTask,
+  t: (key: string, options?: Record<string, unknown>) => string
+): string | null {
+  if (!task.expectedSha256) return null;
+  if (task.phase === "verifying") return t("workspace.downloads.checksumVerifying");
+  if (task.actualSha256 === task.expectedSha256) return t("workspace.downloads.checksumVerified");
+  if (task.actualSha256) return t("workspace.downloads.checksumMismatch");
+  return t("workspace.downloads.checksumPending");
 }
 
 function errorMessage(error: unknown): string {

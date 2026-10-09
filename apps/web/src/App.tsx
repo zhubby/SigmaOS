@@ -956,10 +956,10 @@ export function App() {
     }
   }
 
-  async function changeDownloadConcurrency(concurrency: number) {
+  async function changeDownloadSettings(patch: Partial<Omit<DownloadSettings, "updatedAt">>) {
     setError(null);
     try {
-      setDownloadSettings(await updateDownloadSettings(concurrency));
+      setDownloadSettings(await updateDownloadSettings(patch));
     } catch (nextError) {
       setError(toErrorMessage(nextError));
       throw nextError;
@@ -2249,7 +2249,7 @@ export function App() {
           onClose={() => setSettingsOpen(false)}
           onFormChange={setModelSettingsForm}
           onDockerFormChange={setDockerSettingsForm}
-          onDownloadConcurrencyChange={changeDownloadConcurrency}
+          onDownloadSettingsChange={changeDownloadSettings}
           onToolPolicyFormChange={setToolPolicyForm}
           onLanguagePreferenceChange={changeLanguagePreference}
           onThemePreferenceChange={changeThemePreference}

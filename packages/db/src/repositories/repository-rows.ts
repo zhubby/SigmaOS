@@ -5,6 +5,10 @@ import type {
   BackupRunKind,
   BackupRunStatus,
   DownloadTaskStatus,
+  DownloadTaskPhase,
+  DownloadMode,
+  DownloadControlRequest,
+  DownloadErrorCode,
   DockerConsoleAuthorizationRecord,
   DockerOperationAction,
   DockerOperationStatus,
@@ -234,6 +238,16 @@ export type DbDownloadTaskRow = {
   finished_at: string | null;
   last_progress_at: string | null;
   file_operation_id: string | null;
+  phase: DownloadTaskPhase | null;
+  download_mode: DownloadMode | null;
+  expected_sha256: string | null;
+  actual_sha256: string | null;
+  error_code: DownloadErrorCode | null;
+  error_retryable: 0 | 1;
+  retry_count: number;
+  next_retry_at: string | null;
+  control_requested: DownloadControlRequest | null;
+  segment_count: number;
 };
 
 export type DbPhotoAssetRow = {

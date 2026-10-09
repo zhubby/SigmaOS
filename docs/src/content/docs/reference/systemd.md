@@ -9,7 +9,7 @@ sidebar:
   order: 3
 ---
 
-核心服务默认以 `sigmaos` 身份运行并使用 `ProtectSystem=strict`、`NoNewPrivileges=yes` 和资源上限。`sigmaos-hostd` 是唯一的 root daemon；为原子创建可配置的 Unix 共享账号，它显式放行 `/etc`、ACL 备份目录和 Samba 私有密码库。Rust `sigmaos-termux` 固定以 `sigmaos` 身份启动，使用独立家目录 `/var/lib/sigmaos-termux`；`KillMode=process` 使 daemon 重启时 tmux session 保持运行。它对配置、数据库与日志路径的屏蔽仅防误操作，同 UID 终端不是后台服务的安全隔离边界。downloader 和 photo-worker 只写 `/var/lib/sigmaos`、日志和配置的 NAS roots；photo-worker 使用 `libheif-examples`、`libraw-bin` 的 `heif-convert`/`dcraw_emu` 以及 `ffmpeg`/`ffprobe` 生成媒体衍生图。
+核心服务默认以 `sigmaos` 身份运行并使用 `ProtectSystem=strict`、`NoNewPrivileges=yes` 和资源上限。`sigmaos-hostd` 是唯一的 root daemon；为原子创建可配置的 Unix 共享账号，它显式放行 `/etc`、ACL 备份目录和 Samba 私有密码库。Rust `sigmaos-termux` 固定以 `sigmaos` 身份启动，使用独立家目录 `/var/lib/sigmaos-termux`；`KillMode=process` 使 daemon 重启时 tmux session 保持运行。它对配置、数据库与日志路径的屏蔽仅防误操作，同 UID 终端不是后台服务的安全隔离边界。Rust downloader 和 photo-worker 只写 `/var/lib/sigmaos`、日志和配置的 NAS roots；downloader 在 API 之后启动，收到停止信号后最多等待 20 秒让传输持久化，并在 30 秒 systemd 停止时限内立即归还本进程租约。photo-worker 使用 `libheif-examples`、`libraw-bin` 的 `heif-convert`/`dcraw_emu` 以及 `ffmpeg`/`ffprobe` 生成媒体衍生图。
 
 Indexer 每 30 分钟运行，scheduler 每 6 小时，health 每 15 分钟，maintenance 每日，backup daily/weekly 分别按日历运行。oneshot 任务完成后显示 `inactive (dead)` 是正常状态，成功与否要看退出码和 journal。
 

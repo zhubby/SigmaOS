@@ -292,11 +292,18 @@ describe("API server", () => {
     const healthBody = health.json();
     expect(healthBody).toMatchObject({
       status: "failed",
-      roots: [{ rootId: "local", status: "unknown" }]
+      roots: [{ rootId: "local", status: "unknown" }],
+      downloader: {
+        status: "unavailable",
+        freshWorkers: 0,
+        activeTasks: 0,
+        queuedTasks: 0
+      }
     });
     expect(healthBody.issues).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ code: "backup_failed", severity: "critical" })
+        expect.objectContaining({ code: "backup_failed", severity: "critical" }),
+        expect.objectContaining({ code: "downloader_unavailable", severity: "warning" })
       ])
     );
 
