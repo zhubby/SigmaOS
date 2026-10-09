@@ -24,6 +24,7 @@ import {
   type ManagementDashboardId,
   type ManagementDashboardLayouts
 } from "../../lib/management-dashboard-layout.js";
+import { ManagementWidgetSkeleton } from "./ManagementSkeleton.js";
 import { PanelHeaderAction } from "./PanelHeader.js";
 
 export interface ManagementDashboardItem {
@@ -152,15 +153,18 @@ export function ManagementDashboardControls({
 
 export function ManagementDashboardGrid({
   dashboard,
-  items
+  items,
+  loading = false
 }: {
   dashboard: ManagementDashboardController;
   items: readonly ManagementDashboardItem[];
+  loading?: boolean;
 }) {
   const { t } = useTranslation();
   const { width, containerRef, mounted } = useContainerWidth({ initialWidth: 900 });
   const compact = mounted && width < MANAGEMENT_DASHBOARD_MOBILE_MAX_WIDTH;
   const { editing, layouts, setCompact, setEditing } = dashboard;
+  const editable = editing && !loading;
   const itemById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
   const orderedItems = useMemo(() => {
     const known = new Set<string>();
@@ -184,16 +188,22 @@ export function ManagementDashboardGrid({
   }, [compact, editing, setCompact, setEditing]);
 
   return (
-    <div className="management-dashboard-container" ref={containerRef}>
+    <div
+      className="management-dashboard-container"
+      ref={containerRef}
+      role={loading ? "status" : undefined}
+      aria-busy={loading || undefined}
+      aria-label={loading ? t("common.states.loading") : undefined}
+    >
       {!mounted || compact ? (
-        <div className="management-dashboard-static">
+        <div className={loading ? "management-dashboard-static is-loading" : "management-dashboard-static"}>
           {orderedItems.map((item) => (
-            <DashboardWidget key={item.id} item={item} dashboard={dashboard} editable={false} />
+            <DashboardWidget key={item.id} item={item} dashboard={dashboard} editable={false} loading={loading} />
           ))}
         </div>
       ) : (
         <Responsive<ManagementDashboardBreakpoint>
-          className={dashboard.editing ? "management-dashboard-grid is-editing" : "management-dashboard-grid"}
+          className={`management-dashboard-grid${editable ? " is-editing" : ""}${loading ? " is-loading" : ""}`}
           width={width}
           layouts={dashboard.layouts}
           breakpoints={MANAGEMENT_DASHBOARD_BREAKPOINTS}
@@ -201,8 +211,8 @@ export function ManagementDashboardGrid({
           rowHeight={9}
           margin={[12, 12]}
           containerPadding={[0, 0]}
-          dragConfig={{ enabled: dashboard.editing, handle: ".management-widget-drag-handle", bounded: true }}
-          resizeConfig={{ enabled: dashboard.editing, handles: ["se"] }}
+          dragConfig={{ enabled: editable, handle: ".management-widget-drag-handle", bounded: true }}
+          resizeConfig={{ enabled: editable, handles: ["se"] }}
           positionStrategy={absoluteStrategy}
           compactor={verticalCompactor}
           onBreakpointChange={dashboard.setBreakpoint}
@@ -210,7 +220,7 @@ export function ManagementDashboardGrid({
         >
           {items.map((item) => (
             <div key={item.id}>
-              <DashboardWidget item={item} dashboard={dashboard} editable={dashboard.editing} />
+              <DashboardWidget item={item} dashboard={dashboard} editable={editable} loading={loading} />
             </div>
           ))}
         </Responsive>
@@ -226,11 +236,13 @@ export function ManagementDashboardGrid({
 function DashboardWidget({
   item,
   dashboard,
-  editable
+  editable,
+  loading
 }: {
   item: ManagementDashboardItem;
   dashboard: ManagementDashboardController;
   editable: boolean;
+  loading: boolean;
 }) {
   const { t } = useTranslation();
 
@@ -266,7 +278,9 @@ function DashboardWidget({
           <span>{item.title}</span>
         </div>
       ) : null}
-      <div className="management-widget-content">{item.content}</div>
+      <div className="management-widget-content">
+        {loading ? <ManagementWidgetSkeleton dashboardId={dashboard.dashboardId} widgetId={item.id} /> : item.content}
+      </div>
     </div>
   );
 }

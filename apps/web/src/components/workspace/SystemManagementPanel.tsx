@@ -61,7 +61,6 @@ import {
 import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
 import { calculateNetworkTrafficRate } from "../../lib/network-traffic.js";
-import { ManagementSkeletonBody } from "./ManagementSkeleton.js";
 import {
   ManagementDashboardControls,
   ManagementDashboardGrid,
@@ -257,10 +256,10 @@ export function SystemNetworkManagementPanel({
       />
 
       <div className="management-body">
-        {loading ? <ManagementSkeletonBody tableColumns={8} tableRows={4} /> : (
-          <ManagementDashboardGrid
-            dashboard={dashboard}
-            items={[
+        <ManagementDashboardGrid
+          dashboard={dashboard}
+          loading={loading}
+          items={[
               {
                 id: "overview",
                 title: String(t("workspace.management.network.title")),
@@ -364,9 +363,8 @@ export function SystemNetworkManagementPanel({
                   </section>
                 )
               }
-            ]}
-          />
-        )}
+          ]}
+        />
       </div>
 
       {selectedInterface ? (
@@ -640,10 +638,10 @@ export function SystemStorageManagementPanel({
       />
 
       <div className="management-body">
-        {loading ? <ManagementSkeletonBody tableColumns={7} tableRows={4} variant="storage" /> : (
-          <ManagementDashboardGrid
-            dashboard={dashboard}
-            items={[
+        <ManagementDashboardGrid
+          dashboard={dashboard}
+          loading={loading}
+          items={[
               {
                 id: "overview",
                 title: String(t("workspace.management.storage.title")),
@@ -717,9 +715,8 @@ export function SystemStorageManagementPanel({
                   </section>
                 )
               }
-            ]}
-          />
-        )}
+          ]}
+        />
       </div>
 
       {selectedPool ? (

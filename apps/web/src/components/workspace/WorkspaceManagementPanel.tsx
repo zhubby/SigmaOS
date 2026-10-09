@@ -87,7 +87,6 @@ import {
   type DockerVolumeDetailsState
 } from "./DockerInspectDetails.js";
 import { DockerResourceStatus } from "./DockerResourceStatus.js";
-import { ManagementSkeletonBody } from "./ManagementSkeleton.js";
 import {
   ManagementDashboardControls,
   ManagementDashboardGrid,
@@ -676,10 +675,10 @@ function VirtualMachineManagementPanel({
         </PanelHeaderActions>}
       />
       <div className="management-body">
-        {loading ? <ManagementSkeletonBody tableColumns={7} tableRows={4} /> : (
-          <ManagementDashboardGrid
-            dashboard={dashboard}
-            items={[
+        <ManagementDashboardGrid
+          dashboard={dashboard}
+          loading={loading}
+          items={[
               {
                 id: "overview",
                 title: String(t("workspace.management.virtualMachines.title")),
@@ -732,9 +731,8 @@ function VirtualMachineManagementPanel({
                   </section>
                 )
               }
-            ]}
-          />
-        )}
+          ]}
+        />
       </div>
       {selectedVm ? (
         <VmInstanceDetailsDialog
@@ -1449,10 +1447,10 @@ function DockerManagementPanel({
       />
 
       <div className="management-body">
-        {loading ? <ManagementSkeletonBody tableColumns={6} tableRows={4} variant="docker" /> : (
-          <ManagementDashboardGrid
-            dashboard={dashboard}
-            items={[
+        <ManagementDashboardGrid
+          dashboard={dashboard}
+          loading={loading}
+          items={[
               {
                 id: "overview",
                 title: String(t("workspace.management.docker.title")),
@@ -1641,9 +1639,8 @@ function DockerManagementPanel({
           </div>
         </section>
               }
-            ]}
-          />
-        )}
+          ]}
+        />
       </div>
 
       {logsState ? <DockerLogsDialog state={logsState} onClose={() => setLogsState(null)} /> : null}

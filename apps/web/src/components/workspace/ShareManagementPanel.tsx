@@ -47,7 +47,6 @@ import {
   ManagementDashboardGrid,
   useManagementDashboard
 } from "./ManagementDashboard.js";
-import { ManagementSkeletonBody } from "./ManagementSkeleton.js";
 import { PanelHeader, PanelHeaderAction, PanelHeaderActions } from "./PanelHeader.js";
 
 type StatusTone = "ready" | "warning" | "offline" | "neutral";
@@ -373,10 +372,10 @@ export function ShareManagementPanel({
       />
 
       <form id="share-management-form" className="management-body share-management-body" onSubmit={submitProposal}>
-        {loading ? <ManagementSkeletonBody tableColumns={5} tableRows={3} /> : (
-          <ManagementDashboardGrid
-            dashboard={dashboard}
-            items={[
+        <ManagementDashboardGrid
+          dashboard={dashboard}
+          loading={loading}
+          items={[
               {
                 id: "overview",
                 title: String(t("workspace.management.shares.commandTitle")),
@@ -830,9 +829,8 @@ export function ShareManagementPanel({
           </div>
         </section>
               }
-            ]}
-          />
-        )}
+          ]}
+        />
       </form>
     </section>
   );
