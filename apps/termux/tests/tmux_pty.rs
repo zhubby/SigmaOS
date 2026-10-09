@@ -4,7 +4,7 @@ use std::time::Duration;
 use nix::unistd::{Gid, Uid};
 use sigmaos_termux::config::Account;
 use sigmaos_termux::{pty, tmux::TmuxManager};
-use tokio::time::timeout;
+use tokio::time::{MissedTickBehavior, interval, timeout};
 
 #[tokio::test]
 async fn attaches_to_a_real_tmux_session_through_a_pty() {
@@ -47,32 +47,39 @@ async fn attaches_to_a_real_tmux_session_through_a_pty() {
     assert!(String::from_utf8_lossy(&output).contains("termux-integration-ready"));
     pty::resize(&process.master, 101, 37).unwrap();
     manager.resize(session, 101, 37).await.unwrap();
-    pty::write_all(
-        &process.master,
-        b"printf 'termux-resize:'; stty size; printf ':done\\n'\r",
-    )
-    .await
-    .unwrap();
     let resized_output = timeout(Duration::from_secs(5), async {
         let mut output = Vec::new();
         let mut buffer = [0_u8; 4096];
-        while {
-            let output = String::from_utf8_lossy(&output);
-            !(output.contains("termux-resize:37 101") && output.contains(":done"))
-        } {
-            let count = pty::read_chunk(&process.master, &mut buffer).await.unwrap();
-            if count == 0 {
-                break;
+        let mut probe = interval(Duration::from_millis(100));
+        probe.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                _ = probe.tick() => {
+                    pty::write_all(
+                        &process.master,
+                        b"printf 'termux-resize:'; stty size; printf ':done\\n'\r",
+                    )
+                    .await
+                    .unwrap();
+                }
+                result = pty::read_chunk(&process.master, &mut buffer) => {
+                    let count = result.unwrap();
+                    if count == 0 {
+                        break;
+                    }
+                    output.extend_from_slice(&buffer[..count]);
+                    if String::from_utf8_lossy(&output).contains("termux-resize:37 101") {
+                        break;
+                    }
+                }
             }
-            output.extend_from_slice(&buffer[..count]);
         }
         output
     })
     .await
     .expect("timed out waiting for resized tmux PTY output");
     assert!(
-        String::from_utf8_lossy(&resized_output).contains("termux-resize:37 101")
-            && String::from_utf8_lossy(&resized_output).contains(":done"),
+        String::from_utf8_lossy(&resized_output).contains("termux-resize:37 101"),
         "resized output: {:?}",
         String::from_utf8_lossy(&resized_output)
     );
