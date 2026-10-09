@@ -189,7 +189,7 @@ impl StorageTarget {
 
     pub fn available_bytes(&self) -> Result<u64, DownloadError> {
         let stats = fstatvfs(&self.directory).map_err(DownloadError::storage)?;
-        Ok(u64::from(stats.blocks_available()).saturating_mul(stats.fragment_size()))
+        Ok(block_count_to_u64(stats.blocks_available()).saturating_mul(stats.fragment_size()))
     }
 
     pub async fn prepare_publish(
@@ -301,6 +301,10 @@ impl StorageTarget {
         }
         Ok(())
     }
+}
+
+fn block_count_to_u64<T: Into<u64>>(block_count: T) -> u64 {
+    block_count.into()
 }
 
 fn validate_relative_path(path: &Path) -> Result<(), DownloadError> {
