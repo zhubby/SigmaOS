@@ -22,6 +22,8 @@ import type {
   DockerOperationTargetType,
   DockerCreateResult,
   DockerContainerDetails as SharedDockerContainerDetails,
+  DockerNetworkDetails as SharedDockerNetworkDetails,
+  DockerVolumeDetails as SharedDockerVolumeDetails,
   DockerSettingsRecord,
   DockerRegistryCredentialCreateInput,
   DockerRegistryCredentialSummary as SharedDockerRegistryCredentialSummary,
@@ -350,6 +352,8 @@ export type ShareSettingsInput = Omit<ShareSettings, "account" | "updatedAt"> & 
 };
 export type DockerContainer = DockerSummary["containers"][number];
 export type DockerContainerDetails = SharedDockerContainerDetails;
+export type DockerNetworkDetails = SharedDockerNetworkDetails;
+export type DockerVolumeDetails = SharedDockerVolumeDetails;
 export type DockerComposeProject = DockerSummary["composeProjects"][number];
 export type DockerComposeApp = SharedDockerComposeAppSummary;
 export type DockerComposeAppDetail = SharedDockerComposeAppDetail;
@@ -749,6 +753,20 @@ export async function getDockerContainerDetails(containerId: string): Promise<Do
   await ensureOk(response);
   const body = (await response.json()) as { container: DockerContainerDetails };
   return body.container;
+}
+
+export async function getDockerNetworkDetails(networkId: string): Promise<DockerNetworkDetails> {
+  const response = await fetch(`/api/docker/networks/${encodeURIComponent(networkId)}`);
+  await ensureOk(response);
+  const body = (await response.json()) as { network: DockerNetworkDetails };
+  return body.network;
+}
+
+export async function getDockerVolumeDetails(volumeName: string): Promise<DockerVolumeDetails> {
+  const response = await fetch(`/api/docker/volumes/${encodeURIComponent(volumeName)}`);
+  await ensureOk(response);
+  const body = (await response.json()) as { volume: DockerVolumeDetails };
+  return body.volume;
 }
 
 export async function getDockerComposeApps(): Promise<DockerComposeApp[]> {

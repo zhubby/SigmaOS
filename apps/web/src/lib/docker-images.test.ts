@@ -18,6 +18,7 @@ const image: DockerImageSummary = {
   createdAt: "2026-09-16T00:00:00.000Z",
   sizeBytes: 1024,
   sharedSizeBytes: 256,
+  architecture: "amd64",
   containerCount: 0
 };
 

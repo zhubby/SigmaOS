@@ -49,7 +49,9 @@ import {
   type VmOperation,
   getDockerContainerLogs,
   getDockerContainerDetails,
+  getDockerNetworkDetails,
   getDockerSummary,
+  getDockerVolumeDetails,
   executeDockerContainerAction,
   proposeDockerOperation,
   type DockerOperationProposal,
@@ -57,8 +59,10 @@ import {
   type DockerComposeProject,
   type DockerContainer,
   type DockerContainerDetails,
+  type DockerNetworkDetails,
   type DockerOperation,
   type DockerSummary,
+  type DockerVolumeDetails,
   type DockerLifecycleProposalInput,
   type DockerDaemonStatus,
   type NasRoot,
@@ -76,6 +80,12 @@ import { DockerCreateDialogs } from "./DockerCreateDialogs.js";
 import { DockerDaemonSettingsDialog } from "./DockerDaemonSettingsDialog.js";
 import { DockerComposeAppDialog } from "./DockerComposeAppDialog.js";
 import { DockerImageManagement } from "./DockerImageManagement.js";
+import {
+  DockerNetworkDetailsDialog,
+  DockerVolumeDetailsDialog,
+  type DockerNetworkDetailsState,
+  type DockerVolumeDetailsState
+} from "./DockerInspectDetails.js";
 import { DockerResourceStatus } from "./DockerResourceStatus.js";
 import { ManagementSkeletonBody } from "./ManagementSkeleton.js";
 import {
@@ -94,6 +104,7 @@ import {
   type StorageFileSelection
 } from "./StorageFilePickerDialog.js";
 import { PanelHeader, PanelHeaderAction, PanelHeaderActions } from "./PanelHeader.js";
+import { sortDockerContainers, sortDockerNetworks, sortDockerVolumes } from "../../lib/docker-inventory.js";
 
 export type ManagementPanelId = "docker" | "virtualMachines" | "network" | "storage" | "shares";
 
@@ -1124,6 +1135,10 @@ function DockerManagementPanel({
     loading: boolean;
     error: string | null;
   } | null>(null);
+  const [networkDetailsState, setNetworkDetailsState] = useState<DockerNetworkDetailsState | null>(null);
+  const [volumeDetailsState, setVolumeDetailsState] = useState<DockerVolumeDetailsState | null>(null);
+  const networkInspectRequestRef = useRef(0);
+  const volumeInspectRequestRef = useRef(0);
   const [logsState, setLogsState] = useState<{
     container: DockerContainer;
     content: string;
@@ -1131,7 +1146,7 @@ function DockerManagementPanel({
     error: string | null;
   } | null>(null);
   const [consoleSession, setConsoleSession] = useState<DockerConsoleSession | null>(null);
-  const containers = summary?.containers ?? [];
+  const containers = sortDockerContainers(summary?.containers ?? []);
   const composeProjects = summary?.composeProjects ?? [];
   const dockerEnabled = Boolean(summary?.enabled);
   const canUseDocker = dockerEnabled && summary?.engine.status === "ready" && !error;
@@ -1264,6 +1279,46 @@ function DockerManagementPanel({
     } catch (nextError) {
       setDetailsState({ container, details: null, loading: false, error: errorMessage(nextError) });
     }
+  }
+
+  async function openNetworkDetails(network: DockerSummary["networks"][number]) {
+    const requestId = ++networkInspectRequestRef.current;
+    setNetworkDetailsState({ network, details: null, loading: true, error: null });
+    try {
+      const details: DockerNetworkDetails = await getDockerNetworkDetails(network.id);
+      setNetworkDetailsState((current) => requestId === networkInspectRequestRef.current && current?.network.id === network.id
+        ? { network, details, loading: false, error: null }
+        : current);
+    } catch (nextError) {
+      setNetworkDetailsState((current) => requestId === networkInspectRequestRef.current && current?.network.id === network.id
+        ? { network, details: null, loading: false, error: errorMessage(nextError) }
+        : current);
+    }
+  }
+
+  async function openVolumeDetails(volume: DockerSummary["volumes"][number]) {
+    const requestId = ++volumeInspectRequestRef.current;
+    setVolumeDetailsState({ volume, details: null, loading: true, error: null });
+    try {
+      const details: DockerVolumeDetails = await getDockerVolumeDetails(volume.name);
+      setVolumeDetailsState((current) => requestId === volumeInspectRequestRef.current && current?.volume.name === volume.name
+        ? { volume, details, loading: false, error: null }
+        : current);
+    } catch (nextError) {
+      setVolumeDetailsState((current) => requestId === volumeInspectRequestRef.current && current?.volume.name === volume.name
+        ? { volume, details: null, loading: false, error: errorMessage(nextError) }
+        : current);
+    }
+  }
+
+  function closeNetworkDetails() {
+    networkInspectRequestRef.current += 1;
+    setNetworkDetailsState(null);
+  }
+
+  function closeVolumeDetails() {
+    volumeInspectRequestRef.current += 1;
+    setVolumeDetailsState(null);
   }
 
   async function executeContainerAction(container: DockerContainer, action: "start" | "stop" | "restart" | "remove") {
@@ -1524,12 +1579,12 @@ function DockerManagementPanel({
               {
                 id: "networks",
                 title: String(t("workspace.management.docker.networksTitle")),
-                content: <DockerNetworkInventory summary={summary} locale={locale} t={t} action={renderCreateAction("network")} />
+                content: <DockerNetworkInventory summary={summary} locale={locale} t={t} action={renderCreateAction("network")} onOpen={(network) => void openNetworkDetails(network)} />
               },
               {
                 id: "storage",
                 title: String(t("workspace.management.docker.storageTitle")),
-                content: <DockerStorageInventory summary={summary} t={t} action={renderCreateAction("volume")} />
+                content: <DockerStorageInventory summary={summary} t={t} action={renderCreateAction("volume")} onOpen={(volume) => void openVolumeDetails(volume)} />
               },
               {
                 id: "compose",
@@ -1606,6 +1661,8 @@ function DockerManagementPanel({
           onConsole={() => void requestConsole(currentDetailsContainer ?? detailsState.container)}
         />
       ) : null}
+      {networkDetailsState ? <DockerNetworkDetailsDialog state={networkDetailsState} locale={locale} onClose={closeNetworkDetails} /> : null}
+      {volumeDetailsState ? <DockerVolumeDetailsDialog state={volumeDetailsState} locale={locale} onClose={closeVolumeDetails} /> : null}
       {daemonSettingsOpen ? (
         <DockerDaemonSettingsDialog
           status={daemonStatus}
@@ -2225,14 +2282,16 @@ function DockerNetworkInventory({
   summary,
   locale,
   t,
-  action
+  action,
+  onOpen
 }: {
   summary: DockerSummary | null;
   locale: SupportedLocale;
   t: Translate;
   action: ReactNode;
+  onOpen: (network: DockerSummary["networks"][number]) => void;
 }) {
-  const networks = summary?.networks ?? [];
+  const networks = sortDockerNetworks(summary?.networks ?? []);
   const count = summary?.metrics.networks ?? 0;
   return (
     <section className="management-section docker-inventory-section">
@@ -2246,7 +2305,10 @@ function DockerNetworkInventory({
           <article className="docker-inventory-row" key={network.id}>
             <Network aria-hidden="true" size={16} />
             <div>
-              <strong title={network.name}>{network.name}</strong>
+              <button type="button" className="docker-inventory-name-trigger" title={network.name} onClick={() => onOpen(network)}>
+                <span>{network.name}</span>
+                <ArrowUpRight aria-hidden="true" size={13} />
+              </button>
               <span>{network.driver} · {network.scope}</span>
             </div>
             <dl>
@@ -2261,8 +2323,13 @@ function DockerNetworkInventory({
   );
 }
 
-function DockerStorageInventory({ summary, t, action }: { summary: DockerSummary | null; t: Translate; action: ReactNode }) {
-  const volumes = summary?.volumes ?? [];
+function DockerStorageInventory({ summary, t, action, onOpen }: {
+  summary: DockerSummary | null;
+  t: Translate;
+  action: ReactNode;
+  onOpen: (volume: DockerSummary["volumes"][number]) => void;
+}) {
+  const volumes = sortDockerVolumes(summary?.volumes ?? []);
   const count = summary?.metrics.volumes ?? 0;
   return (
     <section className="management-section docker-inventory-section">
@@ -2276,7 +2343,10 @@ function DockerStorageInventory({ summary, t, action }: { summary: DockerSummary
           <article className="docker-inventory-row docker-storage-row" key={volume.name}>
             <HardDrive aria-hidden="true" size={16} />
             <div>
-              <strong title={volume.name}>{volume.name}</strong>
+              <button type="button" className="docker-inventory-name-trigger" title={volume.name} onClick={() => onOpen(volume)}>
+                <span>{volume.name}</span>
+                <ArrowUpRight aria-hidden="true" size={13} />
+              </button>
               <span>{volume.driver} · {volume.scope}</span>
             </div>
             <small title={volume.mountpoint}>{volume.mountpoint || String(t("common.dash"))}</small>

@@ -25,7 +25,7 @@ import {
   type DockerImageSummary,
   type DockerRegistryCredential
 } from "../../api.js";
-import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
+import { formatBytes } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
 import {
   dockerImageDeleteTargets,
@@ -35,6 +35,8 @@ import {
   isValidDockerImageReference,
   matchingDockerRegistry
 } from "../../lib/docker-images.js";
+import { dockerImageUsage, sortDockerImages } from "../../lib/docker-inventory.js";
+import { useModalDialog } from "./useModalDialog.js";
 
 interface DockerImageManagementProps {
   images: DockerImageSummary[];
@@ -84,7 +86,7 @@ export function DockerImageManagement({
   const [registriesLoading, setRegistriesLoading] = useState(true);
   const [registriesError, setRegistriesError] = useState<string | null>(null);
   const [registryOpen, setRegistryOpen] = useState(false);
-  const visibleImages = useMemo(() => filterDockerImages(images, query), [images, query]);
+  const visibleImages = useMemo(() => filterDockerImages(sortDockerImages(images), query), [images, query]);
   const matchedRegistry = useMemo(
     () => isValidDockerImageReference(pullReference)
       ? matchingDockerRegistry(pullReference, registries)
@@ -207,7 +209,8 @@ export function DockerImageManagement({
                   <th>{t("workspace.management.docker.images.columns.id")}</th>
                   <th>{t("workspace.management.docker.images.columns.created")}</th>
                   <th>{t("workspace.management.docker.images.columns.size")}</th>
-                  <th>{t("workspace.management.docker.images.columns.containers")}</th>
+                  <th>{t("workspace.management.docker.images.columns.architecture")}</th>
+                  <th>{t("workspace.management.docker.images.columns.usage")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -225,7 +228,8 @@ export function DockerImageManagement({
                     <td data-label={t("workspace.management.docker.images.columns.id")}><code>{image.shortId}</code></td>
                     <td data-label={t("workspace.management.docker.images.columns.created")}>{formatDockerDate(image.createdAt, locale, String(t("common.dash")))}</td>
                     <td data-label={t("workspace.management.docker.images.columns.size")}>{formatBytes(image.sizeBytes, locale)}</td>
-                    <td data-label={t("workspace.management.docker.images.columns.containers")}>{image.containerCount === null ? t("common.dash") : formatLocaleNumber(image.containerCount, locale)}</td>
+                    <td data-label={t("workspace.management.docker.images.columns.architecture")}>{image.architecture ?? t("common.dash")}</td>
+                    <td data-label={t("workspace.management.docker.images.columns.usage")}>{t(dockerImageUsageTranslationKey(image))}</td>
                   </tr>
                 ))}
               </tbody>
@@ -288,7 +292,7 @@ export function DockerImageManagement({
   );
 }
 
-function DockerImageDetailsDialog({
+export function DockerImageDetailsDialog({
   image,
   locale,
   engineReady,
@@ -319,11 +323,12 @@ function DockerImageDetailsDialog({
   const targets = dockerImageDeleteTargets(image);
   const occupied = typeof image.containerCount === "number" && image.containerCount > 0;
   const removalBlocked = dockerImageRemovalBlocked(image);
+  const dialogRef = useModalDialog(onClose, deleting);
   return (
     <div className="management-modal-backdrop docker-image-modal-backdrop" onMouseDown={(event) => {
       if (event.target === event.currentTarget && !deleting) onClose();
     }}>
-      <section className="management-modal docker-image-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="docker-image-detail-title">
+      <section ref={dialogRef} tabIndex={-1} className="management-modal docker-image-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="docker-image-detail-title">
         <header>
           <div className="docker-image-dialog-heading">
             <span className="docker-image-dialog-icon"><ImageIcon aria-hidden="true" size={19} /></span>
@@ -361,7 +366,8 @@ function DockerImageDetailsDialog({
               <div><dt>{t("workspace.management.docker.images.columns.created")}</dt><dd>{formatDockerDate(image.createdAt, locale, String(t("common.dash")))}</dd></div>
               <div><dt>{t("workspace.management.docker.images.columns.size")}</dt><dd>{formatBytes(image.sizeBytes, locale)}</dd></div>
               <div><dt>{t("workspace.management.docker.images.sharedSize")}</dt><dd>{image.sharedSizeBytes === null ? t("common.dash") : formatBytes(image.sharedSizeBytes, locale)}</dd></div>
-              <div><dt>{t("workspace.management.docker.images.columns.containers")}</dt><dd>{image.containerCount === null ? t("common.dash") : formatLocaleNumber(image.containerCount, locale)}</dd></div>
+              <div><dt>{t("workspace.management.docker.images.columns.architecture")}</dt><dd>{image.architecture ?? t("common.dash")}</dd></div>
+              <div><dt>{t("workspace.management.docker.images.columns.usage")}</dt><dd>{t(dockerImageUsageTranslationKey(image))}</dd></div>
             </dl>
             <ImageReferenceList title={String(t("workspace.management.docker.images.tags"))} values={image.tags} empty={String(t("workspace.management.docker.images.noTags"))} />
             <ImageReferenceList title={String(t("workspace.management.docker.images.digests"))} values={image.digests} empty={String(t("workspace.management.docker.images.noDigests"))} />
@@ -653,6 +659,16 @@ function formatDockerDate(value: string | null, locale: SupportedLocale, fallbac
   return Number.isNaN(timestamp.getTime())
     ? fallback
     : new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(timestamp);
+}
+
+function dockerImageUsageTranslationKey(image: DockerImageSummary):
+  | "workspace.management.docker.images.usage.inUse"
+  | "workspace.management.docker.images.usage.unused"
+  | "workspace.management.docker.images.usage.unknown" {
+  const usage = dockerImageUsage(image);
+  if (usage === "in-use") return "workspace.management.docker.images.usage.inUse";
+  if (usage === "unused") return "workspace.management.docker.images.usage.unused";
+  return "workspace.management.docker.images.usage.unknown";
 }
 
 function errorMessage(error: unknown): string {

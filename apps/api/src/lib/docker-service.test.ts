@@ -4,7 +4,7 @@ import { resolveDockerImageOccupancy } from "./docker-service.js";
 
 const image: DockerImageSummary = {
   id: "sha256:abc", shortId: "abc", tags: ["app:latest"], digests: [],
-  createdAt: null, sizeBytes: 1, sharedSizeBytes: null, containerCount: null
+  createdAt: null, sizeBytes: 1, sharedSizeBytes: null, architecture: "amd64", containerCount: null
 };
 const container: DockerContainerSummary = {
   id: "one", shortId: "one", name: "app", image: "app:old", imageId: "sha256:abc",

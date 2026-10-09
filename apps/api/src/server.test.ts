@@ -55,8 +55,10 @@ import type {
   DockerDaemonConfigUpdateResult,
   DockerDaemonStatus,
   DockerImageSummary,
+  DockerNetworkDetails,
   DockerOperationProposal,
   DockerResourceCapabilities,
+  DockerVolumeDetails,
   ShareApplyRequest,
   ShareApplyResult,
   SigmaConfig,
@@ -2534,6 +2536,50 @@ describe("API server", () => {
       payload: { reference: "jellyfin:latest", confirmed: true }
     });
     expect(conflict.statusCode).toBe(409);
+    await server.close();
+  });
+
+  it("returns Docker network and volume inspect details with stable error statuses", async () => {
+    const engine = new FakeDockerEngine();
+    const server = await buildServer({
+      config: dockerEnabledConfig(tempDir),
+      db,
+      docker: { engine, compose: new FakeDockerCompose(), daemon: new FakeDockerDaemon() }
+    });
+
+    const network = await server.inject({ method: "GET", url: "/api/docker/networks/network-1" });
+    expect(network.statusCode).toBe(200);
+    expect(network.json()).toMatchObject({ network: {
+      id: "network-1",
+      name: "media-net",
+      enableIPv4: true,
+      containers: [{ name: "media", ipv4Address: "172.20.0.2/16" }]
+    } });
+
+    const volume = await server.inject({ method: "GET", url: "/api/docker/volumes/media-data" });
+    expect(volume.statusCode).toBe(200);
+    expect(volume.json()).toMatchObject({ volume: {
+      name: "media-data",
+      sizeBytes: 4096,
+      referenceCount: 1
+    } });
+
+    expect((await server.inject({ method: "GET", url: "/api/docker/networks/missing" })).statusCode).toBe(404);
+    expect((await server.inject({ method: "GET", url: "/api/docker/volumes/missing" })).statusCode).toBe(404);
+    expect((await server.inject({ method: "GET", url: "/api/docker/networks/broken" })).statusCode).toBe(502);
+    expect((await server.inject({ method: "GET", url: "/api/docker/volumes/broken" })).statusCode).toBe(502);
+    await server.close();
+  });
+
+  it("keeps Docker inspect details disabled with the rest of Docker management", async () => {
+    const server = await buildServer({
+      config: testConfig(tempDir),
+      db,
+      docker: { engine: new FakeDockerEngine(), compose: new FakeDockerCompose(), daemon: new FakeDockerDaemon() }
+    });
+
+    expect((await server.inject({ method: "GET", url: "/api/docker/networks/network-1" })).statusCode).toBe(503);
+    expect((await server.inject({ method: "GET", url: "/api/docker/volumes/media-data" })).statusCode).toBe(503);
     await server.close();
   });
 
@@ -5161,6 +5207,7 @@ class FakeDockerEngine implements DockerEngineRuntime {
       createdAt: new Date(0).toISOString(),
       sizeBytes: 4096,
       sharedSizeBytes: 1024,
+      architecture: "amd64",
       containerCount: 1
     }
   ];
@@ -5188,6 +5235,49 @@ class FakeDockerEngine implements DockerEngineRuntime {
 
   async listImages(): Promise<DockerImageSummary[]> {
     return this.images;
+  }
+
+  async getImageArchitecture(): Promise<string | null> {
+    return "amd64";
+  }
+
+  async getNetworkDetails(networkId: string): Promise<DockerNetworkDetails> {
+    if (networkId === "missing") throw new DockerRequestError("No such network", 404);
+    if (networkId === "broken") throw new DockerRequestError("network inspect failed", 500);
+    return {
+      id: networkId,
+      name: "media-net",
+      createdAt: "2026-09-17T12:00:00.000Z",
+      driver: "bridge",
+      scope: "local",
+      containerCount: 1,
+      enableIPv4: true,
+      enableIPv6: false,
+      internal: false,
+      attachable: true,
+      ingress: false,
+      ipam: { driver: "default", configs: [{ subnet: "172.20.0.0/16", ipRange: null, gateway: "172.20.0.1", auxiliaryAddresses: {} }] },
+      options: {},
+      labels: { environment: "test" },
+      containers: [{ id: "container-1", name: "media", endpointId: "endpoint-1", macAddress: "02:42:ac:14:00:02", ipv4Address: "172.20.0.2/16", ipv6Address: null }]
+    };
+  }
+
+  async getVolumeDetails(volumeName: string): Promise<DockerVolumeDetails> {
+    if (volumeName === "missing") throw new DockerRequestError("No such volume", 404);
+    if (volumeName === "broken") throw new DockerRequestError("volume inspect failed", 500);
+    return {
+      name: volumeName,
+      createdAt: "2026-09-17T12:00:00.000Z",
+      driver: "local",
+      scope: "local",
+      mountpoint: `/var/lib/docker/volumes/${volumeName}/_data`,
+      labels: { role: "media" },
+      options: {},
+      status: { availability: "active" },
+      sizeBytes: 4096,
+      referenceCount: 1
+    };
   }
 
   async listContainers(): Promise<DockerContainerSummary[]> {

@@ -1491,6 +1491,7 @@ export interface DockerImageSummary {
   createdAt: string | null;
   sizeBytes: number;
   sharedSizeBytes: number | null;
+  architecture: string | null;
   containerCount: number | null;
 }
 
@@ -1579,11 +1580,50 @@ export interface DockerNetworkSummary {
   containerCount: number;
 }
 
+export interface DockerNetworkContainerDetails {
+  id: string;
+  name: string;
+  endpointId: string | null;
+  macAddress: string | null;
+  ipv4Address: string | null;
+  ipv6Address: string | null;
+}
+
+export interface DockerNetworkDetails extends DockerNetworkSummary {
+  createdAt: string | null;
+  enableIPv4: boolean | null;
+  enableIPv6: boolean | null;
+  internal: boolean | null;
+  attachable: boolean | null;
+  ingress: boolean | null;
+  ipam: {
+    driver: string | null;
+    configs: Array<{
+      subnet: string | null;
+      ipRange: string | null;
+      gateway: string | null;
+      auxiliaryAddresses: Record<string, string>;
+    }>;
+  };
+  options: Record<string, string>;
+  labels: Record<string, string>;
+  containers: DockerNetworkContainerDetails[];
+}
+
 export interface DockerVolumeSummary {
   name: string;
   driver: string;
   scope: string;
   mountpoint: string;
+}
+
+export interface DockerVolumeDetails extends DockerVolumeSummary {
+  createdAt: string | null;
+  labels: Record<string, string>;
+  options: Record<string, string>;
+  status: Record<string, string>;
+  sizeBytes: number | null;
+  referenceCount: number | null;
 }
 
 export type DockerComposeAppRisk = "medium" | "high";

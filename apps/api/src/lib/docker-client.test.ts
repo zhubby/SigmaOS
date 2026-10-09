@@ -177,6 +177,14 @@ beforeEach(async () => {
       ]);
       return;
     }
+    if (url === "/v1.55/images/sha256%3A1111111111112222/json") {
+      sendJson(response, { Architecture: "amd64" });
+      return;
+    }
+    if (url === "/v1.55/images/sha256%3A2222222222223333/json") {
+      sendJson(response, { message: "inspect unavailable" }, 503);
+      return;
+    }
     if (url === "/v1.55/images/alpine%3Alatest/json") {
       sendJson(response, { Id: "sha256:1111111111112222" });
       return;
@@ -190,12 +198,63 @@ beforeEach(async () => {
       sendJson(response, [{ Id: "network-1", Name: "bridge", Driver: "bridge", Scope: "local", Containers: { "container-1": {} } }]);
       return;
     }
+    if (url === "/v1.55/networks/network-1") {
+      sendJson(response, {
+        Id: "network-1",
+        Name: "bridge",
+        Created: "2026-09-17T12:00:00.000Z",
+        Driver: "bridge",
+        Scope: "local",
+        EnableIPv4: true,
+        EnableIPv6: false,
+        Internal: false,
+        Attachable: true,
+        Ingress: false,
+        IPAM: { Driver: "default", Config: [{ Subnet: "172.18.0.0/16", IPRange: "172.18.1.0/24", Gateway: "172.18.0.1", AuxAddress: { router: "172.18.0.2" } }] },
+        Options: { "com.docker.network.bridge.name": "br-test" },
+        Labels: { environment: "test" },
+        Containers: {
+          "container-1": { Name: "media", EndpointID: "endpoint-1", MacAddress: "02:42:ac:12:00:02", IPv4Address: "172.18.0.2/16", IPv6Address: "" }
+        }
+      });
+      return;
+    }
+    if (url === "/v1.55/networks/minimal") {
+      sendJson(response, {});
+      return;
+    }
+    if (url === "/v1.55/networks/missing") {
+      sendJson(response, { message: "network not found" }, 404);
+      return;
+    }
     if (url === "/v1.55/volumes") {
       sendJson(response, { Volumes: [
         { Name: "volume-1", Driver: "local", Scope: "local", Mountpoint: "/var/lib/docker/volumes/volume-1/_data" },
         { Name: "volume-2" },
         { Name: "volume-3" }
       ] });
+      return;
+    }
+    if (url === "/v1.55/volumes/volume-1") {
+      sendJson(response, {
+        Name: "volume-1",
+        CreatedAt: "2026-09-16T11:00:00.000Z",
+        Driver: "local",
+        Scope: "local",
+        Mountpoint: "/var/lib/docker/volumes/volume-1/_data",
+        Labels: { role: "media" },
+        Options: { type: "none" },
+        Status: { availability: "active" },
+        UsageData: { Size: 4096, RefCount: 2 }
+      });
+      return;
+    }
+    if (url === "/v1.55/volumes/minimal") {
+      sendJson(response, {});
+      return;
+    }
+    if (url === "/v1.55/volumes/missing") {
+      sendJson(response, { message: "volume not found" }, 404);
       return;
     }
     response.statusCode = 404;
@@ -232,6 +291,7 @@ describe("DockerSocketClient", () => {
           createdAt: "2023-11-14T22:13:20.000Z",
           sizeBytes: 7_000_000,
           sharedSizeBytes: 1024,
+          architecture: "amd64",
           containerCount: 2
         },
         {
@@ -242,6 +302,7 @@ describe("DockerSocketClient", () => {
           createdAt: null,
           sizeBytes: 0,
           sharedSizeBytes: null,
+          architecture: null,
           containerCount: null
         }
       ],
@@ -282,6 +343,79 @@ describe("DockerSocketClient", () => {
       workingDir: "/config",
       labels: { "app.role": "media" }
     });
+    await expect(client.getNetworkDetails("network-1")).resolves.toEqual({
+      id: "network-1",
+      name: "bridge",
+      createdAt: "2026-09-17T12:00:00.000Z",
+      driver: "bridge",
+      scope: "local",
+      containerCount: 1,
+      enableIPv4: true,
+      enableIPv6: false,
+      internal: false,
+      attachable: true,
+      ingress: false,
+      ipam: {
+        driver: "default",
+        configs: [{
+          subnet: "172.18.0.0/16",
+          ipRange: "172.18.1.0/24",
+          gateway: "172.18.0.1",
+          auxiliaryAddresses: { router: "172.18.0.2" }
+        }]
+      },
+      options: { "com.docker.network.bridge.name": "br-test" },
+      labels: { environment: "test" },
+      containers: [{
+        id: "container-1",
+        name: "media",
+        endpointId: "endpoint-1",
+        macAddress: "02:42:ac:12:00:02",
+        ipv4Address: "172.18.0.2/16",
+        ipv6Address: null
+      }]
+    });
+    await expect(client.getVolumeDetails("volume-1")).resolves.toEqual({
+      name: "volume-1",
+      createdAt: "2026-09-16T11:00:00.000Z",
+      driver: "local",
+      scope: "local",
+      mountpoint: "/var/lib/docker/volumes/volume-1/_data",
+      labels: { role: "media" },
+      options: { type: "none" },
+      status: { availability: "active" },
+      sizeBytes: 4096,
+      referenceCount: 2
+    });
+  });
+
+  it("normalizes missing inspect fields and preserves not-found responses", async () => {
+    const client = new DockerSocketClient({ socketPath, timeoutMs: 1000 });
+
+    await expect(client.getNetworkDetails("minimal")).resolves.toMatchObject({
+      id: "minimal",
+      name: "minimal",
+      createdAt: null,
+      enableIPv4: null,
+      ipam: { driver: null, configs: [] },
+      options: {},
+      labels: {},
+      containers: []
+    });
+    await expect(client.getVolumeDetails("minimal")).resolves.toEqual({
+      name: "minimal",
+      createdAt: null,
+      driver: "unknown",
+      scope: "local",
+      mountpoint: "",
+      labels: {},
+      options: {},
+      status: {},
+      sizeBytes: null,
+      referenceCount: null
+    });
+    await expect(client.getNetworkDetails("missing")).rejects.toMatchObject({ statusCode: 404 });
+    await expect(client.getVolumeDetails("missing")).rejects.toMatchObject({ statusCode: 404 });
   });
 
   it("caps negotiated API versions and rejects daemons whose minimum is too new", async () => {

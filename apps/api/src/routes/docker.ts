@@ -354,6 +354,36 @@ export function registerDockerRoutes(server: FastifyInstance, context: ApiRouteC
     }
   });
 
+  server.get<{
+    Params: { id: string };
+  }>("/api/docker/networks/:id", async (request, reply) => {
+    const nextConfig = currentConfig();
+    if (!nextConfig.docker.enabled) {
+      reply.status(503).send({ error: "Docker management is disabled" });
+      return;
+    }
+    try {
+      reply.send({ network: await dockerEngine(nextConfig.docker, docker).getNetworkDetails(request.params.id) });
+    } catch (error) {
+      sendDockerInspectError(reply, error, "Docker network not found");
+    }
+  });
+
+  server.get<{
+    Params: { name: string };
+  }>("/api/docker/volumes/:name", async (request, reply) => {
+    const nextConfig = currentConfig();
+    if (!nextConfig.docker.enabled) {
+      reply.status(503).send({ error: "Docker management is disabled" });
+      return;
+    }
+    try {
+      reply.send({ volume: await dockerEngine(nextConfig.docker, docker).getVolumeDetails(request.params.name) });
+    } catch (error) {
+      sendDockerInspectError(reply, error, "Docker volume not found");
+    }
+  });
+
   server.post<{
     Params: { id: string };
     Body: { action?: DockerOperationAction };
@@ -755,6 +785,14 @@ function sendDockerComposeAppError(reply: FastifyReply, error: unknown): void {
     return;
   }
   reply.status(500).send({ error: "Unable to update Docker Compose App" });
+}
+
+function sendDockerInspectError(reply: FastifyReply, error: unknown, notFoundMessage: string): void {
+  if (error instanceof DockerRequestError && error.statusCode === 404) {
+    reply.status(404).send({ error: notFoundMessage });
+    return;
+  }
+  reply.status(502).send({ error: safeDockerMessage(error) });
 }
 
 async function composeAppContainers(

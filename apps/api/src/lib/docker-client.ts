@@ -8,8 +8,10 @@ import type {
   DockerContainerSummary,
   DockerImageRemoveResult,
   DockerImageSummary,
+  DockerNetworkDetails,
   DockerNetworkSummary,
   DockerResourceCapabilities,
+  DockerVolumeDetails,
   DockerVolumeSummary
 } from "@sigmaos/shared";
 
@@ -174,7 +176,10 @@ export interface DockerEngineRuntime {
   createContainer(input: DockerCreateContainerInput): Promise<DockerCreateContainerResult>;
   createVolume(input: DockerCreateVolumeInput): Promise<DockerCreateVolumeResult>;
   createNetwork(input: DockerCreateNetworkInput): Promise<DockerCreateNetworkResult>;
+  getImageArchitecture(imageId: string): Promise<string | null>;
   getContainerDetails?(containerId: string, baseSummary?: DockerContainerSummary): Promise<DockerContainerDetails>;
+  getNetworkDetails(networkId: string): Promise<DockerNetworkDetails>;
+  getVolumeDetails(volumeName: string): Promise<DockerVolumeDetails>;
   getContainerLogs(containerId: string, tail: number): Promise<string>;
   startContainer(containerId: string): Promise<void>;
   stopContainer(containerId: string): Promise<void>;
@@ -225,6 +230,53 @@ type DockerVolumeRow = {
   Driver?: string;
   Scope?: string;
   Mountpoint?: string;
+};
+
+type DockerNetworkInspect = {
+  Id?: string;
+  Name?: string;
+  Created?: string;
+  Driver?: string;
+  Scope?: string;
+  EnableIPv4?: boolean;
+  EnableIPv6?: boolean;
+  Internal?: boolean;
+  Attachable?: boolean;
+  Ingress?: boolean;
+  IPAM?: {
+    Driver?: string;
+    Config?: Array<{
+      Subnet?: string;
+      IPRange?: string;
+      Gateway?: string;
+      AuxAddress?: Record<string, string> | null;
+      AuxiliaryAddresses?: Record<string, string> | null;
+    }> | null;
+  };
+  Options?: Record<string, string> | null;
+  Labels?: Record<string, string> | null;
+  Containers?: Record<string, {
+    Name?: string;
+    EndpointID?: string;
+    MacAddress?: string;
+    IPv4Address?: string;
+    IPv6Address?: string;
+  }> | null;
+};
+
+type DockerVolumeInspect = DockerVolumeRow & {
+  CreatedAt?: string;
+  Labels?: Record<string, string> | null;
+  Options?: Record<string, string> | null;
+  Status?: Record<string, string> | null;
+  UsageData?: {
+    Size?: number;
+    RefCount?: number;
+  } | null;
+};
+
+type DockerImageInspect = {
+  Architecture?: string;
 };
 
 type DockerImageRow = {
@@ -343,6 +395,7 @@ export class DockerRequestError extends Error {
 export class DockerSocketClient implements DockerEngineRuntime {
   private versionResponse: Promise<DockerVersionResponse> | null = null;
   private negotiatedApiVersion: string | null | undefined;
+  private readonly imageArchitectureCache = new Map<string, string | null>();
 
   constructor(private readonly options: DockerSocketClientOptions) {}
 
@@ -408,7 +461,28 @@ export class DockerSocketClient implements DockerEngineRuntime {
 
   async listImages(): Promise<DockerImageSummary[]> {
     const images = await this.requestJson<DockerImageRow[]>("GET", "/images/json", { "shared-size": "true", containers: "true" });
-    return images.map(mapImage).filter((image): image is DockerImageSummary => image !== null);
+    const summaries = images.map(mapImage).filter((image): image is DockerImageSummary => image !== null);
+    return mapWithConcurrency(summaries, 4, async (image) => ({
+      ...image,
+      architecture: await this.getImageArchitecture(image.id)
+    }));
+  }
+
+  async getImageArchitecture(imageId: string): Promise<string | null> {
+    if (this.imageArchitectureCache.has(imageId)) {
+      return this.imageArchitectureCache.get(imageId) ?? null;
+    }
+    try {
+      const inspected = await this.requestJson<DockerImageInspect>(
+        "GET",
+        `/images/${encodeURIComponent(imageId)}/json`
+      );
+      const architecture = inspected.Architecture?.trim() || null;
+      this.imageArchitectureCache.set(imageId, architecture);
+      return architecture;
+    } catch {
+      return null;
+    }
   }
 
   async imageExists(image: string): Promise<boolean> {
@@ -547,6 +621,22 @@ export class DockerSocketClient implements DockerEngineRuntime {
       workingDir: inspected.Config?.WorkingDir || null,
       labels: inspected.Config?.Labels ?? inspected.Labels ?? {}
     };
+  }
+
+  async getNetworkDetails(networkId: string): Promise<DockerNetworkDetails> {
+    const inspected = await this.requestJson<DockerNetworkInspect>(
+      "GET",
+      `/networks/${encodeURIComponent(networkId)}`
+    );
+    return mapNetworkDetails(inspected, networkId);
+  }
+
+  async getVolumeDetails(volumeName: string): Promise<DockerVolumeDetails> {
+    const inspected = await this.requestJson<DockerVolumeInspect>(
+      "GET",
+      `/volumes/${encodeURIComponent(volumeName)}`
+    );
+    return mapVolumeDetails(inspected, volumeName);
   }
 
   async startContainer(containerId: string): Promise<void> {
@@ -993,6 +1083,7 @@ function mapImage(row: DockerImageRow): DockerImageSummary | null {
     sharedSizeBytes: typeof row.SharedSize === "number" && Number.isFinite(row.SharedSize) && row.SharedSize >= 0
       ? row.SharedSize
       : null,
+    architecture: null,
     containerCount: typeof row.Containers === "number" && row.Containers >= 0 ? row.Containers : null
   };
 }
@@ -1127,6 +1218,88 @@ function mapVolume(row: DockerVolumeRow): DockerVolumeSummary | null {
     scope: row.Scope?.trim() || "local",
     mountpoint: row.Mountpoint?.trim() || ""
   };
+}
+
+function mapNetworkDetails(inspected: DockerNetworkInspect, fallbackId: string): DockerNetworkDetails {
+  const containers = Object.entries(inspected.Containers ?? {}).map(([id, container]) => ({
+    id,
+    name: container.Name?.trim() || id.slice(0, 12),
+    endpointId: container.EndpointID?.trim() || null,
+    macAddress: container.MacAddress?.trim() || null,
+    ipv4Address: container.IPv4Address?.trim() || null,
+    ipv6Address: container.IPv6Address?.trim() || null
+  }));
+  return {
+    id: inspected.Id?.trim() || fallbackId,
+    name: inspected.Name?.trim() || fallbackId,
+    createdAt: dockerCreatedAt(inspected.Created),
+    driver: inspected.Driver?.trim() || "unknown",
+    scope: inspected.Scope?.trim() || "local",
+    containerCount: containers.length,
+    enableIPv4: nullableBoolean(inspected.EnableIPv4),
+    enableIPv6: nullableBoolean(inspected.EnableIPv6),
+    internal: nullableBoolean(inspected.Internal),
+    attachable: nullableBoolean(inspected.Attachable),
+    ingress: nullableBoolean(inspected.Ingress),
+    ipam: {
+      driver: inspected.IPAM?.Driver?.trim() || null,
+      configs: (inspected.IPAM?.Config ?? []).map((config) => ({
+        subnet: config.Subnet?.trim() || null,
+        ipRange: config.IPRange?.trim() || null,
+        gateway: config.Gateway?.trim() || null,
+        auxiliaryAddresses: stringRecord(config.AuxAddress ?? config.AuxiliaryAddresses)
+      }))
+    },
+    options: stringRecord(inspected.Options),
+    labels: stringRecord(inspected.Labels),
+    containers
+  };
+}
+
+function mapVolumeDetails(inspected: DockerVolumeInspect, fallbackName: string): DockerVolumeDetails {
+  return {
+    name: inspected.Name?.trim() || fallbackName,
+    createdAt: dockerCreatedAt(inspected.CreatedAt),
+    driver: inspected.Driver?.trim() || "unknown",
+    scope: inspected.Scope?.trim() || "local",
+    mountpoint: inspected.Mountpoint?.trim() || "",
+    labels: stringRecord(inspected.Labels),
+    options: stringRecord(inspected.Options),
+    status: stringRecord(inspected.Status),
+    sizeBytes: nullableNonNegativeNumber(inspected.UsageData?.Size),
+    referenceCount: nullableNonNegativeNumber(inspected.UsageData?.RefCount)
+  };
+}
+
+function nullableBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function nullableNonNegativeNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function stringRecord(value: Record<string, string> | null | undefined): Record<string, string> {
+  if (!value) return {};
+  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+}
+
+async function mapWithConcurrency<T, Result>(
+  values: T[],
+  concurrency: number,
+  mapper: (value: T, index: number) => Promise<Result>
+): Promise<Result[]> {
+  const results = new Array<Result>(values.length);
+  let nextIndex = 0;
+  async function runWorker(): Promise<void> {
+    while (nextIndex < values.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(values[index]!, index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, () => runWorker()));
+  return results;
 }
 
 function dockerCreatedAt(value: number | string | undefined): string | null {
