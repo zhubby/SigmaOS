@@ -12,6 +12,11 @@ name: Deploy CM5
         description: Release tag to deploy, for example v0.5.0
         required: true
         type: string
+      verify_only:
+        description: Verify the currently installed release without reinstalling it
+        required: false
+        default: false
+        type: boolean
 
 permissions: {}
 
@@ -322,6 +327,7 @@ jobs:
             "${baseline[1]:-unknown}" "${baseline[2]:-unknown}"
 
       - name: Stage and deploy release on CM5
+        if: inputs.verify_only != true
         timeout-minutes: 75
         run: |
           set -euo pipefail
