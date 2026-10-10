@@ -1,3 +1,9 @@
+sigmaos (0.9.13) unstable; urgency=medium
+
+  * Fix photo metadata extraction and refresh existing records
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Sat, 10 Oct 2026 22:54:45 +0000
+
 sigmaos (0.9.12) unstable; urgency=medium
 
   * Serialize concurrent SQLite schema migrations.
