@@ -537,10 +537,14 @@ fn set_close_on_exec<F: AsFd>(fd: &F) -> Result<(), VodError> {
 
 fn dup2_for_exec(source: RawFd, target: RawFd) -> std::io::Result<()> {
     if unsafe { nix::libc::dup2(source, target) } == -1 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(())
+        return Err(std::io::Error::last_os_error());
     }
+    // Be explicit because the child must keep these descriptors across the
+    // shell/mpv exec boundary on every supported Unix implementation.
+    if unsafe { nix::libc::fcntl(target, nix::libc::F_SETFD, 0) } == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 async fn read_ipc(reader: ReadHalf<UnixStream>, sender: mpsc::Sender<Incoming>) {
