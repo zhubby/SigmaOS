@@ -23,8 +23,8 @@ use crate::error::{ErrorCode, VodError};
 use crate::protocol::{Capabilities, HardwareDecode, MAX_FRAME_BYTES};
 use crate::storage::OpenedMedia;
 
-const MPV_IPC_FD: RawFd = 198;
-const MPV_MEDIA_FD: RawFd = 199;
+const MPV_IPC_FD: RawFd = 3;
+const MPV_MEDIA_FD: RawFd = 4;
 const CHILD_FD_DUPLICATE_MINIMUM: RawFd = 200;
 
 pub struct CapabilityProbe {
@@ -757,22 +757,22 @@ for argument do
     fdclose://*) media_fd=${argument#fdclose://} ;;
   esac
 done
-eval "exec 3<&$ipc_fd"
-eval "exec 4>&$ipc_fd"
+eval "exec 5<&$ipc_fd"
+eval "exec 6>&$ipc_fd"
 eval "content=\$(dd bs=5 count=1 <&$media_fd 2>/dev/null)"
 [ "$content" = video ] || exit 9
-printf '%s\n' '{"event":"file-loaded"}' >&4
-while IFS= read -r line <&3; do
+printf '%s\n' '{"event":"file-loaded"}' >&6
+while IFS= read -r line <&5; do
 	case "$line" in
 	  *'"quit"'*) exit 0 ;;
 	  *'"no-response"'*) continue ;;
 	esac
   request_id=$(printf '%s' "$line" | sed -n 's/.*"request_id":\([0-9][0-9]*\).*/\1/p')
   [ -n "$request_id" ] || continue
-  printf '%s\n' '{"event":"property-change","name":"time-pos","data":12}' >&4
+  printf '%s\n' '{"event":"property-change","name":"time-pos","data":12}' >&6
   case "$line" in
-    *'"pause",true'*) printf '{"request_id":%s,"error":"failure","data":null}\n' "$request_id" >&4 ;;
-    *) printf '{"request_id":%s,"error":"success","data":null}\n' "$request_id" >&4 ;;
+    *'"pause",true'*) printf '{"request_id":%s,"error":"failure","data":null}\n' "$request_id" >&6 ;;
+    *) printf '{"request_id":%s,"error":"success","data":null}\n' "$request_id" >&6 ;;
   esac
 done
 "#).unwrap();
@@ -793,8 +793,8 @@ for argument do
     --input-ipc-client=fd://*) ipc_fd=${argument#--input-ipc-client=fd://} ;;
   esac
 done
-eval "exec 3<&$ipc_fd"
-while IFS= read -r line <&3; do
+eval "exec 5<&$ipc_fd"
+while IFS= read -r line <&5; do
   case "$line" in
     *'"quit"'*) exit 0 ;;
   esac

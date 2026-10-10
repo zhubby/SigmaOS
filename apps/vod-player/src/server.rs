@@ -389,8 +389,6 @@ mod tests {
             current_uid + 1
         };
         let connection = tokio::spawn(handle_connection(server, wrong_uid, controller.clone()));
-        client.write_all(b"not json\n").await.unwrap();
-        client.shutdown().await.unwrap();
         let mut response = String::new();
         client.read_to_string(&mut response).await.unwrap();
         connection.await.unwrap().unwrap();
