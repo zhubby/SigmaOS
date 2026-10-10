@@ -13,18 +13,20 @@
   },
   "devDependencies": {
     "@astrojs/check": "0.9.10",
-    "@astrojs/starlight": "0.42.0",
-    "astro": "7.3.2",
+    "@astrojs/starlight": "0.42.6",
+    "astro": "7.3.8",
     "astro-mermaid": "2.1.0",
-    "@playwright/test": "1.55.0",
+    "@playwright/test": "1.55.1",
     "mermaid": "11.17.2",
     "pagefind": "1.5.0",
-    "playwright": "1.55.0",
+    "playwright": "1.55.1",
     "starlight-links-validator": "0.26.0",
     "yaml": "2.8.3"
   },
   "overrides": {
     "@pagefind/default-ui": "1.5.0",
-    "pagefind": "1.5.0"
+    "katex": "0.18.2",
+    "pagefind": "1.5.0",
+    "postcss-selector-parser": "7.1.6"
   }
 }

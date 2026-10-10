@@ -11,6 +11,6 @@
   },
   "types": "./src/index.ts",
   "dependencies": {
-    "smol-toml": "^1.4.2"
+    "smol-toml": "^1.9.0"
   }
 }
