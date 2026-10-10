@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type {
+  SystemPowerAction,
   SystemWifiConnectInput,
   SystemWifiHotspotActionInput,
   SystemWifiHotspotUpdateInput,
@@ -15,9 +16,16 @@ import {
   SystemNetworkManagerRuntime,
   type NetworkManagerRuntime
 } from "../lib/network-manager.js";
+import {
+  HostdSystemPowerRuntime,
+  SystemPowerRequestError,
+  isSystemPowerAction,
+  safeSystemPowerMessage
+} from "../lib/power-management.js";
 import { collectSystemNetwork, collectSystemNetworkTraffic, collectSystemStorage } from "../lib/system-management.js";
 
 const MAX_WIFI_BODY_BYTES = 64 * 1024;
+const MAX_POWER_BODY_BYTES = 1024;
 const WIFI_SAMPLE_MS = 1000;
 const WIFI_HEARTBEAT_MS = 15_000;
 
@@ -27,6 +35,7 @@ export function registerSystemRoutes(server: FastifyInstance, { buildInfo, confi
     hostdSocketPath: config.hostd.socketPath
   });
   const systemDependencies = { ...system, networkManager };
+  const power = system?.power ?? new HostdSystemPowerRuntime(config.hostd.socketPath);
 
   server.get("/api/system/build-info", async () => ({
     build: buildInfo ?? unknownBuildInfo()
@@ -43,6 +52,24 @@ export function registerSystemRoutes(server: FastifyInstance, { buildInfo, confi
   server.get("/api/system/storage", async () => ({
     storage: await collectSystemStorage(system)
   }));
+
+  server.post<{ Body: { action?: SystemPowerAction; confirmed?: boolean } }>(
+    "/api/system/power",
+    { bodyLimit: MAX_POWER_BODY_BYTES },
+    async (request, reply) => {
+      try {
+        if (!isSystemPowerAction(request.body?.action)) {
+          throw new SystemPowerRequestError("Power action must be reboot or shutdown", 400);
+        }
+        if (request.body.confirmed !== true) {
+          throw new SystemPowerRequestError("Power action confirmation is required", 400);
+        }
+        reply.status(202).send({ result: await power.request(request.body.action) });
+      } catch (error) {
+        sendSystemPowerError(reply, error);
+      }
+    }
+  );
 
   server.post<{ Body: { device?: string } }>(
     "/api/system/network/wifi/scan",
@@ -271,5 +298,11 @@ function sendNetworkManagerError(reply: FastifyReply, error: unknown): void {
   reply.status(error instanceof NetworkManagerRequestError ? error.statusCode : 503).send({
     error: safeNetworkManagerMessage(error),
     ...(error instanceof NetworkManagerRequestError ? { rollback: error.rollback } : {})
+  });
+}
+
+function sendSystemPowerError(reply: FastifyReply, error: unknown): void {
+  reply.status(error instanceof SystemPowerRequestError ? error.statusCode : 503).send({
+    error: safeSystemPowerMessage(error)
   });
 }

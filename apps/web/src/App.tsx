@@ -33,6 +33,7 @@ import {
   getPhotoLibraryStatus,
   proposeFileOperation,
   rejectRequest,
+  requestSystemPower,
   markAllNotificationsRead,
   markNotificationRead,
   rollbackOperation,
@@ -66,6 +67,7 @@ import {
   type Session,
   type SessionSummary,
   type SystemInfo,
+  type SystemPowerAction,
   type StorageSummary,
   type TextPreview,
   type TranscriptMessage,
@@ -914,6 +916,19 @@ export function App() {
       }
     } finally {
       setSettingsLoading(false);
+    }
+  }
+
+  async function handleSystemPower(action: SystemPowerAction): Promise<boolean> {
+    setError(null);
+    setSuccessNotice(null);
+    try {
+      await requestSystemPower(action);
+      setSuccessNotice(t(`power.accepted.${action}`));
+      return true;
+    } catch (nextError) {
+      setError(toErrorMessage(nextError));
+      return false;
     }
   }
 
@@ -2064,6 +2079,7 @@ export function App() {
         onDeleteSession={() => void deleteActiveSession()}
         onOpenSettings={() => void openSettings()}
         onOpenNotifications={openNotificationCenter}
+        onRequestSystemPower={handleSystemPower}
         notificationUnreadCount={notificationUnreadCount}
         onSelectSession={(nextSession) => void selectSession(nextSession)}
         onApprove={(approvalId) => void handleApprove(approvalId)}

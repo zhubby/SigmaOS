@@ -79,6 +79,39 @@ export const en = {
       }
     }
   },
+  power: {
+    open: "Power controls",
+    menuEyebrow: "System",
+    menuTitle: "Power",
+    menuBody: "Choose how this device should stop.",
+    reboot: "Restart",
+    rebootDescription: "Stop services cleanly, then start the device again.",
+    shutdown: "Shut down",
+    shutdownDescription: "Stop services cleanly, then power off the device.",
+    confirmEyebrow: "Confirm power action",
+    back: "Back",
+    confirm: {
+      reboot: {
+        title: "Restart this device?",
+        body: "SigmaOS will ask systemd to stop services and unmount filesystems before restarting.",
+        action: "Restart now"
+      },
+      shutdown: {
+        title: "Shut down this device?",
+        body: "SigmaOS will ask systemd to stop services and unmount filesystems before powering off.",
+        action: "Shut down now"
+      },
+      safetyNote: "Active work will be interrupted. Wait for important transfers and writes to finish."
+    },
+    requesting: {
+      reboot: "Requesting restart",
+      shutdown: "Requesting shutdown"
+    },
+    accepted: {
+      reboot: "Restart requested. This page will disconnect shortly.",
+      shutdown: "Shutdown requested. This page will disconnect shortly."
+    }
+  },
   status: {
     starting: "Starting",
     offline: "Offline",
@@ -2345,6 +2378,39 @@ export const zhCN = {
         rejected: "已拒绝",
         cancelled: "已取消"
       }
+    }
+  },
+  power: {
+    open: "电源控制",
+    menuEyebrow: "系统",
+    menuTitle: "电源",
+    menuBody: "选择设备的停止方式。",
+    reboot: "重启",
+    rebootDescription: "正常停止服务后重新启动设备。",
+    shutdown: "关机",
+    shutdownDescription: "正常停止服务后关闭设备电源。",
+    confirmEyebrow: "确认电源操作",
+    back: "返回",
+    confirm: {
+      reboot: {
+        title: "重启此设备？",
+        body: "SigmaOS 将请求 systemd 正常停止服务并卸载文件系统，然后重启。",
+        action: "立即重启"
+      },
+      shutdown: {
+        title: "关闭此设备？",
+        body: "SigmaOS 将请求 systemd 正常停止服务并卸载文件系统，然后关闭电源。",
+        action: "立即关机"
+      },
+      safetyNote: "正在进行的任务会被中断，请先等待重要传输和写入完成。"
+    },
+    requesting: {
+      reboot: "正在请求重启",
+      shutdown: "正在请求关机"
+    },
+    accepted: {
+      reboot: "已请求重启，页面即将断开连接。",
+      shutdown: "已请求关机，页面即将断开连接。"
     }
   },
   status: {

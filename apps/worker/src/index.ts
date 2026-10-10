@@ -7,16 +7,22 @@ const db = openSigmaDb(config.databasePath);
 ensureNasRoots(db, config.nasRoots);
 
 let shuttingDown = false;
+let activeTicks = 0;
+let databaseClosed = false;
 
 async function tick(): Promise<void> {
   if (shuttingDown) {
     return;
   }
 
+  activeTicks += 1;
   try {
     await processNextJob({ db, config });
   } catch (error) {
     console.error(error);
+  } finally {
+    activeTicks -= 1;
+    closeDatabaseWhenIdle();
   }
 }
 
@@ -32,5 +38,12 @@ void tick();
 function shutdown(): void {
   shuttingDown = true;
   clearInterval(timer);
-  db.close();
+  closeDatabaseWhenIdle();
+}
+
+function closeDatabaseWhenIdle(): void {
+  if (shuttingDown && activeTicks === 0 && !databaseClosed) {
+    databaseClosed = true;
+    db.close();
+  }
 }

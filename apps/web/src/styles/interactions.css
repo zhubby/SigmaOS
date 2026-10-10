@@ -181,6 +181,7 @@ button.vm-create-submit[aria-busy="true"] {
   :where(
     .icon-button,
     .settings-button,
+    .agent-power-button,
     .agent-notification-button,
     .management-icon-action,
     .download-task-action,

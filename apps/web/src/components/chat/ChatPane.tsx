@@ -30,6 +30,7 @@ import type {
   SessionSummary,
   ShareOperationProposal,
   StorageOperationProposal,
+  SystemPowerAction,
   VmOperationProposal,
   TranscriptMessage
 } from "../../api.js";
@@ -45,6 +46,7 @@ import {
   splitWorkspaceMessagePaths
 } from "../../lib/chat-paths.js";
 import { sessionTitle } from "../../lib/session.js";
+import { PowerControl } from "../power/PowerControl.js";
 
 type ApprovalRisk = PendingApproval["proposal"][number]["risk"];
 type ApprovalCardKind = "file" | "tool" | "docker" | "vm" | "share" | "storage";
@@ -191,6 +193,7 @@ export function ChatPane({
   onDeleteSession,
   onOpenSettings,
   onOpenNotifications,
+  onRequestSystemPower,
   notificationUnreadCount,
   onSelectSession,
   onApprove,
@@ -221,6 +224,7 @@ export function ChatPane({
   onDeleteSession: () => void;
   onOpenSettings: () => void;
   onOpenNotifications: () => void;
+  onRequestSystemPower: (action: SystemPowerAction) => Promise<boolean>;
   notificationUnreadCount: number;
   onSelectSession: (session: SessionSummary) => void;
   onApprove: (approvalId: string) => void;
@@ -400,6 +404,7 @@ export function ChatPane({
           >
             <Settings aria-hidden="true" size={18} />
           </button>
+          <PowerControl onRequest={onRequestSystemPower} />
         </div>
       </aside>
 

@@ -35,6 +35,26 @@ if (existsSync(webDist)) {
 
 await server.listen({ host: config.api.host, port: config.api.port });
 
+let shutdownPromise: Promise<void> | null = null;
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.once(signal, () => {
+    shutdownPromise ??= shutdown(signal);
+    void shutdownPromise.catch((error) => {
+      server.log.error({ err: error, signal }, "Failed to shut down SigmaOS API cleanly");
+      process.exitCode = 1;
+    });
+  });
+}
+
+async function shutdown(signal: NodeJS.Signals): Promise<void> {
+  server.log.info({ signal }, "Stopping SigmaOS API");
+  try {
+    await server.close();
+  } finally {
+    db.close();
+  }
+}
+
 function resolveWebDist(): string {
   if (process.env.SIGMAOS_WEB_DIST) {
     return process.env.SIGMAOS_WEB_DIST;

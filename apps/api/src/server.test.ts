@@ -62,6 +62,8 @@ import type {
   ShareApplyRequest,
   ShareApplyResult,
   SigmaConfig,
+  SystemPowerAction,
+  SystemPowerResult,
   SystemWifiConnectInput,
   SystemWifiHotspotActionInput,
   SystemWifiHotspotUpdateInput,
@@ -76,6 +78,7 @@ import { DockerComposeService, type DockerComposeRuntime } from "./lib/docker-co
 import { DockerRequestError, type DockerEngineRuntime, type DockerExecStream } from "./lib/docker-client.js";
 import { DockerDaemonRequestError, type DockerDaemonRuntime } from "./lib/docker-daemon.js";
 import type { NetworkManagerRuntime } from "./lib/network-manager.js";
+import { SystemPowerRequestError, type SystemPowerRuntime } from "./lib/power-management.js";
 import { streamDockerDaemonEvents } from "./routes/docker.js";
 import { streamWifiEvents } from "./routes/system.js";
 import type { SystemCommandRunner } from "./lib/system-management.js";
@@ -943,6 +946,59 @@ describe("API server", () => {
       delete process.env.SIGMAOS_TEST_SECRET;
       await server.close();
     }
+  });
+
+  it("requires confirmation and a supported action before requesting a system power transition", async () => {
+    const power = new FakeSystemPowerRuntime();
+    const server = await buildServer({
+      config: testConfig(tempDir),
+      db,
+      system: { commandRunner: testStorageCommandRunner(), power }
+    });
+
+    const unconfirmed = await server.inject({
+      method: "POST",
+      url: "/api/system/power",
+      payload: { action: "reboot", confirmed: false }
+    });
+    const unsupported = await server.inject({
+      method: "POST",
+      url: "/api/system/power",
+      payload: { action: "hibernate", confirmed: true }
+    });
+    const reboot = await server.inject({
+      method: "POST",
+      url: "/api/system/power",
+      payload: { action: "reboot", confirmed: true }
+    });
+
+    expect(unconfirmed.statusCode).toBe(400);
+    expect(unsupported.statusCode).toBe(400);
+    expect(reboot.statusCode).toBe(202);
+    expect(reboot.json()).toEqual({ result: { action: "reboot", accepted: true } });
+    expect(power.actions).toEqual(["reboot"]);
+    await server.close();
+  });
+
+  it("preserves safe power service failures", async () => {
+    const power = new FakeSystemPowerRuntime();
+    power.error = new SystemPowerRequestError("hostd is unavailable", 503);
+    const server = await buildServer({
+      config: testConfig(tempDir),
+      db,
+      system: { commandRunner: testStorageCommandRunner(), power }
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/system/power",
+      payload: { action: "shutdown", confirmed: true }
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: "hostd is unavailable" });
+    expect(power.actions).toEqual(["shutdown"]);
+    await server.close();
   });
 
   it("returns read-only network management summary from host commands", async () => {
@@ -4725,6 +4781,17 @@ class FakeSystemCommandRunner implements SystemCommandRunner {
       throw new Error(`${key} unavailable`);
     }
     return output;
+  }
+}
+
+class FakeSystemPowerRuntime implements SystemPowerRuntime {
+  actions: SystemPowerAction[] = [];
+  error: Error | null = null;
+
+  async request(action: SystemPowerAction): Promise<SystemPowerResult> {
+    this.actions.push(action);
+    if (this.error) throw this.error;
+    return { action, accepted: true };
   }
 }
 

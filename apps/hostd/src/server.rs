@@ -34,6 +34,7 @@ struct HostdState {
     storage_lock: Mutex<()>,
     docker_lock: Mutex<()>,
     network_lock: Mutex<()>,
+    power_lock: Mutex<()>,
 }
 
 impl HostdServer {
@@ -52,6 +53,7 @@ impl HostdServer {
                 storage_lock: Mutex::new(()),
                 docker_lock: Mutex::new(()),
                 network_lock: Mutex::new(()),
+                power_lock: Mutex::new(()),
             }),
         }
     }
@@ -286,6 +288,10 @@ async fn dispatch(request: RequestEnvelope, state: &HostdState) -> Result<Value,
                 crate::network_manager::handle(request.payload, state.runner.as_ref()).await
             }
         }
+        "system.power" => {
+            let _guard = state.power_lock.lock().await;
+            crate::power::command(request.payload, state.runner.as_ref()).await
+        }
         _ => Err(HostdError::new(
             404,
             ErrorCode::NotFound,
@@ -368,6 +374,7 @@ mod tests {
             storage_lock: Mutex::new(()),
             docker_lock: Mutex::new(()),
             network_lock: Mutex::new(()),
+            power_lock: Mutex::new(()),
         })
     }
 

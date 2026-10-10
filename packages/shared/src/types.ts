@@ -949,6 +949,13 @@ export interface PublicSystemInfoNetworkAddress {
   scopeId: number | null;
 }
 
+export type SystemPowerAction = "reboot" | "shutdown";
+
+export interface SystemPowerResult {
+  action: SystemPowerAction;
+  accepted: true;
+}
+
 export type SystemCollectionStatus = "ready" | "partial" | "unavailable";
 
 export interface SystemCollectionIssue {

@@ -30,6 +30,11 @@ Agent 事件通过 session SSE stream 传递；terminal、Docker console 和 VM 
 
 JPEG、PNG、WebP、GIF、HEIC、HEIF、常见视频和 RAW 由照片 worker 处理。`exifr` 提取 EXIF/IPTC/XMP/ICC/JFIF/RAW 标量，视频复用一次完整 `ffprobe`；同目录精确媒体名和同 stem XMP 按确定性规则关联。视频缩略图由 FFmpeg 提取首帧，RAW 缩略图由 `dcraw_emu` 渲染。原图、视频流和文件变更每次访问都重新经过 root、storage pool、挂载、遍历和 symlink 校验；当前配置版本的缓存 WebP 缩略图与预览可以在存储池离线时继续读取。不要把索引记录当成原文件存在性的授权依据。
 
+## 系统电源
+
+- `POST /api/system/power` 接收 `{ action: "reboot" | "shutdown", confirmed: true }`。请求通过 hostd 转交 systemd 正常停止服务、同步并卸载文件系统，成功排队返回 `202` 与 `{ result: { action, accepted: true } }`。
+- API 不直接运行电源命令，也不在 hostd 不可用时降级执行。缺少确认或动作不受支持返回 `400`，hostd/系统服务不可用返回对应安全错误，且不接受任意命令、参数或 unit 名称。
+
 ## Wi-Fi 与热点
 
 - `GET /api/system/network` 同时返回内核接口/路由和 NetworkManager 无线摘要。`capabilities.backend` 为 `NetworkManager`、`systemd-networkd` 或 `unknown`；只有 NetworkManager 与 hostd 同时可用时才开放写操作。

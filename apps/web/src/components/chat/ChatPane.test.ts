@@ -247,6 +247,7 @@ describe("ChatPane agent rail", () => {
         onDeleteSession: noop,
         onOpenSettings: noop,
         onOpenNotifications: noop,
+        onRequestSystemPower: async () => true,
         notificationUnreadCount: 3,
         onSelectSession: noop,
         onApprove: noop,
@@ -270,7 +271,9 @@ describe("ChatPane agent rail", () => {
     expect(html).toContain('class="agent-notification-button"');
     expect(html).toContain('class="notification-badge"');
     expect(html).toContain('class="settings-button agent-settings-button"');
+    expect(html).toContain('class="agent-power-button"');
     expect(html.indexOf('class="session-list"')).toBeLessThan(html.indexOf('class="agent-footer"'));
     expect(html.indexOf('class="agent-notification-button"')).toBeLessThan(html.indexOf('class="settings-button agent-settings-button"'));
+    expect(html.indexOf('class="settings-button agent-settings-button"')).toBeLessThan(html.indexOf('class="agent-power-button"'));
   });
 });

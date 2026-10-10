@@ -46,6 +46,8 @@ import type {
   ShareSummary as PublicShareSummary,
   SystemNetworkSummary,
   SystemNetworkTrafficSummary,
+  SystemPowerAction as SharedSystemPowerAction,
+  SystemPowerResult as SharedSystemPowerResult,
   SystemWifiConnectInput,
   SystemWifiHotspotActionInput,
   SystemWifiHotspotUpdateInput,
@@ -317,6 +319,8 @@ export interface PiToolPolicySettings {
 
 export type SystemInfo = PublicSystemInfo;
 export type BuildInfo = PublicBuildInfo;
+export type SystemPowerAction = SharedSystemPowerAction;
+export type SystemPowerResult = SharedSystemPowerResult;
 export type SystemInfoStorageVolume = PublicSystemInfo["storage"]["volumes"][number];
 export type NetworkSummary = SystemNetworkSummary;
 export type NetworkTrafficSummary = SystemNetworkTrafficSummary;
@@ -481,6 +485,12 @@ export async function getBuildInfo(): Promise<BuildInfo> {
   await ensureOk(response);
   const body = (await response.json()) as { build: BuildInfo };
   return body.build;
+}
+
+export async function requestSystemPower(action: SystemPowerAction): Promise<SystemPowerResult> {
+  const response = await fetch("/api/system/power", jsonRequest("POST", { action, confirmed: true }));
+  await ensureOk(response);
+  return ((await response.json()) as { result: SystemPowerResult }).result;
 }
 
 export async function getSystemNetwork(): Promise<NetworkSummary> {
