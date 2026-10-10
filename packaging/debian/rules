@@ -16,16 +16,16 @@ override_dh_auto_test:
 override_dh_auto_install:
 	:
 
-# Archiver's Bare runtime dependencies bundle prebuilt .bare files for several
-# foreign platforms. They are already stripped and cannot be processed by the
-# target architecture's objcopy.
+# npm dependencies bundle prebuilt native artifacts for several platforms. The
+# foreign .bare and .node files are already stripped and cannot be processed by
+# the target architecture's objcopy.
 override_dh_strip:
-	dh_strip --exclude=.bare
+	dh_strip --exclude=.bare --exclude=.node
 
-# Dependency analysis must likewise ignore foreign Bare prebuilds and musl
-# fallbacks that npm installs alongside the host glibc binaries.
+# Dependency analysis must likewise ignore foreign Bare/native prebuilds and
+# musl fallbacks that npm installs alongside the host glibc binaries.
 override_dh_shlibdeps:
-	dh_shlibdeps --exclude=.bare --exclude=linuxmusl
+	dh_shlibdeps --exclude=.bare --exclude=linuxmusl --exclude=.node
 
 # Services are started by the installer after first-boot configuration. Timers
 # and units must not be enabled implicitly by debhelper during package install.
