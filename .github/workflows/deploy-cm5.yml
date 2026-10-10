@@ -541,12 +541,32 @@ jobs:
             END { exit (legacy || !socket || !user) ? 1 : 0 }
           ' /etc/sigmaos/config.toml
 
-          systemctl is-active --quiet sigmaos-api.service
-          systemctl is-active --quiet sigmaos-worker@1.service
-          systemctl is-active --quiet sigmaos-photo-worker.service
-          systemctl is-active --quiet sigmaos-downloader.service
-          systemctl is-active --quiet sigmaos-hostd.service
-          systemctl is-active --quiet sigmaos-termux.service
+          check_active_unit() {
+            unit=$1
+            attempt=1
+            while [ "$attempt" -le 12 ]; do
+              if systemctl is-active --quiet "$unit"; then
+                return 0
+              fi
+              printf 'waiting for %s (attempt %s/12)\n' "$unit" "$attempt" >&2
+              systemctl show --property=ActiveState,SubState,ExecMainStatus --value "$unit" >&2 || true
+              attempt=$((attempt + 1))
+              sleep 5
+            done
+            printf 'required service is not active: %s\n' "$unit" >&2
+            systemctl status --no-pager --full "$unit" >&2 || true
+            return 3
+          }
+
+          for unit in \
+            sigmaos-api.service \
+            sigmaos-worker@1.service \
+            sigmaos-photo-worker.service \
+            sigmaos-downloader.service \
+            sigmaos-hostd.service \
+            sigmaos-termux.service; do
+            check_active_unit "$unit"
+          done
           systemctl show --property ExecStart --value sigmaos-termux.service | \
             grep -Fq /usr/lib/sigmaos/bin/sigmaos-termux
           ! systemctl is-active --quiet sigmaos-terminal-helper.service
