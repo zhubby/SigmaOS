@@ -1,3 +1,9 @@
+sigmaos (0.9.4) unstable; urgency=medium
+
+  * Harden Linux helper-process descriptor inheritance and VOD socket shutdown handling.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Sat, 10 Oct 2026 10:46:15 +0000
+
 sigmaos (0.9.3) unstable; urgency=medium
 
   * Add the Rust VOD service, safe power controls, unified helper protocols, and dependency security updates.
