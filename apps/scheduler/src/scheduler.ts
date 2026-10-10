@@ -2,7 +2,7 @@ import { lstat, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { acquireExecutionLock, detectDuplicateIndexedFiles, getDownloadWorkerHealth, getIndexRootStatus, heartbeatExecutionLock, listBackupRuns, listIndexRunHistory, listNasRoots, listRootReadiness, pruneOperationNotifications, releaseExecutionLock, resolveHealthAlert, upsertHealthAlert, type SigmaDatabase } from "@sigmaos/db";
 import { randomUUID } from "node:crypto";
-import type { SigmaConfig, SystemHealthSummary } from "@sigmaos/shared";
+import { createVodPlayerRuntime, type SigmaConfig, type SystemHealthSummary, type VodPlayerRuntime } from "@sigmaos/shared";
 import { checkMountReadiness, type MountCommandRunner } from "@sigmaos/nas-tools";
 
 export interface DuplicateReport {
@@ -40,7 +40,7 @@ export interface MaintenanceSummary {
   operationNotificationsRemoved: number;
 }
 
-export async function runHealthOnce(input: { db: SigmaDatabase; config: SigmaConfig; now?: Date; mountCommandRunner?: MountCommandRunner }): Promise<SystemHealthSummary> {
+export async function runHealthOnce(input: { db: SigmaDatabase; config: SigmaConfig; now?: Date; mountCommandRunner?: MountCommandRunner; vodPlayer?: VodPlayerRuntime }): Promise<SystemHealthSummary> {
   const now = input.now ?? new Date();
   const roots = listNasRoots(input.db);
   const readinessRows = listRootReadiness(input.db, roots.map((root) => root.id));
@@ -153,6 +153,12 @@ export async function runHealthOnce(input: { db: SigmaDatabase; config: SigmaCon
   } else {
     resolveHealthAlert(input.db, { code: "backup_stale", now });
   }
+  const vodPlayer = await collectVodPlayerHealth(input.config, now, input.vodPlayer);
+  if (vodPlayer.status === "degraded") {
+    issues.push({ code: "vod_player_recovering", severity: "warning", message: "VOD Player is recovering playback" });
+  } else if (vodPlayer.status === "critical") {
+    issues.push({ code: "vod_player_unavailable", severity: "critical", message: "VOD Player is unavailable" });
+  }
   const summary: SystemHealthSummary = {
     status: issues.some((issue) => issue.severity === "critical") ? "failed" : issues.length ? "degraded" : "ready",
     checkedAt: now.toISOString(),
@@ -160,10 +166,33 @@ export async function runHealthOnce(input: { db: SigmaDatabase; config: SigmaCon
     roots: readiness,
     indexerFreshnessMs: roots.map((root) => getIndexRootStatus(input.db, root.id, now).metrics?.freshnessMs ?? null).filter((value): value is number => value !== null).reduce((max, value) => Math.max(max, value), 0) || null,
     backupFreshnessMs: latestBackup?.finishedAt ? Math.max(0, now.getTime() - Date.parse(latestBackup.finishedAt)) : null,
-    downloader: getDownloadWorkerHealth(input.db, now)
+    downloader: getDownloadWorkerHealth(input.db, now),
+    vodPlayer
   };
   console.log(JSON.stringify({ event: "health.run.completed", status: summary.status, issueCount: summary.issues.length }));
   return summary;
+}
+
+async function collectVodPlayerHealth(
+  config: SigmaConfig,
+  now: Date,
+  runtime = createVodPlayerRuntime(config.vodPlayer)
+): Promise<SystemHealthSummary["vodPlayer"]> {
+  const checkedAt = now.toISOString();
+  if (!config.vodPlayer.enabled) {
+    return { status: "disabled", state: null, errorCode: "VOD_PLAYER_DISABLED", checkedAt };
+  }
+  try {
+    const status = await runtime.getStatus();
+    return {
+      status: status.state === "recovering" ? "degraded" : status.state === "error" ? "critical" : "ready",
+      state: status.state,
+      errorCode: status.errorCode,
+      checkedAt
+    };
+  } catch {
+    return { status: "critical", state: null, errorCode: "VOD_PLAYER_UNAVAILABLE", checkedAt };
+  }
 }
 
 export async function runSchedulerOnce(input: {

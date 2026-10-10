@@ -32,7 +32,7 @@ import {
   Upload,
   type LucideIcon
 } from "lucide-react";
-import type { DockerOperation, FileEntry, FileListing, FileMeta, FileOperation, NasRoot, PendingApproval, PlayerCommand, PlayerStatus, TextPreview, VmOperation } from "../../api.js";
+import type { DockerOperation, FileEntry, FileListing, FileMeta, FileOperation, NasRoot, PendingApproval, VodPlayerCommand, VodPlayerStatus, TextPreview, VmOperation } from "../../api.js";
 import { describeFileVisual, isHiddenName } from "../../file-type-utils.js";
 import { formatBytes, formatLocaleNumber } from "../../i18n/format.js";
 import type { SupportedLocale } from "../../i18n/locale.js";
@@ -46,7 +46,7 @@ import {
 import { ActivityMenu } from "../activity/ActivityMenu.js";
 import { FileTypeIcon } from "../file/FileTypeIcon.js";
 import { PreviewContent, previewIcon } from "../preview/PreviewContent.js";
-import { PlayerControls } from "../preview/PlayerControls.js";
+import { VodPlayerControls } from "../preview/VodPlayerControls.js";
 import {
   collectUploadSourcesFromDataTransfer,
   collectUploadSourcesFromFileList,
@@ -272,7 +272,8 @@ export function WorkspacePane({
   blobUrl,
   downloadUrl,
   videoUrl,
-  playerStatus,
+  vodPlayerStatus,
+  vodPlayerBusy,
   previewFileSizeLimitBytes,
   previewCollapsed,
   searchQuery,
@@ -299,9 +300,9 @@ export function WorkspacePane({
   onOpenWorkspacePath,
   onInsertWorkspacePath,
   onOpenEditor,
-  onPlayToHdmi,
-  onPlayerCommand,
-  onRetryPlayer,
+  onPlayToVodPlayer,
+  onVodPlayerCommand,
+  onRetryVodPlayer,
   onRequestCreateFolder,
   onRequestCreateFolderAt,
   onRequestRename,
@@ -337,7 +338,8 @@ export function WorkspacePane({
   blobUrl: string;
   downloadUrl: string;
   videoUrl: string;
-  playerStatus: PlayerStatus | null;
+  vodPlayerStatus: VodPlayerStatus | null;
+  vodPlayerBusy: boolean;
   previewFileSizeLimitBytes: number;
   previewCollapsed: boolean;
   searchQuery: string;
@@ -364,9 +366,9 @@ export function WorkspacePane({
   onOpenWorkspacePath: (path: string) => void;
   onInsertWorkspacePath: (path: string) => void;
   onOpenEditor: (meta: FileMeta) => void;
-  onPlayToHdmi: () => void;
-  onPlayerCommand: (command: Exclude<PlayerCommand, { type: "play" }>) => void;
-  onRetryPlayer: () => void;
+  onPlayToVodPlayer: () => void;
+  onVodPlayerCommand: (command: Exclude<VodPlayerCommand, { type: "play" }>) => void;
+  onRetryVodPlayer: () => void;
   onRequestCreateFolder: (folderName: string) => Promise<void>;
   onRequestCreateFolderAt?: (input: {
     rootId: string;
@@ -1140,9 +1142,11 @@ export function WorkspacePane({
                             <button
                               type="button"
                               className="preview-tool-button"
-                              onClick={onPlayToHdmi}
-                              title={t("preview.hdmiPlayer.playToHdmi")}
-                              aria-label={t("preview.hdmiPlayer.playToHdmi")}
+                              onClick={onPlayToVodPlayer}
+                              disabled={vodPlayerBusy}
+                              aria-busy={vodPlayerBusy || undefined}
+                              title={t("preview.vodPlayer.play")}
+                              aria-label={t("preview.vodPlayer.play")}
                             >
                               <MonitorPlay aria-hidden="true" size={14} />
                             </button>
@@ -1204,8 +1208,8 @@ export function WorkspacePane({
                         locale={locale}
                         onOpenWorkspacePath={onOpenWorkspacePath}
                       />
-                      {playerStatus ? (
-                        <PlayerControls status={playerStatus} onCommand={onPlayerCommand} onRetry={onRetryPlayer} />
+                      {vodPlayerStatus ? (
+                        <VodPlayerControls status={vodPlayerStatus} busy={vodPlayerBusy} onCommand={onVodPlayerCommand} onRetry={onRetryVodPlayer} />
                       ) : null}
                     </>
                   ) : null}

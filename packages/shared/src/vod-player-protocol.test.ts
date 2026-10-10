@@ -1,0 +1,120 @@
+import { describe, expect, it } from "vitest";
+import {
+  encodeVodPlayerBrokerMessage,
+  parseVodPlayerBrokerRequest,
+  parseVodPlayerBrokerResponse,
+  type VodPlayerStatus,
+  VOD_PLAYER_PROTOCOL_VERSION
+} from "./vod-player-protocol.js";
+
+const status: VodPlayerStatus = {
+  state: "playing",
+  sessionId: "session-1",
+  serviceInstanceId: "instance-1",
+  revision: 7,
+  rootId: "primary",
+  storagePoolId: "/dev/md/media",
+  relativePath: "movies/clip.mp4",
+  fileName: "clip.mp4",
+  positionSeconds: 12.5,
+  durationSeconds: 90,
+  volume: 80,
+  retryCount: 0,
+  nextRetryAt: null,
+  capabilities: {
+    mpvAvailable: true,
+    drmAvailable: true,
+    audioAvailable: true,
+    hardwareDecode: "enabled",
+    error: null
+  },
+  error: null,
+  errorCode: null,
+  updatedAt: new Date().toISOString()
+};
+
+describe("VOD player broker protocol", () => {
+  it("round-trips a versioned play request and status response", () => {
+    const request = parseVodPlayerBrokerRequest(
+      encodeVodPlayerBrokerMessage({
+        version: VOD_PLAYER_PROTOCOL_VERSION,
+        id: "request-1",
+        command: {
+          type: "play",
+          rootId: "primary",
+          storagePoolId: "/dev/md/media",
+          relativePath: "movies/clip.mp4",
+          startPositionSeconds: 4
+        }
+      }).trim()
+    );
+    expect(request?.command).toEqual({
+      type: "play",
+      rootId: "primary",
+      storagePoolId: "/dev/md/media",
+      relativePath: "movies/clip.mp4",
+      startPositionSeconds: 4
+    });
+
+    expect(parseVodPlayerBrokerResponse(encodeVodPlayerBrokerMessage({
+      version: VOD_PLAYER_PROTOCOL_VERSION,
+      id: "request-1",
+      ok: true,
+      status
+    }).trim())).toMatchObject({ id: "request-1", ok: true, status });
+  });
+
+  it("requires the protocol version, safe paths, session ids, and bounded values", () => {
+    expect(parseVodPlayerBrokerRequest(JSON.stringify({ id: "request-1", command: { type: "status" } }))).toBeNull();
+    expect(parseVodPlayerBrokerRequest(JSON.stringify({
+      version: 1,
+      id: "request-1",
+      command: { type: "play", rootId: "primary", storagePoolId: "pool", relativePath: "../video.mp4" }
+    }))).toBeNull();
+    expect(parseVodPlayerBrokerRequest(JSON.stringify({
+      version: 1,
+      id: "request-1",
+      command: { type: "pause" }
+    }))).toBeNull();
+    expect(parseVodPlayerBrokerRequest(JSON.stringify({
+      version: 1,
+      id: "request-1",
+      command: { type: "set-volume", sessionId: "session-1", volume: 101 }
+    }))).toBeNull();
+    expect(parseVodPlayerBrokerRequest("x".repeat(128 * 1024 + 1))).toBeNull();
+    expect(parseVodPlayerBrokerRequest(JSON.stringify({
+      version: 1,
+      id: "request-1",
+      command: { type: "status", extra: true }
+    }))).toBeNull();
+    expect(parseVodPlayerBrokerRequest(JSON.stringify({
+      version: 1,
+      id: "x".repeat(129),
+      command: { type: "status" }
+    }))).toBeNull();
+  });
+
+  it("round-trips stable errors", () => {
+    expect(parseVodPlayerBrokerResponse(JSON.stringify({
+      version: 1,
+      id: "request-1",
+      ok: false,
+      error: "The session changed",
+      code: "SESSION_CONFLICT",
+      statusCode: 409
+    }))).toEqual({
+      version: 1,
+      id: "request-1",
+      ok: false,
+      error: "The session changed",
+      code: "SESSION_CONFLICT",
+      statusCode: 409
+    });
+    expect(parseVodPlayerBrokerResponse(JSON.stringify({
+      version: 1,
+      id: "request-1",
+      ok: true,
+      status: { ...status, extra: true }
+    }))).toBeNull();
+  });
+});

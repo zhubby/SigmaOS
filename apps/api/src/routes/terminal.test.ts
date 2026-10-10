@@ -407,7 +407,7 @@ function testConfig(): SigmaConfig {
     },
     hostd: { socketPath: "/tmp/hostd.sock" },
     terminal: { user: "test-user", termuxSocketPath: "/tmp/termux.sock", maxSessions: 4 },
-    player: { enabled: false, helperSocketPath: "/tmp/player-helper.sock", videoOutput: "drm", drmConnector: null, audioOutput: "alsa", audioDevice: null, hwdec: "auto-safe", user: "sigmaos" },
+    vodPlayer: { enabled: false, socketPath: "/tmp/vod-player.sock", statePath: "/tmp/vod-player-session.json", commandTimeoutMs: 5000, startupTimeoutMs: 15000, checkpointIntervalMs: 5000, retryBaseDelayMs: 2000, retryMaxDelayMs: 60000, videoOutput: "drm", drmConnector: null, audioOutput: "alsa", audioDevice: null, hwdec: "auto-safe", user: "sigmaos" },
     nasRoots: [{ id: "local", name: "Local", path: rootDir }]
   };
 }

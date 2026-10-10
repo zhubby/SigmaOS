@@ -59,9 +59,13 @@ describe("native packaging artifacts", () => {
     await expect(readPackagingFile("systemd", "sigmaos-hostd.service")).resolves.toContain(
       "After=network-online.target local-fs.target systemd-tmpfiles-setup.service"
     );
-    await expect(readPackagingFile("systemd", "sigmaos-player-helper.service")).resolves.toContain(
-      "ProtectSystem=strict"
-    );
+    const vodPlayerUnit = await readPackagingFile("systemd", "sigmaos-vod-player.service");
+    expect(vodPlayerUnit).toContain("ExecStart=/usr/lib/sigmaos/bin/sigmaos-vod-player");
+    expect(vodPlayerUnit).toContain("Type=notify");
+    expect(vodPlayerUnit).toContain("WatchdogSec=20s");
+    expect(vodPlayerUnit).toContain("TimeoutStopSec=30s");
+    expect(vodPlayerUnit).toContain("ProtectSystem=strict");
+    expect(vodPlayerUnit).not.toContain("RequiresMountsFor=/srv/nas");
 
     await expect(readPackagingFile("systemd", "sigmaos-maintenance.timer")).resolves.toContain(
       "OnCalendar=daily"
@@ -100,7 +104,8 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("usr/lib/sigmaos/apps/indexer/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/backup/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/scheduler/dist/");
-    expect(install).toContain("usr/lib/sigmaos/apps/player-helper/dist/");
+    expect(install).toContain("target/release/sigmaos-vod-player usr/lib/sigmaos/bin/");
+    expect(install).not.toContain("apps/player-helper");
     expect(install).toContain("target/release/sigmaos-downloader usr/lib/sigmaos/bin/");
     expect(install).not.toContain("apps/downloader/dist/");
     expect(install).toContain("node_modules/* usr/lib/sigmaos/node_modules/");
@@ -125,7 +130,7 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("packaging/systemd/smbd.service.d/sigmaos.conf lib/systemd/system/smbd.service.d/");
     expect(install).toContain("packaging/systemd/vsftpd.service.d/sigmaos.conf lib/systemd/system/vsftpd.service.d/");
     expect(install).toContain("packaging/systemd/minidlna.service.d/sigmaos.conf lib/systemd/system/minidlna.service.d/");
-    expect(install).toContain("packaging/scripts/sigmaos-refresh-player.sh usr/lib/sigmaos/scripts/");
+    expect(install).toContain("packaging/scripts/sigmaos-refresh-vod-player.sh usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/scripts/sigmaos-deploy-bootstrap.sh usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/scripts/sigmaos-deploy usr/lib/sigmaos/scripts/");
     expect(install).toContain("packaging/nginx/sigmaos.conf usr/share/sigmaos/nginx/");
@@ -153,8 +158,19 @@ describe("native packaging artifacts", () => {
     expect(control).toContain("nginx");
     expect(control).not.toMatch(/^Depends:.*samba/m);
     const postrm = await readPackagingFile("debian", "postrm");
+    const postinst = await readPackagingFile("debian", "postinst");
+    const refreshVodPlayer = await readPackagingFile("scripts", "sigmaos-refresh-vod-player.sh");
+    expect(postinst).toContain("legacy_vod_player_active");
+    expect(postinst).toContain("systemctl start sigmaos-vod-player.service");
+    expect(refreshVodPlayer).toContain("SIGMAOS_VOD_PLAYER_SOCKET_PATH");
+    expect(refreshVodPlayer).toContain("SIGMAOS_VOD_PLAYER_STATE_PATH");
+    expect(refreshVodPlayer).toContain("ReadWritePaths=");
+    expect(refreshVodPlayer).toContain("private temporary directory");
+    expect(refreshVodPlayer).toContain("SIGMAOS_ENABLE_PLAYER");
+    expect(postinst).toContain("sigmaos-vod-player migrate-config");
     expect(postrm.indexOf("optional-groups.conf")).toBeLessThan(postrm.indexOf("systemctl daemon-reload"));
     expect(postrm).toContain("sigmaos-termux.service.d/identity.conf");
+    expect(postrm).toContain("sigmaos-vod-player.service.d/identity.conf");
   });
 
   it("ships first-boot and appliance image scaffolding", async () => {
@@ -165,6 +181,8 @@ describe("native packaging artifacts", () => {
     expect(firstBoot).toContain("SIGMAOS_ADMIN_DISPLAY_NAME");
     expect(firstBoot).toContain("SIGMAOS_DOCKER_ENABLED");
     expect(firstBoot).toContain("SIGMAOS_VM_ENABLED");
+    expect(firstBoot).toContain("SIGMAOS_VOD_PLAYER_ENABLED");
+    expect(firstBoot).toContain("[vod_player]");
     expect(firstBoot).toContain("SIGMAOS_TERMUX_USER");
     expect(firstBoot).not.toContain('chown -R sigmaos:sigmaos "$DATA_DIR" "$NAS_ROOT_PATH"');
     expect(firstBoot).toContain("[[nas_roots]]");
@@ -186,7 +204,8 @@ describe("native packaging artifacts", () => {
     expect(manifest).not.toContain("sigmaos-terminal-helper.service");
     expect(manifest).toContain("sigmaos-downloader.service");
     expect(manifest).toContain("sigmaos-photo-worker.service");
-    expect(manifest).toContain("sigmaos-player-helper.service");
+    expect(manifest).toContain("sigmaos-vod-player.service");
+    expect(manifest).not.toContain("sigmaos-player-helper.service");
     expect(manifest).toContain("mpv");
     expect(manifest).toContain("samba");
     expect(buildImage).toMatch(/--include=.*(^|,)git(,|\\|\s)/s);

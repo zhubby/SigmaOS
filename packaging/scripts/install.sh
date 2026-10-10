@@ -19,8 +19,8 @@ SIGMAOS_LOCALE=${SIGMAOS_LOCALE:-C.UTF-8}
 NGINX_ENABLED=${SIGMAOS_ENABLE_NGINX:-1}
 DOCKER_ENABLED=${SIGMAOS_ENABLE_DOCKER:-0}
 VM_ENABLED=${SIGMAOS_ENABLE_VM:-0}
-PLAYER_ENABLED=${SIGMAOS_ENABLE_PLAYER:-0}
-PLAYER_USER=${SIGMAOS_PLAYER_USER:-sigmaos}
+VOD_PLAYER_ENABLED=${SIGMAOS_ENABLE_VOD_PLAYER:-0}
+VOD_PLAYER_USER=${SIGMAOS_VOD_PLAYER_USER:-sigmaos}
 TERMINAL_USER=${SIGMAOS_TERMUX_USER:-sigmaos}
 DEBIAN_FRONTEND=noninteractive
 export DEBIAN_FRONTEND
@@ -43,6 +43,9 @@ die() {
   printf 'sigmaos-install: error: %s\n' "$*" >&2
   exit 1
 }
+
+legacy_player_environment=$(env | awk -F= '$1 == "SIGMAOS_ENABLE_PLAYER" || $1 ~ /^SIGMAOS_PLAYER_/ { print $1; exit }')
+[ -z "$legacy_player_environment" ] || die "$legacy_player_environment is no longer supported; use SIGMAOS_VOD_PLAYER_*"
 
 apt_install() {
   apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=3 \
@@ -135,12 +138,12 @@ case "$VM_ENABLED" in
   0|1) ;;
   *) die "SIGMAOS_ENABLE_VM must be 0 or 1" ;;
 esac
-case "$PLAYER_ENABLED" in
+case "$VOD_PLAYER_ENABLED" in
   0|1) ;;
-  *) die "SIGMAOS_ENABLE_PLAYER must be 0 or 1" ;;
+  *) die "SIGMAOS_ENABLE_VOD_PLAYER must be 0 or 1" ;;
 esac
-case "$PLAYER_USER" in
-  *[!a-zA-Z0-9._-]*|root) die "SIGMAOS_PLAYER_USER must name a non-root local user" ;;
+case "$VOD_PLAYER_USER" in
+  *[!a-zA-Z0-9._-]*|root) die "SIGMAOS_VOD_PLAYER_USER must name a non-root local user" ;;
 esac
 
 install_build_dependencies() {
@@ -183,7 +186,7 @@ install_optional_runtime() {
       amd64) runtime_packages="$runtime_packages libvirt-daemon-system libvirt-clients qemu-system-x86 qemu-utils virtinst" ;;
     esac
   fi
-  if [ "$PLAYER_ENABLED" = "1" ]; then
+  if [ "$VOD_PLAYER_ENABLED" = "1" ]; then
     runtime_packages="$runtime_packages mpv seatd"
   fi
   if [ -n "$runtime_packages" ]; then
@@ -290,8 +293,8 @@ if [ "$SIGMAOS_CONFIG_EXISTS" = "0" ]; then
   SIGMAOS_NAS_ROOT_PATH=${SIGMAOS_NAS_ROOT_PATH:-/srv/nas} \
   SIGMAOS_DOCKER_ENABLED="$DOCKER_ENABLED" \
   SIGMAOS_VM_ENABLED="$VM_ENABLED" \
-  SIGMAOS_PLAYER_ENABLED="$PLAYER_ENABLED" \
-  SIGMAOS_PLAYER_USER="$PLAYER_USER" \
+  SIGMAOS_VOD_PLAYER_ENABLED="$VOD_PLAYER_ENABLED" \
+  SIGMAOS_VOD_PLAYER_USER="$VOD_PLAYER_USER" \
   SIGMAOS_TERMUX_USER="$TERMINAL_USER" \
     /usr/lib/sigmaos/scripts/sigmaos-first-boot.sh
 else
@@ -302,7 +305,7 @@ if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload
   /usr/lib/sigmaos/scripts/sigmaos-refresh-groups.sh
   /usr/lib/sigmaos/scripts/sigmaos-refresh-termux.sh
-  SIGMAOS_PLAYER_USER="$PLAYER_USER" /usr/lib/sigmaos/scripts/sigmaos-refresh-player.sh
+  SIGMAOS_VOD_PLAYER_USER="$VOD_PLAYER_USER" /usr/lib/sigmaos/scripts/sigmaos-refresh-vod-player.sh
   if [ "$DOCKER_ENABLED" = "1" ]; then
     systemctl enable --now docker.service
   fi
@@ -323,8 +326,8 @@ if command -v systemctl >/dev/null 2>&1; then
     sigmaos-downloader.service
   systemctl restart sigmaos-hostd.service sigmaos-termux.service \
     sigmaos-api.service sigmaos-worker@1.service sigmaos-photo-worker.service sigmaos-downloader.service
-  if [ "$PLAYER_ENABLED" = "1" ]; then
-    systemctl enable --now sigmaos-player-helper.service
+  if [ "$VOD_PLAYER_ENABLED" = "1" ]; then
+    systemctl enable --now sigmaos-vod-player.service
   fi
   systemctl enable \
     sigmaos-indexer.timer \

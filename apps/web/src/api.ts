@@ -76,7 +76,8 @@ import type {
   VmMemoryBacking,
   VmNetworkModel,
   VmVideoModel,
-  PlayerStatus as SharedPlayerStatus,
+  VodPlayerStatus as SharedVodPlayerStatus,
+  VodPlayerCommand as SharedVodPlayerCommand,
   OperationNotificationRecord as SharedOperationNotification,
   PhotoAssetRecord as SharedPhotoAsset,
   PhotoJobRecord as SharedPhotoJob,
@@ -361,12 +362,10 @@ export type DockerComposeApp = SharedDockerComposeAppSummary;
 export type DockerComposeAppDetail = SharedDockerComposeAppDetail;
 export type DockerOperation = DockerOperationRecord;
 export type ShareOperation = ShareOperationRecord;
-export type PlayerStatus = SharedPlayerStatus;
-export type PlayerCommand =
+export type VodPlayerStatus = SharedVodPlayerStatus;
+export type VodPlayerCommand =
   | { type: "play"; rootId: string; storagePoolId: string; path: string; startPositionSeconds?: number }
-  | { type: "pause" | "resume" | "stop" }
-  | { type: "seek"; seconds: number }
-  | { type: "set_volume"; volume: number };
+  | Exclude<SharedVodPlayerCommand, { type: "play" }>;
 
 export interface FileMeta {
   path: string;
@@ -1580,21 +1579,21 @@ export function getFileVideoUrl(rootId: string, currentPath: string, storagePool
   return `/api/files/video?${params.toString()}`;
 }
 
-export async function getPlayerStatus(): Promise<PlayerStatus> {
-  const response = await fetch("/api/player/status");
+export async function getVodPlayerStatus(): Promise<VodPlayerStatus> {
+  const response = await fetch("/api/vod-player/status");
   await ensureOk(response);
-  const body = (await response.json()) as { status: PlayerStatus };
+  const body = (await response.json()) as { status: VodPlayerStatus };
   return body.status;
 }
 
-export async function sendPlayerCommand(command: PlayerCommand): Promise<PlayerStatus> {
-  const response = await fetch("/api/player/command", {
+export async function sendVodPlayerCommand(command: VodPlayerCommand): Promise<VodPlayerStatus> {
+  const response = await fetch("/api/vod-player/command", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(command)
   });
   await ensureOk(response);
-  const body = (await response.json()) as { status: PlayerStatus };
+  const body = (await response.json()) as { status: VodPlayerStatus };
   return body.status;
 }
 

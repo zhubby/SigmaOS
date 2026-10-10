@@ -7,7 +7,7 @@ import type { ShareManagementDependencies } from "./lib/share-service.js";
 import type { SystemManagementDependencies } from "./lib/system-management.js";
 import type { TerminalRuntime } from "./lib/terminal.js";
 import type { VideoTranscoder } from "./lib/video-cache.js";
-import type { PlayerRuntime } from "./lib/player.js";
+import type { VodPlayerRuntime } from "./lib/vod-player.js";
 import type { VmRuntimeDependencies } from "./lib/vm-service.js";
 
 export interface ApiRouteContext {
@@ -24,7 +24,7 @@ export interface ApiRouteContext {
   system?: SystemManagementDependencies;
   terminal?: TerminalRuntime;
   videoTranscoder?: VideoTranscoder;
-  player?: PlayerRuntime;
+  vodPlayer?: VodPlayerRuntime;
 }
 
 export type ServerDependencies = ApiRouteContext;

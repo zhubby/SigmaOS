@@ -5,7 +5,7 @@ import { loadConfig } from "@sigmaos/shared";
 import { loadBuildInfo } from "./lib/build-info.js";
 import { createSystemCommandRunner } from "./lib/system-management.js";
 import { createTerminalRuntime } from "./lib/termux-client.js";
-import { createPlayerRuntime } from "./lib/player.js";
+import { createVodPlayerRuntime } from "./lib/vod-player.js";
 import { ffmpegVideoTranscoder } from "./lib/video-cache.js";
 import { buildServer } from "./server.js";
 import { registerWebApp } from "./web-static.js";
@@ -24,7 +24,7 @@ const server = await buildServer({
   },
   terminal: createTerminalRuntime(config.terminal),
   videoTranscoder: ffmpegVideoTranscoder,
-  player: createPlayerRuntime(config.player)
+  vodPlayer: createVodPlayerRuntime(config.vodPlayer)
 });
 const webDist = resolveWebDist();
 const docsDist = resolveDocsDist();

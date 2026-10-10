@@ -6,8 +6,8 @@ apps/photo-worker/dist/* usr/lib/sigmaos/apps/photo-worker/dist/
 apps/indexer/dist/* usr/lib/sigmaos/apps/indexer/dist/
 apps/backup/dist/* usr/lib/sigmaos/apps/backup/dist/
 apps/scheduler/dist/* usr/lib/sigmaos/apps/scheduler/dist/
-apps/player-helper/dist/* usr/lib/sigmaos/apps/player-helper/dist/
 target/release/sigmaos-downloader usr/lib/sigmaos/bin/
+target/release/sigmaos-vod-player usr/lib/sigmaos/bin/
 apps/web/dist/* usr/lib/sigmaos/apps/web/dist/
 docs/dist/* usr/lib/sigmaos/docs/dist/
 node_modules/* usr/lib/sigmaos/node_modules/
@@ -22,7 +22,7 @@ packaging/scripts/sigmaos-refresh-groups.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-refresh-termux.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-nas-acl.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-share-acl.mjs usr/lib/sigmaos/scripts/
-packaging/scripts/sigmaos-refresh-player.sh usr/lib/sigmaos/scripts/
+packaging/scripts/sigmaos-refresh-vod-player.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-deploy-bootstrap.sh usr/lib/sigmaos/scripts/
 packaging/scripts/sigmaos-deploy usr/lib/sigmaos/scripts/
 packaging/nginx/sigmaos.conf usr/share/sigmaos/nginx/

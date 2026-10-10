@@ -16,7 +16,7 @@ import {
   getFileBlobUrl,
   getFileDownloadUrl,
   getFileVideoUrl,
-  getPlayerStatus,
+  getVodPlayerStatus,
   getFileMeta,
   getFiles,
   getOperations,
@@ -41,7 +41,7 @@ import {
   savePiToolPolicySettings,
   searchFiles,
   sendMessage,
-  sendPlayerCommand,
+  sendVodPlayerCommand,
   updateSessionPath,
   updateDownloadSettings,
   uploadFile,
@@ -69,8 +69,8 @@ import {
   type StorageSummary,
   type TextPreview,
   type TranscriptMessage,
-  type PlayerCommand,
-  type PlayerStatus
+  type VodPlayerCommand,
+  type VodPlayerStatus
 } from "./api.js";
 import { ChatPane, composeAgentMessage } from "./components/chat/ChatPane.js";
 import { NotificationCenter } from "./components/notifications/NotificationCenter.js";
@@ -132,29 +132,35 @@ import {
 import { loadFileListingForView, syncSessionPath } from "./lib/session.js";
 import { readStoredStoragePoolId, writeStoredStoragePoolId } from "./lib/storage-pool-settings.js";
 import { scheduleToastDismissal } from "./lib/toast.js";
+import { acceptVodPlayerStatus } from "./lib/vod-player-status.js";
 
 type MobileView = "chat" | "workspace";
 const MAX_UPLOAD_BATCHES = 8;
-const PLAYER_ERROR_CODES = new Set([
-  "PLAYER_DISABLED",
-  "HELPER_UNAVAILABLE",
+const VOD_PLAYER_ERROR_CODES = new Set([
+  "VOD_PLAYER_DISABLED",
+  "VOD_PLAYER_UNAVAILABLE",
   "MPV_UNAVAILABLE",
   "DRM_UNAVAILABLE",
   "AUDIO_UNAVAILABLE",
   "PERMISSION_DENIED",
+  "STORAGE_UNAVAILABLE",
+  "SOURCE_CHANGED",
+  "UNSUPPORTED_MEDIA",
   "PLAYBACK_FAILED",
-  "PLAYER_BUSY",
+  "COMMAND_TIMEOUT",
+  "SESSION_CONFLICT",
   "INVALID_COMMAND",
   "INVALID_PATH",
+  "PROTOCOL_ERROR",
   "INTERNAL"
 ]);
 
-function playerErrorCode(error: unknown): NonNullable<PlayerStatus["errorCode"]> {
+function vodPlayerErrorCode(error: unknown): NonNullable<VodPlayerStatus["errorCode"]> {
   const candidate = typeof error === "object" && error !== null && "code" in error
     ? (error as { code?: unknown }).code
     : null;
-  return typeof candidate === "string" && PLAYER_ERROR_CODES.has(candidate)
-    ? candidate as NonNullable<PlayerStatus["errorCode"]>
+  return typeof candidate === "string" && VOD_PLAYER_ERROR_CODES.has(candidate)
+    ? candidate as NonNullable<VodPlayerStatus["errorCode"]>
     : "INTERNAL";
 }
 
@@ -183,7 +189,8 @@ export function App() {
   const [textPreview, setTextPreview] = useState<TextPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const [playerStatus, setPlayerStatus] = useState<PlayerStatus | null>(null);
+  const [vodPlayerStatus, setVodPlayerStatus] = useState<VodPlayerStatus | null>(null);
+  const [vodPlayerBusy, setVodPlayerBusy] = useState(false);
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [editorMeta, setEditorMeta] = useState<FileMeta | null>(null);
   const [message, setMessage] = useState("");
@@ -649,12 +656,12 @@ export function App() {
   }, [previewFileSizeLimitBytes, selectedRootId, selectedStoragePoolId, selectedFilePath]);
 
   useEffect(() => {
-    const playerAreaVisible = Boolean(
+    const vodPlayerAreaVisible = Boolean(
       selectedFilePath &&
         !previewCollapsed &&
         (typeof window === "undefined" || window.innerWidth > 860 || mobileView === "workspace")
     );
-    if (!playerAreaVisible) {
+    if (!vodPlayerAreaVisible) {
       return;
     }
 
@@ -662,13 +669,11 @@ export function App() {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
       try {
-        const nextStatus = await getPlayerStatus();
+        const nextStatus = await getVodPlayerStatus();
         if (!active) return;
-        setPlayerStatus(nextStatus);
-        const activePlayback = nextStatus.state === "starting" || nextStatus.state === "playing" || nextStatus.state === "paused";
-        if (activePlayback) {
-          timer = setTimeout(poll, 1000);
-        }
+        setVodPlayerStatus((current) => acceptVodPlayerStatus(current, nextStatus));
+        const activeVodPlayback = nextStatus.state === "starting" || nextStatus.state === "playing" || nextStatus.state === "paused" || nextStatus.state === "recovering";
+        timer = setTimeout(poll, activeVodPlayback ? 1000 : 5000);
       } catch {
         if (active) timer = setTimeout(poll, 5000);
       }
@@ -678,7 +683,7 @@ export function App() {
       active = false;
       if (timer) clearTimeout(timer);
     };
-  }, [mobileView, playerStatus?.state, previewCollapsed, selectedFilePath]);
+  }, [mobileView, previewCollapsed, selectedFilePath]);
 
   useEffect(() => {
     if (!resizing) {
@@ -1841,39 +1846,50 @@ export function App() {
     }
   }
 
-  async function playSelectedOnHdmi() {
+  async function playSelectedOnVodPlayer() {
     if (!selectedRootId || !selectedStoragePoolId || !selectedFilePath || previewMeta?.previewKind !== "video") {
       return;
     }
+    setVodPlayerBusy(true);
     try {
-      setPlayerStatus(
-        await sendPlayerCommand({
+      const next = await sendVodPlayerCommand({
           type: "play",
           rootId: selectedRootId,
           storagePoolId: selectedStoragePoolId,
           path: selectedFilePath
-        })
-      );
+        });
+      setVodPlayerStatus((current) => acceptVodPlayerStatus(current, next));
     } catch (nextError) {
-      reportPlayerError(nextError);
+      reportVodPlayerError(nextError);
+    } finally {
+      setVodPlayerBusy(false);
     }
   }
 
-  function issuePlayerCommand(command: Exclude<PlayerCommand, { type: "play" }>) {
-    void sendPlayerCommand(command)
-      .then(setPlayerStatus)
-      .catch((nextError: unknown) => reportPlayerError(nextError));
+  function issueVodPlayerCommand(command: Exclude<VodPlayerCommand, { type: "play" }>) {
+    setVodPlayerBusy(true);
+    void sendVodPlayerCommand(command)
+      .then((next) => setVodPlayerStatus((current) => acceptVodPlayerStatus(current, next)))
+      .catch((nextError: unknown) => reportVodPlayerError(nextError))
+      .finally(() => setVodPlayerBusy(false));
   }
 
-  function retryHdmiPlay() {
-    void playSelectedOnHdmi();
+  function retryVodPlayback() {
+    if (vodPlayerStatus?.sessionId) {
+      issueVodPlayerCommand({ type: "retry", sessionId: vodPlayerStatus.sessionId });
+    } else {
+      void playSelectedOnVodPlayer();
+    }
   }
 
-  function reportPlayerError(nextError: unknown) {
+  function reportVodPlayerError(nextError: unknown) {
     const message = toErrorMessage(nextError);
-    const errorCode = playerErrorCode(nextError);
-    setPlayerStatus((current) => ({
+    const errorCode = vodPlayerErrorCode(nextError);
+    setVodPlayerStatus((current) => ({
       state: "error",
+      sessionId: current?.sessionId ?? null,
+      serviceInstanceId: "client-error",
+      revision: 0,
       rootId: selectedRootId || current?.rootId || null,
       storagePoolId: selectedStoragePoolId || current?.storagePoolId || null,
       relativePath: selectedFilePath || current?.relativePath || null,
@@ -1881,6 +1897,8 @@ export function App() {
       positionSeconds: current?.positionSeconds ?? 0,
       durationSeconds: current?.durationSeconds ?? null,
       volume: current?.volume ?? 100,
+      retryCount: current?.retryCount ?? 0,
+      nextRetryAt: null,
       capabilities: current?.capabilities ?? {
         mpvAvailable: false,
         drmAvailable: false,
@@ -1890,7 +1908,7 @@ export function App() {
       },
       error: message,
       errorCode,
-      updatedAt: new Date().toISOString()
+      updatedAt: current?.updatedAt ?? new Date().toISOString()
     }));
     setError(message);
   }
@@ -2146,7 +2164,8 @@ export function App() {
         blobUrl={blobUrl}
         downloadUrl={downloadUrl}
         videoUrl={videoUrl}
-        playerStatus={playerStatus}
+        vodPlayerStatus={vodPlayerStatus}
+        vodPlayerBusy={vodPlayerBusy}
         previewFileSizeLimitBytes={previewFileSizeLimitBytes}
         previewCollapsed={previewCollapsed}
         searchQuery={searchQuery}
@@ -2173,9 +2192,9 @@ export function App() {
         onOpenWorkspacePath={(path) => void openWorkspacePath(path)}
         onInsertWorkspacePath={(path) => insertWorkspacePathInComposer(path)}
         onOpenEditor={setEditorMeta}
-        onPlayToHdmi={() => void playSelectedOnHdmi()}
-        onPlayerCommand={issuePlayerCommand}
-        onRetryPlayer={retryHdmiPlay}
+        onPlayToVodPlayer={() => void playSelectedOnVodPlayer()}
+        onVodPlayerCommand={issueVodPlayerCommand}
+        onRetryVodPlayer={retryVodPlayback}
         onRequestCreateFolder={(folderName) => requestFolderCreate(folderName)}
         onRequestCreateFolderAt={(input) => requestFolderCreateAt(input)}
         onRequestRename={(entry, targetName) => requestFileRename(entry, targetName)}

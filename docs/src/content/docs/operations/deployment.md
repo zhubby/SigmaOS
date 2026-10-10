@@ -53,11 +53,12 @@ sudo ./packaging/scripts/install.sh
 sudo SIGMAOS_ENABLE_NGINX=1 \
   SIGMAOS_ENABLE_DOCKER=0 \
   SIGMAOS_ENABLE_VM=0 \
+  SIGMAOS_ENABLE_VOD_PLAYER=0 \
   SIGMAOS_NAS_ROOT_PATH=/srv/nas \
   ./packaging/scripts/install.sh
 ```
 
-脚本会安装 Node.js 22 和 Rust 1.95.0、构建并安装本架构 `.deb`，然后仅在新安装时执行 `sigmaos-first-boot.sh`。首次初始化会创建 `/etc/sigmaos/config.toml`、`/var/lib/sigmaos`、`/var/lib/sigmaos-termux`、`/srv/nas`、`/srv/iso` 和本地管理员记录。升级会固定终端身份为 `sigmaos`，把 `[terminal].helper_socket_path` 迁移到 `termux_socket_path`，并保留权限为 `0600` 的 `config.toml.pre-termux.bak`。若仅存在旧家目录，`/var/lib/sigmaos-terminal` 会原子迁移为 `/var/lib/sigmaos-termux`；新旧目录同时存在时安装会拒绝合并，要求运维人员先核对数据。
+脚本会安装 Node.js 22 和 Rust 1.95.0、构建并安装本架构 `.deb`，然后仅在新安装时执行 `sigmaos-first-boot.sh`。首次初始化会创建 `/etc/sigmaos/config.toml`、`/var/lib/sigmaos`、`/var/lib/sigmaos-termux`、`/var/lib/sigmaos-vod-player`、`/srv/nas`、`/srv/iso` 和本地管理员记录。升级会迁移 Termux 和 VOD Player 配置，并分别保留 `config.toml.pre-termux.bak` 与 `config.toml.pre-vod-player.bak`。若仅存在旧终端家目录，`/var/lib/sigmaos-terminal` 会原子迁移为 `/var/lib/sigmaos-termux`；新旧目录同时存在时安装会拒绝合并，要求运维人员先核对数据。
 
 核心服务会被 `enable --now`：
 
@@ -96,7 +97,8 @@ sudo systemctl stop sigmaos-indexer.timer sigmaos-scheduler.timer \
   sigmaos-maintenance.timer sigmaos-health.timer \
   sigmaos-backup-daily.timer sigmaos-backup-weekly.timer
 sudo systemctl stop sigmaos-downloader.service sigmaos-worker@1.service \
-  sigmaos-api.service sigmaos-termux.service sigmaos-hostd.service
+  sigmaos-vod-player.service sigmaos-api.service sigmaos-termux.service \
+  sigmaos-hostd.service
 sudo dpkg -i .sigmaos/sigmaos_<version>_<arch>.deb
 sudo systemctl daemon-reload
 findmnt /srv/nas/pool1
@@ -113,11 +115,12 @@ sudo /usr/lib/sigmaos/scripts/sigmaos-nas-acl.sh --apply --pool /srv/nas/pool1
 
 共享服务只在启用的共享路径获得 ACL。hostd 应用共享设置时备份受影响路径的 ACL，服务重载失败会恢复；可写 NFS 客户端被映射为 `sigmaos-nfs`，不继承客户端 UID。
 
-从旧版升级时，`postinst` 会先确认新旧终端家目录不存在冲突，再停止 `sigmaos-terminal-helper.service`，然后把旧家目录迁移到 `/var/lib/sigmaos-termux`。随后运行 hostd 与 termux 的幂等配置迁移，并停用已废弃的 `sigmaos-share-helper.service`。hostd 迁移把 `[shares].helper_socket_path` 移到 `[hostd].socket_path`；termux 迁移把 `[terminal].helper_socket_path` 移到 `termux_socket_path` 并固定用户为 `sigmaos`。新字段已存在时以新字段为准；对应的 `.pre-hostd.bak` 和 `.pre-termux.bak` 只在首次修改时创建且不会被重复覆盖。完成 ACL 验证后启动服务：
+从旧版升级时，`postinst` 会先确认新旧终端家目录不存在冲突，再停止旧 helper。随后运行 hostd、termux 和 VOD Player 的幂等配置迁移，并停用 `sigmaos-share-helper.service` 与 `sigmaos-player-helper.service`。VOD Player 迁移把 `[player]` 改为 `[vod_player]`、把 `helper_socket_path` 改为 `socket_path`，并写入可靠性默认值；若新旧播放器配置同时存在且不等价，安装会拒绝覆盖。`.pre-hostd.bak`、`.pre-termux.bak` 和 `.pre-vod-player.bak` 只在首次修改时创建且不会重复覆盖。完成 ACL 验证后启动服务：
 
 ```bash
 sudo systemctl start sigmaos-hostd.service sigmaos-termux.service \
-  sigmaos-api.service sigmaos-worker@1.service sigmaos-downloader.service
+  sigmaos-api.service sigmaos-worker@1.service sigmaos-downloader.service \
+  sigmaos-vod-player.service
 sudo systemctl --failed
 sudo journalctl -u sigmaos-hostd.service -u sigmaos-termux.service -n 100 --no-pager
 ```

@@ -1,0 +1,845 @@
+use std::path::Path;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use serde_json::json;
+use time::format_description::well_known::Rfc3339;
+use time::{Duration as TimeDuration, OffsetDateTime};
+use tokio::sync::{mpsc, oneshot, watch};
+use tokio::time::interval;
+use uuid::Uuid;
+
+use crate::config::VodPlayerConfig;
+use crate::error::{ErrorCode, VodError};
+use crate::mpv::{MpvEvent, MpvHandle, classify_end_file_failure, probe, probe_active_outputs};
+use crate::protocol::{Capabilities, Command, HardwareDecode, PlayerState, Status};
+use crate::session::{self, LoadOutcome, PersistedSession};
+use crate::storage::{FileIdentity, open_media};
+
+#[derive(Clone)]
+pub struct ControllerHandle {
+    sender: mpsc::Sender<Message>,
+    status: watch::Receiver<Status>,
+    shutdown: watch::Sender<bool>,
+    done: watch::Receiver<bool>,
+}
+
+enum Message {
+    Execute(Command, oneshot::Sender<Result<Status, VodError>>),
+}
+
+#[derive(Debug, Clone)]
+struct DesiredSession {
+    session_id: String,
+    root_id: String,
+    storage_pool_id: String,
+    relative_path: String,
+    position_seconds: f64,
+    volume: f64,
+    paused: bool,
+    identity: Option<FileIdentity>,
+}
+
+struct Controller {
+    config: Arc<VodPlayerConfig>,
+    receiver: mpsc::Receiver<Message>,
+    status_sender: watch::Sender<Status>,
+    shutdown: watch::Receiver<bool>,
+    done: watch::Sender<bool>,
+    status: Status,
+    desired: Option<DesiredSession>,
+    mpv: Option<MpvHandle>,
+    retry_at: Option<Instant>,
+    stable_since: Option<Instant>,
+    last_checkpoint: Instant,
+    last_capability_probe: Instant,
+}
+
+impl ControllerHandle {
+    pub async fn start(config: Arc<VodPlayerConfig>) -> Result<Self, VodError> {
+        let service_instance_id = Uuid::new_v4().to_string();
+        let capabilities = probe(&config).await.capabilities;
+        let mut status = empty_status(service_instance_id, capabilities);
+        let desired = match session::load(&config.state_path)? {
+            LoadOutcome::Empty => None,
+            LoadOutcome::Corrupt(path) => {
+                tracing::warn!(path = %path.display(), "ignored corrupt VOD player session");
+                None
+            }
+            LoadOutcome::Session(saved) => {
+                status.state = PlayerState::Recovering;
+                status.session_id = Some(saved.session_id.clone());
+                status.root_id = Some(saved.root_id.clone());
+                status.storage_pool_id = Some(saved.storage_pool_id.clone());
+                status.relative_path = Some(saved.relative_path.clone());
+                status.file_name = file_name(&saved.relative_path);
+                status.position_seconds = saved.position_seconds;
+                status.volume = saved.volume;
+                Some(DesiredSession {
+                    session_id: saved.session_id,
+                    root_id: saved.root_id,
+                    storage_pool_id: saved.storage_pool_id,
+                    relative_path: saved.relative_path,
+                    position_seconds: saved.position_seconds,
+                    volume: saved.volume,
+                    paused: saved.desired_paused,
+                    identity: Some(saved.identity),
+                })
+            }
+        };
+        let (status_sender, status_receiver) = watch::channel(status.clone());
+        let (sender, receiver) = mpsc::channel(32);
+        let (shutdown_sender, shutdown_receiver) = watch::channel(false);
+        let (done_sender, done_receiver) = watch::channel(false);
+        let mut controller = Controller {
+            config,
+            receiver,
+            status_sender,
+            shutdown: shutdown_receiver,
+            done: done_sender,
+            status,
+            desired,
+            mpv: None,
+            retry_at: None,
+            stable_since: None,
+            last_checkpoint: Instant::now(),
+            last_capability_probe: Instant::now(),
+        };
+        tokio::spawn(async move { controller.run().await });
+        Ok(Self {
+            sender,
+            status: status_receiver,
+            shutdown: shutdown_sender,
+            done: done_receiver,
+        })
+    }
+
+    pub fn status(&self) -> Result<Status, VodError> {
+        if self.sender.is_closed() {
+            return Err(VodError::unavailable(
+                ErrorCode::VodPlayerUnavailable,
+                "VOD player controller stopped",
+            ));
+        }
+        Ok(self.status.borrow().clone())
+    }
+
+    pub async fn execute(&self, command: Command) -> Result<Status, VodError> {
+        if matches!(command, Command::Status) {
+            return self.status();
+        }
+        let (response_tx, response_rx) = oneshot::channel();
+        self.sender
+            .try_send(Message::Execute(command, response_tx))
+            .map_err(|_| {
+                VodError::unavailable(
+                    ErrorCode::VodPlayerUnavailable,
+                    "VOD player command queue is full",
+                )
+            })?;
+        response_rx.await.map_err(|_| {
+            VodError::unavailable(
+                ErrorCode::VodPlayerUnavailable,
+                "VOD player controller stopped",
+            )
+        })?
+    }
+
+    pub async fn shutdown(&self) {
+        let _ = self.shutdown.send(true);
+        let mut done = self.done.clone();
+        if !*done.borrow() {
+            let _ = done.changed().await;
+        }
+    }
+}
+
+impl Controller {
+    async fn run(&mut self) {
+        if self.desired.is_some() {
+            self.try_start_or_schedule().await;
+        }
+        let mut tick = interval(Duration::from_secs(1));
+        tick.tick().await;
+        loop {
+            tokio::select! {
+                biased;
+                changed = self.shutdown.changed() => {
+                    if changed.is_err() || *self.shutdown.borrow() {
+                        self.shutdown().await;
+                        self.done.send_replace(true);
+                        return;
+                    }
+                }
+                message = self.receiver.recv() => match message {
+                    Some(Message::Execute(command, response)) => {
+                        let result = self.handle_command(command).await;
+                        let _ = response.send(result);
+                    }
+                    None => {
+                        self.shutdown().await;
+                        self.done.send_replace(true);
+                        return;
+                    }
+                },
+                _ = tick.tick() => self.tick().await,
+            }
+        }
+    }
+
+    async fn handle_command(&mut self, command: Command) -> Result<Status, VodError> {
+        match command {
+            Command::Status => {}
+            Command::Play {
+                root_id,
+                storage_pool_id,
+                relative_path,
+                start_position_seconds,
+            } => {
+                self.stop_mpv().await;
+                self.retry_at = None;
+                self.stable_since = None;
+                self.status.retry_count = 0;
+                self.desired = Some(DesiredSession {
+                    session_id: Uuid::new_v4().to_string(),
+                    root_id,
+                    storage_pool_id,
+                    relative_path,
+                    position_seconds: start_position_seconds.unwrap_or(0.0),
+                    volume: self.status.volume,
+                    paused: false,
+                    identity: None,
+                });
+                self.status.state = PlayerState::Starting;
+                self.status.error = None;
+                self.status.error_code = None;
+                self.copy_desired_to_status();
+                self.publish();
+                self.try_start_or_schedule().await;
+            }
+            Command::Pause { session_id } => {
+                self.assert_session(&session_id)?;
+                self.execute_mpv_command(json!(["set_property", "pause", true]))
+                    .await?;
+                if let Some(desired) = self.desired.as_mut() {
+                    desired.paused = true;
+                }
+                self.status.state = PlayerState::Paused;
+                self.stable_since = None;
+                self.transition_checkpoint()?;
+            }
+            Command::Resume { session_id } => {
+                self.assert_session(&session_id)?;
+                self.execute_mpv_command(json!(["set_property", "pause", false]))
+                    .await?;
+                if let Some(desired) = self.desired.as_mut() {
+                    desired.paused = false;
+                }
+                self.status.state = PlayerState::Playing;
+                self.stable_since = Some(Instant::now());
+                self.transition_checkpoint()?;
+            }
+            Command::Stop { session_id } => {
+                self.assert_session(&session_id)?;
+                self.stop_mpv().await;
+                self.desired = None;
+                self.retry_at = None;
+                self.status.state = PlayerState::Stopped;
+                self.status.position_seconds = 0.0;
+                self.status.duration_seconds = None;
+                self.status.next_retry_at = None;
+                self.status.error = None;
+                self.status.error_code = None;
+                session::clear(&self.config.state_path)?;
+                self.publish();
+            }
+            Command::Retry { session_id } => {
+                self.assert_session(&session_id)?;
+                self.stop_mpv().await;
+                self.status.retry_count = 0;
+                self.retry_at = None;
+                self.try_start_or_schedule().await;
+            }
+            Command::Seek {
+                session_id,
+                seconds,
+            } => {
+                self.assert_session(&session_id)?;
+                self.execute_mpv_command(json!(["seek", seconds, "absolute", "exact"]))
+                    .await?;
+                if let Some(desired) = self.desired.as_mut() {
+                    desired.position_seconds = seconds;
+                }
+                self.status.position_seconds = seconds;
+                self.transition_checkpoint()?;
+            }
+            Command::SetVolume { session_id, volume } => {
+                self.assert_session(&session_id)?;
+                if self.mpv.is_some() {
+                    self.execute_mpv_command(json!(["set_property", "volume", volume]))
+                        .await?;
+                }
+                if let Some(desired) = self.desired.as_mut() {
+                    desired.volume = volume;
+                }
+                self.status.volume = volume;
+                self.transition_checkpoint()?;
+            }
+        }
+        Ok(self.status.clone())
+    }
+
+    async fn try_start_or_schedule(&mut self) {
+        match self.attempt_start().await {
+            Ok(()) => {}
+            Err(error) if error.retryable() => self.schedule_recovery(error),
+            Err(error) => self.set_terminal_error(error),
+        }
+    }
+
+    async fn execute_mpv_command(&mut self, command: serde_json::Value) -> Result<(), VodError> {
+        let result = match self.mpv.as_mut() {
+            Some(mpv) => mpv.command(command).await.map(|_| ()),
+            None => Err(VodError::unavailable(
+                ErrorCode::VodPlayerUnavailable,
+                "Playback is not active",
+            )),
+        };
+        if let Err(error) = &result
+            && error.retryable()
+        {
+            let recovery_error = error.clone();
+            self.stop_mpv().await;
+            self.schedule_recovery(recovery_error);
+        }
+        result
+    }
+
+    async fn attempt_start(&mut self) -> Result<(), VodError> {
+        let desired = self
+            .desired
+            .clone()
+            .ok_or_else(|| VodError::internal("No playback session to start"))?;
+        let probe = probe(&self.config).await;
+        self.status.capabilities = probe.capabilities;
+        if let Some(error) = probe.error {
+            return Err(error);
+        }
+        let media = open_media(
+            &self.config,
+            &desired.root_id,
+            &desired.storage_pool_id,
+            &desired.relative_path,
+        )?;
+        if desired
+            .identity
+            .is_some_and(|expected| expected != media.identity)
+        {
+            return Err(VodError::new(
+                ErrorCode::SourceChanged,
+                "Media file changed since the session was saved",
+                409,
+            ));
+        }
+        if let Some(current) = self.desired.as_mut() {
+            current.identity = Some(media.identity);
+        }
+        self.status.state = PlayerState::Starting;
+        self.status.error = None;
+        self.status.error_code = None;
+        self.status.next_retry_at = None;
+        self.publish();
+        self.persist_current()?;
+        let mpv = MpvHandle::start(
+            &self.config,
+            media,
+            desired.position_seconds,
+            desired.volume,
+            desired.paused,
+        )
+        .await?;
+        self.mpv = Some(mpv);
+        self.retry_at = None;
+        self.status.state = if desired.paused {
+            PlayerState::Paused
+        } else {
+            PlayerState::Playing
+        };
+        self.status.error = None;
+        self.status.error_code = None;
+        self.status.next_retry_at = None;
+        self.stable_since = (!desired.paused).then(Instant::now);
+        self.publish();
+        self.persist_current()?;
+        Ok(())
+    }
+
+    async fn tick(&mut self) {
+        let events = self
+            .mpv
+            .as_mut()
+            .map(MpvHandle::drain_events)
+            .unwrap_or_default();
+        for event in events {
+            self.handle_mpv_event(event).await;
+        }
+        if self.last_capability_probe.elapsed() >= Duration::from_secs(5) {
+            self.refresh_capabilities().await;
+        }
+        if self
+            .retry_at
+            .is_some_and(|retry_at| Instant::now() >= retry_at)
+        {
+            self.retry_at = None;
+            self.try_start_or_schedule().await;
+        }
+        if self
+            .stable_since
+            .is_some_and(|started| started.elapsed() >= Duration::from_secs(60))
+            && self.status.retry_count != 0
+        {
+            self.status.retry_count = 0;
+            self.stable_since = None;
+            self.publish();
+        }
+        if self.desired.is_some()
+            && self.last_checkpoint.elapsed()
+                >= Duration::from_millis(self.config.checkpoint_interval_ms)
+            && let Err(error) = self.persist_current()
+        {
+            tracing::error!(code = ?error.code, "failed to persist VOD player checkpoint");
+        }
+    }
+
+    async fn refresh_capabilities(&mut self) {
+        self.last_capability_probe = Instant::now();
+        let mut probe = if self.mpv.is_some() {
+            probe_active_outputs(&self.config).await
+        } else {
+            probe(&self.config).await
+        };
+        if self.mpv.is_some() && self.config.hwdec != "no" {
+            probe.capabilities.hardware_decode = self.status.capabilities.hardware_decode;
+        }
+        let changed = probe.capabilities != self.status.capabilities;
+        self.status.capabilities = probe.capabilities;
+        if let Some(error) = probe.error
+            && self.mpv.is_some()
+        {
+            self.stop_mpv().await;
+            if error.retryable() {
+                self.schedule_recovery(error);
+            } else {
+                self.set_terminal_error(error);
+            }
+        } else if changed {
+            self.publish();
+        }
+    }
+
+    async fn handle_mpv_event(&mut self, event: MpvEvent) {
+        match event {
+            MpvEvent::Property { name, value } => {
+                let mut changed = false;
+                match name.as_str() {
+                    "time-pos" => {
+                        if let Some(position) = value.as_f64() {
+                            self.status.position_seconds = position.max(0.0);
+                            if let Some(desired) = self.desired.as_mut() {
+                                desired.position_seconds = self.status.position_seconds;
+                            }
+                            changed = true;
+                        }
+                    }
+                    "duration" => {
+                        if let Some(duration) = value.as_f64() {
+                            self.status.duration_seconds = Some(duration.max(0.0));
+                            changed = true;
+                        }
+                    }
+                    "pause" => {
+                        if let Some(paused) = value.as_bool() {
+                            self.status.state = if paused {
+                                PlayerState::Paused
+                            } else {
+                                PlayerState::Playing
+                            };
+                            if let Some(desired) = self.desired.as_mut() {
+                                desired.paused = paused;
+                            }
+                            self.stable_since = if paused { None } else { Some(Instant::now()) };
+                            changed = true;
+                        }
+                    }
+                    "volume" => {
+                        if let Some(volume) = value.as_f64() {
+                            self.status.volume = volume.clamp(0.0, 100.0);
+                            if let Some(desired) = self.desired.as_mut() {
+                                desired.volume = self.status.volume;
+                            }
+                            changed = true;
+                        }
+                    }
+                    "hwdec-current" => {
+                        if let Some(hwdec) = value.as_str() {
+                            self.status.capabilities.hardware_decode = if hwdec == "no" {
+                                HardwareDecode::Software
+                            } else {
+                                HardwareDecode::Enabled
+                            };
+                            changed = true;
+                        }
+                    }
+                    _ => {}
+                }
+                if changed {
+                    self.publish();
+                }
+            }
+            MpvEvent::EndFile { reason, error: _ } if reason == "eof" => {
+                if self.mpv.is_none() {
+                    return;
+                }
+                self.stop_mpv().await;
+                self.desired = None;
+                self.retry_at = None;
+                self.status.state = PlayerState::Stopped;
+                self.status.position_seconds = self
+                    .status
+                    .duration_seconds
+                    .unwrap_or(self.status.position_seconds);
+                self.status.error = None;
+                self.status.error_code = None;
+                let _ = session::clear(&self.config.state_path);
+                self.publish();
+            }
+            MpvEvent::EndFile { reason, error } => {
+                if self.mpv.is_none() {
+                    return;
+                }
+                self.stop_mpv().await;
+                let failure = classify_end_file_failure(&reason, error.as_deref());
+                if failure.retryable() {
+                    self.schedule_recovery(failure);
+                } else {
+                    self.set_terminal_error(failure);
+                }
+            }
+            MpvEvent::Exit { code, signal } => {
+                if self.mpv.take().is_some() && self.desired.is_some() {
+                    self.schedule_recovery(VodError::unavailable(
+                        ErrorCode::PlaybackFailed,
+                        format!("mpv exited unexpectedly (code {code:?}, signal {signal:?})"),
+                    ));
+                }
+            }
+            MpvEvent::ProtocolFailure(message) => {
+                if self.mpv.is_none() {
+                    return;
+                }
+                self.stop_mpv().await;
+                self.schedule_recovery(VodError::unavailable(ErrorCode::PlaybackFailed, message));
+            }
+            MpvEvent::FileLoaded => {}
+        }
+    }
+
+    fn schedule_recovery(&mut self, error: VodError) {
+        if self.desired.is_none() {
+            return;
+        }
+        self.status.retry_count = self.status.retry_count.saturating_add(1);
+        let exponent = self.status.retry_count.saturating_sub(1).min(20);
+        let multiplier = 1_u64 << exponent;
+        let delay_ms = self
+            .config
+            .retry_base_delay_ms
+            .saturating_mul(multiplier)
+            .min(self.config.retry_max_delay_ms);
+        self.retry_at = Some(Instant::now() + Duration::from_millis(delay_ms));
+        self.status.state = PlayerState::Recovering;
+        self.status.error = Some(error.message);
+        self.status.error_code = Some(error.code);
+        self.status.next_retry_at = Some(format_time(
+            OffsetDateTime::now_utc() + TimeDuration::milliseconds(delay_ms as i64),
+        ));
+        self.publish();
+        let _ = self.persist_current();
+    }
+
+    fn set_terminal_error(&mut self, error: VodError) {
+        self.status.state = PlayerState::Error;
+        self.status.error = Some(error.message);
+        self.status.error_code = Some(error.code);
+        self.status.next_retry_at = None;
+        self.retry_at = None;
+        self.stable_since = None;
+        if let Err(clear_error) = session::clear(&self.config.state_path) {
+            tracing::error!(code = ?clear_error.code, "failed to clear terminal VOD player session");
+        }
+        self.publish();
+    }
+
+    fn assert_session(&self, session_id: &str) -> Result<(), VodError> {
+        if self.status.session_id.as_deref() != Some(session_id) {
+            return Err(VodError::new(
+                ErrorCode::SessionConflict,
+                "Playback session changed",
+                409,
+            ));
+        }
+        Ok(())
+    }
+
+    fn copy_desired_to_status(&mut self) {
+        if let Some(desired) = &self.desired {
+            self.status.session_id = Some(desired.session_id.clone());
+            self.status.root_id = Some(desired.root_id.clone());
+            self.status.storage_pool_id = Some(desired.storage_pool_id.clone());
+            self.status.relative_path = Some(desired.relative_path.clone());
+            self.status.file_name = file_name(&desired.relative_path);
+            self.status.position_seconds = desired.position_seconds;
+            self.status.volume = desired.volume;
+        }
+    }
+
+    fn transition_checkpoint(&mut self) -> Result<(), VodError> {
+        self.publish();
+        self.persist_current()
+    }
+
+    fn persist_current(&mut self) -> Result<(), VodError> {
+        let Some(desired) = &self.desired else {
+            return Ok(());
+        };
+        let Some(identity) = desired.identity else {
+            return Ok(());
+        };
+        session::persist(
+            &self.config.state_path,
+            &PersistedSession {
+                version: 1,
+                session_id: desired.session_id.clone(),
+                root_id: desired.root_id.clone(),
+                storage_pool_id: desired.storage_pool_id.clone(),
+                relative_path: desired.relative_path.clone(),
+                position_seconds: desired.position_seconds,
+                volume: desired.volume,
+                desired_paused: desired.paused,
+                identity,
+                updated_at: now(),
+            },
+        )?;
+        self.last_checkpoint = Instant::now();
+        Ok(())
+    }
+
+    fn publish(&mut self) {
+        self.status.revision = self.status.revision.saturating_add(1);
+        self.status.updated_at = now();
+        self.status_sender.send_replace(self.status.clone());
+    }
+
+    async fn stop_mpv(&mut self) {
+        if let Some(mpv) = self.mpv.take() {
+            let diagnostic = mpv.stderr_summary();
+            mpv.shutdown().await;
+            if !diagnostic.is_empty() {
+                tracing::debug!(stderr = %diagnostic, "mpv stopped");
+            }
+        }
+    }
+
+    async fn shutdown(&mut self) {
+        self.stop_mpv().await;
+        let _ = self.persist_current();
+    }
+}
+
+fn empty_status(service_instance_id: String, capabilities: Capabilities) -> Status {
+    Status {
+        state: PlayerState::Idle,
+        session_id: None,
+        service_instance_id,
+        revision: 0,
+        root_id: None,
+        storage_pool_id: None,
+        relative_path: None,
+        file_name: None,
+        position_seconds: 0.0,
+        duration_seconds: None,
+        volume: 100.0,
+        retry_count: 0,
+        next_retry_at: None,
+        capabilities,
+        error: None,
+        error_code: None,
+        updated_at: now(),
+    }
+}
+
+fn now() -> String {
+    format_time(OffsetDateTime::now_utc())
+}
+
+fn format_time(value: OffsetDateTime) -> String {
+    value
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| value.unix_timestamp().to_string())
+}
+
+fn file_name(path: &str) -> Option<String> {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::NasRoot;
+
+    fn test_config(directory: &Path) -> Arc<VodPlayerConfig> {
+        Arc::new(VodPlayerConfig {
+            enabled: true,
+            socket_path: directory.join("vod-player.sock"),
+            state_path: directory.join("session.json"),
+            command_timeout_ms: 100,
+            startup_timeout_ms: 100,
+            checkpoint_interval_ms: 5_000,
+            retry_base_delay_ms: 10,
+            retry_max_delay_ms: 60,
+            video_output: "drm".to_owned(),
+            drm_connector: None,
+            audio_output: "alsa".to_owned(),
+            audio_device: None,
+            hwdec: "no".to_owned(),
+            user: "test".to_owned(),
+            peer_uid: nix::unistd::Uid::current().as_raw(),
+            nas_roots: vec![NasRoot {
+                id: "root".to_owned(),
+                path: directory.to_owned(),
+            }],
+        })
+    }
+
+    fn test_controller(
+        directory: &Path,
+    ) -> (Controller, mpsc::Sender<Message>, watch::Receiver<bool>) {
+        let (sender, receiver) = mpsc::channel(1);
+        let (status_sender, _) = watch::channel(empty_status(
+            "instance".to_owned(),
+            Capabilities {
+                mpv_available: true,
+                drm_available: true,
+                audio_available: true,
+                hardware_decode: HardwareDecode::Software,
+                error: None,
+            },
+        ));
+        let status = status_sender.borrow().clone();
+        let (_, shutdown) = watch::channel(false);
+        let (done, done_receiver) = watch::channel(false);
+        (
+            Controller {
+                config: test_config(directory),
+                receiver,
+                status_sender,
+                shutdown,
+                done,
+                status,
+                desired: None,
+                mpv: None,
+                retry_at: None,
+                stable_since: None,
+                last_checkpoint: Instant::now(),
+                last_capability_probe: Instant::now(),
+            },
+            sender,
+            done_receiver,
+        )
+    }
+
+    #[test]
+    fn recovery_backoff_caps_at_the_configured_maximum() {
+        let base = 2_000_u64;
+        let maximum = 60_000_u64;
+        let delay = base.saturating_mul(1_u64 << 10).min(maximum);
+        assert_eq!(delay, maximum);
+    }
+
+    #[test]
+    fn file_names_do_not_expose_parent_paths() {
+        assert_eq!(file_name("private/movies/a.mp4").as_deref(), Some("a.mp4"));
+    }
+
+    #[test]
+    fn deterministic_decode_failures_do_not_retry() {
+        assert_eq!(
+            classify_end_file_failure("error", Some("decoder not found for codec")).code,
+            ErrorCode::UnsupportedMedia
+        );
+        assert!(classify_end_file_failure("error", Some("Input/output error")).retryable());
+    }
+
+    #[tokio::test]
+    async fn shutdown_preempts_queued_commands() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut controller, sender, done) = test_controller(directory.path());
+        let (shutdown_sender, shutdown_receiver) = watch::channel(false);
+        controller.shutdown = shutdown_receiver;
+        let (response_sender, response_receiver) = oneshot::channel();
+        sender
+            .try_send(Message::Execute(
+                Command::SetVolume {
+                    session_id: "stale".to_owned(),
+                    volume: 10.0,
+                },
+                response_sender,
+            ))
+            .unwrap();
+        shutdown_sender.send(true).unwrap();
+
+        controller.run().await;
+
+        assert!(*done.borrow());
+        drop(controller);
+        assert!(response_receiver.await.is_err());
+    }
+
+    #[tokio::test]
+    async fn stale_terminal_events_do_not_schedule_recovery_twice() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut controller, _sender, _done) = test_controller(directory.path());
+        controller.desired = Some(DesiredSession {
+            session_id: "session".to_owned(),
+            root_id: "root".to_owned(),
+            storage_pool_id: "pool".to_owned(),
+            relative_path: "movie.mp4".to_owned(),
+            position_seconds: 0.0,
+            volume: 100.0,
+            paused: false,
+            identity: None,
+        });
+        controller.status.retry_count = 1;
+        controller
+            .handle_mpv_event(MpvEvent::ProtocolFailure("closed".to_owned()))
+            .await;
+        controller
+            .handle_mpv_event(MpvEvent::Exit {
+                code: Some(1),
+                signal: None,
+            })
+            .await;
+        controller
+            .handle_mpv_event(MpvEvent::EndFile {
+                reason: "error".to_owned(),
+                error: None,
+            })
+            .await;
+
+        assert_eq!(controller.status.retry_count, 1);
+        assert!(controller.retry_at.is_none());
+    }
+}

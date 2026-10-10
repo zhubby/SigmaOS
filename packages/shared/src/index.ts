@@ -2,6 +2,7 @@ export * from "./config.js";
 export * from "./docker-images.js";
 export * from "./docker-resources.js";
 export * from "./photo-config.js";
-export * from "./player-protocol.js";
+export * from "./vod-player-protocol.js";
+export * from "./vod-player-client.js";
 export * from "./termux-protocol.js";
 export * from "./types.js";

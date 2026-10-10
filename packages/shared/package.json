@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./vod-player-client": "./src/vod-player-client.ts",
     "./docker-images": "./src/docker-images.ts",
     "./docker-resources": "./src/docker-resources.ts",
     "./photo-config": "./src/photo-config.ts"

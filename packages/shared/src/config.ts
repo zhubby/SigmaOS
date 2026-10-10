@@ -11,7 +11,7 @@ import type {
   ShareConfig,
   ShareDefinitionConfig,
   ShareProtocolConfig,
-  PlayerConfig,
+  VodPlayerConfig,
   SigmaConfig,
   TerminalConfig,
   VmConfig
@@ -110,9 +110,15 @@ interface TomlConfig {
     connect_timeout_ms?: number;
     max_sessions?: number;
   };
-  player?: {
+  vod_player?: {
     enabled?: boolean;
-    helper_socket_path?: string;
+    socket_path?: string;
+    state_path?: string;
+    command_timeout_ms?: number;
+    startup_timeout_ms?: number;
+    checkpoint_interval_ms?: number;
+    retry_base_delay_ms?: number;
+    retry_max_delay_ms?: number;
     video_output?: "drm";
     drm_connector?: string;
     audio_output?: "alsa";
@@ -204,7 +210,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.c
     hostd: loadHostdConfig(env, fileConfig),
     shares: loadShareConfig(env, fileConfig),
     terminal: loadTerminalConfig(env, fileConfig),
-    player: loadPlayerConfig(env, fileConfig),
+    vodPlayer: loadVodPlayerConfig(env, fileConfig),
     nasRoots,
     backup,
     health
@@ -424,32 +430,108 @@ function loadTerminalConfig(env: NodeJS.ProcessEnv, fileConfig: TomlConfig): Ter
   };
 }
 
-function loadPlayerConfig(env: NodeJS.ProcessEnv, fileConfig: TomlConfig): PlayerConfig {
-  const player = fileConfig.player;
-  const videoOutput = env.SIGMAOS_PLAYER_VIDEO_OUTPUT ?? player?.video_output ?? "drm";
-  const audioOutput = env.SIGMAOS_PLAYER_AUDIO_OUTPUT ?? player?.audio_output ?? "alsa";
-  const hwdec = env.SIGMAOS_PLAYER_HWDEC ?? player?.hwdec ?? "auto-safe";
-  const helperSocketPath =
-    normalizeText(env.SIGMAOS_PLAYER_HELPER_SOCKET_PATH) ??
-    normalizeText(player?.helper_socket_path) ??
-    "/run/sigmaos/player-helper.sock";
-  const playerUser = normalizeText(env.SIGMAOS_PLAYER_USER) ?? normalizeText(player?.user) ?? "sigmaos";
+function loadVodPlayerConfig(env: NodeJS.ProcessEnv, fileConfig: TomlConfig): VodPlayerConfig {
+  const legacyEnvironment = Object.keys(env).find((name) => name.startsWith("SIGMAOS_PLAYER_") || name === "SIGMAOS_ENABLE_PLAYER");
+  if (legacyEnvironment) {
+    throw new Error(`${legacyEnvironment} is no longer supported; use SIGMAOS_VOD_PLAYER_*`);
+  }
+  const player = fileConfig.vod_player;
+  const videoOutput = env.SIGMAOS_VOD_PLAYER_VIDEO_OUTPUT ?? player?.video_output ?? "drm";
+  const audioOutput = env.SIGMAOS_VOD_PLAYER_AUDIO_OUTPUT ?? player?.audio_output ?? "alsa";
+  const hwdec = env.SIGMAOS_VOD_PLAYER_HWDEC ?? player?.hwdec ?? "auto-safe";
+  const socketPath =
+    normalizeText(env.SIGMAOS_VOD_PLAYER_SOCKET_PATH) ??
+    normalizeText(player?.socket_path) ??
+    "/run/sigmaos/vod-player.sock";
+  const statePath =
+    normalizeText(env.SIGMAOS_VOD_PLAYER_STATE_PATH) ??
+    normalizeText(player?.state_path) ??
+    "/var/lib/sigmaos-vod-player/session.json";
+  const playerUser = normalizeText(env.SIGMAOS_VOD_PLAYER_USER) ?? normalizeText(player?.user) ?? "sigmaos";
+  if (!path.isAbsolute(socketPath) || !path.isAbsolute(statePath)) {
+    throw new Error("VOD Player socket_path and state_path must be absolute");
+  }
+  if (isPrivateTemporaryPath(socketPath) || isPrivateTemporaryPath(statePath)) {
+    throw new Error("VOD Player socket_path and state_path cannot use /tmp or /var/tmp");
+  }
+  if (!/^[a-zA-Z0-9._-]+$/.test(playerUser) || playerUser === "root") {
+    throw new Error("VOD Player user must name a non-root local account");
+  }
+  if (videoOutput !== "drm" || audioOutput !== "alsa" || !["auto-safe", "auto", "no"].includes(hwdec)) {
+    throw new Error("VOD Player output configuration is invalid");
+  }
+  const retryBaseDelayMs = strictPositiveInteger(
+    env.SIGMAOS_VOD_PLAYER_RETRY_BASE_DELAY_MS ?? player?.retry_base_delay_ms,
+    2_000,
+    "retry_base_delay_ms"
+  );
+  const retryMaxDelayMs = strictPositiveInteger(
+    env.SIGMAOS_VOD_PLAYER_RETRY_MAX_DELAY_MS ?? player?.retry_max_delay_ms,
+    60_000,
+    "retry_max_delay_ms"
+  );
+  if (retryMaxDelayMs < retryBaseDelayMs) {
+    throw new Error("VOD Player retry_max_delay_ms must be at least retry_base_delay_ms");
+  }
   return {
-    enabled: toBoolean(env.SIGMAOS_PLAYER_ENABLED, player?.enabled ?? false),
-    helperSocketPath: path.isAbsolute(helperSocketPath) ? helperSocketPath : "/run/sigmaos/player-helper.sock",
-    videoOutput: videoOutput === "drm" ? "drm" : "drm",
+    enabled: strictBoolean(
+      env.SIGMAOS_VOD_PLAYER_ENABLED ?? player?.enabled,
+      false,
+      "enabled"
+    ),
+    socketPath,
+    statePath,
+    commandTimeoutMs: strictPositiveInteger(
+      env.SIGMAOS_VOD_PLAYER_COMMAND_TIMEOUT_MS ?? player?.command_timeout_ms,
+      5_000,
+      "command_timeout_ms"
+    ),
+    startupTimeoutMs: strictPositiveInteger(
+      env.SIGMAOS_VOD_PLAYER_STARTUP_TIMEOUT_MS ?? player?.startup_timeout_ms,
+      15_000,
+      "startup_timeout_ms"
+    ),
+    checkpointIntervalMs: strictPositiveInteger(
+      env.SIGMAOS_VOD_PLAYER_CHECKPOINT_INTERVAL_MS ?? player?.checkpoint_interval_ms,
+      5_000,
+      "checkpoint_interval_ms"
+    ),
+    retryBaseDelayMs,
+    retryMaxDelayMs,
+    videoOutput: "drm",
     drmConnector:
-      normalizeText(env.SIGMAOS_PLAYER_DRM_CONNECTOR) ??
+      normalizeText(env.SIGMAOS_VOD_PLAYER_DRM_CONNECTOR) ??
       normalizeText(player?.drm_connector) ??
       null,
-    audioOutput: audioOutput === "alsa" ? "alsa" : "alsa",
+    audioOutput: "alsa",
     audioDevice:
-      normalizeText(env.SIGMAOS_PLAYER_AUDIO_DEVICE) ??
+      normalizeText(env.SIGMAOS_VOD_PLAYER_AUDIO_DEVICE) ??
       normalizeText(player?.audio_device) ??
       null,
-    hwdec: hwdec === "auto" || hwdec === "no" || hwdec === "auto-safe" ? hwdec : "auto-safe",
-    user: /^[a-zA-Z0-9._-]+$/.test(playerUser) && playerUser !== "root" ? playerUser : "sigmaos"
+    hwdec: hwdec as VodPlayerConfig["hwdec"],
+    user: playerUser
   };
+}
+
+function isPrivateTemporaryPath(value: string): boolean {
+  return value === "/tmp" || value.startsWith("/tmp/") || value === "/var/tmp" || value.startsWith("/var/tmp/");
+}
+
+function strictBoolean(value: string | boolean | undefined, fallback: boolean, name: string): boolean {
+  if (value === undefined) return fallback;
+  if (typeof value === "boolean") return value;
+  if (value === "1" || value === "true") return true;
+  if (value === "0" || value === "false") return false;
+  throw new Error(`VOD Player ${name} must be 0 or 1`);
+}
+
+function strictPositiveInteger(value: string | number | undefined, fallback: number, name: string): number {
+  if (value === undefined) return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`VOD Player ${name} must be a positive integer`);
+  }
+  return parsed;
 }
 
 function normalizeShareItem(item: NonNullable<NonNullable<TomlConfig["shares"]>["items"]>[number], index: number): ShareDefinitionConfig | null {

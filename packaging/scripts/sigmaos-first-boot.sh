@@ -13,9 +13,15 @@ PI_COMMAND="${SIGMAOS_PI_COMMAND:-pi}"
 LOCAL_ENDPOINT="${SIGMAOS_LOCAL_ENDPOINT:-}"
 DOCKER_ENABLED="${SIGMAOS_DOCKER_ENABLED:-0}"
 VM_ENABLED="${SIGMAOS_VM_ENABLED:-0}"
-PLAYER_ENABLED="${SIGMAOS_PLAYER_ENABLED:-${SIGMAOS_ENABLE_PLAYER:-0}}"
-PLAYER_USER="${SIGMAOS_PLAYER_USER:-sigmaos}"
+VOD_PLAYER_ENABLED="${SIGMAOS_VOD_PLAYER_ENABLED:-${SIGMAOS_ENABLE_VOD_PLAYER:-0}}"
+VOD_PLAYER_USER="${SIGMAOS_VOD_PLAYER_USER:-sigmaos}"
 TERMINAL_USER="${SIGMAOS_TERMUX_USER:-sigmaos}"
+
+legacy_player_environment=$(env | awk -F= '$1 == "SIGMAOS_ENABLE_PLAYER" || $1 ~ /^SIGMAOS_PLAYER_/ { print $1; exit }')
+if [ -n "$legacy_player_environment" ]; then
+  printf "%s is no longer supported; use SIGMAOS_VOD_PLAYER_*\n" "$legacy_player_environment" >&2
+  exit 1
+fi
 
 if [ -e "$CONFIG_PATH" ] && [ "${SIGMAOS_FIRST_BOOT_FORCE:-0}" != "1" ]; then
   printf "SigmaOS configuration already exists at %s; preserving it\n" "$CONFIG_PATH"
@@ -35,24 +41,24 @@ case "$VM_ENABLED" in
   0|1) ;;
   *) printf "SIGMAOS_VM_ENABLED must be 0 or 1\n" >&2; exit 1 ;;
 esac
-case "$PLAYER_ENABLED" in
+case "$VOD_PLAYER_ENABLED" in
   0|1) ;;
-  *) printf "SIGMAOS_PLAYER_ENABLED must be 0 or 1\n" >&2; exit 1 ;;
+  *) printf "SIGMAOS_VOD_PLAYER_ENABLED must be 0 or 1\n" >&2; exit 1 ;;
 esac
-case "$PLAYER_USER" in
-  *[!a-zA-Z0-9._-]*|root) printf "SIGMAOS_PLAYER_USER must name a non-root local user\n" >&2; exit 1 ;;
+case "$VOD_PLAYER_USER" in
+  *[!a-zA-Z0-9._-]*|root) printf "SIGMAOS_VOD_PLAYER_USER must name a non-root local user\n" >&2; exit 1 ;;
 esac
-getent passwd "$PLAYER_USER" >/dev/null || {
-  printf "player user does not exist: %s\n" "$PLAYER_USER" >&2
+getent passwd "$VOD_PLAYER_USER" >/dev/null || {
+  printf "VOD player user does not exist: %s\n" "$VOD_PLAYER_USER" >&2
   exit 1
 }
 
 DOCKER_ENABLED_BOOL=false
 VM_ENABLED_BOOL=false
-PLAYER_ENABLED_BOOL=false
+VOD_PLAYER_ENABLED_BOOL=false
 [ "$DOCKER_ENABLED" = "1" ] && DOCKER_ENABLED_BOOL=true
 [ "$VM_ENABLED" = "1" ] && VM_ENABLED_BOOL=true
-[ "$PLAYER_ENABLED" = "1" ] && PLAYER_ENABLED_BOOL=true
+[ "$VOD_PLAYER_ENABLED" = "1" ] && VOD_PLAYER_ENABLED_BOOL=true
 
 ask_default() {
   prompt="$1"
@@ -131,15 +137,21 @@ session_idle_timeout_ms = 1800000
 connect_timeout_ms = 10000
 max_sessions = 32
 
-[player]
-enabled = $PLAYER_ENABLED_BOOL
-helper_socket_path = "/run/sigmaos/player-helper.sock"
+[vod_player]
+enabled = $VOD_PLAYER_ENABLED_BOOL
+socket_path = "/run/sigmaos/vod-player.sock"
+state_path = "/var/lib/sigmaos-vod-player/session.json"
+command_timeout_ms = 5000
+startup_timeout_ms = 15000
+checkpoint_interval_ms = 5000
+retry_base_delay_ms = 2000
+retry_max_delay_ms = 60000
 video_output = "drm"
 drm_connector = ""
 audio_output = "alsa"
 audio_device = ""
 hwdec = "auto-safe"
-user = "$PLAYER_USER"
+user = "$VOD_PLAYER_USER"
 
 [[nas_roots]]
 id = "$NAS_ROOT_ID"

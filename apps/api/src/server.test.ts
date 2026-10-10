@@ -298,7 +298,8 @@ describe("API server", () => {
         freshWorkers: 0,
         activeTasks: 0,
         queuedTasks: 0
-      }
+      },
+      vodPlayer: { status: "disabled", state: null, errorCode: "VOD_PLAYER_DISABLED" }
     });
     expect(healthBody.issues).toEqual(
       expect.arrayContaining([
@@ -5072,9 +5073,15 @@ function testConfig(dataDir: string): SigmaConfig {
       user: "test-user",
       termuxSocketPath: "/tmp/termux.sock"
     },
-    player: {
+    vodPlayer: {
       enabled: false,
-      helperSocketPath: "/tmp/player-helper.sock",
+      socketPath: "/tmp/vod-player.sock",
+      statePath: "/tmp/vod-player-session.json",
+      commandTimeoutMs: 5_000,
+      startupTimeoutMs: 15_000,
+      checkpointIntervalMs: 5_000,
+      retryBaseDelayMs: 2_000,
+      retryMaxDelayMs: 60_000,
       videoOutput: "drm",
       drmConnector: null,
       audioOutput: "alsa",

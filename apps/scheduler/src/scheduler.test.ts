@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createActionMessageAndJob, createSession, ensureNasRoots, finishBackupRun, finishIndexRun, openSigmaDb, recordBackupFailure, startBackupRun, startIndexRun, upsertIndexedFile, upsertRootReadiness, type SigmaDatabase } from "@sigmaos/db";
-import type { SigmaConfig } from "@sigmaos/shared";
+import type { SigmaConfig, VodPlayerRuntime } from "@sigmaos/shared";
 import { describeModelProvider, runHealthOnce, runMaintenance, runSchedulerOnce } from "./scheduler.js";
 
 let tempDir: string;
@@ -56,7 +56,7 @@ beforeEach(async () => {
     },
     hostd: { socketPath: "/tmp/hostd.sock" },
     terminal: { user: "test-user", termuxSocketPath: "/tmp/termux.sock" },
-    player: { enabled: false, helperSocketPath: "/tmp/player-helper.sock", videoOutput: "drm", drmConnector: null, audioOutput: "alsa", audioDevice: null, hwdec: "auto-safe", user: "sigmaos" },
+    vodPlayer: { enabled: false, socketPath: "/tmp/vod-player.sock", statePath: "/tmp/vod-player-session.json", commandTimeoutMs: 5000, startupTimeoutMs: 15000, checkpointIntervalMs: 5000, retryBaseDelayMs: 2000, retryMaxDelayMs: 60000, videoOutput: "drm", drmConnector: null, audioOutput: "alsa", audioDevice: null, hwdec: "auto-safe", user: "sigmaos" },
     nasRoots: [{ id: "local", name: "Local", path: rootDir }]
   };
   upsertIndexedFile(db, {
@@ -315,6 +315,41 @@ describe("scheduler", () => {
     ]));
     expect(summary.issues).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "backup_target_not_ready" })
+    ]));
+  });
+
+  it("includes the live VOD Player state in scheduled health", async () => {
+    config = { ...config, vodPlayer: { ...config.vodPlayer, enabled: true } };
+    const vodPlayer: VodPlayerRuntime = {
+      async getStatus() {
+        return {
+          state: "recovering",
+          sessionId: "session-1",
+          serviceInstanceId: "instance-1",
+          revision: 3,
+          rootId: "local",
+          storagePoolId: "/dev/md/media",
+          relativePath: "movie.mp4",
+          fileName: "movie.mp4",
+          positionSeconds: 10,
+          durationSeconds: 100,
+          volume: 80,
+          retryCount: 2,
+          nextRetryAt: new Date(Date.now() + 2_000).toISOString(),
+          capabilities: { mpvAvailable: true, drmAvailable: false, audioAvailable: true, hardwareDecode: "unknown", error: "Display unavailable" },
+          error: "Display unavailable",
+          errorCode: "DRM_UNAVAILABLE",
+          updatedAt: new Date().toISOString()
+        };
+      },
+      async command() {
+        throw new Error("not used");
+      }
+    };
+    const summary = await runHealthOnce({ db, config, vodPlayer });
+    expect(summary.vodPlayer).toMatchObject({ status: "degraded", state: "recovering", errorCode: "DRM_UNAVAILABLE" });
+    expect(summary.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "vod_player_recovering", severity: "warning" })
     ]));
   });
 });

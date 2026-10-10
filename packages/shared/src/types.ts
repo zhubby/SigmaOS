@@ -1,4 +1,5 @@
 import type { PhotoMediaKind } from "./photo-config.js";
+import type { VodPlayerErrorCode, VodPlayerState } from "./vod-player-protocol.js";
 
 export type JobStatus =
   | "queued"
@@ -580,6 +581,14 @@ export interface SystemHealthSummary {
   indexerFreshnessMs: number | null;
   backupFreshnessMs: number | null;
   downloader: DownloadWorkerHealth;
+  vodPlayer: VodPlayerHealth;
+}
+
+export interface VodPlayerHealth {
+  status: "disabled" | "ready" | "degraded" | "critical";
+  state: VodPlayerState | null;
+  errorCode: VodPlayerErrorCode | null;
+  checkedAt: string;
 }
 
 export interface DockerConfig {
@@ -708,9 +717,15 @@ export interface TerminalTabState {
   maxSessions: number;
 }
 
-export interface PlayerConfig {
+export interface VodPlayerConfig {
   enabled: boolean;
-  helperSocketPath: string;
+  socketPath: string;
+  statePath: string;
+  commandTimeoutMs: number;
+  startupTimeoutMs: number;
+  checkpointIntervalMs: number;
+  retryBaseDelayMs: number;
+  retryMaxDelayMs: number;
   videoOutput: "drm";
   drmConnector: string | null;
   audioOutput: "alsa";
@@ -753,7 +768,7 @@ export interface SigmaConfig {
   hostd: HostdConfig;
   shares: ShareConfig;
   terminal: TerminalConfig;
-  player: PlayerConfig;
+  vodPlayer: VodPlayerConfig;
   nasRoots: NasRootConfig[];
   backup?: BackupConfig;
   health?: {

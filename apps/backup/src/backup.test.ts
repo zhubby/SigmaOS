@@ -29,7 +29,7 @@ function config(root: string, repository: string, passwordFile: string): SigmaCo
     hostd: { socketPath: "/tmp/hostd.sock" },
     shares: { enabled: false, account: { username: "share", password: null }, shares: [] },
     terminal: { user: "test-user", termuxSocketPath: "/tmp/termux.sock" },
-    player: { enabled: false, helperSocketPath: "/tmp/player-helper.sock", videoOutput: "drm", drmConnector: null, audioOutput: "alsa", audioDevice: null, hwdec: "auto-safe", user: "sigmaos" },
+    vodPlayer: { enabled: false, socketPath: "/tmp/vod-player.sock", statePath: "/tmp/vod-player-session.json", commandTimeoutMs: 5000, startupTimeoutMs: 15000, checkpointIntervalMs: 5000, retryBaseDelayMs: 2000, retryMaxDelayMs: 60000, videoOutput: "drm", drmConnector: null, audioOutput: "alsa", audioDevice: null, hwdec: "auto-safe", user: "sigmaos" },
     nasRoots: [{ id: "local", name: "Local", path: root, mountPolicy: "optional" }],
     backup: { enabled: true, repositoryPath: repository, passwordFile, stagingPath: path.join(path.dirname(root), "staging"), requireMount: false, retryCount: 1, timeoutMs: 1000, keepDaily: 7, keepWeekly: 4 },
     health: { staleIndexWarningMs: 7200000, staleIndexCriticalMs: 21600000, stalledRunMs: 900000, consecutiveFailureThreshold: 2, backupStaleMs: 93600000 }

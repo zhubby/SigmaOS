@@ -2,9 +2,11 @@ import type { FastifyInstance } from "fastify";
 import { getDownloadWorkerHealth, listHealthAlerts, listNasRoots, listRootReadiness, getIndexRootStatus, listBackupRuns } from "@sigmaos/db";
 import type { SystemHealthSummary } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
+import { createVodPlayerRuntime } from "../lib/vod-player.js";
 
-export function registerHealthStatusRoutes(server: FastifyInstance, { db }: ApiRouteContext): void {
+export function registerHealthStatusRoutes(server: FastifyInstance, context: ApiRouteContext): void {
   server.get("/api/system/health", async (): Promise<SystemHealthSummary> => {
+    const { db } = context;
     const checkedAt = new Date().toISOString();
     const roots = listNasRoots(db);
     const readinessById = new Map(listRootReadiness(db, roots.map((root) => root.id)).map((item) => [item.rootId, item]));
@@ -39,6 +41,29 @@ export function registerHealthStatusRoutes(server: FastifyInstance, { db }: ApiR
         message: downloader.status === "stale" ? "Downloader heartbeat is stale" : "Downloader is unavailable"
       });
     }
-    return { status: issues.some((issue) => issue.severity === "critical") ? "failed" : issues.length ? "degraded" : "ready", checkedAt, issues, roots: readiness, indexerFreshnessMs: indexerFreshness.length ? Math.max(...indexerFreshness) : null, backupFreshnessMs, downloader };
+    const vodPlayer = await getVodPlayerHealth(context, checkedAt);
+    if (vodPlayer.status === "degraded") {
+      issues.push({ code: "vod_player_recovering", severity: "warning", message: "VOD Player is recovering playback" });
+    } else if (vodPlayer.status === "critical") {
+      issues.push({ code: "vod_player_unavailable", severity: "critical", message: "VOD Player is unavailable" });
+    }
+    return { status: issues.some((issue) => issue.severity === "critical") ? "failed" : issues.length ? "degraded" : "ready", checkedAt, issues, roots: readiness, indexerFreshnessMs: indexerFreshness.length ? Math.max(...indexerFreshness) : null, backupFreshnessMs, downloader, vodPlayer };
   });
+}
+
+async function getVodPlayerHealth(context: ApiRouteContext, checkedAt: string): Promise<SystemHealthSummary["vodPlayer"]> {
+  if (!context.config.vodPlayer.enabled) {
+    return { status: "disabled", state: null, errorCode: "VOD_PLAYER_DISABLED", checkedAt };
+  }
+  try {
+    const status = await (context.vodPlayer ?? createVodPlayerRuntime(context.config.vodPlayer)).getStatus();
+    return {
+      status: status.state === "recovering" ? "degraded" : status.state === "error" ? "critical" : "ready",
+      state: status.state,
+      errorCode: status.errorCode,
+      checkedAt
+    };
+  } catch {
+    return { status: "critical", state: null, errorCode: "VOD_PLAYER_UNAVAILABLE", checkedAt };
+  }
 }

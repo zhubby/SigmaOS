@@ -53,9 +53,15 @@ describe("loadConfig", () => {
       connectTimeoutMs: 10_000,
       maxSessions: 32
     });
-    expect(config.player).toEqual({
+    expect(config.vodPlayer).toEqual({
       enabled: false,
-      helperSocketPath: "/run/sigmaos/player-helper.sock",
+      socketPath: "/run/sigmaos/vod-player.sock",
+      statePath: "/var/lib/sigmaos-vod-player/session.json",
+      commandTimeoutMs: 5_000,
+      startupTimeoutMs: 15_000,
+      checkpointIntervalMs: 5_000,
+      retryBaseDelayMs: 2_000,
+      retryMaxDelayMs: 60_000,
       videoOutput: "drm",
       drmConnector: null,
       audioOutput: "alsa",
@@ -65,15 +71,16 @@ describe("loadConfig", () => {
     });
   });
 
-  it("loads HDMI player settings from TOML and environment overrides", async () => {
+  it("loads VOD Player settings from TOML and environment overrides", async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-config-"));
     const configPath = path.join(tempDir, "config.toml");
     await writeFile(
       configPath,
       `
-        [player]
+        [vod_player]
         enabled = true
-        helper_socket_path = "/tmp/player.sock"
+        socket_path = "/run/custom/vod-player.sock"
+        state_path = "/var/lib/custom-vod-player/session.json"
         drm_connector = "HDMI-A-1"
         audio_device = "alsa/plughw:1,0"
         hwdec = "auto"
@@ -81,9 +88,10 @@ describe("loadConfig", () => {
       `
     );
 
-    expect(loadConfig({ SIGMAOS_CONFIG: configPath } as NodeJS.ProcessEnv, tempDir).player).toMatchObject({
+    expect(loadConfig({ SIGMAOS_CONFIG: configPath } as NodeJS.ProcessEnv, tempDir).vodPlayer).toMatchObject({
       enabled: true,
-      helperSocketPath: "/tmp/player.sock",
+      socketPath: "/run/custom/vod-player.sock",
+      statePath: "/var/lib/custom-vod-player/session.json",
       drmConnector: "HDMI-A-1",
       audioDevice: "alsa/plughw:1,0",
       hwdec: "auto",
@@ -91,22 +99,34 @@ describe("loadConfig", () => {
     });
     expect(loadConfig({
       SIGMAOS_CONFIG: configPath,
-      SIGMAOS_PLAYER_ENABLED: "0",
-      SIGMAOS_PLAYER_HELPER_SOCKET_PATH: "/run/override-player.sock"
-    } as NodeJS.ProcessEnv, tempDir).player).toMatchObject({
+      SIGMAOS_VOD_PLAYER_ENABLED: "0",
+      SIGMAOS_VOD_PLAYER_SOCKET_PATH: "/run/override-vod-player.sock"
+    } as NodeJS.ProcessEnv, tempDir).vodPlayer).toMatchObject({
       enabled: false,
-      helperSocketPath: "/run/override-player.sock"
+      socketPath: "/run/override-vod-player.sock"
     });
   });
 
-  it("falls back from unsafe player identity and socket settings", async () => {
+  it("rejects unsafe or internally inconsistent VOD Player settings", async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-config-player-"));
     const configPath = path.join(tempDir, "config.toml");
-    await writeFile(configPath, `[player]\nuser = "root"\nhelper_socket_path = "relative.sock"\n`);
-    expect(loadConfig({ SIGMAOS_CONFIG: configPath } as NodeJS.ProcessEnv, tempDir).player).toMatchObject({
-      user: "sigmaos",
-      helperSocketPath: "/run/sigmaos/player-helper.sock"
-    });
+    await writeFile(configPath, `[vod_player]\nuser = "root"\nsocket_path = "relative.sock"\n`);
+    expect(() => loadConfig({ SIGMAOS_CONFIG: configPath } as NodeJS.ProcessEnv, tempDir!))
+      .toThrow("socket_path and state_path must be absolute");
+    await writeFile(configPath, `[vod_player]\nretry_base_delay_ms = 1000\nretry_max_delay_ms = 500\n`);
+    expect(() => loadConfig({ SIGMAOS_CONFIG: configPath } as NodeJS.ProcessEnv, tempDir!))
+      .toThrow("retry_max_delay_ms must be at least retry_base_delay_ms");
+    await writeFile(configPath, `[vod_player]\nhwdec = "unsafe"\n`);
+    expect(() => loadConfig({ SIGMAOS_CONFIG: configPath } as NodeJS.ProcessEnv, tempDir!))
+      .toThrow("output configuration is invalid");
+    await writeFile(configPath, `[vod_player]\nsocket_path = "/tmp/vod-player.sock"\n`);
+    expect(() => loadConfig({ SIGMAOS_CONFIG: configPath } as NodeJS.ProcessEnv, tempDir!))
+      .toThrow("cannot use /tmp or /var/tmp");
+  });
+
+  it("rejects removed player environment variables", () => {
+    expect(() => loadConfig({ SIGMAOS_PLAYER_ENABLED: "1" } as NodeJS.ProcessEnv, process.cwd()))
+      .toThrow("SIGMAOS_PLAYER_ENABLED is no longer supported");
   });
 
   it("loads Docker settings from TOML", async () => {

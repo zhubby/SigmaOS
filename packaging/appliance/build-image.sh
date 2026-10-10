@@ -10,7 +10,13 @@ MIRROR="${MIRROR%/}"
 NODE_MIRROR="${SIGMAOS_NODE_MIRROR:-https://mirrors.aliyun.com/nodejs-release}"
 NODE_MIRROR="${NODE_MIRROR%/}"
 NODE_VERSION="${SIGMAOS_NODE_VERSION:-22.23.2}"
-PLAYER_ENABLED="${SIGMAOS_ENABLE_PLAYER:-0}"
+VOD_PLAYER_ENABLED="${SIGMAOS_ENABLE_VOD_PLAYER:-0}"
+
+legacy_player_environment=$(env | awk -F= '$1 == "SIGMAOS_ENABLE_PLAYER" || $1 ~ /^SIGMAOS_PLAYER_/ { print $1; exit }')
+if [ -n "$legacy_player_environment" ]; then
+  printf "%s is no longer supported; use SIGMAOS_ENABLE_VOD_PLAYER\n" "$legacy_player_environment" >&2
+  exit 1
+fi
 
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -31,9 +37,9 @@ need tar
 need curl
 need sha256sum
 
-case "$PLAYER_ENABLED" in
+case "$VOD_PLAYER_ENABLED" in
   0|1) ;;
-  *) printf "SIGMAOS_ENABLE_PLAYER must be 0 or 1\n" >&2; exit 1 ;;
+  *) printf "SIGMAOS_ENABLE_VOD_PLAYER must be 0 or 1\n" >&2; exit 1 ;;
 esac
 
 if [ ! -f "$DEB_PATH" ]; then
@@ -73,10 +79,10 @@ ln -sfn "$node_dir/bin/npx" "$ROOTFS/usr/local/bin/npx"
 cp "$DEB_PATH" "$ROOTFS/tmp/sigmaos.deb"
 systemd-nspawn -D "$ROOTFS" /bin/sh -eu -c "apt-get update && apt-get install -y /tmp/sigmaos.deb && rm /tmp/sigmaos.deb"
 systemd-nspawn -D "$ROOTFS" /usr/lib/sigmaos/scripts/sigmaos-nginx.sh
-if [ "$PLAYER_ENABLED" = "1" ]; then
+if [ "$VOD_PLAYER_ENABLED" = "1" ]; then
   systemd-nspawn -D "$ROOTFS" /bin/sh -eu -c \
-    'sed -i "/^\\[player\\]/,/^\\[/ s/^enabled = false$/enabled = true/" /etc/sigmaos/config.toml'
-  systemd-nspawn -D "$ROOTFS" systemctl enable nginx.service sigmaos-hostd.service sigmaos-termux.service sigmaos-player-helper.service sigmaos-api.service sigmaos-worker@1.service sigmaos-photo-worker.service sigmaos-downloader.service sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer sigmaos-backup-daily.timer sigmaos-backup-weekly.timer sigmaos-health.timer
+    'sed -i "/^\\[vod_player\\]/,/^\\[/ s/^enabled = false$/enabled = true/" /etc/sigmaos/config.toml'
+  systemd-nspawn -D "$ROOTFS" systemctl enable nginx.service sigmaos-hostd.service sigmaos-termux.service sigmaos-vod-player.service sigmaos-api.service sigmaos-worker@1.service sigmaos-photo-worker.service sigmaos-downloader.service sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer sigmaos-backup-daily.timer sigmaos-backup-weekly.timer sigmaos-health.timer
 else
   systemd-nspawn -D "$ROOTFS" systemctl enable nginx.service sigmaos-hostd.service sigmaos-termux.service sigmaos-api.service sigmaos-worker@1.service sigmaos-photo-worker.service sigmaos-downloader.service sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer sigmaos-backup-daily.timer sigmaos-backup-weekly.timer sigmaos-health.timer
 fi

@@ -10,8 +10,8 @@ LOCK_PATH=/run/lock/sigmaos-deploy.lock
 
 TIMERS='sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer sigmaos-health.timer sigmaos-backup-daily.timer sigmaos-backup-weekly.timer'
 RUNTIME_SERVICES='sigmaos-hostd.service sigmaos-termux.service sigmaos-api.service sigmaos-worker@1.service sigmaos-photo-worker.service sigmaos-downloader.service'
-WRITERS="sigmaos-indexer.service sigmaos-scheduler.service sigmaos-maintenance.service sigmaos-health.service sigmaos-backup-daily.service sigmaos-backup-weekly.service $RUNTIME_SERVICES sigmaos-player-helper.service"
-RETIRED_UNITS='sigmaos-share-helper.service sigmaos-terminal-helper.service'
+WRITERS="sigmaos-indexer.service sigmaos-scheduler.service sigmaos-maintenance.service sigmaos-health.service sigmaos-backup-daily.service sigmaos-backup-weekly.service $RUNTIME_SERVICES sigmaos-vod-player.service"
+RETIRED_UNITS='sigmaos-share-helper.service sigmaos-terminal-helper.service sigmaos-player-helper.service'
 
 success=0
 work_dir=

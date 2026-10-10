@@ -13,7 +13,7 @@ package = "sigmaos.deb"
 units = [
   "sigmaos-api.service",
   "sigmaos-termux.service",
-  "sigmaos-player-helper.service",
+  "sigmaos-vod-player.service",
   "sigmaos-hostd.service",
   "sigmaos-worker@1.service",
   "sigmaos-photo-worker.service",
