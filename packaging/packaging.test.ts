@@ -109,6 +109,9 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("target/release/sigmaos-downloader usr/lib/sigmaos/bin/");
     expect(install).not.toContain("apps/downloader/dist/");
     expect(install).toContain("node_modules/* usr/lib/sigmaos/node_modules/");
+    expect(install).toContain(
+      "packages/agent/node_modules/@earendil-works/pi-coding-agent usr/lib/sigmaos/node_modules/@earendil-works/"
+    );
     expect(install).toContain("docs/dist/* usr/lib/sigmaos/docs/dist/");
     expect(install).toContain(".sigmaos/build-info.json usr/lib/sigmaos/");
     expect(install).not.toContain("docs/node_modules");

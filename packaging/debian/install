@@ -11,6 +11,10 @@ target/release/sigmaos-vod-player usr/lib/sigmaos/bin/
 apps/web/dist/* usr/lib/sigmaos/apps/web/dist/
 docs/dist/* usr/lib/sigmaos/docs/dist/
 node_modules/* usr/lib/sigmaos/node_modules/
+# The worker bundle keeps the Pi SDK external so it can share the packaged
+# runtime. npm places this workspace dependency under the agent workspace
+# because its typebox version is intentionally isolated from the root tree.
+packages/agent/node_modules/@earendil-works/pi-coding-agent usr/lib/sigmaos/node_modules/@earendil-works/
 package.json usr/lib/sigmaos/
 package-lock.json usr/lib/sigmaos/
 .sigmaos/build-info.json usr/lib/sigmaos/
