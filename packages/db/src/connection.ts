@@ -9,10 +9,11 @@ export function openSigmaDb(databasePath: string): SigmaDatabase {
   mkdirSync(path.dirname(databasePath), { recursive: true });
 
   const db = new Database(databasePath);
+  // Set the busy handler before WAL negotiation so simultaneous service
+  // startup waits for the other connection instead of failing immediately.
+  db.pragma("busy_timeout = 5000");
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
-  db.pragma("busy_timeout = 5000");
   runMigrations(db);
   return db;
 }
-

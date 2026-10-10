@@ -76,7 +76,9 @@ afterEach(async () => {
 describe("core repositories", () => {
   it("enables WAL and creates the core job/event flow", () => {
     const journalMode = db.pragma("journal_mode", { simple: true });
+    const busyTimeout = db.pragma("busy_timeout", { simple: true });
     expect(String(journalMode).toLowerCase()).toBe("wal");
+    expect(busyTimeout).toBe(5000);
 
     const session = createSession(db, { rootId: "local" });
     const { job } = createUserMessageAndJob(db, {
