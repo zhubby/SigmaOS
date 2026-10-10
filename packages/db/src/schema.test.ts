@@ -1,6 +1,8 @@
+import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -28,6 +30,33 @@ import {
 } from "./index.js";
 
 let tempDir: string;
+
+function startMigrationProcess(databasePath: string, moduleUrl: string): Promise<void> {
+  const childCode = [
+    `import { openSigmaDb } from ${JSON.stringify(moduleUrl)};`,
+    "const db = openSigmaDb(process.argv[1]);",
+    "db.close();"
+  ].join(" ");
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      ["--import", "tsx/esm", "--input-type=module", "-e", childCode, databasePath],
+      { stdio: ["ignore", "ignore", "pipe"] }
+    );
+    let stderr = "";
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.once("error", reject);
+    child.once("exit", (status, signal) => {
+      if (status === 0) {
+        resolve();
+      } else {
+        reject(new Error(`migration process exited ${status ?? signal}: ${stderr}`));
+      }
+    });
+  });
+}
 
 beforeEach(async () => {
   tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-db-migration-"));
@@ -98,6 +127,25 @@ describe("SQLite schema migrations", () => {
         SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'download_tasks'
       `).pluck().all();
       expect(indexes).toContain("idx_download_tasks_claim");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("serializes concurrent first-start migration runs", async () => {
+    const databasePath = path.join(tempDir, "concurrent-startup.sqlite");
+    const moduleUrl = pathToFileURL(path.resolve("packages/db/src/index.ts")).href;
+
+    await Promise.all(
+      Array.from({ length: 8 }, () => startMigrationProcess(databasePath, moduleUrl))
+    );
+
+    const database = openSigmaDb(databasePath);
+    try {
+      const columns = database.prepare("PRAGMA table_info(index_runs)").all()
+        .map((column) => (column as { name: string }).name);
+      expect(columns).toEqual(expect.arrayContaining(["phase", "current_path", "last_progress_at"]));
+      expect(database.prepare("SELECT COUNT(*) FROM schema_migrations").pluck().get()).toBe(migrations.length);
     } finally {
       database.close();
     }

@@ -30,6 +30,10 @@ export function runMigrations(db: Database.Database): void {
   );
 
   const apply = db.transaction((migration: Migration) => {
+    // Another process may have applied this migration while this connection
+    // was waiting for the write lock. Re-check under the transaction lock so
+    // concurrent startups never replay ALTER TABLE statements.
+    if (hasMigration.get(migration.id)) return;
     db.exec(migration.sql);
     insertMigration.run(migration.id, new Date().toISOString());
   });
@@ -39,26 +43,15 @@ export function runMigrations(db: Database.Database): void {
       if (migration.disableForeignKeys) {
         const foreignKeysEnabled = Number(db.pragma("foreign_keys", { simple: true })) === 1;
         const legacyAlterTableEnabled = Number(db.pragma("legacy_alter_table", { simple: true })) === 1;
-        let transactionStarted = false;
         db.pragma("foreign_keys = OFF");
         try {
-          db.exec("BEGIN");
-          transactionStarted = true;
-          db.exec(migration.sql);
-          insertMigration.run(migration.id, new Date().toISOString());
-          db.exec("COMMIT");
-          transactionStarted = false;
-        } catch (error) {
-          if (transactionStarted) {
-            db.exec("ROLLBACK");
-          }
-          throw error;
+          apply.immediate(migration);
         } finally {
           db.pragma(`legacy_alter_table = ${legacyAlterTableEnabled ? "ON" : "OFF"}`);
           db.pragma(`foreign_keys = ${foreignKeysEnabled ? "ON" : "OFF"}`);
         }
       } else {
-        apply(migration);
+        apply.immediate(migration);
       }
     }
   }
