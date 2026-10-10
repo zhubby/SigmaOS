@@ -4,6 +4,7 @@ mod profiles;
 mod store;
 mod validation;
 
+#[cfg(test)]
 use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -22,10 +23,11 @@ use std::os::unix::fs::PermissionsExt;
 use model::ConfirmedDeviceInput;
 pub use model::NetworkOptions;
 use model::{
-    ConnectInput, HotspotUpdateInput, MANAGED_PREFIX, ManagedProfile, MutationResult,
-    NetworkRequest, ProfileDefinition, ProfileUpdateInput, RecoveryEntry, RollbackStatus,
-    ScanInput,
+    AccessPoint, ConnectInput, HotspotUpdateInput, InspectionResult, MANAGED_PREFIX,
+    ManagedProfile, MutationResult, PingResult, ProfileDefinition, ProfileUpdateInput,
+    RecoveryEntry, RollbackStatus, ScanInput, ScanResult,
 };
+pub(crate) use model::{NetworkRequest, NetworkResult};
 use nmcli::{
     active_connection_uuid, assert_available, assert_client_profile, assert_wifi_device,
     is_connection_active, parse_frequency, parse_integer, restore_connection,
@@ -39,29 +41,40 @@ use profiles::{
 use store::{atomic_write, read_recovery_state, remove_if_exists, write_recovery_state};
 use validation::{validate_credential, validate_request};
 
-pub async fn handle(payload: Value, runner: &dyn CommandRunner) -> Result<Value, HostdError> {
-    handle_with_options(payload, runner, &NetworkOptions::default()).await
+#[cfg(test)]
+pub(crate) fn export_protocol_bindings(config: &ts_rs::Config) {
+    use ts_rs::TS;
+
+    NetworkRequest::export_all(config).unwrap();
+    NetworkResult::export_all(config).unwrap();
 }
 
-async fn handle_with_options(
-    payload: Value,
+pub(crate) async fn handle(
+    request: NetworkRequest,
+    runner: &dyn CommandRunner,
+) -> Result<NetworkResult, HostdError> {
+    execute_with_options(request, runner, &NetworkOptions::default()).await
+}
+
+async fn execute_with_options(
+    request: NetworkRequest,
     runner: &dyn CommandRunner,
     options: &NetworkOptions,
-) -> Result<Value, HostdError> {
-    let request: NetworkRequest = serde_json::from_value(payload)
-        .map_err(|_| HostdError::validation("Invalid NetworkManager request"))?;
+) -> Result<NetworkResult, HostdError> {
     validate_request(&request)?;
     let result = match request {
         NetworkRequest::Ping => {
             assert_available(runner).await?;
-            serde_json::json!({ "ready": true })
+            NetworkResult::Ping(PingResult { ready: true })
         }
-        NetworkRequest::Inspect => inspect(options).await?,
+        NetworkRequest::Inspect => NetworkResult::Inspection(inspect(options).await?),
         request => {
             assert_available(runner).await?;
             match request {
-                NetworkRequest::Scan { input } => scan(&input, runner).await?,
-                NetworkRequest::Connect { input } => connect(&input, runner, options).await?,
+                NetworkRequest::Scan { input } => NetworkResult::Scan(scan(&input, runner).await?),
+                NetworkRequest::Connect { input } => {
+                    NetworkResult::Mutation(connect(&input, runner, options).await?)
+                }
                 NetworkRequest::Disconnect { input } => {
                     assert_wifi_device(&input.device, runner).await?;
                     run_checked(
@@ -71,7 +84,7 @@ async fn handle_with_options(
                         None,
                     )
                     .await?;
-                    success_value()?
+                    NetworkResult::Mutation(success_result())
                 }
                 NetworkRequest::Radio { input } => {
                     run_checked(
@@ -81,26 +94,26 @@ async fn handle_with_options(
                         None,
                     )
                     .await?;
-                    success_value()?
+                    NetworkResult::Mutation(success_result())
                 }
-                NetworkRequest::UpdateProfile { profile_id, input } => {
-                    update_profile(&profile_id, &input, runner, options).await?
-                }
+                NetworkRequest::UpdateProfile { profile_id, input } => NetworkResult::Mutation(
+                    update_profile(&profile_id, &input, runner, options).await?,
+                ),
                 NetworkRequest::DeleteProfile { profile_id, .. } => {
-                    delete_profile(&profile_id, runner, options).await?
+                    NetworkResult::Mutation(delete_profile(&profile_id, runner, options).await?)
                 }
                 NetworkRequest::UpdateHotspot { input } => {
-                    update_hotspot(&input, runner, options).await?
+                    NetworkResult::Mutation(update_hotspot(&input, runner, options).await?)
                 }
                 NetworkRequest::StartHotspot { input } => {
-                    start_hotspot(&input.device, runner, options).await?
+                    NetworkResult::Mutation(start_hotspot(&input.device, runner, options).await?)
                 }
                 NetworkRequest::StopHotspot { input } => {
-                    stop_hotspot(&input.device, runner, options).await?
+                    NetworkResult::Mutation(stop_hotspot(&input.device, runner, options).await?)
                 }
                 NetworkRequest::DeleteHotspot { input } => {
                     stop_hotspot(&input.device, runner, options).await?;
-                    delete_hotspot(&input.device, runner, options).await?
+                    NetworkResult::Mutation(delete_hotspot(&input.device, runner, options).await?)
                 }
                 NetworkRequest::Ping | NetworkRequest::Inspect => unreachable!(),
             }
@@ -109,19 +122,31 @@ async fn handle_with_options(
     Ok(result)
 }
 
-async fn inspect(options: &NetworkOptions) -> Result<Value, HostdError> {
+#[cfg(test)]
+async fn handle_with_options(
+    payload: Value,
+    runner: &dyn CommandRunner,
+    options: &NetworkOptions,
+) -> Result<Value, HostdError> {
+    let request: NetworkRequest = serde_json::from_value(payload)
+        .map_err(|_| HostdError::validation("Invalid NetworkManager request"))?;
+    let result = execute_with_options(request, runner, options).await?;
+    serde_json::to_value(result).map_err(|error| HostdError::operation_failed(error.to_string()))
+}
+
+async fn inspect(options: &NetworkOptions) -> Result<InspectionResult, HostdError> {
     let profiles = read_profiles(&options.connections_dir)
         .await?
         .into_iter()
         .map(|profile| profile.inspection)
         .collect::<Vec<_>>();
-    Ok(serde_json::json!({
-        "profiles": profiles,
-        "recovery": read_recovery_state(&options.state_dir).await?
-    }))
+    Ok(InspectionResult {
+        profiles,
+        recovery: read_recovery_state(&options.state_dir).await?,
+    })
 }
 
-async fn scan(input: &ScanInput, runner: &dyn CommandRunner) -> Result<Value, HostdError> {
+async fn scan(input: &ScanInput, runner: &dyn CommandRunner) -> Result<ScanResult, HostdError> {
     assert_wifi_device(&input.device, runner).await?;
     let output = run_checked(
         runner,
@@ -153,32 +178,37 @@ async fn scan(input: &ScanInput, runner: &dyn CommandRunner) -> Result<Value, Ho
             }
             let channel = parse_integer(&fields[4]).unwrap_or(0).max(0) as u16;
             let frequency = parse_frequency(&fields[5]).unwrap_or(0);
-            Some(serde_json::json!({
-                "active": fields[0] == "*" || fields[0] == "yes",
-                "ssid": fields[1],
-                "bssid": fields[2],
-                "channel": channel,
-                "frequencyMHz": frequency,
-                "signal": parse_integer(&fields[6]).unwrap_or(0).clamp(0, 100),
-                "band": if frequency >= 4900 || (frequency == 0 && channel > 14) { "5" } else { "2.4" },
-                "security": security_from_nmcli(&fields[7]),
-                "savedProfileId": Value::Null
-            }))
+            Some(AccessPoint {
+                active: fields[0] == "*" || fields[0] == "yes",
+                ssid: fields[1].clone(),
+                bssid: fields[2].clone(),
+                channel,
+                frequency_mhz: frequency,
+                signal: parse_integer(&fields[6]).unwrap_or(0).clamp(0, 100),
+                band: if frequency >= 4900 || (frequency == 0 && channel > 14) {
+                    "5".to_owned()
+                } else {
+                    "2.4".to_owned()
+                },
+                security: security_from_nmcli(&fields[7]).to_owned(),
+                saved_profile_id: None,
+            })
         })
         .collect::<Vec<_>>();
-    Ok(serde_json::json!({
-        "device": input.device,
-        "scannedAt": OffsetDateTime::now_utc().format(&Rfc3339)
+    Ok(ScanResult {
+        device: input.device.clone(),
+        scanned_at: OffsetDateTime::now_utc()
+            .format(&Rfc3339)
             .map_err(|error| HostdError::operation_failed(error.to_string()))?,
-        "accessPoints": access_points
-    }))
+        access_points,
+    })
 }
 
 async fn connect(
     input: &ConnectInput,
     runner: &dyn CommandRunner,
     options: &NetworkOptions,
-) -> Result<Value, HostdError> {
+) -> Result<MutationResult, HostdError> {
     assert_wifi_device(&input.device, runner).await?;
     let previous_id = active_connection_uuid(&input.device, runner).await?;
     if let Some(profile_id) = &input.profile_id {
@@ -195,7 +225,7 @@ async fn connect(
             args.extend(["ap".to_owned(), bssid.to_ascii_uppercase()]);
         }
         if run_nmcli_owned(runner, &args).await.is_ok() {
-            return success_value();
+            return Ok(success_result());
         }
         let rollback = restore_connection(previous_id.as_deref(), &input.device, runner).await;
         return Err(network_error("Wi-Fi connection failed", rollback));
@@ -237,7 +267,7 @@ async fn connect(
         args.extend(["ap".to_owned(), bssid.to_ascii_uppercase()]);
     }
     if loaded.is_ok() && run_nmcli_owned(runner, &args).await.is_ok() {
-        return success_value();
+        return Ok(success_result());
     }
     let _ = fs::remove_file(&path).await;
     safe_reload(runner).await;
@@ -250,7 +280,7 @@ async fn update_profile(
     input: &ProfileUpdateInput,
     runner: &dyn CommandRunner,
     options: &NetworkOptions,
-) -> Result<Value, HostdError> {
+) -> Result<MutationResult, HostdError> {
     let current = find_profile(profile_id, &options.connections_dir).await?;
     if current.inspection.mode != "client" {
         return Err(HostdError::conflict(
@@ -306,7 +336,7 @@ async fn delete_profile(
     profile_id: &str,
     runner: &dyn CommandRunner,
     options: &NetworkOptions,
-) -> Result<Value, HostdError> {
+) -> Result<MutationResult, HostdError> {
     let profile = find_profile(profile_id, &options.connections_dir).await?;
     if profile.inspection.mode != "client" {
         return Err(HostdError::conflict(
@@ -321,14 +351,14 @@ async fn delete_profile(
     )
     .await?;
     remove_if_exists(&profile.path).await?;
-    success_value()
+    Ok(success_result())
 }
 
 async fn update_hotspot(
     input: &HotspotUpdateInput,
     runner: &dyn CommandRunner,
     options: &NetworkOptions,
-) -> Result<Value, HostdError> {
+) -> Result<MutationResult, HostdError> {
     assert_wifi_device(&input.device, runner).await?;
     let existing = read_profiles(&options.connections_dir)
         .await?
@@ -387,7 +417,7 @@ async fn update_hotspot(
     .await
     .is_ok()
     {
-        return success_value();
+        return Ok(success_result());
     }
     let _ = fs::remove_file(&path).await;
     safe_reload(runner).await;
@@ -401,13 +431,13 @@ async fn start_hotspot(
     device: &str,
     runner: &dyn CommandRunner,
     options: &NetworkOptions,
-) -> Result<Value, HostdError> {
+) -> Result<MutationResult, HostdError> {
     assert_wifi_device(device, runner).await?;
     let hotspot = find_hotspot(device, &options.connections_dir).await?;
     let previous_id = active_connection_uuid(device, runner).await?;
     let mut state = read_recovery_state(&options.state_dir).await?;
     if previous_id.as_deref() == Some(&hotspot.inspection.id) {
-        return success_value();
+        return Ok(success_result());
     }
     state.insert(
         device.to_owned(),
@@ -435,7 +465,7 @@ async fn start_hotspot(
     )
     .await;
     if activation.is_ok() {
-        return success_value();
+        return Ok(success_result());
     }
     let restore_id = state
         .get(device)
@@ -452,7 +482,7 @@ async fn stop_hotspot(
     device: &str,
     runner: &dyn CommandRunner,
     options: &NetworkOptions,
-) -> Result<Value, HostdError> {
+) -> Result<MutationResult, HostdError> {
     assert_wifi_device(device, runner).await?;
     let hotspot = find_hotspot(device, &options.connections_dir).await?;
     let mut state = read_recovery_state(&options.state_dir).await?;
@@ -479,19 +509,18 @@ async fn stop_hotspot(
             rollback,
         ));
     }
-    serde_json::to_value(MutationResult {
+    Ok(MutationResult {
         rollback,
         message: (rollback == RollbackStatus::Succeeded)
             .then(|| "Previous Wi-Fi connection restored".to_owned()),
     })
-    .map_err(|error| HostdError::operation_failed(error.to_string()))
 }
 
 async fn delete_hotspot(
     device: &str,
     runner: &dyn CommandRunner,
     options: &NetworkOptions,
-) -> Result<Value, HostdError> {
+) -> Result<MutationResult, HostdError> {
     assert_wifi_device(device, runner).await?;
     let hotspot = find_hotspot(device, &options.connections_dir).await?;
     run_checked(
@@ -502,7 +531,7 @@ async fn delete_hotspot(
     )
     .await?;
     remove_if_exists(&hotspot.path).await?;
-    success_value()
+    Ok(success_result())
 }
 
 async fn replace_profile(
@@ -510,7 +539,7 @@ async fn replace_profile(
     definition: &ProfileDefinition,
     confirmed: bool,
     runner: &dyn CommandRunner,
-) -> Result<Value, HostdError> {
+) -> Result<MutationResult, HostdError> {
     let active = is_connection_active(&current.inspection.id, runner).await;
     if active && !confirmed {
         return Err(HostdError::validation(
@@ -551,7 +580,7 @@ async fn replace_profile(
     }
     .await;
     if apply.is_ok() {
-        return success_value();
+        return Ok(success_result());
     }
     let rollback = async {
         atomic_write(&current.path, current.content.as_bytes(), 0o600, || async {
@@ -591,12 +620,11 @@ async fn replace_profile(
     }
 }
 
-fn success_value() -> Result<Value, HostdError> {
-    serde_json::to_value(MutationResult {
+fn success_result() -> MutationResult {
+    MutationResult {
         rollback: RollbackStatus::NotRequired,
         message: None,
-    })
-    .map_err(|error| HostdError::operation_failed(error.to_string()))
+    }
 }
 
 fn network_error(message: &str, rollback: RollbackStatus) -> HostdError {

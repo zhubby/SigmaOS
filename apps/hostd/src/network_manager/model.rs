@@ -22,9 +22,14 @@ impl Default for NetworkOptions {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(
+    test,
+    ts(export_to = "hostd.ts", rename = "HostdNetworkManagerRequest")
+)]
 #[serde(tag = "action", rename_all = "snake_case")]
-pub(super) enum NetworkRequest {
+pub(crate) enum NetworkRequest {
     Ping,
     Inspect,
     Scan {
@@ -63,78 +68,127 @@ pub(super) enum NetworkRequest {
     },
 }
 
-#[derive(Debug, Deserialize)]
-pub(super) struct ScanInput {
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdNetworkScanInput"))]
+pub(crate) struct ScanInput {
     pub(super) device: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdNetworkConnectInput"))]
 #[serde(rename_all = "camelCase")]
-pub(super) struct ConnectInput {
+pub(crate) struct ConnectInput {
     pub(super) device: String,
+    #[cfg_attr(test, ts(optional = nullable))]
     pub(super) profile_id: Option<String>,
+    #[cfg_attr(test, ts(optional = nullable))]
     pub(super) ssid: Option<String>,
+    #[cfg_attr(test, ts(optional = nullable))]
     pub(super) security: Option<String>,
+    #[cfg_attr(test, ts(optional = nullable))]
     pub(super) password: Option<String>,
+    #[cfg_attr(test, ts(optional = nullable))]
     pub(super) bssid: Option<String>,
+    #[cfg_attr(test, ts(optional = nullable))]
     pub(super) autoconnect: Option<bool>,
     #[serde(rename = "confirmed")]
     pub(super) _confirmed: bool,
 }
 
-#[derive(Debug, Deserialize)]
-pub(super) struct ConfirmedDeviceInput {
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(
+    test,
+    ts(export_to = "hostd.ts", rename = "HostdNetworkConfirmedDeviceInput")
+)]
+pub(crate) struct ConfirmedDeviceInput {
     pub(super) device: String,
     pub(super) confirmed: bool,
 }
 
-#[derive(Debug, Deserialize)]
-pub(super) struct RadioInput {
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdNetworkRadioInput"))]
+pub(crate) struct RadioInput {
     pub(super) enabled: bool,
     pub(super) confirmed: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(
+    test,
+    ts(export_to = "hostd.ts", rename = "HostdNetworkProfileUpdateInput")
+)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct ProfileUpdateInput {
+pub(crate) struct ProfileUpdateInput {
     pub(super) expected_revision: String,
     pub(super) confirmed: bool,
+    #[cfg_attr(test, ts(optional = nullable))]
     pub(super) ssid: Option<String>,
+    #[cfg_attr(test, ts(optional = nullable))]
     pub(super) security: Option<String>,
+    #[cfg_attr(test, ts(optional = nullable))]
     pub(super) autoconnect: Option<bool>,
+    #[cfg_attr(test, ts(optional = nullable))]
     pub(super) password: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(
+    test,
+    ts(export_to = "hostd.ts", rename = "HostdNetworkHotspotUpdateInput")
+)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct HotspotUpdateInput {
+pub(crate) struct HotspotUpdateInput {
     pub(super) device: String,
     pub(super) ssid: String,
+    #[cfg_attr(test, ts(optional = nullable))]
     pub(super) password: Option<String>,
     pub(super) band: String,
+    #[cfg_attr(test, ts(optional = nullable))]
     pub(super) channel: Option<u16>,
     pub(super) autostart: bool,
+    #[cfg_attr(test, ts(optional = nullable))]
     pub(super) expected_revision: Option<String>,
     pub(super) confirmed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(
+    test,
+    ts(export_to = "hostd.ts", rename = "HostdNetworkRollbackStatus")
+)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum RollbackStatus {
+pub(crate) enum RollbackStatus {
     NotRequired,
     Succeeded,
     Failed,
 }
 
 #[derive(Debug, Serialize)]
-pub(super) struct MutationResult {
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(
+    test,
+    ts(export_to = "hostd.ts", rename = "HostdNetworkMutationResult")
+)]
+pub(crate) struct MutationResult {
     pub(super) rollback: RollbackStatus,
     pub(super) message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(
+    test,
+    ts(export_to = "hostd.ts", rename = "HostdNetworkProfileInspection")
+)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct ProfileInspection {
+pub(crate) struct ProfileInspection {
     pub(super) id: String,
     pub(super) name: String,
     pub(super) ssid: String,
@@ -170,10 +224,69 @@ pub(super) struct ProfileDefinition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdNetworkRecoveryEntry"))]
 #[serde(rename_all = "camelCase")]
-pub(super) struct RecoveryEntry {
+pub(crate) struct RecoveryEntry {
     pub(super) restore_profile_id: Option<String>,
     pub(super) hotspot_profile_id: String,
 }
 
 pub(super) type RecoveryState = HashMap<String, RecoveryEntry>;
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdNetworkPingResult"))]
+pub(crate) struct PingResult {
+    #[cfg_attr(test, ts(type = "true"))]
+    pub(super) ready: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(
+    test,
+    ts(export_to = "hostd.ts", rename = "HostdNetworkInspectionResult")
+)]
+pub(crate) struct InspectionResult {
+    pub(super) profiles: Vec<ProfileInspection>,
+    pub(super) recovery: RecoveryState,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdNetworkAccessPoint"))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AccessPoint {
+    pub(super) active: bool,
+    pub(super) ssid: String,
+    pub(super) bssid: String,
+    pub(super) channel: u16,
+    #[serde(rename = "frequencyMHz")]
+    pub(super) frequency_mhz: u32,
+    pub(super) signal: i32,
+    pub(super) band: String,
+    pub(super) security: String,
+    pub(super) saved_profile_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdNetworkScanResult"))]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScanResult {
+    pub(super) device: String,
+    pub(super) scanned_at: String,
+    pub(super) access_points: Vec<AccessPoint>,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdNetworkManagerResult"))]
+#[serde(untagged)]
+pub(crate) enum NetworkResult {
+    Ping(PingResult),
+    Inspection(InspectionResult),
+    Scan(ScanResult),
+    Mutation(MutationResult),
+}

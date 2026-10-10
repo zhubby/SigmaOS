@@ -17,7 +17,10 @@ import type {
   SystemWifiScanResult,
   SystemWifiSecurity,
   SystemWifiStatus,
-  SystemWifiSummary
+  SystemWifiSummary,
+  HostdNetworkMutationRequest,
+  HostdRequest,
+  HostdResult
 } from "@sigmaos/shared";
 import type { SystemCommandRunner } from "./system-management.js";
 import { HostdClient, HostdRequestError } from "./hostd-client.js";
@@ -54,7 +57,7 @@ export interface NetworkManagerHostdClient {
   ping(): Promise<boolean>;
   inspect(): Promise<HostdInspection>;
   scan(input: SystemWifiScanInput): Promise<SystemWifiScanResult>;
-  mutate(payload: unknown): Promise<HostdMutationResult>;
+  mutate(payload: HostdNetworkMutationRequest): Promise<HostdMutationResult>;
 }
 
 export interface NetworkManagerRuntime {
@@ -119,11 +122,13 @@ export class HostdNetworkManagerClient implements NetworkManagerHostdClient {
     return this.request({ action: "scan", input });
   }
 
-  mutate(payload: unknown): Promise<HostdMutationResult> {
+  mutate(payload: HostdNetworkMutationRequest): Promise<HostdMutationResult> {
     return this.request(payload);
   }
 
-  async request<T>(payload: unknown): Promise<T> {
+  async request<Request extends HostdRequest<"network.manager">>(
+    payload: Request
+  ): Promise<HostdResult<"network.manager", Request>> {
     try {
       return await this.client.request("network.manager", payload, HOSTD_TIMEOUT_MS);
     } catch (error) {
@@ -225,7 +230,7 @@ export class SystemNetworkManagerRuntime implements NetworkManagerRuntime {
     return this.mutate({ action: "delete_hotspot", input });
   }
 
-  private async mutate(payload: unknown): Promise<SystemWifiOperationResult> {
+  private async mutate(payload: HostdNetworkMutationRequest): Promise<SystemWifiOperationResult> {
     const result = await this.hostd.mutate(payload);
     return {
       status: await this.getStatus(),

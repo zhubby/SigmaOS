@@ -3,6 +3,9 @@ use serde_json::Value;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(serde::Deserialize))]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "termux.ts", rename = "TermuxErrorCode"))]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     ProtocolError,

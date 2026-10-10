@@ -23,7 +23,7 @@ export class HostdSystemPowerRuntime implements SystemPowerRuntime {
 
   async request(action: SystemPowerAction): Promise<SystemPowerResult> {
     try {
-      const result = await this.client.request<SystemPowerResult>(
+      const result = await this.client.request(
         "system.power",
         { action, confirmed: true },
         HOSTD_POWER_TIMEOUT_MS

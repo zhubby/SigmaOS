@@ -6,6 +6,11 @@ pub const PROTOCOL_VERSION: u8 = 1;
 pub const MAX_FRAME_BYTES: usize = 128 * 1024;
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(
+    test,
+    ts(export_to = "vod-player.ts", rename = "VodPlayerRequestEnvelope")
+)]
 #[serde(deny_unknown_fields)]
 pub struct RequestEnvelope {
     pub version: u8,
@@ -74,6 +79,8 @@ fn validate_command_fields(value: &serde_json::Value) -> Result<(), VodError> {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "vod-player.ts", rename = "VodPlayerWireCommand"))]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Command {
     Status,
@@ -85,6 +92,7 @@ pub enum Command {
         #[serde(rename = "relativePath")]
         relative_path: String,
         #[serde(rename = "startPositionSeconds")]
+        #[cfg_attr(test, ts(optional = nullable))]
         start_position_seconds: Option<f64>,
     },
     Pause {
@@ -157,6 +165,8 @@ impl Command {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "vod-player.ts", rename = "VodPlayerState"))]
 #[serde(rename_all = "lowercase")]
 pub enum PlayerState {
     Idle,
@@ -169,6 +179,11 @@ pub enum PlayerState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(
+    test,
+    ts(export_to = "vod-player.ts", rename = "VodPlayerCapabilities")
+)]
 #[serde(rename_all = "camelCase")]
 pub struct Capabilities {
     pub mpv_available: bool,
@@ -179,6 +194,11 @@ pub struct Capabilities {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(
+    test,
+    ts(export_to = "vod-player.ts", rename = "VodPlayerHardwareDecode")
+)]
 #[serde(rename_all = "lowercase")]
 pub enum HardwareDecode {
     Enabled,
@@ -187,6 +207,8 @@ pub enum HardwareDecode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "vod-player.ts", rename = "VodPlayerStatus"))]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
     pub state: PlayerState,
@@ -209,6 +231,11 @@ pub struct Status {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(
+    test,
+    ts(export_to = "vod-player.ts", rename = "VodPlayerSuccessResponse")
+)]
 #[serde(rename_all = "camelCase")]
 pub struct SuccessResponse<'a> {
     pub version: u8,
@@ -218,6 +245,11 @@ pub struct SuccessResponse<'a> {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(
+    test,
+    ts(export_to = "vod-player.ts", rename = "VodPlayerErrorResponse")
+)]
 #[serde(rename_all = "camelCase")]
 pub struct ErrorResponse<'a> {
     pub version: u8,
@@ -267,6 +299,50 @@ fn validate_number(value: f64, minimum: f64, maximum: f64, name: &str) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
+    use ts_rs::{Config, TS};
+
+    #[derive(Deserialize)]
+    struct GoldenFixtures {
+        requests: Vec<String>,
+        responses: Vec<String>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum GoldenResponse {
+        Success(Box<GoldenSuccessResponse>),
+        Error(GoldenErrorResponse),
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct GoldenSuccessResponse {
+        version: u8,
+        id: String,
+        ok: bool,
+        status: Status,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct GoldenErrorResponse {
+        version: u8,
+        id: String,
+        ok: bool,
+        error: String,
+        code: ErrorCode,
+        status_code: u16,
+    }
+
+    #[test]
+    #[ignore = "writes checked-in TypeScript protocol bindings"]
+    fn export_protocol_bindings() {
+        let config = Config::from_env();
+        RequestEnvelope::export_all(&config).unwrap();
+        SuccessResponse::<'static>::export_all(&config).unwrap();
+        ErrorResponse::<'static>::export_all(&config).unwrap();
+    }
 
     #[test]
     fn parses_strict_versioned_commands() {
@@ -291,5 +367,47 @@ mod tests {
             RequestEnvelope::parse(br#"{"version":1,"id":"r1","command":{"type":"pause"}}"#)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn accepts_the_shared_golden_frames() {
+        let fixtures: GoldenFixtures = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../packages/shared/fixtures/vod-player-protocol-v1.json"
+        )))
+        .unwrap();
+        for frame in fixtures.requests {
+            RequestEnvelope::parse(frame.as_bytes()).unwrap();
+        }
+        for frame in fixtures.responses {
+            let value: serde_json::Value = serde_json::from_str(&frame).unwrap();
+            let encoded = match serde_json::from_value(value.clone()).unwrap() {
+                GoldenResponse::Success(response) => {
+                    assert_eq!(response.version, PROTOCOL_VERSION);
+                    assert!(response.ok);
+                    serde_json::to_value(SuccessResponse {
+                        version: response.version,
+                        id: &response.id,
+                        ok: response.ok,
+                        status: &response.status,
+                    })
+                    .unwrap()
+                }
+                GoldenResponse::Error(response) => {
+                    assert_eq!(response.version, PROTOCOL_VERSION);
+                    assert!(!response.ok);
+                    serde_json::to_value(ErrorResponse {
+                        version: response.version,
+                        id: &response.id,
+                        ok: response.ok,
+                        error: &response.error,
+                        code: response.code,
+                        status_code: response.status_code,
+                    })
+                    .unwrap()
+                }
+            };
+            assert_eq!(encoded, value);
+        }
     }
 }

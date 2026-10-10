@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use nix::unistd::{Gid, Group, chown};
+#[cfg(test)]
 use serde_json::Value;
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -15,7 +16,9 @@ use tokio::time::timeout;
 use crate::command::{CommandRunner, SystemCommandRunner};
 use crate::config::{ConfiguredNasRoot, HostdConfig};
 use crate::error::{ErrorCode, HostdError};
-use crate::protocol::{MAX_FRAME_BYTES, RequestEnvelope, ResponseEnvelope};
+use crate::protocol::{
+    HostdRequest, HostdResult, MAX_FRAME_BYTES, RequestEnvelope, ResponseEnvelope,
+};
 
 const FRAME_TIMEOUT: Duration = Duration::from_secs(5);
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -176,7 +179,17 @@ async fn handle_connection(
     };
     let request_id = request.id.clone();
     let response = match dispatch(request, &state).await {
-        Ok(result) => ResponseEnvelope::success(request_id, result),
+        Ok(result) => match serde_json::to_value(result) {
+            Ok(result) => ResponseEnvelope::success(request_id, result),
+            Err(error) => ResponseEnvelope::failure(
+                request_id,
+                HostdError::new(
+                    500,
+                    ErrorCode::Internal,
+                    format!("Could not encode hostd result: {error}"),
+                ),
+            ),
+        },
         Err(error) => ResponseEnvelope::failure(request_id, error),
     };
     write_response(&mut stream, &response).await
@@ -257,46 +270,54 @@ async fn write_response(
     Ok(())
 }
 
-async fn dispatch(request: RequestEnvelope, state: &HostdState) -> Result<Value, HostdError> {
-    match request.operation.as_str() {
-        "shares.apply" => {
+async fn dispatch(request: RequestEnvelope, state: &HostdState) -> Result<HostdResult, HostdError> {
+    match request.into_contract()? {
+        HostdRequest::SharesApply(request) => {
             let _guard = state.shares_lock.lock().await;
-            crate::shares::apply(request.payload, state.runner.as_ref(), &state.nas_roots).await
+            crate::shares::apply(request, state.runner.as_ref(), &state.nas_roots)
+                .await
+                .map(HostdResult::SharesApply)
         }
-        "storage.command" => crate::storage::command(request.payload, state.runner.as_ref()).await,
-        "storage.operation" => {
+        HostdRequest::StorageCommand(request) => {
+            crate::storage::command(request, state.runner.as_ref())
+                .await
+                .map(HostdResult::StorageCommand)
+        }
+        HostdRequest::StorageOperation(request) => {
             let _guard = state.storage_lock.lock().await;
-            crate::storage::operation(request.payload, state.runner.as_ref()).await
+            crate::storage::operation(request, state.runner.as_ref())
+                .await
+                .map(HostdResult::StorageOperation)
         }
-        "docker.daemon" => {
-            if request.payload.get("action").and_then(Value::as_str) == Some("read") {
-                crate::docker_daemon::handle(request.payload, state.runner.as_ref()).await
-            } else {
-                let _guard = state.docker_lock.lock().await;
-                crate::docker_daemon::handle(request.payload, state.runner.as_ref()).await
-            }
+        HostdRequest::DockerDaemon(request @ crate::docker_daemon::DockerRequest::Read) => {
+            crate::docker_daemon::handle(request, state.runner.as_ref())
+                .await
+                .map(HostdResult::DockerDaemon)
         }
-        "network.manager" => {
-            let read_only = matches!(
-                request.payload.get("action").and_then(Value::as_str),
-                Some("ping" | "inspect")
-            );
-            if read_only {
-                crate::network_manager::handle(request.payload, state.runner.as_ref()).await
-            } else {
-                let _guard = state.network_lock.lock().await;
-                crate::network_manager::handle(request.payload, state.runner.as_ref()).await
-            }
+        HostdRequest::DockerDaemon(request) => {
+            let _guard = state.docker_lock.lock().await;
+            crate::docker_daemon::handle(request, state.runner.as_ref())
+                .await
+                .map(HostdResult::DockerDaemon)
         }
-        "system.power" => {
+        HostdRequest::NetworkManager(
+            request @ (crate::network_manager::NetworkRequest::Ping
+            | crate::network_manager::NetworkRequest::Inspect),
+        ) => crate::network_manager::handle(request, state.runner.as_ref())
+            .await
+            .map(HostdResult::NetworkManager),
+        HostdRequest::NetworkManager(request) => {
+            let _guard = state.network_lock.lock().await;
+            crate::network_manager::handle(request, state.runner.as_ref())
+                .await
+                .map(HostdResult::NetworkManager)
+        }
+        HostdRequest::SystemPower(request) => {
             let _guard = state.power_lock.lock().await;
-            crate::power::command(request.payload, state.runner.as_ref()).await
+            crate::power::command(request, state.runner.as_ref())
+                .await
+                .map(HostdResult::SystemPower)
         }
-        _ => Err(HostdError::new(
-            404,
-            ErrorCode::NotFound,
-            "Unknown hostd operation",
-        )),
     }
 }
 

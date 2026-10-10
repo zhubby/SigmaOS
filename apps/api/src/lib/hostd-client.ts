@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
 import net from "node:net";
+import {
+  parseHostdResult,
+  type HostdOperation,
+  type HostdRequest,
+  type HostdResult
+} from "@sigmaos/shared";
 
 const HOSTD_PROTOCOL_VERSION = 1;
 const MAX_FRAME_BYTES = 1024 * 1024;
@@ -41,7 +47,11 @@ export class HostdRequestError extends Error {
 export class HostdClient {
   constructor(private readonly socketPath: string) {}
 
-  request<T>(operation: string, payload: unknown, timeoutMs: number): Promise<T> {
+  request<Operation extends HostdOperation, Request extends HostdRequest<Operation>>(
+    operation: Operation,
+    payload: Request,
+    timeoutMs: number
+  ): Promise<HostdResult<Operation, Request>> {
     const id = randomUUID();
     const frame = `${JSON.stringify({
       version: HOSTD_PROTOCOL_VERSION,
@@ -53,7 +63,7 @@ export class HostdClient {
       return Promise.reject(new HostdRequestError("hostd request is too large", 413, "protocol_error"));
     }
 
-    return new Promise<T>((resolve, reject) => {
+    return new Promise<HostdResult<Operation, Request>>((resolve, reject) => {
       const socket = net.createConnection({ path: this.socketPath });
       const chunks: Buffer[] = [];
       let size = 0;
@@ -87,13 +97,18 @@ export class HostdClient {
         if (settled) return;
         try {
           const response = parseResponse(Buffer.concat(chunks), id);
-          settled = true;
           if (!response.ok) {
             const { status, code, message, ...details } = response.error;
+            settled = true;
             reject(new HostdRequestError(message, status, code, details));
             return;
           }
-          resolve(response.result as T);
+          const result = parseHostdResult(operation, payload, response.result);
+          if (result === null) {
+            throw new HostdRequestError("Invalid response from hostd", 502, "protocol_error");
+          }
+          settled = true;
+          resolve(result);
         } catch (error) {
           fail(error);
         }

@@ -3,7 +3,7 @@ NPM ?= npm
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install dev dev-api dev-web dev-worker dev-indexer dev-scheduler docs-dev docs-check docs-test docs-build docs-browser index schedule maintenance preview-web start-api start-worker start-indexer start-scheduler typecheck lint test build check ci clean deb appliance
+.PHONY: help install dev dev-api dev-web dev-worker dev-indexer dev-scheduler docs-dev docs-check docs-test docs-build docs-browser index schedule maintenance preview-web start-api start-worker start-indexer start-scheduler protocol-check typecheck lint test build check ci clean deb appliance
 
 help: ## Show available targets.
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_.-]+:.*##/ { printf "  %-18s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -69,6 +69,9 @@ start-indexer: ## Start the built indexer process.
 start-scheduler: ## Start the built scheduler process.
 	$(NPM) run start -w @sigmaos/scheduler
 
+protocol-check: ## Verify checked-in Rust-to-TypeScript protocol bindings.
+	$(NPM) run protocol:check
+
 typecheck: ## Run TypeScript checks.
 	$(NPM) run typecheck
 
@@ -81,7 +84,7 @@ test: ## Run the test suite.
 build: ## Build all workspaces.
 	$(NPM) run build
 
-check: typecheck lint test ## Run typecheck, lint, and tests.
+check: protocol-check typecheck lint test ## Run protocol drift, typecheck, lint, and tests.
 
 ci: check build ## Run the full local verification suite.
 

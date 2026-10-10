@@ -53,6 +53,9 @@ jobs:
           SIGMAOS_RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: npm run version:check
 
+      - name: Verify protocol bindings
+        run: npm run protocol:check
+
       - name: Typecheck
         run: npm run typecheck
 

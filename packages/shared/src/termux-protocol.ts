@@ -1,3 +1,15 @@
+import type {
+  TermuxClosePayload as GeneratedTermuxClosePayload,
+  TermuxCommandContract,
+  TermuxDestroyPayload as GeneratedTermuxDestroyPayload,
+  TermuxErrorCode as GeneratedTermuxErrorCode,
+  TermuxEventContract,
+  TermuxExitPayload as GeneratedTermuxExitPayload,
+  TermuxOpenPayload as GeneratedTermuxOpenPayload,
+  TermuxRequestContract,
+  TermuxResultContract
+} from "./generated/termux.js";
+
 export const TERMUX_PROTOCOL_VERSION = 1 as const;
 export const TERMUX_MAX_FRAME_BYTES = 256 * 1024;
 export const TERMUX_MAX_INPUT_BYTES = 64 * 1024;
@@ -10,45 +22,33 @@ export const TERMUX_MAX_COLS = 500;
 export const TERMUX_MIN_ROWS = 1;
 export const TERMUX_MAX_ROWS = 200;
 
-export type TermuxErrorCode =
-  | "protocol_error"
-  | "validation"
-  | "forbidden"
-  | "not_found"
-  | "conflict"
-  | "session_limit"
-  | "timeout"
-  | "output_too_large"
-  | "unavailable"
-  | "operation_failed"
-  | "internal";
-
-export interface TermuxOpenPayload {
-  user: string;
-  cols: number;
-  rows: number;
+export type TermuxErrorCode = GeneratedTermuxErrorCode;
+export type TermuxOpenPayload = Omit<GeneratedTermuxOpenPayload, "sessionName" | "persistent"> & {
   sessionName?: string;
   persistent?: boolean;
-}
+};
+export type TermuxClosePayload = Omit<GeneratedTermuxClosePayload, "destroy"> & { destroy?: boolean };
+export type TermuxDestroyPayload = GeneratedTermuxDestroyPayload;
 
-export interface TermuxClosePayload {
-  streamId: string;
-  destroy?: boolean;
-}
+type PublicTermuxRequestPayload<Payload> = Payload extends GeneratedTermuxOpenPayload
+  ? TermuxOpenPayload
+  : Payload extends GeneratedTermuxClosePayload
+    ? TermuxClosePayload
+    : Payload;
 
-export interface TermuxDestroyPayload {
-  user: string;
-  sessionName: string;
-}
+type TermuxRequestFromContract<Contract extends TermuxRequestContract> =
+  Contract extends { operation: infer Operation extends string; payload: infer Payload }
+    ? TermuxRequestEnvelope<Operation, PublicTermuxRequestPayload<Payload>>
+    : never;
 
-export type TermuxRequest =
-  | TermuxRequestEnvelope<"session.open", TermuxOpenPayload>
-  | TermuxRequestEnvelope<"session.close", TermuxClosePayload>
-  | TermuxRequestEnvelope<"session.destroy", TermuxDestroyPayload>;
+export type TermuxRequest = TermuxRequestFromContract<TermuxRequestContract>;
 
-export type TermuxCommand =
-  | TermuxCommandEnvelope<"terminal.input", { data: string }>
-  | TermuxCommandEnvelope<"terminal.resize", { cols: number; rows: number }>;
+type TermuxCommandFromContract<Contract extends TermuxCommandContract> =
+  Contract extends { operation: infer Operation extends string; payload: infer Payload }
+    ? TermuxCommandEnvelope<Operation, Payload>
+    : never;
+
+export type TermuxCommand = TermuxCommandFromContract<TermuxCommandContract>;
 
 export type TermuxClientFrame = TermuxRequest | TermuxCommand;
 
@@ -70,10 +70,19 @@ export type TermuxResponse =
       error: TermuxProtocolError;
     };
 
-export type TermuxEvent =
-  | TermuxEventEnvelope<"terminal.output", { data: string }>
-  | TermuxEventEnvelope<"terminal.exit", { exitCode: number; signal?: number; recoverable: boolean }>
-  | TermuxEventEnvelope<"terminal.error", { code: TermuxErrorCode; message: string; retryable: boolean }>;
+type PublicTermuxEventPayload<Payload> = Payload extends GeneratedTermuxExitPayload
+  ? Omit<Payload, "signal"> & { signal?: number }
+  : Payload;
+
+type TermuxEventFromContract<Contract extends TermuxEventContract> =
+  Contract extends { event: infer Event extends string; payload: infer Payload }
+    ? TermuxEventEnvelope<Event, PublicTermuxEventPayload<Payload>>
+    : never;
+
+export type TermuxEvent = TermuxEventFromContract<TermuxEventContract>;
+
+export type TermuxResult<Operation extends TermuxResultContract["operation"]> =
+  Extract<TermuxResultContract, { operation: Operation }>["result"];
 
 export interface TermuxProtocolError {
   status: number;
@@ -215,12 +224,7 @@ export function parseTermuxServerFrame(raw: string): TermuxServerFrame | null {
   return null;
 }
 
-export function parseTermuxOpenResult(result: Record<string, unknown>): {
-  streamId: string;
-  user: string;
-  cwd: string;
-  shell: string;
-} | null {
+export function parseTermuxOpenResult(result: Record<string, unknown>): TermuxResult<"session.open"> | null {
   if (!hasOnlyKeys(result, ["streamId", "user", "cwd", "shell"]) || !isUuid(result.streamId) || typeof result.user !== "string" || typeof result.cwd !== "string" || typeof result.shell !== "string") {
     return null;
   }
@@ -230,7 +234,7 @@ export function parseTermuxOpenResult(result: Record<string, unknown>): {
 function parseOpenPayload(value: Record<string, unknown>): TermuxOpenPayload | null {
   if (!hasOnlyKeys(value, ["user", "cols", "rows", "sessionName", "persistent"], ["sessionName", "persistent"]) || typeof value.user !== "string") return null;
   const dimensions = parseDimensions(value);
-  if (!dimensions || (value.sessionName !== undefined && !isSessionName(value.sessionName)) || (value.persistent !== undefined && typeof value.persistent !== "boolean")) return null;
+  if (!dimensions || (value.sessionName !== undefined && value.sessionName !== null && !isSessionName(value.sessionName)) || (value.persistent !== undefined && typeof value.persistent !== "boolean")) return null;
   return {
     user: value.user,
     ...dimensions,

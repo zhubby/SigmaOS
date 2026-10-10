@@ -24,16 +24,23 @@ impl Default for DockerOptions {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdDockerDaemonRequest"))]
 #[serde(tag = "action", rename_all = "snake_case")]
-pub(super) enum DockerRequest {
+pub(crate) enum DockerRequest {
     Read,
     Update { input: DockerUpdateInput },
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(
+    test,
+    ts(export_to = "hostd.ts", rename = "HostdDockerDaemonUpdateInput")
+)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct DockerUpdateInput {
+pub(crate) struct DockerUpdateInput {
     pub(super) content: String,
     pub(super) expected_revision: String,
     pub(super) restart: bool,
@@ -41,8 +48,10 @@ pub(super) struct DockerUpdateInput {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdDockerDaemonSnapshot"))]
 #[serde(rename_all = "camelCase")]
-pub(super) struct DockerSnapshot {
+pub(crate) struct DockerSnapshot {
     pub(super) path: &'static str,
     pub(super) content: String,
     pub(super) revision: String,
@@ -51,8 +60,13 @@ pub(super) struct DockerSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(
+    test,
+    ts(export_to = "hostd.ts", rename = "HostdDockerDaemonUpdateResult")
+)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct DockerUpdateResult {
+pub(crate) struct DockerUpdateResult {
     pub(super) snapshot: DockerSnapshot,
     pub(super) restarted: bool,
     pub(super) rollback: RollbackStatus,
@@ -60,11 +74,25 @@ pub(super) struct DockerUpdateResult {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(
+    test,
+    ts(export_to = "hostd.ts", rename = "HostdDockerDaemonRollbackStatus")
+)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum RollbackStatus {
+pub(crate) enum RollbackStatus {
     NotRequired,
     Succeeded,
     Failed,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdDockerDaemonResult"))]
+#[serde(untagged)]
+pub(crate) enum DockerResult {
+    Snapshot(DockerSnapshot),
+    Update(DockerUpdateResult),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

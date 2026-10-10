@@ -7,6 +7,7 @@ mod validation;
 
 use std::collections::BTreeSet;
 
+#[cfg(test)]
 use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -17,7 +18,8 @@ use crate::error::HostdError;
 
 use credentials::apply_credentials;
 use files::{restore_files, snapshot_files, write_managed_file};
-use model::{ALL_SERVICES, ShareApplyResult};
+use model::ALL_SERVICES;
+pub(crate) use model::ShareApplyResult;
 pub use model::{
     DlnaConfig, FtpConfig, NasRoot, NfsConfig, ResolvedShare, ShareAccount, ShareApplyRequest,
     ShareDefinition, ShareOptions, SharePaths, ShareProtocols, ShareSettings, SmbConfig,
@@ -28,16 +30,20 @@ pub use render::{
 };
 use validation::{resolve_shares, validate_request, validate_requested_roots};
 
-pub async fn apply(
-    payload: Value,
+#[cfg(test)]
+pub(crate) fn export_protocol_bindings(config: &ts_rs::Config) {
+    use ts_rs::TS;
+
+    ShareApplyRequest::export_all(config).unwrap();
+    ShareApplyResult::export_all(config).unwrap();
+}
+
+pub(crate) async fn apply(
+    request: ShareApplyRequest,
     runner: &dyn CommandRunner,
     configured_roots: &[ConfiguredNasRoot],
-) -> Result<Value, HostdError> {
-    let request: ShareApplyRequest = serde_json::from_value(payload)
-        .map_err(|_| HostdError::validation("Invalid shares.apply payload"))?;
-    let result =
-        apply_with_options(&request, runner, &ShareOptions::default(), configured_roots).await?;
-    serde_json::to_value(result).map_err(|error| HostdError::operation_failed(error.to_string()))
+) -> Result<ShareApplyResult, HostdError> {
+    apply_with_options(&request, runner, &ShareOptions::default(), configured_roots).await
 }
 
 async fn apply_with_options(

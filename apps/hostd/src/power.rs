@@ -1,49 +1,83 @@
-use serde::Deserialize;
-use serde_json::{Value, json};
+use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use serde_json::Value;
 
 use crate::command::{CommandRunner, run_checked};
 use crate::error::HostdError;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdPowerRequest"))]
 #[serde(deny_unknown_fields)]
-struct PowerRequest {
+pub(crate) struct PowerRequest {
     action: PowerAction,
     confirmed: bool,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdPowerAction"))]
 #[serde(rename_all = "snake_case")]
-enum PowerAction {
+pub(crate) enum PowerAction {
     Reboot,
     Shutdown,
 }
 
-pub async fn command(payload: Value, runner: &dyn CommandRunner) -> Result<Value, HostdError> {
-    let request: PowerRequest = serde_json::from_value(payload)
-        .map_err(|_| HostdError::validation("A confirmed power action is required"))?;
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdPowerResult"))]
+pub(crate) struct PowerResult {
+    action: PowerAction,
+    #[cfg_attr(test, ts(type = "true"))]
+    accepted: bool,
+}
+
+#[cfg(test)]
+pub(crate) fn export_protocol_bindings(config: &ts_rs::Config) {
+    use ts_rs::TS;
+
+    PowerRequest::export_all(config).unwrap();
+    PowerResult::export_all(config).unwrap();
+}
+
+pub(crate) async fn command(
+    request: PowerRequest,
+    runner: &dyn CommandRunner,
+) -> Result<PowerResult, HostdError> {
     if !request.confirmed {
         return Err(HostdError::validation(
             "Power action confirmation is required",
         ));
     }
 
-    let action = match request.action {
-        PowerAction::Reboot => "reboot",
-        PowerAction::Shutdown => "poweroff",
+    let (command, action) = match request.action {
+        PowerAction::Reboot => ("reboot", PowerAction::Reboot),
+        PowerAction::Shutdown => ("poweroff", PowerAction::Shutdown),
     };
-    run_checked(runner, "systemctl", &["--no-block", action], None).await?;
-    Ok(json!({
-        "action": if action == "reboot" { "reboot" } else { "shutdown" },
-        "accepted": true
-    }))
+    run_checked(runner, "systemctl", &["--no-block", command], None).await?;
+    Ok(PowerResult {
+        action,
+        accepted: true,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use serde_json::json;
     use std::sync::Mutex;
     use std::time::Duration;
+
+    async fn command_payload(
+        payload: Value,
+        runner: &dyn CommandRunner,
+    ) -> Result<Value, HostdError> {
+        let request: PowerRequest = serde_json::from_value(payload)
+            .map_err(|_| HostdError::validation("A confirmed power action is required"))?;
+        serde_json::to_value(command(request, runner).await?)
+            .map_err(|error| HostdError::operation_failed(error.to_string()))
+    }
 
     #[derive(Default)]
     struct FakeRunner {
@@ -79,7 +113,7 @@ mod tests {
             success: true,
             ..Default::default()
         };
-        let result = command(json!({ "action": "reboot", "confirmed": true }), &runner)
+        let result = command_payload(json!({ "action": "reboot", "confirmed": true }), &runner)
             .await
             .unwrap();
         assert_eq!(result, json!({ "action": "reboot", "accepted": true }));
@@ -98,7 +132,7 @@ mod tests {
             success: true,
             ..Default::default()
         };
-        let result = command(json!({ "action": "shutdown", "confirmed": true }), &runner)
+        let result = command_payload(json!({ "action": "shutdown", "confirmed": true }), &runner)
             .await
             .unwrap();
         assert_eq!(result, json!({ "action": "shutdown", "accepted": true }));
@@ -122,7 +156,7 @@ mod tests {
             json!({ "action": "hibernate", "confirmed": true }),
             json!({ "action": "reboot", "confirmed": true, "command": "rm -rf /" }),
         ] {
-            assert!(command(payload, &runner).await.is_err());
+            assert!(command_payload(payload, &runner).await.is_err());
         }
         assert!(runner.calls.lock().unwrap().is_empty());
     }

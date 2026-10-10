@@ -55,18 +55,23 @@ pub enum Command {
     },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "termux.ts", rename = "TermuxOpenPayload"))]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct OpenPayload {
     pub user: String,
     pub cols: u16,
     pub rows: u16,
+    #[cfg_attr(test, ts(optional = nullable))]
     pub session_name: Option<String>,
     #[serde(default)]
     pub persistent: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "termux.ts", rename = "TermuxClosePayload"))]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct ClosePayload {
     pub stream_id: String,
@@ -74,24 +79,60 @@ pub struct ClosePayload {
     pub destroy: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "termux.ts", rename = "TermuxDestroyPayload"))]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct DestroyPayload {
     pub user: String,
     pub session_name: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "termux.ts", rename = "TermuxInputPayload"))]
 #[serde(deny_unknown_fields)]
 struct InputPayload {
     data: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "termux.ts", rename = "TermuxResizePayload"))]
 #[serde(deny_unknown_fields)]
 struct ResizePayload {
     cols: u16,
     rows: u16,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(Deserialize))]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "termux.ts", rename = "TermuxOpenResult"))]
+#[serde(rename_all = "camelCase")]
+pub struct OpenResult {
+    pub stream_id: String,
+    pub user: String,
+    pub cwd: String,
+    pub shell: String,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(Deserialize))]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "termux.ts", rename = "TermuxCloseResult"))]
+#[serde(rename_all = "camelCase")]
+pub struct CloseResult {
+    pub closed: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(Deserialize))]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "termux.ts", rename = "TermuxDestroyResult"))]
+#[serde(rename_all = "camelCase")]
+pub struct DestroyResult {
+    pub session_name: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -108,6 +149,7 @@ pub struct ResponseEnvelope {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(Deserialize))]
 #[serde(rename_all = "camelCase")]
 struct ErrorEnvelope {
     status: u16,
@@ -129,11 +171,17 @@ pub struct EventEnvelope<T: Serialize> {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(Deserialize))]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "termux.ts", rename = "TermuxOutputPayload"))]
 pub struct OutputPayload {
     pub data: String,
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(Deserialize))]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "termux.ts", rename = "TermuxExitPayload"))]
 #[serde(rename_all = "camelCase")]
 pub struct ExitPayload {
     pub exit_code: i32,
@@ -143,6 +191,9 @@ pub struct ExitPayload {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(Deserialize))]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "termux.ts", rename = "TermuxStreamErrorPayload"))]
 #[serde(rename_all = "camelCase")]
 pub struct StreamErrorPayload {
     pub code: ErrorCode,
@@ -248,13 +299,15 @@ impl ClientFrame {
 }
 
 impl ResponseEnvelope {
-    pub fn success(id: String, result: Value) -> Self {
+    pub fn success(id: String, result: impl Serialize) -> Self {
         Self {
             version: PROTOCOL_VERSION,
             kind: "response",
             id,
             ok: true,
-            result: Some(result),
+            result: Some(
+                serde_json::to_value(result).expect("Termux protocol result must serialize"),
+            ),
             error: None,
         }
     }
@@ -365,6 +418,57 @@ fn validate_dimensions(cols: u16, rows: u16) -> Result<(), TermuxError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ts_rs::{Config, TS};
+
+    #[allow(dead_code)]
+    #[derive(Serialize, TS)]
+    #[ts(export_to = "termux.ts")]
+    #[serde(tag = "operation", content = "payload")]
+    enum TermuxRequestContract {
+        #[serde(rename = "session.open")]
+        Open(OpenPayload),
+        #[serde(rename = "session.close")]
+        Close(ClosePayload),
+        #[serde(rename = "session.destroy")]
+        Destroy(DestroyPayload),
+    }
+
+    #[allow(dead_code)]
+    #[derive(Serialize, TS)]
+    #[ts(export_to = "termux.ts")]
+    #[serde(tag = "operation", content = "payload")]
+    enum TermuxCommandContract {
+        #[serde(rename = "terminal.input")]
+        Input(InputPayload),
+        #[serde(rename = "terminal.resize")]
+        Resize(ResizePayload),
+    }
+
+    #[allow(dead_code)]
+    #[derive(Serialize, TS)]
+    #[ts(export_to = "termux.ts")]
+    #[serde(tag = "event", content = "payload")]
+    enum TermuxEventContract {
+        #[serde(rename = "terminal.output")]
+        Output(OutputPayload),
+        #[serde(rename = "terminal.exit")]
+        Exit(ExitPayload),
+        #[serde(rename = "terminal.error")]
+        Error(StreamErrorPayload),
+    }
+
+    #[allow(dead_code)]
+    #[derive(Serialize, TS)]
+    #[ts(export_to = "termux.ts")]
+    #[serde(tag = "operation", content = "result")]
+    enum TermuxResultContract {
+        #[serde(rename = "session.open")]
+        Open(OpenResult),
+        #[serde(rename = "session.close")]
+        Close(CloseResult),
+        #[serde(rename = "session.destroy")]
+        Destroy(DestroyResult),
+    }
 
     #[derive(Deserialize)]
     struct GoldenFixtures {
@@ -373,6 +477,16 @@ mod tests {
     }
 
     const ID: &str = "67e55044-10b1-426f-9247-bb680e5fe0c8";
+
+    #[test]
+    #[ignore = "writes checked-in TypeScript protocol bindings"]
+    fn export_protocol_bindings() {
+        let config = Config::from_env();
+        TermuxRequestContract::export_all(&config).unwrap();
+        TermuxCommandContract::export_all(&config).unwrap();
+        TermuxEventContract::export_all(&config).unwrap();
+        TermuxResultContract::export_all(&config).unwrap();
+    }
 
     #[test]
     fn parses_open_and_binary_input_frames() {
@@ -476,12 +590,88 @@ mod tests {
         )))
         .unwrap();
         for frame in fixtures.client {
-            ClientFrame::parse(frame.as_bytes()).unwrap();
+            match ClientFrame::parse(frame.as_bytes()).unwrap() {
+                frame @ ClientFrame::Request { .. } => {
+                    frame.into_request().unwrap();
+                }
+                frame @ ClientFrame::Command { .. } => {
+                    frame.into_command().unwrap();
+                }
+            }
         }
         for frame in fixtures.server {
             let value: Value = serde_json::from_str(&frame).unwrap();
-            assert_eq!(value["version"], PROTOCOL_VERSION);
-            assert!(matches!(value["kind"].as_str(), Some("response" | "event")));
+            assert_eq!(round_trip_server_fixture(&value), value);
+        }
+    }
+
+    fn round_trip_server_fixture(value: &Value) -> Value {
+        let id = value
+            .get("id")
+            .or_else(|| value.get("streamId"))
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_owned();
+        match (
+            value["kind"].as_str(),
+            value["ok"].as_bool(),
+            value["event"].as_str(),
+        ) {
+            (Some("response"), Some(true), _) => {
+                let result = value["result"].clone();
+                let response = if result.get("streamId").is_some() {
+                    ResponseEnvelope::success(
+                        id,
+                        serde_json::from_value::<OpenResult>(result).unwrap(),
+                    )
+                } else if result.get("closed").is_some() {
+                    ResponseEnvelope::success(
+                        id,
+                        serde_json::from_value::<CloseResult>(result).unwrap(),
+                    )
+                } else {
+                    ResponseEnvelope::success(
+                        id,
+                        serde_json::from_value::<DestroyResult>(result).unwrap(),
+                    )
+                };
+                serde_json::to_value(response).unwrap()
+            }
+            (Some("response"), Some(false), _) => serde_json::to_value(ResponseEnvelope {
+                version: PROTOCOL_VERSION,
+                kind: "response",
+                id,
+                ok: false,
+                result: None,
+                error: Some(serde_json::from_value(value["error"].clone()).unwrap()),
+            })
+            .unwrap(),
+            (Some("event"), _, Some("terminal.output")) => serde_json::to_value(EventEnvelope {
+                version: PROTOCOL_VERSION,
+                kind: "event",
+                stream_id: id,
+                event: "terminal.output",
+                payload: serde_json::from_value::<OutputPayload>(value["payload"].clone()).unwrap(),
+            })
+            .unwrap(),
+            (Some("event"), _, Some("terminal.exit")) => serde_json::to_value(EventEnvelope {
+                version: PROTOCOL_VERSION,
+                kind: "event",
+                stream_id: id,
+                event: "terminal.exit",
+                payload: serde_json::from_value::<ExitPayload>(value["payload"].clone()).unwrap(),
+            })
+            .unwrap(),
+            (Some("event"), _, Some("terminal.error")) => serde_json::to_value(EventEnvelope {
+                version: PROTOCOL_VERSION,
+                kind: "event",
+                stream_id: id,
+                event: "terminal.error",
+                payload: serde_json::from_value::<StreamErrorPayload>(value["payload"].clone())
+                    .unwrap(),
+            })
+            .unwrap(),
+            _ => panic!("unexpected Termux server fixture: {value}"),
         }
     }
 }

@@ -67,21 +67,27 @@ impl Default for ShareOptions {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdShareApplyRequest"))]
 #[serde(rename_all = "camelCase")]
 pub struct ShareApplyRequest {
     pub settings: ShareSettings,
     pub roots: Vec<NasRoot>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdNasRoot"))]
 #[serde(rename_all = "camelCase")]
 pub struct NasRoot {
     pub id: String,
     pub path: PathBuf,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdShareSettings"))]
 #[serde(rename_all = "camelCase")]
 pub struct ShareSettings {
     pub enabled: bool,
@@ -89,14 +95,18 @@ pub struct ShareSettings {
     pub shares: Vec<ShareDefinition>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdShareAccount"))]
 #[serde(rename_all = "camelCase")]
 pub struct ShareAccount {
     pub username: String,
     pub password: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdShareDefinition"))]
 #[serde(rename_all = "camelCase")]
 pub struct ShareDefinition {
     pub id: String,
@@ -107,7 +117,9 @@ pub struct ShareDefinition {
     pub protocols: ShareProtocols,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdShareProtocols"))]
 pub struct ShareProtocols {
     pub smb: SmbConfig,
     pub webdav: WebDavConfig,
@@ -116,7 +128,9 @@ pub struct ShareProtocols {
     pub dlna: DlnaConfig,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdSmbConfig"))]
 #[serde(rename_all = "camelCase")]
 pub struct SmbConfig {
     pub enabled: bool,
@@ -125,7 +139,9 @@ pub struct SmbConfig {
     pub allow_guest: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdWebDavConfig"))]
 #[serde(rename_all = "camelCase")]
 pub struct WebDavConfig {
     pub enabled: bool,
@@ -135,7 +151,9 @@ pub struct WebDavConfig {
     pub path_prefix: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdFtpConfig"))]
 #[serde(rename_all = "camelCase")]
 pub struct FtpConfig {
     pub enabled: bool,
@@ -146,7 +164,9 @@ pub struct FtpConfig {
     pub passive_port_end: u16,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdNfsConfig"))]
 #[serde(rename_all = "camelCase")]
 pub struct NfsConfig {
     pub enabled: bool,
@@ -155,7 +175,9 @@ pub struct NfsConfig {
     pub root_squash: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdDlnaConfig"))]
 #[serde(rename_all = "camelCase")]
 pub struct DlnaConfig {
     pub enabled: bool,
@@ -173,8 +195,10 @@ pub struct ResolvedShare<'a> {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdShareApplyResult"))]
 #[serde(rename_all = "camelCase")]
-pub(super) struct ShareApplyResult {
+pub(crate) struct ShareApplyResult {
     pub(super) applied_at: String,
     pub(super) files: Vec<String>,
     pub(super) services: Vec<String>,

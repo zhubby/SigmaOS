@@ -7,7 +7,6 @@ use std::time::Duration;
 
 use nix::unistd::{Gid, Uid, chown};
 use serde::Serialize;
-use serde_json::json;
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
@@ -19,8 +18,8 @@ use uuid::Uuid;
 use crate::config::TermuxConfig;
 use crate::error::{ErrorCode, TermuxError};
 use crate::protocol::{
-    ClientFrame, Command, EventEnvelope, ExitPayload, MAX_FRAME_BYTES, MAX_OUTPUT_BYTES, Request,
-    ResponseEnvelope, UNKNOWN_REQUEST_ID,
+    ClientFrame, CloseResult, Command, DestroyResult, EventEnvelope, ExitPayload, MAX_FRAME_BYTES,
+    MAX_OUTPUT_BYTES, OpenResult, Request, ResponseEnvelope, UNKNOWN_REQUEST_ID,
 };
 use crate::pty;
 use crate::tmux::TmuxManager;
@@ -230,9 +229,12 @@ async fn handle_connection(
                 return Ok(());
             }
             let response = match state.tmux.destroy(&payload.session_name).await {
-                Ok(()) => {
-                    ResponseEnvelope::success(id, json!({ "sessionName": payload.session_name }))
-                }
+                Ok(()) => ResponseEnvelope::success(
+                    id,
+                    DestroyResult {
+                        session_name: payload.session_name,
+                    },
+                ),
                 Err(error) => ResponseEnvelope::failure(id, error),
             };
             write_json(&mut stream, &response).await?;
@@ -329,12 +331,12 @@ async fn run_open_session(
             stream,
             &ResponseEnvelope::success(
                 request_id,
-                json!({
-                    "streamId": stream_id,
-                    "user": config.account.name,
-                    "cwd": config.account.home,
-                    "shell": config.account.shell,
-                }),
+                OpenResult {
+                    stream_id: stream_id.clone(),
+                    user: config.account.name.clone(),
+                    cwd: config.account.home.to_string_lossy().into_owned(),
+                    shell: config.account.shell.to_string_lossy().into_owned(),
+                },
             ),
         )
         .await?;
@@ -364,7 +366,11 @@ async fn run_open_session(
                                 state.tmux.mark_detached(&session_name).await?;
                                 lifecycle.detached = true;
                             }
-                            write_json(stream, &ResponseEnvelope::success(id, json!({ "closed": true }))).await?;
+                            write_json(
+                                stream,
+                                &ResponseEnvelope::success(id, CloseResult { closed: true }),
+                            )
+                            .await?;
                             break;
                         }
                         Err(error) => {

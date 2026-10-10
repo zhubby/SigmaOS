@@ -3,6 +3,8 @@ use serde_json::Value;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdErrorCode"))]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     ProtocolError,

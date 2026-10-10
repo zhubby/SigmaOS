@@ -1,76 +1,25 @@
+import type {
+  VodPlayerCapabilities as GeneratedVodPlayerCapabilities,
+  VodPlayerErrorCode as GeneratedVodPlayerErrorCode,
+  VodPlayerState as GeneratedVodPlayerState,
+  VodPlayerStatus as GeneratedVodPlayerStatus,
+  VodPlayerWireCommand
+} from "./generated/vod-player.js";
+
 export const VOD_PLAYER_PROTOCOL_VERSION = 1 as const;
 export const VOD_PLAYER_BROKER_MAX_FRAME_BYTES = 128 * 1024;
 export const VOD_PLAYER_BROKER_CONNECT_TIMEOUT_MS = 5_000;
 
-export type VodPlayerState =
-  | "idle"
-  | "starting"
-  | "playing"
-  | "paused"
-  | "recovering"
-  | "stopped"
-  | "error";
+export type VodPlayerState = GeneratedVodPlayerState;
+export type VodPlayerErrorCode = GeneratedVodPlayerErrorCode;
+export type VodPlayerCapabilities = GeneratedVodPlayerCapabilities;
+export type VodPlayerStatus = GeneratedVodPlayerStatus;
 
-export type VodPlayerErrorCode =
-  | "VOD_PLAYER_DISABLED"
-  | "VOD_PLAYER_UNAVAILABLE"
-  | "MPV_UNAVAILABLE"
-  | "DRM_UNAVAILABLE"
-  | "AUDIO_UNAVAILABLE"
-  | "PERMISSION_DENIED"
-  | "STORAGE_UNAVAILABLE"
-  | "SOURCE_CHANGED"
-  | "UNSUPPORTED_MEDIA"
-  | "PLAYBACK_FAILED"
-  | "COMMAND_TIMEOUT"
-  | "SESSION_CONFLICT"
-  | "INVALID_COMMAND"
-  | "INVALID_PATH"
-  | "PROTOCOL_ERROR"
-  | "INTERNAL";
-
-export interface VodPlayerCapabilities {
-  mpvAvailable: boolean;
-  drmAvailable: boolean;
-  audioAvailable: boolean;
-  hardwareDecode: "enabled" | "software" | "unknown";
-  error: string | null;
-}
-
-export interface VodPlayerStatus {
-  state: VodPlayerState;
-  sessionId: string | null;
-  serviceInstanceId: string;
-  revision: number;
-  rootId: string | null;
-  storagePoolId: string | null;
-  relativePath: string | null;
-  fileName: string | null;
-  positionSeconds: number;
-  durationSeconds: number | null;
-  volume: number;
-  retryCount: number;
-  nextRetryAt: string | null;
-  capabilities: VodPlayerCapabilities;
-  error: string | null;
-  errorCode: VodPlayerErrorCode | null;
-  updatedAt: string;
-}
-
+type GeneratedPlayCommand = Extract<VodPlayerWireCommand, { type: "play" }>;
 export type VodPlayerCommand =
-  | {
-      type: "play";
-      rootId: string;
-      storagePoolId: string;
-      relativePath: string;
-      startPositionSeconds?: number;
-    }
-  | { type: "pause"; sessionId: string }
-  | { type: "resume"; sessionId: string }
-  | { type: "stop"; sessionId: string }
-  | { type: "retry"; sessionId: string }
-  | { type: "seek"; sessionId: string; seconds: number }
-  | { type: "set-volume"; sessionId: string; volume: number };
+  | Exclude<VodPlayerWireCommand, { type: "status" | "play" }>
+  | Omit<GeneratedPlayCommand, "startPositionSeconds">
+    & { startPositionSeconds?: number };
 
 export type VodPlayerBrokerRequest = {
   version: typeof VOD_PLAYER_PROTOCOL_VERSION;
@@ -139,7 +88,7 @@ function parseCommand(value: Record<string, unknown>): VodPlayerBrokerRequest["c
       typeof value.relativePath !== "string" || !safeRelativePath(value.relativePath)
     ) return null;
     const startPositionSeconds = optionalNonNegative(value.startPositionSeconds);
-    if (value.startPositionSeconds !== undefined && startPositionSeconds === null) return null;
+    if (value.startPositionSeconds !== undefined && value.startPositionSeconds !== null && startPositionSeconds === null) return null;
     return {
       type: "play",
       rootId: value.rootId,

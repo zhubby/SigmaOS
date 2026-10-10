@@ -1,0 +1,199 @@
+{
+  "contracts": [
+    {
+      "operation": "shares.apply",
+      "request": {
+        "settings": {
+          "enabled": false,
+          "account": { "username": "sigma_share", "password": null },
+          "shares": []
+        },
+        "roots": [{ "id": "primary", "path": "/srv/nas" }]
+      },
+      "result": {
+        "appliedAt": "2026-10-10T00:00:00Z",
+        "files": ["/etc/samba/smb.conf.d/sigmaos-shares.conf"],
+        "services": []
+      }
+    },
+    {
+      "operation": "storage.command",
+      "request": { "command": "mdadm", "args": ["--detail", "/dev/md0"] },
+      "result": { "stdout": "detail\n" }
+    },
+    {
+      "operation": "storage.operation",
+      "request": {
+        "action": "create_pool",
+        "name": "media",
+        "raidLevel": "1",
+        "devices": ["/dev/sda", "/dev/sdb"],
+        "filesystem": "ext4",
+        "mountpoint": "/srv/nas/media",
+        "risk": "high"
+      },
+      "result": {
+        "action": "create_pool",
+        "name": "media",
+        "raidLevel": "1",
+        "devices": ["/dev/sda", "/dev/sdb"],
+        "filesystem": "ext4",
+        "mountpoint": "/srv/nas/media",
+        "mdDevice": "/dev/md/media",
+        "uuid": "array-uuid"
+      }
+    },
+    {
+      "operation": "storage.operation",
+      "request": {
+        "action": "delete_pool",
+        "name": "media",
+        "mdDevice": "/dev/md/media",
+        "devices": ["/dev/sda", "/dev/sdb"],
+        "mountpoint": "/srv/nas/media",
+        "risk": "high"
+      },
+      "result": {
+        "action": "delete_pool",
+        "name": "media",
+        "mountpoint": "/srv/nas/media",
+        "mdDevice": "/dev/md/media",
+        "devices": ["/dev/sda", "/dev/sdb"]
+      }
+    },
+    {
+      "operation": "docker.daemon",
+      "request": { "action": "read" },
+      "result": {
+        "path": "/etc/docker/daemon.json",
+        "content": "{}\n",
+        "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "exists": true,
+        "restartPending": false
+      }
+    },
+    {
+      "operation": "docker.daemon",
+      "request": {
+        "action": "update",
+        "input": {
+          "content": "{}\n",
+          "expectedRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "restart": true,
+          "confirmed": true
+        }
+      },
+      "result": {
+        "snapshot": {
+          "path": "/etc/docker/daemon.json",
+          "content": "{}\n",
+          "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "exists": true,
+          "restartPending": false
+        },
+        "restarted": true,
+        "rollback": "not_required",
+        "error": null
+      }
+    },
+    {
+      "operation": "network.manager",
+      "request": { "action": "ping" },
+      "result": { "ready": true }
+    },
+    {
+      "operation": "network.manager",
+      "request": { "action": "inspect" },
+      "result": {
+        "profiles": [{
+          "id": "550e8400-e29b-41d4-a716-446655440000",
+          "name": "SigmaOS Home",
+          "ssid": "Home",
+          "device": "wlan0",
+          "security": "wpa2",
+          "mode": "client",
+          "band": "5",
+          "channel": 36,
+          "autoconnect": true,
+          "credentialConfigured": true,
+          "revision": "profile-revision"
+        }],
+        "recovery": {}
+      }
+    },
+    {
+      "operation": "network.manager",
+      "request": { "action": "scan", "input": { "device": "wlan0" } },
+      "result": {
+        "device": "wlan0",
+        "scannedAt": "2026-10-10T00:00:00Z",
+        "accessPoints": [{
+          "active": true,
+          "ssid": "Home",
+          "bssid": "00:11:22:33:44:55",
+          "channel": 36,
+          "frequencyMHz": 5180,
+          "signal": 82,
+          "band": "5",
+          "security": "wpa2",
+          "savedProfileId": null
+        }]
+      }
+    },
+    {
+      "operation": "network.manager",
+      "request": { "action": "connect", "input": { "device": "wlan0", "profileId": "profile", "confirmed": true } },
+      "result": { "rollback": "not_required", "message": null }
+    },
+    {
+      "operation": "network.manager",
+      "request": { "action": "disconnect", "input": { "device": "wlan0", "confirmed": true } },
+      "result": { "rollback": "not_required", "message": null }
+    },
+    {
+      "operation": "network.manager",
+      "request": { "action": "radio", "input": { "enabled": true, "confirmed": true } },
+      "result": { "rollback": "not_required", "message": null }
+    },
+    {
+      "operation": "network.manager",
+      "request": { "action": "update_profile", "profileId": "profile", "input": { "expectedRevision": "revision", "confirmed": true } },
+      "result": { "rollback": "not_required", "message": null }
+    },
+    {
+      "operation": "network.manager",
+      "request": { "action": "delete_profile", "profileId": "profile", "confirmed": true },
+      "result": { "rollback": "not_required", "message": null }
+    },
+    {
+      "operation": "network.manager",
+      "request": { "action": "update_hotspot", "input": { "device": "wlan0", "ssid": "SigmaOS", "band": "5", "autostart": true, "confirmed": true } },
+      "result": { "rollback": "not_required", "message": null }
+    },
+    {
+      "operation": "network.manager",
+      "request": { "action": "start_hotspot", "input": { "device": "wlan0", "confirmed": true } },
+      "result": { "rollback": "not_required", "message": null }
+    },
+    {
+      "operation": "network.manager",
+      "request": { "action": "stop_hotspot", "input": { "device": "wlan0", "confirmed": true } },
+      "result": { "rollback": "not_required", "message": null }
+    },
+    {
+      "operation": "network.manager",
+      "request": { "action": "delete_hotspot", "input": { "device": "wlan0", "confirmed": true } },
+      "result": { "rollback": "not_required", "message": null }
+    },
+    {
+      "operation": "system.power",
+      "request": { "action": "reboot", "confirmed": true },
+      "result": { "action": "reboot", "accepted": true }
+    },
+    {
+      "operation": "system.power",
+      "request": { "action": "shutdown", "confirmed": true },
+      "result": { "action": "shutdown", "accepted": true }
+    }
+  ]
+}

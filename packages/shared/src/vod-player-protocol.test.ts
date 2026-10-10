@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
   encodeVodPlayerBrokerMessage,
@@ -116,5 +117,14 @@ describe("VOD player broker protocol", () => {
       ok: true,
       status: { ...status, extra: true }
     }))).toBeNull();
+  });
+
+  it("keeps the checked-in golden frames valid", async () => {
+    const fixtures = JSON.parse(await readFile(new URL("../fixtures/vod-player-protocol-v1.json", import.meta.url), "utf8")) as {
+      requests: string[];
+      responses: string[];
+    };
+    expect(fixtures.requests.map(parseVodPlayerBrokerRequest).every(Boolean)).toBe(true);
+    expect(fixtures.responses.map(parseVodPlayerBrokerResponse).every(Boolean)).toBe(true);
   });
 });

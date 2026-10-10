@@ -1,10 +1,13 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type {
-  DockerDaemonConfigSnapshot,
-  DockerDaemonConfigUpdateInput,
-  DockerDaemonConfigUpdateResult,
-  DockerDaemonStatus
+import {
+  parseHostdResult,
+  type DockerDaemonConfigSnapshot,
+  type DockerDaemonConfigUpdateInput,
+  type DockerDaemonConfigUpdateResult,
+  type DockerDaemonStatus,
+  type HostdRequest,
+  type HostdResult
 } from "@sigmaos/shared";
 import type { SystemCommandRunner } from "./system-management.js";
 import { HostdClient, HostdRequestError } from "./hostd-client.js";
@@ -68,26 +71,34 @@ export class HostdDockerDaemonClient implements DockerDaemonHostdClient {
   }
 
   read(): Promise<DockerDaemonConfigSnapshot> {
-    return this.request<DockerDaemonConfigSnapshot>({ action: "read" });
+    return this.request({ action: "read" });
   }
 
   update(input: DockerDaemonConfigUpdateInput): Promise<DockerDaemonConfigUpdateResult> {
-    return this.request<DockerDaemonConfigUpdateResult>({ action: "update", input });
+    return this.request({ action: "update", input });
   }
 
-  async request<T>(payload: unknown): Promise<T> {
+  async request<Request extends HostdRequest<"docker.daemon">>(
+    payload: Request
+  ): Promise<HostdResult<"docker.daemon", Request>> {
     try {
       return await this.client.request("docker.daemon", payload, HOSTD_TIMEOUT_MS);
     } catch (error) {
       if (error instanceof HostdRequestError) {
-        const result = isRecord(error.details.result)
-          ? (error.details.result as unknown as DockerDaemonConfigUpdateResult)
-          : undefined;
+        const result = parseDockerUpdateErrorResult(payload, error.details.result);
         throw new DockerDaemonRequestError(safeDockerDaemonMessage(error), error.statusCode, result);
       }
       throw new DockerDaemonRequestError("hostd is unavailable", 503);
     }
   }
+}
+
+function parseDockerUpdateErrorResult(
+  request: HostdRequest<"docker.daemon">,
+  value: unknown
+): DockerDaemonConfigUpdateResult | undefined {
+  if (request.action !== "update" || !isRecord(value)) return undefined;
+  return parseHostdResult("docker.daemon", request, value) ?? undefined;
 }
 
 export class SystemDockerDaemonRuntime implements DockerDaemonRuntime {

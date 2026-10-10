@@ -93,7 +93,7 @@ async function requestStorageHostd(
   command: "mdadm" | "smartctl",
   args: string[]
 ): Promise<string> {
-  const result = await client.request<{ stdout: string }>(
+  const result = await client.request(
     "storage.command",
     { command, args },
     HOSTD_TIMEOUT_MS

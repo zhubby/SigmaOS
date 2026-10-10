@@ -3,6 +3,7 @@ mod store;
 
 use std::path::Path;
 
+#[cfg(test)]
 use serde_json::Value;
 use tokio::fs;
 use uuid::Uuid;
@@ -13,17 +14,44 @@ use crate::error::{ErrorCode, HostdError};
 pub use model::DockerOptions;
 #[cfg(test)]
 use model::MAX_CONFIG_BYTES;
-use model::{DockerRequest, DockerUpdateInput, DockerUpdateResult, RollbackStatus, validate_input};
+pub(crate) use model::{DockerRequest, DockerResult};
+use model::{DockerUpdateInput, DockerUpdateResult, RollbackStatus, validate_input};
 use store::{
     atomic_write, atomic_write_checked, clear_transaction, conflict, create_baseline,
     ensure_revision, read_config_file, read_snapshot, read_transaction, revision, rollback_config,
     write_transaction,
 };
 
-pub async fn handle(payload: Value, runner: &dyn CommandRunner) -> Result<Value, HostdError> {
-    handle_with_options(payload, runner, &DockerOptions::default()).await
+#[cfg(test)]
+pub(crate) fn export_protocol_bindings(config: &ts_rs::Config) {
+    use ts_rs::TS;
+
+    DockerRequest::export_all(config).unwrap();
+    DockerResult::export_all(config).unwrap();
 }
 
+pub(crate) async fn handle(
+    request: DockerRequest,
+    runner: &dyn CommandRunner,
+) -> Result<DockerResult, HostdError> {
+    execute_with_options(request, runner, &DockerOptions::default()).await
+}
+
+async fn execute_with_options(
+    request: DockerRequest,
+    runner: &dyn CommandRunner,
+    options: &DockerOptions,
+) -> Result<DockerResult, HostdError> {
+    match request {
+        DockerRequest::Read => Ok(DockerResult::Snapshot(read_snapshot(options).await?)),
+        DockerRequest::Update { input } => {
+            validate_input(&input)?;
+            Ok(DockerResult::Update(update(input, runner, options).await?))
+        }
+    }
+}
+
+#[cfg(test)]
 async fn handle_with_options(
     payload: Value,
     runner: &dyn CommandRunner,
@@ -31,17 +59,8 @@ async fn handle_with_options(
 ) -> Result<Value, HostdError> {
     let request: DockerRequest = serde_json::from_value(payload)
         .map_err(|_| HostdError::validation("Invalid Docker daemon request"))?;
-    let result = match request {
-        DockerRequest::Read => serde_json::to_value(read_snapshot(options).await?),
-        DockerRequest::Update { input } => {
-            validate_input(&input)?;
-            match update(input, runner, options).await {
-                Ok(result) => serde_json::to_value(result),
-                Err(error) => return Err(error),
-            }
-        }
-    };
-    result.map_err(|error| HostdError::operation_failed(error.to_string()))
+    let result = execute_with_options(request, runner, options).await?;
+    serde_json::to_value(result).map_err(|error| HostdError::operation_failed(error.to_string()))
 }
 
 async fn update(

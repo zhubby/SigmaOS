@@ -6,6 +6,8 @@ mod validation;
 use std::path::Path;
 use std::time::Duration;
 
+use serde::Serialize;
+#[cfg(test)]
 use serde_json::Value;
 use tokio::fs;
 
@@ -19,15 +21,33 @@ use devices::{
 };
 use fstab::{append_entry, mount_unit_name, remove_entry};
 pub use model::StorageOptions;
-use model::{StorageCommand, StorageOperation, StorageResult};
+pub(crate) use model::{StorageCommand, StorageOperation, StorageResult};
 use validation::{validate_command, validate_operation};
 
 const READ_COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
 
-pub async fn command(payload: Value, runner: &dyn CommandRunner) -> Result<Value, HostdError> {
-    let request: StorageCommand = serde_json::from_value(payload)
-        .map_err(|_| HostdError::validation("Invalid storage command request"))?;
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdStorageCommandResult"))]
+pub(crate) struct StorageCommandResult {
+    pub stdout: String,
+}
+
+#[cfg(test)]
+pub(crate) fn export_protocol_bindings(config: &ts_rs::Config) {
+    use ts_rs::TS;
+
+    StorageCommand::export_all(config).unwrap();
+    StorageCommandResult::export_all(config).unwrap();
+    StorageOperation::export_all(config).unwrap();
+    StorageResult::export_all(config).unwrap();
+}
+
+pub(crate) async fn command(
+    request: StorageCommand,
+    runner: &dyn CommandRunner,
+) -> Result<StorageCommandResult, HostdError> {
     validate_command(&request)?;
     let output = runner
         .run(
@@ -39,7 +59,9 @@ pub async fn command(payload: Value, runner: &dyn CommandRunner) -> Result<Value
         )
         .await?;
     if output.success || !output.stdout.trim().is_empty() {
-        return Ok(serde_json::json!({ "stdout": output.stdout }));
+        return Ok(StorageCommandResult {
+            stdout: output.stdout,
+        });
     }
     Err(HostdError::operation_failed(
         if output.stderr.trim().is_empty() {
@@ -50,10 +72,27 @@ pub async fn command(payload: Value, runner: &dyn CommandRunner) -> Result<Value
     ))
 }
 
-pub async fn operation(payload: Value, runner: &dyn CommandRunner) -> Result<Value, HostdError> {
-    operation_with_options(payload, runner, &StorageOptions::default()).await
+pub(crate) async fn operation(
+    request: StorageOperation,
+    runner: &dyn CommandRunner,
+) -> Result<StorageResult, HostdError> {
+    execute_operation_with_options(request, runner, &StorageOptions::default()).await
 }
 
+async fn execute_operation_with_options(
+    operation: StorageOperation,
+    runner: &dyn CommandRunner,
+    options: &StorageOptions,
+) -> Result<StorageResult, HostdError> {
+    validate_operation(&operation)?;
+    let result = match &operation {
+        StorageOperation::CreatePool { .. } => create_pool(&operation, runner, options).await?,
+        StorageOperation::DeletePool { .. } => delete_pool(&operation, runner, options).await?,
+    };
+    Ok(result)
+}
+
+#[cfg(test)]
 async fn operation_with_options(
     payload: Value,
     runner: &dyn CommandRunner,
@@ -61,11 +100,7 @@ async fn operation_with_options(
 ) -> Result<Value, HostdError> {
     let operation: StorageOperation = serde_json::from_value(payload)
         .map_err(|_| HostdError::validation("Invalid storage operation request"))?;
-    validate_operation(&operation)?;
-    let result = match &operation {
-        StorageOperation::CreatePool { .. } => create_pool(&operation, runner, options).await?,
-        StorageOperation::DeletePool { .. } => delete_pool(&operation, runner, options).await?,
-    };
+    let result = execute_operation_with_options(operation, runner, options).await?;
     serde_json::to_value(result).map_err(|error| HostdError::operation_failed(error.to_string()))
 }
 

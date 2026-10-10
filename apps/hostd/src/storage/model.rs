@@ -23,15 +23,19 @@ impl Default for StorageOptions {
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub(super) struct StorageCommand {
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdStorageCommand"))]
+pub(crate) struct StorageCommand {
     pub(super) command: String,
     pub(super) args: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export_to = "hostd.ts", rename = "HostdStorageOperation"))]
 #[serde(tag = "action", rename_all = "snake_case")]
-pub(super) enum StorageOperation {
+pub(crate) enum StorageOperation {
     CreatePool {
         name: String,
         #[serde(rename = "raidLevel")]
@@ -52,8 +56,13 @@ pub(super) enum StorageOperation {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(
+    test,
+    ts(export_to = "hostd.ts", rename = "HostdStorageOperationResult")
+)]
 #[serde(tag = "action", rename_all = "snake_case")]
-pub(super) enum StorageResult {
+pub(crate) enum StorageResult {
     CreatePool {
         name: String,
         #[serde(rename = "raidLevel")]
