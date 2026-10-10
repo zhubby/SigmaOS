@@ -353,10 +353,13 @@ impl MpvHandle {
                         return Err(VodError::unavailable(ErrorCode::PlaybackFailed, message));
                     }
                     Some(Incoming::Event(MpvEvent::Exit { .. })) | None => {
-                        return Err(VodError::unavailable(
-                            ErrorCode::PlaybackFailed,
-                            "mpv exited before loading media",
-                        ));
+                        let diagnostic = self.stderr_summary();
+                        let message = if diagnostic.is_empty() {
+                            "mpv exited before loading media".to_owned()
+                        } else {
+                            format!("mpv exited before loading media: {diagnostic}")
+                        };
+                        return Err(VodError::unavailable(ErrorCode::PlaybackFailed, message));
                     }
                     Some(Incoming::Event(event)) => self.deferred.push_back(event),
                     Some(Incoming::Response { .. }) => {}
