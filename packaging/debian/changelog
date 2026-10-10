@@ -1,3 +1,9 @@
+sigmaos (0.9.5) unstable; urgency=medium
+
+  * Use portable Unix descriptor numbers for the Rust VOD helper process and harden its rejection tests.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Sat, 10 Oct 2026 10:56:02 +0000
+
 sigmaos (0.9.4) unstable; urgency=medium
 
   * Harden Linux helper-process descriptor inheritance and VOD socket shutdown handling.
