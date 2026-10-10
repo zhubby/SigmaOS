@@ -746,9 +746,21 @@ mod tests {
         }
     }
 
+    fn write_executable(path: &std::path::Path, contents: &str) -> PathBuf {
+        let temporary = path.with_extension("tmp");
+        std::fs::write(&temporary, contents).unwrap();
+        let mut permissions = std::fs::metadata(&temporary).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&temporary, permissions).unwrap();
+        std::fs::rename(&temporary, path).unwrap();
+        path.to_owned()
+    }
+
     fn fake_mpv(directory: &std::path::Path) -> PathBuf {
         let path = directory.join("fake-mpv");
-        std::fs::write(&path, r#"#!/bin/sh
+        write_executable(
+            &path,
+            r#"#!/bin/sh
 ipc_fd=
 media_fd=
 for argument do
@@ -775,16 +787,13 @@ while IFS= read -r line <&5; do
     *) printf '{"request_id":%s,"error":"success","data":null}\n' "$request_id" >&6 ;;
   esac
 done
-"#).unwrap();
-        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&path, permissions).unwrap();
-        path
+"#,
+        )
     }
 
     fn fake_mpv_without_events(directory: &std::path::Path) -> PathBuf {
         let path = directory.join("fake-mpv-without-events");
-        std::fs::write(
+        write_executable(
             &path,
             r#"#!/bin/sh
 ipc_fd=
@@ -801,11 +810,6 @@ while IFS= read -r line <&5; do
 done
 "#,
         )
-        .unwrap();
-        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&path, permissions).unwrap();
-        path
     }
 
     fn media(directory: &std::path::Path) -> OpenedMedia {
