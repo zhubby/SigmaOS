@@ -31,6 +31,8 @@ pub struct VodPlayerServer {
 struct SocketIdentity {
     device: u64,
     inode: u64,
+    changed_seconds: i64,
+    changed_nanoseconds: i64,
 }
 
 impl VodPlayerServer {
@@ -138,6 +140,8 @@ async fn bind_socket(path: &Path) -> Result<(UnixListener, SocketIdentity), VodE
         SocketIdentity {
             device: metadata.dev(),
             inode: metadata.ino(),
+            changed_seconds: metadata.ctime(),
+            changed_nanoseconds: metadata.ctime_nsec(),
         },
     ))
 }
@@ -147,7 +151,9 @@ async fn remove_socket_if_same(path: &Path, expected: SocketIdentity) -> Result<
         Ok(metadata)
             if metadata.file_type().is_socket()
                 && metadata.dev() == expected.device
-                && metadata.ino() == expected.inode =>
+                && metadata.ino() == expected.inode
+                && metadata.ctime() == expected.changed_seconds
+                && metadata.ctime_nsec() == expected.changed_nanoseconds =>
         {
             fs::remove_file(path).await?;
         }
