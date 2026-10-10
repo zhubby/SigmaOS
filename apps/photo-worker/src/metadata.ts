@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import * as exifr from "exifr";
+import * as exifrModule from "exifr";
 import {
   PHOTO_METADATA_MAX_DEPTH,
   PHOTO_METADATA_MAX_JSON_BYTES,
@@ -49,7 +49,7 @@ export async function extractPhotoMetadata(input: {
     }
   } else {
     try {
-      const embedded = await exifr.parse(input.sourcePath, EXIFR_OPTIONS);
+      const embedded = await exifr.parse(await readFile(input.sourcePath), EXIFR_OPTIONS);
       mergeEmbeddedSources(sources, embedded, warnings);
     } catch (error) {
       warnings.push(`Embedded metadata: ${safeMessage(error)}`);
@@ -408,6 +408,26 @@ export async function readVideoMetadataProbe(
     "-v", "error", "-show_format", "-show_streams", "-of", "json", path
   ], options);
   return JSON.parse(output) as VideoProbe;
+}
+
+type ExifrApi = Pick<typeof exifrModule, "parse" | "sidecar">;
+
+const exifr = resolveExifr(exifrModule);
+
+function resolveExifr(value: unknown): ExifrApi {
+  let candidate = value;
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (isExifrApi(candidate)) return candidate;
+    if (typeof candidate !== "object" || candidate === null || !("default" in candidate)) break;
+    candidate = candidate.default;
+  }
+  throw new Error("Unable to resolve exifr module exports");
+}
+
+function isExifrApi(value: unknown): value is ExifrApi {
+  return typeof value === "object" && value !== null
+    && "parse" in value && typeof value.parse === "function"
+    && "sidecar" in value && typeof value.sidecar === "function";
 }
 
 const EXIFR_OPTIONS = {

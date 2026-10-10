@@ -11,6 +11,30 @@ import {
 import { extractPhotoMetadata, normalizePhotoMetadata, sanitizeMetadata } from "./metadata.js";
 
 describe("photo metadata extraction", () => {
+  it("extracts embedded metadata from a Node file path", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "sigmaos-photo-metadata-"));
+    const sourcePath = join(directory, "photo.jpg");
+    try {
+      await writeFile(sourcePath, Buffer.from(
+        "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9k=",
+        "base64"
+      ));
+
+      const result = await extractPhotoMetadata({
+        sourcePath,
+        mediaKind: "image",
+        mtimeMs: 0,
+        commandRunner: { async run() { throw new Error("ffprobe should not run"); } },
+        commandOptions: { timeout: 1, maxBuffer: 1 }
+      });
+
+      expect(result.status).toBe("ready");
+      expect(result.warnings).toEqual([]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("flattens scalar metadata by source while excluding binary and MakerNote payloads", () => {
     const warnings: string[] = [];
     const result = sanitizeMetadata({
