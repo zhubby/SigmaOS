@@ -1,6 +1,6 @@
 [package]
 name = "sigmaos-downloader"
-version = "0.9.11"
+version = "0.9.12"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
