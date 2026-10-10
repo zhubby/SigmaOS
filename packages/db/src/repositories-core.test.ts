@@ -78,7 +78,7 @@ describe("core repositories", () => {
     const journalMode = db.pragma("journal_mode", { simple: true });
     const busyTimeout = db.pragma("busy_timeout", { simple: true });
     expect(String(journalMode).toLowerCase()).toBe("wal");
-    expect(busyTimeout).toBe(5000);
+    expect(busyTimeout).toBe(30_000);
 
     const session = createSession(db, { rootId: "local" });
     const { job } = createUserMessageAndJob(db, {
