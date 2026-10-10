@@ -555,6 +555,7 @@ jobs:
             done
             printf 'required service is not active: %s\n' "$unit" >&2
             systemctl status --no-pager --full "$unit" >&2 || true
+            journalctl -u "$unit" -n 100 --no-pager >&2 || true
             return 3
           }
 
