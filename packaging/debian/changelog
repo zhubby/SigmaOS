@@ -1,3 +1,9 @@
+sigmaos (0.9.6) unstable; urgency=medium
+
+  * Protect stale VOD socket cleanup when Linux reuses an inode.
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Sat, 10 Oct 2026 11:04:25 +0000
+
 sigmaos (0.9.5) unstable; urgency=medium
 
   * Use portable Unix descriptor numbers for the Rust VOD helper process and harden its rejection tests.
