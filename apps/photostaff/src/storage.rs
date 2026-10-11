@@ -6,6 +6,7 @@ use std::path::{Component, Path, PathBuf};
 use nix::fcntl::{OFlag, OpenHow, ResolveFlag, openat2};
 #[cfg(not(target_os = "linux"))]
 use nix::fcntl::{OFlag, openat};
+#[cfg(not(target_os = "linux"))]
 use nix::sys::stat::Mode;
 use nix::sys::statvfs::fstatvfs;
 
@@ -174,7 +175,11 @@ impl Library {
 
     pub fn available_bytes(&self) -> Result<u64, PhotostaffError> {
         let stats = fstatvfs(&self.mount).map_err(PhotostaffError::storage)?;
-        Ok(u64::from(stats.blocks_available()).saturating_mul(stats.fragment_size()))
+        #[cfg(target_os = "linux")]
+        let blocks_available = stats.blocks_available();
+        #[cfg(not(target_os = "linux"))]
+        let blocks_available = u64::from(stats.blocks_available());
+        Ok(blocks_available.saturating_mul(stats.fragment_size()))
     }
 
     pub fn mountpoint(&self) -> &Path {

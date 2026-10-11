@@ -663,7 +663,11 @@ fn cache_available_bytes(cache_root: &Path) -> Result<u64, PhotostaffError> {
     std::fs::create_dir_all(cache_root).map_err(PhotostaffError::storage)?;
     let directory = File::open(cache_root).map_err(PhotostaffError::storage)?;
     let stats = fstatvfs(&directory).map_err(PhotostaffError::storage)?;
-    Ok(u64::from(stats.blocks_available()).saturating_mul(stats.fragment_size()))
+    #[cfg(target_os = "linux")]
+    let blocks_available = stats.blocks_available();
+    #[cfg(not(target_os = "linux"))]
+    let blocks_available = u64::from(stats.blocks_available());
+    Ok(blocks_available.saturating_mul(stats.fragment_size()))
 }
 
 fn verify_identity(file: &File, expected: FileIdentity) -> Result<(), PhotostaffError> {
