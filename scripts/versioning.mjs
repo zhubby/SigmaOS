@@ -3,8 +3,10 @@ import path from "node:path";
 
 const INTERNAL_PACKAGE_PREFIX = "@sigmaos/";
 const DEPENDENCY_FIELDS = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"];
-const DOWNLOADER_CARGO_MANIFEST = "apps/downloader/Cargo.toml";
-const DOWNLOADER_CARGO_PACKAGE = "sigmaos-downloader";
+const PRODUCT_CARGO_PACKAGES = [
+  { manifestPath: "apps/downloader/Cargo.toml", packageName: "sigmaos-downloader" },
+  { manifestPath: "apps/photostaff/Cargo.toml", packageName: "sigmaos-photostaff" }
+];
 const STABLE_SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 
 export function parseStableVersion(value) {
@@ -62,7 +64,14 @@ export async function readVersionState(repoRoot) {
     version: rootManifest.value.version,
     manifests,
     lock: await readJson(path.join(repoRoot, "package-lock.json")),
-    downloaderCargoManifest: await readFile(path.join(repoRoot, DOWNLOADER_CARGO_MANIFEST), "utf8"),
+    cargoManifests: Object.fromEntries(
+      await Promise.all(
+        PRODUCT_CARGO_PACKAGES.map(async ({ manifestPath }) => [
+          manifestPath,
+          await readFile(path.join(repoRoot, manifestPath), "utf8")
+        ])
+      )
+    ),
     cargoLock: await readFile(path.join(repoRoot, "Cargo.lock"), "utf8"),
     debianChangelog: await readFile(path.join(repoRoot, "packaging/debian/changelog"), "utf8"),
     applianceManifest: await readFile(path.join(repoRoot, "packaging/appliance/manifest.toml"), "utf8")
@@ -84,24 +93,21 @@ export function versionStateErrors(state) {
     errors.push(`package-lock.json has top-level version ${JSON.stringify(state.lock.version)}; expected ${version}`);
   }
 
-  const downloaderManifestVersion = readTomlPackageVersion(
-    state.downloaderCargoManifest,
-    "[package]",
-    DOWNLOADER_CARGO_PACKAGE,
-    DOWNLOADER_CARGO_MANIFEST
-  );
-  if (downloaderManifestVersion !== version) {
-    errors.push(`${DOWNLOADER_CARGO_MANIFEST} has version ${JSON.stringify(downloaderManifestVersion)}; expected ${version}`);
-  }
+  for (const { manifestPath, packageName } of PRODUCT_CARGO_PACKAGES) {
+    const manifestVersion = readTomlPackageVersion(
+      state.cargoManifests[manifestPath],
+      "[package]",
+      packageName,
+      manifestPath
+    );
+    if (manifestVersion !== version) {
+      errors.push(`${manifestPath} has version ${JSON.stringify(manifestVersion)}; expected ${version}`);
+    }
 
-  const downloaderLockVersion = readTomlPackageVersion(
-    state.cargoLock,
-    "[[package]]",
-    DOWNLOADER_CARGO_PACKAGE,
-    "Cargo.lock"
-  );
-  if (downloaderLockVersion !== version) {
-    errors.push(`Cargo.lock package ${JSON.stringify(DOWNLOADER_CARGO_PACKAGE)} has version ${JSON.stringify(downloaderLockVersion)}; expected ${version}`);
+    const lockVersion = readTomlPackageVersion(state.cargoLock, "[[package]]", packageName, "Cargo.lock");
+    if (lockVersion !== version) {
+      errors.push(`Cargo.lock package ${JSON.stringify(packageName)} has version ${JSON.stringify(lockVersion)}; expected ${version}`);
+    }
   }
 
   for (const { relativePath } of state.manifests) {
@@ -157,26 +163,21 @@ export async function prepareRelease(repoRoot, { increment, note, now = new Date
     updateInternalDependencies(lockEntry, nextVersion);
   }
   files.set("package-lock.json", `${JSON.stringify(state.lock, null, 2)}\n`);
-  files.set(
-    DOWNLOADER_CARGO_MANIFEST,
-    replaceTomlPackageVersion(
-      state.downloaderCargoManifest,
-      "[package]",
-      DOWNLOADER_CARGO_PACKAGE,
-      nextVersion,
-      DOWNLOADER_CARGO_MANIFEST
-    )
-  );
-  files.set(
-    "Cargo.lock",
-    replaceTomlPackageVersion(
-      state.cargoLock,
-      "[[package]]",
-      DOWNLOADER_CARGO_PACKAGE,
-      nextVersion,
-      "Cargo.lock"
-    )
-  );
+  let cargoLock = state.cargoLock;
+  for (const { manifestPath, packageName } of PRODUCT_CARGO_PACKAGES) {
+    files.set(
+      manifestPath,
+      replaceTomlPackageVersion(
+        state.cargoManifests[manifestPath],
+        "[package]",
+        packageName,
+        nextVersion,
+        manifestPath
+      )
+    );
+    cargoLock = replaceTomlPackageVersion(cargoLock, "[[package]]", packageName, nextVersion, "Cargo.lock");
+  }
+  files.set("Cargo.lock", cargoLock);
   files.set("packaging/debian/changelog", prependDebianChangelog(state.debianChangelog, nextVersion, note, now));
   files.set(
     "packaging/appliance/manifest.toml",

@@ -47,8 +47,10 @@ describe("release versioning", () => {
     expect(state.version).toBe("0.2.0");
     expect(versionStateErrors(state)).toEqual([]);
     expect(state.manifests[1].value.dependencies["@sigmaos/shared"]).toBe("0.2.0");
-    expect(state.downloaderCargoManifest).toContain('version = "0.2.0"');
+    expect(state.cargoManifests["apps/downloader/Cargo.toml"]).toContain('version = "0.2.0"');
+    expect(state.cargoManifests["apps/photostaff/Cargo.toml"]).toContain('version = "0.2.0"');
     expect(state.cargoLock).toContain('name = "sigmaos-downloader"\nversion = "0.2.0"');
+    expect(state.cargoLock).toContain('name = "sigmaos-photostaff"\nversion = "0.2.0"');
     expect(state.debianChangelog).toContain("sigmaos (0.2.0) unstable");
     expect(state.debianChangelog).toContain("* Add release traceability.");
   });
@@ -97,6 +99,16 @@ describe("release versioning", () => {
       'apps/downloader/Cargo.toml has version "0.0.9"; expected 0.1.0'
     );
   });
+
+  it("reports Photostaff Cargo version drift", async () => {
+    const manifestPath = path.join(fixtureRoot, "apps/photostaff/Cargo.toml");
+    await writeFile(manifestPath, '[package]\nname = "sigmaos-photostaff"\nversion = "0.0.9"\n');
+
+    const state = await readVersionState(fixtureRoot);
+    expect(versionStateErrors(state)).toContain(
+      'apps/photostaff/Cargo.toml has version "0.0.9"; expected 0.1.0'
+    );
+  });
 });
 
 async function writeFixture(root) {
@@ -104,6 +116,7 @@ async function writeFixture(root) {
     mkdir(path.join(root, "apps/api"), { recursive: true }),
     mkdir(path.join(root, "apps/downloader"), { recursive: true }),
     mkdir(path.join(root, "apps/hostd"), { recursive: true }),
+    mkdir(path.join(root, "apps/photostaff"), { recursive: true }),
     mkdir(path.join(root, "packages/shared"), { recursive: true }),
     mkdir(path.join(root, "packaging/debian"), { recursive: true }),
     mkdir(path.join(root, "packaging/appliance"), { recursive: true })
@@ -141,8 +154,12 @@ async function writeFixture(root) {
       '[package]\nname = "sigmaos-downloader"\nversion = "0.1.0"\n'
     ),
     writeFile(
+      path.join(root, "apps/photostaff/Cargo.toml"),
+      '[package]\nname = "sigmaos-photostaff"\nversion = "0.1.0"\n'
+    ),
+    writeFile(
       path.join(root, "Cargo.lock"),
-      'version = 4\n\n[[package]]\nname = "dependency"\nversion = "1.2.3"\n\n[[package]]\nname = "sigmaos-downloader"\nversion = "0.1.0"\n'
+      'version = 4\n\n[[package]]\nname = "dependency"\nversion = "1.2.3"\n\n[[package]]\nname = "sigmaos-downloader"\nversion = "0.1.0"\n\n[[package]]\nname = "sigmaos-photostaff"\nversion = "0.1.0"\n'
     ),
     writeFile(
       path.join(root, "packaging/debian/changelog"),
