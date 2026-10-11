@@ -100,6 +100,7 @@ describe("native packaging artifacts", () => {
 
   it("declares Debian install paths required by the spec", async () => {
     const install = await readPackagingFile("debian", "install");
+    const links = await readPackagingFile("debian", "links");
     const control = await readPackagingFile("debian", "control");
     const tmpfiles = await readPackagingFile("tmpfiles.d", "sigmaos.conf");
 
@@ -120,7 +121,13 @@ describe("native packaging artifacts", () => {
     expect(install).not.toContain("apps/downloader/dist/");
     expect(install).toContain("node_modules/* usr/lib/sigmaos/node_modules/");
     expect(install).toContain(
-      "packages/agent/node_modules/@earendil-works/pi-coding-agent usr/lib/sigmaos/node_modules/@earendil-works/"
+      "packages/agent/node_modules/* usr/lib/sigmaos/packages/agent/node_modules/"
+    );
+    expect(links).toContain(
+      "usr/lib/sigmaos/packages/agent/node_modules/@earendil-works/pi-coding-agent usr/lib/sigmaos/node_modules/@earendil-works/pi-coding-agent"
+    );
+    expect(links).toContain(
+      "lib/systemd/system/sigmaos-photostaff.service lib/systemd/system/sigmaos-photo-worker.service"
     );
     expect(install).toContain("docs/dist/* usr/lib/sigmaos/docs/dist/");
     expect(install).toContain(".sigmaos/build-info.json usr/lib/sigmaos/");
@@ -390,6 +397,8 @@ describe("native packaging artifacts", () => {
     expect(deployWorkflow).toContain('[ "$actual_config_sha256" = "$expected_config_sha256" ]');
     expect(deployWorkflow).toContain("END { exit (legacy || !socket || !user) ? 1 : 0 }");
     expect(deployWorkflow).toContain("/usr/lib/sigmaos/bin/sigmaos-termux");
+    expect(deployWorkflow).toContain('runtime_before="$(runtime_fingerprint)"');
+    expect(deployWorkflow).toContain('runtime_after="$(runtime_fingerprint)"');
     expect(deployWorkflow).toContain("! systemctl is-active --quiet sigmaos-terminal-helper.service");
     expect(deployWorkflow).not.toContain('cp "$package_path" "$release_dir/package.deb"');
     expect(deployWorkflow).not.toContain('"$release_dir/package.deb" \\\n            "$release_dir/release-manifest.json"');
@@ -534,6 +543,8 @@ describe("native packaging artifacts", () => {
     expect(deploy).toContain("restore_unit_state \"$unit\" \"$state_dir\"");
     expect(deploy).toContain("activate_runtime");
     expect(deploy).toContain("systemctl restart $RUNTIME_SERVICES");
+    expect(deploy).toContain("runtime_before=$(runtime_fingerprint)");
+    expect(deploy).toContain('die "one or more services restarted during stabilization"');
     expect(deploy).toContain('version $manifest_version is already installed; recovering runtime and release state');
     expect(deploy).toContain('record_release "$manifest_tag" "$manifest_version" "$manifest_commit_sha"');
     expect(deploy).toContain('record_release "$manifest_tag" "$manifest_version" "$manifest_commit_sha"\n    cleanup_deployment_artifacts');

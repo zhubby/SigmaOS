@@ -135,6 +135,17 @@ verify_runtime() {
     systemctl is-active --quiet "$unit" || die "service is not active: $unit"
   done
 
+  runtime_before=$(runtime_fingerprint)
+  sleep 5
+  for unit in sigmaos-api.service sigmaos-worker@1.service sigmaos-photostaff.service sigmaos-downloader.service sigmaos-hostd.service sigmaos-termux.service; do
+    systemctl is-active --quiet "$unit" || die "service did not remain active: $unit"
+  done
+  runtime_after=$(runtime_fingerprint)
+  if [ "$runtime_before" != "$runtime_after" ]; then
+    printf 'runtime before stabilization:\n%s\nruntime after stabilization:\n%s\n' "$runtime_before" "$runtime_after" >&2
+    die "one or more services restarted during stabilization"
+  fi
+
   failed_units=$(systemctl --failed --no-legend --plain | awk '$1 ~ /^sigmaos-/ { print }' || true)
   if [ -n "$failed_units" ]; then
     printf '%s\n' "$failed_units" >&2
@@ -145,6 +156,14 @@ verify_runtime() {
   wait_for_url http://127.0.0.1:3010/api/roots/readiness || die "root readiness check failed"
   wait_for_url http://127.0.0.1:3010/api/system/health || die "system health endpoint failed"
   wait_for_url http://127.0.0.1:3010/api/system/build-info || die "build-info endpoint failed"
+}
+
+runtime_fingerprint() {
+  for unit in sigmaos-api.service sigmaos-worker@1.service sigmaos-photostaff.service sigmaos-downloader.service sigmaos-hostd.service sigmaos-termux.service; do
+    main_pid=$(systemctl show --property=MainPID --value "$unit")
+    restart_count=$(systemctl show --property=NRestarts --value "$unit")
+    printf '%s:%s:%s\n' "$unit" "$main_pid" "$restart_count"
+  done
 }
 
 verify_build_info() {

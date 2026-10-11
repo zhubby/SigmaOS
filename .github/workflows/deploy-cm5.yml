@@ -565,6 +565,20 @@ jobs:
             return 3
           }
 
+          runtime_fingerprint() {
+            for unit in \
+              sigmaos-api.service \
+              sigmaos-worker@1.service \
+              sigmaos-photostaff.service \
+              sigmaos-downloader.service \
+              sigmaos-hostd.service \
+              sigmaos-termux.service; do
+              main_pid="$(systemctl show --property=MainPID --value "$unit")"
+              restart_count="$(systemctl show --property=NRestarts --value "$unit")"
+              printf '%s:%s:%s\n' "$unit" "$main_pid" "$restart_count"
+            done
+          }
+
           for unit in \
             sigmaos-api.service \
             sigmaos-worker@1.service \
@@ -574,6 +588,23 @@ jobs:
             sigmaos-termux.service; do
             check_active_unit "$unit"
           done
+          runtime_before="$(runtime_fingerprint)"
+          sleep 5
+          for unit in \
+            sigmaos-api.service \
+            sigmaos-worker@1.service \
+            sigmaos-photostaff.service \
+            sigmaos-downloader.service \
+            sigmaos-hostd.service \
+            sigmaos-termux.service; do
+            check_active_unit "$unit"
+          done
+          runtime_after="$(runtime_fingerprint)"
+          if [ "$runtime_before" != "$runtime_after" ]; then
+            printf 'runtime before stabilization:\n%s\nruntime after stabilization:\n%s\n' \
+              "$runtime_before" "$runtime_after" >&2
+            exit 1
+          fi
           systemctl show --property ExecStart --value sigmaos-termux.service | \
             grep -Fq /usr/lib/sigmaos/bin/sigmaos-termux
           ! systemctl is-active --quiet sigmaos-terminal-helper.service

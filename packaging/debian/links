@@ -1,0 +1,2 @@
+usr/lib/sigmaos/packages/agent/node_modules/@earendil-works/pi-coding-agent usr/lib/sigmaos/node_modules/@earendil-works/pi-coding-agent
+lib/systemd/system/sigmaos-photostaff.service lib/systemd/system/sigmaos-photo-worker.service
