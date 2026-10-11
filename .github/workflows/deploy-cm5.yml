@@ -568,7 +568,7 @@ jobs:
           for unit in \
             sigmaos-api.service \
             sigmaos-worker@1.service \
-            sigmaos-photo-worker.service \
+            sigmaos-photostaff.service \
             sigmaos-downloader.service \
             sigmaos-hostd.service \
             sigmaos-termux.service; do

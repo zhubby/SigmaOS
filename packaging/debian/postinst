@@ -2,8 +2,16 @@
 set -e
 
 if [ "$1" = "configure" ]; then
+  photostaff_was_enabled=0
+  photostaff_was_active=0
   legacy_vod_player_enabled=0
   legacy_vod_player_active=0
+  if command -v systemctl >/dev/null 2>&1 && { systemctl is-enabled --quiet sigmaos-photostaff.service 2>/dev/null || systemctl is-enabled --quiet sigmaos-photo-worker.service 2>/dev/null; }; then
+    photostaff_was_enabled=1
+  fi
+  if command -v systemctl >/dev/null 2>&1 && { systemctl is-active --quiet sigmaos-photostaff.service 2>/dev/null || systemctl is-active --quiet sigmaos-photo-worker.service 2>/dev/null; }; then
+    photostaff_was_active=1
+  fi
   if command -v systemctl >/dev/null 2>&1 && systemctl is-enabled --quiet sigmaos-player-helper.service 2>/dev/null; then
     legacy_vod_player_enabled=1
   fi
@@ -66,11 +74,13 @@ if [ "$1" = "configure" ]; then
   ln -sfn /usr/lib/sigmaos/scripts/sigmaos-deploy /usr/local/sbin/sigmaos-deploy
 
   if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload || true
     systemd-tmpfiles --create sigmaos.conf || true
 
     # Stop retired helpers before activating their Rust replacements.
     systemctl disable --now sigmaos-share-helper.service 2>/dev/null || true
     systemctl disable --now sigmaos-player-helper.service 2>/dev/null || true
+    systemctl disable --now sigmaos-photo-worker.service 2>/dev/null || true
     rm -f /etc/systemd/system/sigmaos-terminal-helper.service.d/identity.conf
     rm -f /etc/systemd/system/sigmaos-player-helper.service.d/identity.conf
     rmdir /etc/systemd/system/sigmaos-terminal-helper.service.d 2>/dev/null || true
@@ -81,7 +91,15 @@ if [ "$1" = "configure" ]; then
     /usr/lib/sigmaos/scripts/sigmaos-refresh-groups.sh
     /usr/lib/sigmaos/scripts/sigmaos-refresh-termux.sh || true
     /usr/lib/sigmaos/scripts/sigmaos-refresh-vod-player.sh || true
-    systemctl enable sigmaos-hostd.service sigmaos-termux.service sigmaos-api.service sigmaos-worker@1.service sigmaos-photo-worker.service sigmaos-downloader.service sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer sigmaos-backup-daily.timer sigmaos-backup-weekly.timer sigmaos-health.timer || true
+    systemctl enable sigmaos-hostd.service sigmaos-termux.service sigmaos-api.service sigmaos-worker@1.service sigmaos-downloader.service sigmaos-indexer.timer sigmaos-scheduler.timer sigmaos-maintenance.timer sigmaos-backup-daily.timer sigmaos-backup-weekly.timer sigmaos-health.timer || true
+    if [ -z "${2:-}" ] || [ "$photostaff_was_enabled" = "1" ]; then
+      systemctl enable sigmaos-photostaff.service || true
+    else
+      systemctl disable sigmaos-photostaff.service 2>/dev/null || true
+    fi
+    if [ "$photostaff_was_active" = "1" ]; then
+      systemctl restart sigmaos-photostaff.service || true
+    fi
     if [ "$legacy_vod_player_enabled" = "1" ]; then
       systemctl enable sigmaos-vod-player.service || true
     fi

@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PHOTO_SUPPORTED_EXTENSIONS } from "@sigmaos/shared";
+import { PHOTOSTAFF_SUPPORTED_EXTENSIONS } from "@sigmaos/shared";
 import {
   appendEvent,
   createActionMessageAndJob,
@@ -302,12 +302,20 @@ describe("API server", () => {
         activeTasks: 0,
         queuedTasks: 0
       },
+      photostaff: {
+        status: "unavailable",
+        freshWorkers: 0,
+        activeJobs: 0,
+        queuedJobs: 0,
+        retryingJobs: 0
+      },
       vodPlayer: { status: "disabled", state: null, errorCode: "VOD_PLAYER_DISABLED" }
     });
     expect(healthBody.issues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: "backup_failed", severity: "critical" }),
-        expect.objectContaining({ code: "downloader_unavailable", severity: "warning" })
+        expect.objectContaining({ code: "downloader_unavailable", severity: "warning" }),
+        expect.objectContaining({ code: "photostaff_unavailable", severity: "warning" })
       ])
     );
 
@@ -882,12 +890,12 @@ describe("API server", () => {
           sigma: {
             dataDir: tempDir,
             databasePath: path.join(tempDir, "sigmaos.sqlite"),
-            photos: {
-              dataDir: path.join(tempDir, "photos"),
+            photostaff: {
+              dataDir: path.join(tempDir, "photostaff"),
               maxFileSizeBytes: 512 * 1024 * 1024,
               thumbnailSizePx: 512,
               previewMaxEdgePx: 2048,
-              supportedExtensions: [...PHOTO_SUPPORTED_EXTENSIONS]
+              supportedExtensions: [...PHOTOSTAFF_SUPPORTED_EXTENSIONS]
             },
             nasRoots: [{ id: "local", name: "Local", path: rootDir }]
           }

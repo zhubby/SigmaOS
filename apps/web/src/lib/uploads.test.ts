@@ -11,9 +11,9 @@ import {
 
 describe("upload path helpers", () => {
   it("normalizes browser relative paths while preserving nested folders", () => {
-    expect(normalizeUploadRelativePath("album\\day-one/./photo.jpg")).toBe("album/day-one/photo.jpg");
+    expect(normalizeUploadRelativePath("album\\day-one/./photostaff.jpg")).toBe("album/day-one/photostaff.jpg");
     expect(normalizeNasPath("./docs//incoming")).toBe("docs/incoming");
-    expect(joinNasPath("docs/incoming", "album/photo.jpg")).toBe("docs/incoming/album/photo.jpg");
+    expect(joinNasPath("docs/incoming", "album/photostaff.jpg")).toBe("docs/incoming/album/photostaff.jpg");
   });
 
   it("rejects traversal outside the selected root", () => {
@@ -26,13 +26,13 @@ describe("upload path helpers", () => {
 
 describe("upload batches", () => {
   it("builds queued items with normalized nested target paths", () => {
-    const file = new File(["photo"], "photo.jpg", { type: "image/jpeg" });
+    const file = new File(["photostaff"], "photostaff.jpg", { type: "image/jpeg" });
     const batch = createUploadBatch({
       id: "batch-1",
       rootId: "root-1",
       storagePoolId: "pool-1",
       currentPath: "docs/incoming",
-      sources: [{ file, relativePath: "album\\day-one/photo.jpg" }]
+      sources: [{ file, relativePath: "album\\day-one/photostaff.jpg" }]
     });
 
     expect(batch).toMatchObject({
@@ -45,10 +45,10 @@ describe("upload batches", () => {
       items: [
         {
           id: "batch-1:0",
-          name: "photo.jpg",
-          relativePath: "album/day-one/photo.jpg",
-          targetPath: "docs/incoming/album/day-one/photo.jpg",
-          sizeBytes: 5,
+          name: "photostaff.jpg",
+          relativePath: "album/day-one/photostaff.jpg",
+          targetPath: "docs/incoming/album/day-one/photostaff.jpg",
+          sizeBytes: 10,
           uploadedBytes: 0,
           status: "queued"
         }

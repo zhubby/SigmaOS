@@ -1,47 +1,51 @@
 import { randomUUID } from "node:crypto";
 import type {
-  PhotoAssetRecord,
-  PhotoAssetStatus,
-  PhotoJobKind,
-  PhotoJobRecord,
-  PhotoLibrarySettingsRecord,
-  PhotoLibraryStatus,
-  PhotoTakenAtSource
+  PhotostaffAssetRecord,
+  PhotostaffAssetStatus,
+  PhotostaffJobKind,
+  PhotostaffJobPhase,
+  PhotostaffJobRecord,
+  PhotostaffLibrarySettingsRecord,
+  PhotostaffLibraryStatus,
+  PhotostaffWorkerHealth,
+  PhotostaffTakenAtSource
 } from "@sigmaos/shared";
 import type { SigmaDatabase } from "../connection.js";
-import type { DbPhotoAssetRow, DbPhotoJobRow, DbSystemSettingRow } from "./repository-rows.js";
+import type { DbPhotostaffAssetRow, DbPhotostaffJobRow, DbSystemSettingRow } from "./repository-rows.js";
 import {
-  getPhotoMetadataIndexStatus,
-  hasStalePhotoMetadata,
-  replacePhotoAssetMetadata,
-  type PhotoMetadataWriteInput
-} from "./photo-metadata.js";
+  getPhotostaffMetadataIndexStatus,
+  hasStalePhotostaffMetadata,
+  replacePhotostaffAssetMetadata,
+  type PhotostaffMetadataWriteInput
+} from "./photostaff-metadata.js";
 
-const PHOTO_LIBRARY_SETTING_KEY = "photo_library";
-const PHOTO_ASSET_COLUMNS = `
+const PHOTOSTAFF_LIBRARY_SETTING_KEY = "photostaff_library_settings";
+const PHOTOSTAFF_ASSET_COLUMNS = `
   id, root_id, storage_pool_id, path, name, mime_type, size_bytes, mtime_ms,
   content_hash, width, height, orientation, taken_at, taken_at_source,
-  thumbnail_key, preview_key, status, error, library_updated_at, indexed_at
+  thumbnail_key, preview_key, status, error, error_code, error_retryable,
+  derivative_schema_version, library_updated_at, indexed_at
 `;
-const PHOTO_JOB_COLUMNS = `
+const PHOTOSTAFF_JOB_COLUMNS = `
   id, kind, status, root_id, storage_pool_id, path, library_updated_at,
-  scanned, processed, failed, current_path, error, worker_id, lease_expires_at,
+  scanned, processed, failed, current_path, phase, error, error_code,
+  error_retryable, retry_count, next_retry_at, scan_generation, worker_id, lease_expires_at,
   created_at, updated_at, started_at, finished_at
 `;
 
-export interface PhotoTimelineCursor {
+export interface PhotostaffTimelineCursor {
   takenAt: string;
   id: string;
 }
 
-export interface PhotoUploadReservationInput {
-  settings: PhotoLibrarySettingsRecord;
+export interface PhotostaffUploadReservationInput {
+  settings: PhotostaffLibrarySettingsRecord;
   path: string;
   contentHash: string;
   now?: Date;
 }
 
-export interface PhotoUploadReservationRecord {
+export interface PhotostaffUploadReservationRecord {
   id: string;
   libraryUpdatedAt: string;
   contentHash: string;
@@ -49,19 +53,19 @@ export interface PhotoUploadReservationRecord {
   createdAt: string;
 }
 
-export interface PhotoUploadReservationResult {
-  reservation: PhotoUploadReservationRecord | null;
-  duplicate: PhotoAssetRecord | PhotoUploadReservationRecord | null;
+export interface PhotostaffUploadReservationResult {
+  reservation: PhotostaffUploadReservationRecord | null;
+  duplicate: PhotostaffAssetRecord | PhotostaffUploadReservationRecord | null;
   conflict: "content_hash" | "path" | null;
 }
 
-export function getPhotoLibrarySettings(db: SigmaDatabase): PhotoLibrarySettingsRecord | null {
+export function getPhotostaffLibrarySettings(db: SigmaDatabase): PhotostaffLibrarySettingsRecord | null {
   const row = db
     .prepare("SELECT key, value_json, updated_at FROM system_settings WHERE key = ?")
-    .get(PHOTO_LIBRARY_SETTING_KEY) as DbSystemSettingRow | undefined;
+    .get(PHOTOSTAFF_LIBRARY_SETTING_KEY) as DbSystemSettingRow | undefined;
   if (!row) return null;
   try {
-    const parsed = JSON.parse(row.value_json) as Partial<PhotoLibrarySettingsRecord>;
+    const parsed = JSON.parse(row.value_json) as Partial<PhotostaffLibrarySettingsRecord>;
     if (!isNonEmptyString(parsed.rootId) || !isNonEmptyString(parsed.storagePoolId) || !isNonEmptyString(parsed.path)) {
       return null;
     }
@@ -76,12 +80,12 @@ export function getPhotoLibrarySettings(db: SigmaDatabase): PhotoLibrarySettings
   }
 }
 
-export function savePhotoLibrarySettings(
+export function savePhotostaffLibrarySettings(
   db: SigmaDatabase,
-  input: Omit<PhotoLibrarySettingsRecord, "updatedAt">,
+  input: Omit<PhotostaffLibrarySettingsRecord, "updatedAt">,
   now = new Date()
-): PhotoLibrarySettingsRecord {
-  const existing = getPhotoLibrarySettings(db);
+): PhotostaffLibrarySettingsRecord {
+  const existing = getPhotostaffLibrarySettings(db);
   if (
     existing &&
     existing.rootId === input.rootId.trim() &&
@@ -95,62 +99,63 @@ export function savePhotoLibrarySettings(
   const updatedAt = new Date(Number.isFinite(previousUpdatedAt)
     ? Math.max(requestedUpdatedAt, previousUpdatedAt + 1)
     : requestedUpdatedAt).toISOString();
-  const record: PhotoLibrarySettingsRecord = {
+  const record: PhotostaffLibrarySettingsRecord = {
     rootId: input.rootId.trim(),
     storagePoolId: input.storagePoolId.trim(),
     path: input.path.trim(),
     updatedAt
   };
   if (!record.rootId || !record.storagePoolId || !record.path) {
-    throw new Error("Photo library root, storage pool, and path are required");
+    throw new Error("Photostaff library root, storage pool, and path are required");
   }
   const tx = db.transaction(() => {
     db.prepare(`
       INSERT INTO system_settings (key, value_json, updated_at)
       VALUES (?, ?, ?)
       ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at
-    `).run(PHOTO_LIBRARY_SETTING_KEY, JSON.stringify(record), updatedAt);
-    db.prepare("DELETE FROM photo_assets").run();
-    db.prepare("DELETE FROM photo_upload_reservations").run();
+    `).run(PHOTOSTAFF_LIBRARY_SETTING_KEY, JSON.stringify(record), updatedAt);
+    db.prepare("DELETE FROM photostaff_assets").run();
+    db.prepare("DELETE FROM photostaff_upload_reservations").run();
     db.prepare(`
-      UPDATE photo_jobs
-      SET status = 'failed', error = 'Photo library configuration changed',
+      UPDATE photostaff_jobs
+      SET status = 'failed', error = 'Photostaff library configuration changed',
           worker_id = NULL, lease_expires_at = NULL, finished_at = ?, updated_at = ?
-      WHERE status IN ('queued', 'running')
+      WHERE status IN ('queued', 'running', 'retrying')
     `).run(updatedAt, updatedAt);
   });
   tx();
   return record;
 }
 
-export function enqueuePhotoJob(
+export function enqueuePhotostaffJob(
   db: SigmaDatabase,
   input: {
-    settings: PhotoLibrarySettingsRecord;
-    kind?: PhotoJobKind;
+    settings: PhotostaffLibrarySettingsRecord;
+    kind?: PhotostaffJobKind;
     path?: string;
     now?: Date;
     queueAfterRunning?: boolean;
   }
-): PhotoJobRecord {
+): PhotostaffJobRecord {
   const kind = input.kind ?? "full_scan";
   const jobPath = input.path ?? input.settings.path;
   const now = (input.now ?? new Date()).toISOString();
   const tx = db.transaction(() => {
     const existing = db.prepare(`
-      SELECT ${PHOTO_JOB_COLUMNS}
-      FROM photo_jobs
+      SELECT ${PHOTOSTAFF_JOB_COLUMNS}
+      FROM photostaff_jobs
       WHERE library_updated_at = ? AND kind = ? AND path = ?
         AND ${input.queueAfterRunning ? "status = 'queued'" : "status IN ('queued', 'running')"}
       ORDER BY created_at ASC LIMIT 1
-    `).get(input.settings.updatedAt, kind, jobPath) as DbPhotoJobRow | undefined;
-    if (existing) return mapPhotoJob(existing);
+    `).get(input.settings.updatedAt, kind, jobPath) as DbPhotostaffJobRow | undefined;
+    if (existing) return mapPhotostaffJob(existing);
 
     const id = randomUUID();
     db.prepare(`
-      INSERT INTO photo_jobs (
-        id, kind, status, root_id, storage_pool_id, path, library_updated_at, created_at, updated_at
-      ) VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?)
+      INSERT INTO photostaff_jobs (
+        id, kind, status, root_id, storage_pool_id, path, library_updated_at,
+        scan_generation, created_at, updated_at
+      ) VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       kind,
@@ -158,68 +163,75 @@ export function enqueuePhotoJob(
       input.settings.storagePoolId,
       jobPath,
       input.settings.updatedAt,
+      id,
       now,
       now
     );
-    return getRequiredPhotoJob(db, id);
+    return getRequiredPhotostaffJob(db, id);
   });
   return tx();
 }
 
-export function ensurePeriodicPhotoScan(
+export function ensurePeriodicPhotostaffScan(
   db: SigmaDatabase,
-  settings: PhotoLibrarySettingsRecord,
+  settings: PhotostaffLibrarySettingsRecord,
   input: { intervalMs: number; now?: Date }
-): PhotoJobRecord | null {
+): PhotostaffJobRecord | null {
   const now = input.now ?? new Date();
   const latest = db.prepare(`
-    SELECT ${PHOTO_JOB_COLUMNS}
-    FROM photo_jobs
+    SELECT ${PHOTOSTAFF_JOB_COLUMNS}
+    FROM photostaff_jobs
     WHERE library_updated_at = ? AND kind = 'full_scan'
     ORDER BY created_at DESC LIMIT 1
-  `).get(settings.updatedAt) as DbPhotoJobRow | undefined;
-  if (latest && (latest.status === "queued" || latest.status === "running")) return mapPhotoJob(latest);
-  if (hasStalePhotoMetadata(db, settings.updatedAt)) return enqueuePhotoJob(db, { settings, now });
+  `).get(settings.updatedAt) as DbPhotostaffJobRow | undefined;
+  if (latest && (latest.status === "queued" || latest.status === "running")) return mapPhotostaffJob(latest);
+  if (hasStalePhotostaffMetadata(db, settings.updatedAt)) return enqueuePhotostaffJob(db, { settings, now });
   if (latest && now.getTime() - new Date(latest.created_at).getTime() < input.intervalMs) return null;
-  return enqueuePhotoJob(db, { settings, now });
+  return enqueuePhotostaffJob(db, { settings, now });
 }
 
-export function recoverExpiredPhotoJobs(db: SigmaDatabase, now = new Date()): number {
+export function recoverExpiredPhotostaffJobs(db: SigmaDatabase, now = new Date()): number {
   const nowIso = now.toISOString();
   return db.prepare(`
-    UPDATE photo_jobs
+    UPDATE photostaff_jobs
     SET status = 'queued', worker_id = NULL, lease_expires_at = NULL,
-        error = NULL, updated_at = ?
+        phase = NULL, error = NULL, error_code = NULL, error_retryable = 0,
+        next_retry_at = NULL, updated_at = ?
     WHERE status = 'running' AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
   `).run(nowIso, nowIso).changes;
 }
 
-export function claimNextPhotoJob(
+export function claimNextPhotostaffJob(
   db: SigmaDatabase,
   input: { workerId: string; leaseMs: number; now?: Date }
-): PhotoJobRecord | null {
+): PhotostaffJobRecord | null {
   const now = input.now ?? new Date();
-  recoverExpiredPhotoJobs(db, now);
+  recoverExpiredPhotostaffJobs(db, now);
   const nowIso = now.toISOString();
   const row = db.prepare(`
-    UPDATE photo_jobs
+    UPDATE photostaff_jobs
     SET status = 'running', worker_id = ?, lease_expires_at = ?,
         started_at = COALESCE(started_at, ?), finished_at = NULL,
-        error = NULL, updated_at = ?
+        phase = COALESCE(phase, 'discovering'), error = NULL, error_code = NULL,
+        error_retryable = 0, next_retry_at = NULL, updated_at = ?
     WHERE id = (
-      SELECT id FROM photo_jobs WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1
-    ) AND status = 'queued'
-    RETURNING ${PHOTO_JOB_COLUMNS}
+      SELECT id FROM photostaff_jobs
+      WHERE status = 'queued' OR (status = 'retrying' AND next_retry_at <= ?)
+      ORDER BY created_at ASC LIMIT 1
+    ) AND (status = 'queued' OR (status = 'retrying' AND next_retry_at <= ?))
+    RETURNING ${PHOTOSTAFF_JOB_COLUMNS}
   `).get(
     input.workerId,
     new Date(now.getTime() + input.leaseMs).toISOString(),
     nowIso,
+    nowIso,
+    nowIso,
     nowIso
-  ) as DbPhotoJobRow | undefined;
-  return row ? mapPhotoJob(row) : null;
+  ) as DbPhotostaffJobRow | undefined;
+  return row ? mapPhotostaffJob(row) : null;
 }
 
-export function updatePhotoJobProgress(
+export function updatePhotostaffJobProgress(
   db: SigmaDatabase,
   input: {
     id: string;
@@ -228,6 +240,7 @@ export function updatePhotoJobProgress(
     processed: number;
     failed: number;
     currentPath: string | null;
+    phase?: PhotostaffJobPhase;
     leaseMs: number;
     now?: Date;
   }
@@ -235,8 +248,8 @@ export function updatePhotoJobProgress(
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
   return db.prepare(`
-    UPDATE photo_jobs
-    SET scanned = ?, processed = ?, failed = ?, current_path = ?,
+    UPDATE photostaff_jobs
+    SET scanned = ?, processed = ?, failed = ?, current_path = ?, phase = COALESCE(?, phase),
         lease_expires_at = ?, updated_at = ?
     WHERE id = ? AND status = 'running' AND worker_id = ?
   `).run(
@@ -244,6 +257,7 @@ export function updatePhotoJobProgress(
     input.processed,
     input.failed,
     input.currentPath,
+    input.phase ?? null,
     new Date(now.getTime() + input.leaseMs).toISOString(),
     nowIso,
     input.id,
@@ -251,26 +265,28 @@ export function updatePhotoJobProgress(
   ).changes === 1;
 }
 
-export function finishPhotoJob(
+export function finishPhotostaffJob(
   db: SigmaDatabase,
   input: { id: string; workerId: string; error?: string | null; now?: Date }
-): PhotoJobRecord | null {
+): PhotostaffJobRecord | null {
   const nowIso = (input.now ?? new Date()).toISOString();
   const status = input.error ? "failed" : "completed";
   const row = db.prepare(`
-    UPDATE photo_jobs
+    UPDATE photostaff_jobs
     SET status = ?, error = ?, worker_id = NULL, lease_expires_at = NULL,
-        current_path = NULL, finished_at = ?, updated_at = ?
+        current_path = NULL, phase = NULL,
+        error_code = CASE WHEN ? IS NULL THEN NULL ELSE 'INTERNAL' END,
+        error_retryable = 0, next_retry_at = NULL, finished_at = ?, updated_at = ?
     WHERE id = ? AND status = 'running' AND worker_id = ?
-    RETURNING ${PHOTO_JOB_COLUMNS}
-  `).get(status, input.error ?? null, nowIso, nowIso, input.id, input.workerId) as DbPhotoJobRow | undefined;
-  return row ? mapPhotoJob(row) : null;
+    RETURNING ${PHOTOSTAFF_JOB_COLUMNS}
+  `).get(status, input.error ?? null, input.error ?? null, nowIso, nowIso, input.id, input.workerId) as DbPhotostaffJobRow | undefined;
+  return row ? mapPhotostaffJob(row) : null;
 }
 
-export function upsertPhotoAsset(
+export function upsertPhotostaffAsset(
   db: SigmaDatabase,
   input: {
-    settings: PhotoLibrarySettingsRecord;
+    settings: PhotostaffLibrarySettingsRecord;
     path: string;
     name: string;
     mimeType: string;
@@ -281,24 +297,24 @@ export function upsertPhotoAsset(
     height: number | null;
     orientation: number | null;
     takenAt: string;
-    takenAtSource: PhotoTakenAtSource;
+    takenAtSource: PhotostaffTakenAtSource;
     thumbnailKey: string | null;
     previewKey: string | null;
-    status: PhotoAssetStatus;
+    status: PhotostaffAssetStatus;
     error: string | null;
-    metadata?: PhotoMetadataWriteInput;
+    metadata?: PhotostaffMetadataWriteInput;
     indexedAt?: Date;
   }
-): PhotoAssetRecord {
+): PhotostaffAssetRecord {
   const tx = db.transaction(() => {
-    const currentSettings = getPhotoLibrarySettings(db);
+    const currentSettings = getPhotostaffLibrarySettings(db);
     if (!currentSettings || currentSettings.updatedAt !== input.settings.updatedAt) {
-      throw new Error("Photo library configuration changed");
+      throw new Error("Photostaff library configuration changed");
     }
     const id = randomUUID();
     const indexedAt = (input.indexedAt ?? new Date()).toISOString();
     db.prepare(`
-      INSERT INTO photo_assets (
+      INSERT INTO photostaff_assets (
         id, root_id, storage_pool_id, path, name, mime_type, size_bytes, mtime_ms,
         content_hash, width, height, orientation, taken_at, taken_at_source,
         thumbnail_key, preview_key, status, error, library_updated_at, indexed_at
@@ -335,61 +351,61 @@ export function upsertPhotoAsset(
       indexedAt
     );
     const row = db.prepare(`
-      SELECT ${PHOTO_ASSET_COLUMNS} FROM photo_assets
+      SELECT ${PHOTOSTAFF_ASSET_COLUMNS} FROM photostaff_assets
       WHERE root_id = ? AND storage_pool_id = ? AND path = ?
-    `).get(input.settings.rootId, input.settings.storagePoolId, input.path) as DbPhotoAssetRow;
+    `).get(input.settings.rootId, input.settings.storagePoolId, input.path) as DbPhotostaffAssetRow;
     db.prepare(`
-      DELETE FROM photo_upload_reservations
+      DELETE FROM photostaff_upload_reservations
       WHERE library_updated_at = ? AND path = ?
     `).run(input.settings.updatedAt, input.path);
-    const asset = mapPhotoAsset(row);
-    if (input.metadata) replacePhotoAssetMetadata(db, asset, input.metadata, input.indexedAt);
+    const asset = mapPhotostaffAsset(row);
+    if (input.metadata) replacePhotostaffAssetMetadata(db, asset, input.metadata, input.indexedAt);
     return asset;
   });
   return tx();
 }
 
-export function getPhotoAsset(db: SigmaDatabase, id: string, libraryUpdatedAt: string): PhotoAssetRecord | null {
+export function getPhotostaffAsset(db: SigmaDatabase, id: string, libraryUpdatedAt: string): PhotostaffAssetRecord | null {
   const row = db.prepare(`
-    SELECT ${PHOTO_ASSET_COLUMNS} FROM photo_assets
+    SELECT ${PHOTOSTAFF_ASSET_COLUMNS} FROM photostaff_assets
     WHERE id = ? AND library_updated_at = ?
-  `).get(id, libraryUpdatedAt) as DbPhotoAssetRow | undefined;
-  return row ? mapPhotoAsset(row) : null;
+  `).get(id, libraryUpdatedAt) as DbPhotostaffAssetRow | undefined;
+  return row ? mapPhotostaffAsset(row) : null;
 }
 
-export function getPhotoAssetByPath(
+export function getPhotostaffAssetByPath(
   db: SigmaDatabase,
   input: { rootId: string; storagePoolId: string; path: string }
-): PhotoAssetRecord | null {
+): PhotostaffAssetRecord | null {
   const row = db.prepare(`
-    SELECT ${PHOTO_ASSET_COLUMNS} FROM photo_assets
+    SELECT ${PHOTOSTAFF_ASSET_COLUMNS} FROM photostaff_assets
     WHERE root_id = ? AND storage_pool_id = ? AND path = ?
-  `).get(input.rootId, input.storagePoolId, input.path) as DbPhotoAssetRow | undefined;
-  return row ? mapPhotoAsset(row) : null;
+  `).get(input.rootId, input.storagePoolId, input.path) as DbPhotostaffAssetRow | undefined;
+  return row ? mapPhotostaffAsset(row) : null;
 }
 
-export function findPhotoAssetByHash(
+export function findPhotostaffAssetByHash(
   db: SigmaDatabase,
   input: { libraryUpdatedAt: string; contentHash: string }
-): PhotoAssetRecord | null {
+): PhotostaffAssetRecord | null {
   const row = db.prepare(`
-    SELECT ${PHOTO_ASSET_COLUMNS} FROM photo_assets
+    SELECT ${PHOTOSTAFF_ASSET_COLUMNS} FROM photostaff_assets
     WHERE library_updated_at = ? AND content_hash = ? AND status = 'ready'
     ORDER BY indexed_at ASC LIMIT 1
-  `).get(input.libraryUpdatedAt, input.contentHash) as DbPhotoAssetRow | undefined;
-  return row ? mapPhotoAsset(row) : null;
+  `).get(input.libraryUpdatedAt, input.contentHash) as DbPhotostaffAssetRow | undefined;
+  return row ? mapPhotostaffAsset(row) : null;
 }
 
-export function reservePhotoUpload(
+export function reservePhotostaffUpload(
   db: SigmaDatabase,
-  input: PhotoUploadReservationInput
-): PhotoUploadReservationResult {
+  input: PhotostaffUploadReservationInput
+): PhotostaffUploadReservationResult {
   const reserve = db.transaction(() => {
-    const currentSettings = getPhotoLibrarySettings(db);
+    const currentSettings = getPhotostaffLibrarySettings(db);
     if (!currentSettings || currentSettings.updatedAt !== input.settings.updatedAt) {
-      throw new Error("Photo library configuration changed");
+      throw new Error("Photostaff library configuration changed");
     }
-    const duplicate = findPhotoAssetByHash(db, {
+    const duplicate = findPhotostaffAssetByHash(db, {
       libraryUpdatedAt: input.settings.updatedAt,
       contentHash: input.contentHash
     });
@@ -398,7 +414,7 @@ export function reservePhotoUpload(
     const id = randomUUID();
     const createdAt = (input.now ?? new Date()).toISOString();
     const inserted = db.prepare(`
-      INSERT INTO photo_upload_reservations (id, library_updated_at, content_hash, path, created_at)
+      INSERT INTO photostaff_upload_reservations (id, library_updated_at, content_hash, path, created_at)
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT DO NOTHING
     `).run(id, input.settings.updatedAt, input.contentHash, input.path, createdAt);
@@ -410,110 +426,114 @@ export function reservePhotoUpload(
       } as const;
     }
 
-    const hashConflict = getPhotoUploadReservation(db, {
+    const hashConflict = getPhotostaffUploadReservation(db, {
       libraryUpdatedAt: input.settings.updatedAt,
       contentHash: input.contentHash
     });
     if (hashConflict) return { reservation: null, duplicate: hashConflict, conflict: "content_hash" } as const;
-    const pathConflict = getPhotoUploadReservation(db, {
+    const pathConflict = getPhotostaffUploadReservation(db, {
       libraryUpdatedAt: input.settings.updatedAt,
       path: input.path
     });
     if (pathConflict) return { reservation: null, duplicate: pathConflict, conflict: "path" } as const;
-    throw new Error("Photo upload reservation conflict could not be resolved");
+    throw new Error("Photostaff upload reservation conflict could not be resolved");
   });
   return reserve.immediate();
 }
 
-export function releasePhotoUploadReservation(
+export function releasePhotostaffUploadReservation(
   db: SigmaDatabase,
   input: { id: string; libraryUpdatedAt: string }
 ): boolean {
   return db.prepare(`
-    DELETE FROM photo_upload_reservations
+    DELETE FROM photostaff_upload_reservations
     WHERE id = ? AND library_updated_at = ?
   `).run(input.id, input.libraryUpdatedAt).changes === 1;
 }
 
-export function removeStalePhotoUploadReservations(
+export function removeStalePhotostaffUploadReservations(
   db: SigmaDatabase,
   input: { libraryUpdatedAt: string; createdBefore: string }
 ): number {
   return db.prepare(`
-    DELETE FROM photo_upload_reservations
+    DELETE FROM photostaff_upload_reservations
     WHERE library_updated_at = ? AND created_at < ?
   `).run(input.libraryUpdatedAt, input.createdBefore).changes;
 }
 
-export function hasCompletedPhotoScan(db: SigmaDatabase, libraryUpdatedAt: string): boolean {
+export function hasCompletedPhotostaffScan(db: SigmaDatabase, libraryUpdatedAt: string): boolean {
   return Boolean(db.prepare(`
-    SELECT 1 FROM photo_jobs
+    SELECT 1 FROM photostaff_jobs
     WHERE library_updated_at = ? AND kind = 'full_scan' AND status = 'completed'
     LIMIT 1
   `).pluck().get(libraryUpdatedAt));
 }
 
-export function listPhotoAssets(
+export function listPhotostaffAssets(
   db: SigmaDatabase,
-  input: { libraryUpdatedAt: string; limit: number; cursor?: PhotoTimelineCursor | null }
-): { photos: PhotoAssetRecord[]; hasMore: boolean } {
+  input: { libraryUpdatedAt: string; limit: number; cursor?: PhotostaffTimelineCursor | null }
+): { photostaff: PhotostaffAssetRecord[]; hasMore: boolean } {
   const limit = Math.max(1, Math.min(input.limit, 100));
   const cursorClause = input.cursor ? "AND (taken_at < ? OR (taken_at = ? AND id < ?))" : "";
   const cursorParams = input.cursor ? [input.cursor.takenAt, input.cursor.takenAt, input.cursor.id] : [];
   const rows = db.prepare(`
-    SELECT ${PHOTO_ASSET_COLUMNS}
-    FROM photo_assets
+    SELECT ${PHOTOSTAFF_ASSET_COLUMNS}
+    FROM photostaff_assets
     WHERE library_updated_at = ? AND status = 'ready' ${cursorClause}
     ORDER BY taken_at DESC, id DESC
     LIMIT ?
-  `).all(input.libraryUpdatedAt, ...cursorParams, limit + 1) as DbPhotoAssetRow[];
-  return { photos: rows.slice(0, limit).map(mapPhotoAsset), hasMore: rows.length > limit };
+  `).all(input.libraryUpdatedAt, ...cursorParams, limit + 1) as DbPhotostaffAssetRow[];
+  return { photostaff: rows.slice(0, limit).map(mapPhotostaffAsset), hasMore: rows.length > limit };
 }
 
-export function removeStalePhotoAssets(
+export function removeStalePhotostaffAssets(
   db: SigmaDatabase,
   input: { libraryUpdatedAt: string; indexedBefore: string }
 ): number {
   return db.prepare(`
-    DELETE FROM photo_assets WHERE library_updated_at = ? AND indexed_at < ?
+    DELETE FROM photostaff_assets WHERE library_updated_at = ? AND indexed_at < ?
   `).run(input.libraryUpdatedAt, input.indexedBefore).changes;
 }
 
-export function listPhotoDerivativeKeys(db: SigmaDatabase, libraryUpdatedAt: string): Set<string> {
+export function listPhotostaffDerivativeKeys(db: SigmaDatabase, libraryUpdatedAt: string): Set<string> {
   const rows = db.prepare(`
-    SELECT thumbnail_key, preview_key FROM photo_assets
+    SELECT thumbnail_key, preview_key FROM photostaff_assets
     WHERE library_updated_at = ? AND status = 'ready'
   `).all(libraryUpdatedAt) as Array<{ thumbnail_key: string | null; preview_key: string | null }>;
   return new Set(rows.flatMap((row) => [row.thumbnail_key, row.preview_key].filter((key): key is string => Boolean(key))));
 }
 
-export function getPhotoLibraryStatus(
+export function getPhotostaffLibraryStatus(
   db: SigmaDatabase,
-  settings: PhotoLibrarySettingsRecord | null
-): PhotoLibraryStatus {
+  settings: PhotostaffLibrarySettingsRecord | null
+): PhotostaffLibraryStatus {
   if (!settings) {
-    return { state: "unconfigured", total: 0, failed: 0, scanned: 0, processed: 0, currentPath: null, error: null, updatedAt: null };
+    return { state: "unconfigured", total: 0, failed: 0, scanned: 0, processed: 0, currentPath: null, phase: null, error: null, errorCode: null, retryCount: 0, nextRetryAt: null, updatedAt: null };
   }
   const counts = db.prepare(`
     SELECT SUM(CASE WHEN status = 'ready' THEN 1 ELSE 0 END) AS total,
            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed
-    FROM photo_assets WHERE library_updated_at = ?
+    FROM photostaff_assets WHERE library_updated_at = ?
   `).get(settings.updatedAt) as { total: number | null; failed: number | null };
   const row = db.prepare(`
-    SELECT ${PHOTO_JOB_COLUMNS} FROM photo_jobs
+    SELECT ${PHOTOSTAFF_JOB_COLUMNS} FROM photostaff_jobs
     WHERE library_updated_at = ? ORDER BY created_at DESC LIMIT 1
-  `).get(settings.updatedAt) as DbPhotoJobRow | undefined;
+  `).get(settings.updatedAt) as DbPhotostaffJobRow | undefined;
   const total = counts.total ?? 0;
   const failed = counts.failed ?? 0;
-  const metadataIndex = getPhotoMetadataIndexStatus(db, settings.updatedAt);
+  const metadataIndex = getPhotostaffMetadataIndexStatus(db, settings.updatedAt);
   if (!row) {
-    return { state: "queued", total, failed, metadataIndex, scanned: 0, processed: 0, currentPath: null, error: null, updatedAt: settings.updatedAt };
+    return { state: "queued", total, failed, metadataIndex, scanned: 0, processed: 0, currentPath: null, phase: null, error: null, errorCode: null, retryCount: 0, nextRetryAt: null, updatedAt: settings.updatedAt };
   }
-  const job = mapPhotoJob(row);
+  const job = mapPhotostaffJob(row);
   const state = job.status === "queued"
     ? "queued"
     : job.status === "running"
-      ? "scanning"
+      ? job.phase === "processing" || job.phase === "publishing"
+        ? "processing"
+        : "discovering"
+      : job.status === "retrying"
+        ? "retrying"
       : job.status === "failed"
         ? "degraded"
         : failed > 0
@@ -527,27 +547,56 @@ export function getPhotoLibraryStatus(
     scanned: job.scanned,
     processed: job.processed,
     currentPath: job.currentPath,
+    phase: job.phase,
     error: job.error,
+    errorCode: job.errorCode,
+    retryCount: job.retryCount,
+    nextRetryAt: job.nextRetryAt,
     updatedAt: job.updatedAt
   };
 }
 
-function getRequiredPhotoJob(db: SigmaDatabase, id: string): PhotoJobRecord {
-  const row = db.prepare(`SELECT ${PHOTO_JOB_COLUMNS} FROM photo_jobs WHERE id = ?`).get(id) as DbPhotoJobRow | undefined;
-  if (!row) throw new Error(`Photo job ${id} was not created`);
-  return mapPhotoJob(row);
+export function getPhotostaffWorkerHealth(db: SigmaDatabase, now = new Date()): PhotostaffWorkerHealth {
+  const worker = db.prepare("SELECT heartbeat_at FROM photostaff_workers ORDER BY heartbeat_at DESC LIMIT 1")
+    .get() as { heartbeat_at: string } | undefined;
+  const counts = db.prepare(`
+    SELECT
+      SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS active_jobs,
+      SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) AS queued_jobs,
+      SUM(CASE WHEN status = 'retrying' THEN 1 ELSE 0 END) AS retrying_jobs
+    FROM photostaff_jobs
+  `).get() as { active_jobs: number | null; queued_jobs: number | null; retrying_jobs: number | null };
+  const lastHeartbeatAt = worker?.heartbeat_at ?? null;
+  const ageMs = lastHeartbeatAt ? now.getTime() - Date.parse(lastHeartbeatAt) : Number.POSITIVE_INFINITY;
+  const status = ageMs <= 15_000 ? "ready" : ageMs <= 60_000 ? "stale" : "unavailable";
+  const freshWorkers = db.prepare("SELECT COUNT(*) FROM photostaff_workers WHERE heartbeat_at >= ?")
+    .pluck().get(new Date(now.getTime() - 15_000).toISOString()) as number;
+  return {
+    status,
+    freshWorkers,
+    lastHeartbeatAt,
+    activeJobs: counts.active_jobs ?? 0,
+    queuedJobs: counts.queued_jobs ?? 0,
+    retryingJobs: counts.retrying_jobs ?? 0
+  };
 }
 
-function getPhotoUploadReservation(
+function getRequiredPhotostaffJob(db: SigmaDatabase, id: string): PhotostaffJobRecord {
+  const row = db.prepare(`SELECT ${PHOTOSTAFF_JOB_COLUMNS} FROM photostaff_jobs WHERE id = ?`).get(id) as DbPhotostaffJobRow | undefined;
+  if (!row) throw new Error(`Photostaff job ${id} was not created`);
+  return mapPhotostaffJob(row);
+}
+
+function getPhotostaffUploadReservation(
   db: SigmaDatabase,
   input: { libraryUpdatedAt: string; contentHash?: string; path?: string }
-): PhotoUploadReservationRecord | null {
+): PhotostaffUploadReservationRecord | null {
   const column = input.contentHash !== undefined ? "content_hash" : "path";
   const value = input.contentHash ?? input.path;
   if (value === undefined) return null;
   const row = db.prepare(`
     SELECT id, library_updated_at, content_hash, path, created_at
-    FROM photo_upload_reservations
+    FROM photostaff_upload_reservations
     WHERE library_updated_at = ? AND ${column} = ?
     LIMIT 1
   `).get(input.libraryUpdatedAt, value) as {
@@ -566,7 +615,7 @@ function getPhotoUploadReservation(
   } : null;
 }
 
-function mapPhotoAsset(row: DbPhotoAssetRow): PhotoAssetRecord {
+function mapPhotostaffAsset(row: DbPhotostaffAssetRow): PhotostaffAssetRecord {
   return {
     id: row.id,
     rootId: row.root_id,
@@ -586,11 +635,14 @@ function mapPhotoAsset(row: DbPhotoAssetRow): PhotoAssetRecord {
     previewKey: row.preview_key,
     status: row.status,
     error: row.error,
+    errorCode: row.error_code,
+    errorRetryable: row.error_retryable === 1,
+    derivativeSchemaVersion: row.derivative_schema_version,
     indexedAt: row.indexed_at
   };
 }
 
-function mapPhotoJob(row: DbPhotoJobRow): PhotoJobRecord {
+function mapPhotostaffJob(row: DbPhotostaffJobRow): PhotostaffJobRecord {
   return {
     id: row.id,
     kind: row.kind,
@@ -603,7 +655,13 @@ function mapPhotoJob(row: DbPhotoJobRow): PhotoJobRecord {
     processed: row.processed,
     failed: row.failed,
     currentPath: row.current_path,
+    phase: row.phase,
     error: row.error,
+    errorCode: row.error_code,
+    errorRetryable: row.error_retryable === 1,
+    retryCount: row.retry_count,
+    nextRetryAt: row.next_retry_at,
+    scanGeneration: row.scan_generation,
     workerId: row.worker_id,
     leaseExpiresAt: row.lease_expires_at,
     createdAt: row.created_at,

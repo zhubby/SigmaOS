@@ -49,7 +49,7 @@ export function StorageFilePickerDialog({
   initialPoolId: string;
   locale: SupportedLocale;
   mode?: "iso" | "directory" | "pmtiles";
-  directoryPurpose?: "downloads" | "photoMove";
+  directoryPurpose?: "downloads" | "photostaffMove";
   initialPath?: string;
   boundaryPath?: string;
   onCancel: () => void;
@@ -76,14 +76,14 @@ export function StorageFilePickerDialog({
   const [createFolderSubmitting, setCreateFolderSubmitting] = useState(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const loadRequestId = useRef(0);
-  const directoryCopy = directoryPurpose === "photoMove"
+  const directoryCopy = directoryPurpose === "photostaffMove"
     ? {
-        eyebrow: t("workspace.photos.moveDestination"),
-        title: t("workspace.photos.movePickerTitle"),
-        description: t("workspace.photos.movePickerDescription"),
-        list: t("workspace.photos.directoryPickerList"),
-        empty: t("workspace.photos.directoryPickerEmpty"),
-        select: t("workspace.photos.useMoveDestination")
+        eyebrow: t("workspace.photostaff.moveDestination"),
+        title: t("workspace.photostaff.movePickerTitle"),
+        description: t("workspace.photostaff.movePickerDescription"),
+        list: t("workspace.photostaff.directoryPickerList"),
+        empty: t("workspace.photostaff.directoryPickerEmpty"),
+        select: t("workspace.photostaff.useMoveDestination")
       }
     : {
         eyebrow: t("workspace.downloads.targetDirectory"),
@@ -95,13 +95,13 @@ export function StorageFilePickerDialog({
       };
   const fileCopy = mode === "pmtiles"
     ? {
-        eyebrow: t("workspace.photos.mapArchive"),
-        title: t("workspace.photos.mapPickerTitle"),
-        description: t("workspace.photos.mapPickerDescription"),
-        list: t("workspace.photos.mapPickerFiles"),
-        empty: t("workspace.photos.mapPickerEmpty"),
-        none: t("workspace.photos.mapPickerNone"),
-        select: t("workspace.photos.mapPickerSelect")
+        eyebrow: t("workspace.photostaff.mapArchive"),
+        title: t("workspace.photostaff.mapPickerTitle"),
+        description: t("workspace.photostaff.mapPickerDescription"),
+        list: t("workspace.photostaff.mapPickerFiles"),
+        empty: t("workspace.photostaff.mapPickerEmpty"),
+        none: t("workspace.photostaff.mapPickerNone"),
+        select: t("workspace.photostaff.mapPickerSelect")
       }
     : {
         eyebrow: t("workspace.management.virtualMachines.createIsoSource"),

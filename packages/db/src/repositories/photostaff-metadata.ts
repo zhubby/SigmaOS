@@ -1,55 +1,55 @@
 import { createHash } from "node:crypto";
 import {
-  PHOTO_METADATA_SCHEMA_VERSION,
-  type PhotoAssetRecord,
-  type PhotoMapCluster,
-  type PhotoMapQueryRequest,
-  type PhotoMetadataDetail,
-  type PhotoMetadataField,
-  type PhotoMetadataIndexStatus,
-  type PhotoMetadataScalar,
-  type PhotoMetadataSummary,
-  type PhotoMetadataValueType,
-  type PhotoQueryAsset,
-  type PhotoQueryFacets,
-  type PhotoQueryFilters,
-  type PhotoQueryRequest
+  PHOTOSTAFF_METADATA_SCHEMA_VERSION,
+  type PhotostaffAssetRecord,
+  type PhotostaffMapCluster,
+  type PhotostaffMapQueryRequest,
+  type PhotostaffMetadataDetail,
+  type PhotostaffMetadataField,
+  type PhotostaffMetadataIndexStatus,
+  type PhotostaffMetadataScalar,
+  type PhotostaffMetadataSummary,
+  type PhotostaffMetadataValueType,
+  type PhotostaffQueryAsset,
+  type PhotostaffQueryFacets,
+  type PhotostaffQueryFilters,
+  type PhotostaffQueryRequest
 } from "@sigmaos/shared";
 import type { SigmaDatabase } from "../connection.js";
 
-export interface PhotoMetadataValueInput {
+export interface PhotostaffMetadataValueInput {
   source: string;
   key: string;
-  valueType: PhotoMetadataValueType;
-  value: PhotoMetadataScalar;
+  valueType: PhotostaffMetadataValueType;
+  value: PhotostaffMetadataScalar;
   sensitive: boolean;
   ordinal: number;
 }
 
-export interface PhotoMetadataWriteInput extends Omit<PhotoMetadataSummary, "hasLocation" | "hasSensitiveMetadata"> {
+export interface PhotostaffMetadataWriteInput extends Omit<PhotostaffMetadataSummary, "hasLocation" | "hasSensitiveMetadata"> {
   bodySerial: string | null;
   lensSerial: string | null;
   gpsLatitude: number | null;
   gpsLongitude: number | null;
   gpsAltitudeM: number | null;
   gpsDirectionDeg: number | null;
-  rawMetadata: Record<string, Record<string, PhotoMetadataScalar[]>>;
+  rawMetadata: Record<string, Record<string, PhotostaffMetadataScalar[]>>;
   warnings: string[];
   keywords: string[];
-  values: PhotoMetadataValueInput[];
+  values: PhotostaffMetadataValueInput[];
   sidecarPath: string | null;
   sidecarSizeBytes: number | null;
   sidecarMtimeMs: number | null;
 }
 
-export interface PhotoMetadataState {
+export interface PhotostaffMetadataState {
   schemaVersion: number;
   sidecarPath: string | null;
   sidecarSizeBytes: number | null;
   sidecarMtimeMs: number | null;
 }
 
-export interface PhotoQueryCursor {
+export interface PhotostaffQueryCursor {
   fingerprint: string;
   sortValue: string | number | null;
   id: string;
@@ -69,19 +69,22 @@ interface QueryRow {
   height: number | null;
   orientation: number | null;
   taken_at: string;
-  taken_at_source: PhotoAssetRecord["takenAtSource"];
+  taken_at_source: PhotostaffAssetRecord["takenAtSource"];
   thumbnail_key: string | null;
   preview_key: string | null;
-  status: PhotoAssetRecord["status"];
+  status: PhotostaffAssetRecord["status"];
   error: string | null;
+  error_code: PhotostaffAssetRecord["errorCode"];
+  error_retryable: 0 | 1;
+  derivative_schema_version: number;
   indexed_at: string;
   schema_version: number | null;
-  metadata_status: PhotoMetadataSummary["status"] | null;
-  media_kind: PhotoMetadataSummary["mediaKind"] | null;
+  metadata_status: PhotostaffMetadataSummary["status"] | null;
+  media_kind: PhotostaffMetadataSummary["mediaKind"] | null;
   captured_at: string | null;
   captured_at_local: string | null;
   capture_offset_minutes: number | null;
-  capture_source: PhotoMetadataSummary["captureSource"] | null;
+  capture_source: PhotostaffMetadataSummary["captureSource"] | null;
   duration_ms: number | null;
   container: string | null;
   video_codec: string | null;
@@ -119,7 +122,7 @@ const QUERY_COLUMNS = `
   a.id, a.root_id, a.storage_pool_id, a.path, a.name, a.mime_type,
   a.size_bytes, a.mtime_ms, a.content_hash, a.width, a.height, a.orientation,
   a.taken_at, a.taken_at_source, a.thumbnail_key, a.preview_key, a.status,
-  a.error, a.indexed_at,
+  a.error, a.error_code, a.error_retryable, a.derivative_schema_version, a.indexed_at,
   m.schema_version, m.status AS metadata_status, m.media_kind, m.captured_at,
   m.captured_at_local, m.capture_offset_minutes, m.capture_source, m.duration_ms,
   m.container, m.video_codec, m.audio_codec, m.camera_make, m.camera_model,
@@ -129,30 +132,30 @@ const QUERY_COLUMNS = `
   m.white_balance, m.title, m.description, m.creator, m.copyright, m.rating,
   m.gps_latitude, m.gps_longitude,
   EXISTS (
-    SELECT 1 FROM photo_metadata_values sensitive_value
+    SELECT 1 FROM photostaff_metadata_values sensitive_value
     WHERE sensitive_value.asset_id = a.id AND sensitive_value.sensitive = 1
   ) AS has_sensitive_metadata
 `;
 
 const CAPTURE_SORT_EXPRESSION = "COALESCE(m.captured_at, m.captured_at_local, a.taken_at)";
 
-export function replacePhotoAssetMetadata(
+export function replacePhotostaffAssetMetadata(
   db: SigmaDatabase,
-  asset: Pick<PhotoAssetRecord, "id" | "name" | "path">,
-  input: PhotoMetadataWriteInput,
+  asset: Pick<PhotostaffAssetRecord, "id" | "name" | "path">,
+  input: PhotostaffMetadataWriteInput,
   now = new Date()
 ): void {
-  const previousRowId = db.prepare("SELECT rowid FROM photo_asset_metadata WHERE asset_id = ?")
+  const previousRowId = db.prepare("SELECT rowid FROM photostaff_asset_metadata WHERE asset_id = ?")
     .pluck().get(asset.id) as number | undefined;
   if (previousRowId !== undefined) {
-    db.prepare("DELETE FROM photo_geo_index WHERE metadata_rowid = ?").run(previousRowId);
+    db.prepare("DELETE FROM photostaff_geo_index WHERE metadata_rowid = ?").run(previousRowId);
   }
-  db.prepare("DELETE FROM photo_metadata_values WHERE asset_id = ?").run(asset.id);
-  db.prepare("DELETE FROM photo_keywords WHERE asset_id = ?").run(asset.id);
-  db.prepare("DELETE FROM photo_metadata_fts WHERE asset_id = ?").run(asset.id);
+  db.prepare("DELETE FROM photostaff_metadata_values WHERE asset_id = ?").run(asset.id);
+  db.prepare("DELETE FROM photostaff_keywords WHERE asset_id = ?").run(asset.id);
+  db.prepare("DELETE FROM photostaff_metadata_fts WHERE asset_id = ?").run(asset.id);
 
   db.prepare(`
-    INSERT INTO photo_asset_metadata (
+    INSERT INTO photostaff_asset_metadata (
       asset_id, schema_version, status, media_kind, captured_at, captured_at_local,
       capture_offset_minutes, capture_source, duration_ms, container, video_codec,
       audio_codec, camera_make, camera_model, software, body_serial, lens_make,
@@ -206,7 +209,7 @@ export function replacePhotoAssetMetadata(
   );
 
   const insertKeyword = db.prepare(`
-    INSERT OR IGNORE INTO photo_keywords (asset_id, keyword, normalized_keyword)
+    INSERT OR IGNORE INTO photostaff_keywords (asset_id, keyword, normalized_keyword)
     VALUES (?, ?, ?)
   `);
   for (const keyword of input.keywords) {
@@ -215,7 +218,7 @@ export function replacePhotoAssetMetadata(
   }
 
   const insertValue = db.prepare(`
-    INSERT INTO photo_metadata_values (
+    INSERT INTO photostaff_metadata_values (
       asset_id, source, key, value_type, text_value, normalized_text_value,
       number_value, date_value, boolean_value, sensitive, ordinal
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -237,7 +240,7 @@ export function replacePhotoAssetMetadata(
   }
 
   db.prepare(`
-    INSERT INTO photo_metadata_fts (
+    INSERT INTO photostaff_metadata_fts (
       asset_id, name, path, title, description, creator, copyright, keywords, camera, lens
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
@@ -254,20 +257,20 @@ export function replacePhotoAssetMetadata(
   );
 
   if (input.gpsLatitude !== null && input.gpsLongitude !== null) {
-    const metadataRowId = db.prepare("SELECT rowid FROM photo_asset_metadata WHERE asset_id = ?")
+    const metadataRowId = db.prepare("SELECT rowid FROM photostaff_asset_metadata WHERE asset_id = ?")
       .pluck().get(asset.id) as number;
     db.prepare(`
-      INSERT INTO photo_geo_index (
+      INSERT INTO photostaff_geo_index (
         metadata_rowid, min_latitude, max_latitude, min_longitude, max_longitude
       ) VALUES (?, ?, ?, ?, ?)
     `).run(metadataRowId, input.gpsLatitude, input.gpsLatitude, input.gpsLongitude, input.gpsLongitude);
   }
 }
 
-export function getPhotoMetadataState(db: SigmaDatabase, assetId: string): PhotoMetadataState | null {
+export function getPhotostaffMetadataState(db: SigmaDatabase, assetId: string): PhotostaffMetadataState | null {
   const row = db.prepare(`
     SELECT schema_version, sidecar_path, sidecar_size_bytes, sidecar_mtime_ms
-    FROM photo_asset_metadata WHERE asset_id = ?
+    FROM photostaff_asset_metadata WHERE asset_id = ?
   `).get(assetId) as {
     schema_version: number;
     sidecar_path: string | null;
@@ -282,37 +285,37 @@ export function getPhotoMetadataState(db: SigmaDatabase, assetId: string): Photo
   } : null;
 }
 
-export function hasStalePhotoMetadata(db: SigmaDatabase, libraryUpdatedAt: string): boolean {
+export function hasStalePhotostaffMetadata(db: SigmaDatabase, libraryUpdatedAt: string): boolean {
   return Boolean(db.prepare(`
     SELECT 1
-    FROM photo_assets a
-    LEFT JOIN photo_asset_metadata m ON m.asset_id = a.id
+    FROM photostaff_assets a
+    LEFT JOIN photostaff_asset_metadata m ON m.asset_id = a.id
     WHERE a.library_updated_at = ? AND a.status = 'ready'
       AND (m.asset_id IS NULL OR m.schema_version <> ?)
     LIMIT 1
-  `).pluck().get(libraryUpdatedAt, PHOTO_METADATA_SCHEMA_VERSION));
+  `).pluck().get(libraryUpdatedAt, PHOTOSTAFF_METADATA_SCHEMA_VERSION));
 }
 
-export function getPhotoMetadataIndexStatus(
+export function getPhotostaffMetadataIndexStatus(
   db: SigmaDatabase,
   libraryUpdatedAt: string
-): PhotoMetadataIndexStatus {
+): PhotostaffMetadataIndexStatus {
   const row = db.prepare(`
     SELECT
       COUNT(*) AS total,
       SUM(CASE WHEN m.schema_version = ? THEN 1 ELSE 0 END) AS indexed,
       SUM(CASE WHEN m.schema_version = ? AND m.status = 'partial' THEN 1 ELSE 0 END) AS partial
-    FROM photo_assets a
-    LEFT JOIN photo_asset_metadata m ON m.asset_id = a.id
+    FROM photostaff_assets a
+    LEFT JOIN photostaff_asset_metadata m ON m.asset_id = a.id
     WHERE a.library_updated_at = ? AND a.status = 'ready'
-  `).get(PHOTO_METADATA_SCHEMA_VERSION, PHOTO_METADATA_SCHEMA_VERSION, libraryUpdatedAt) as {
+  `).get(PHOTOSTAFF_METADATA_SCHEMA_VERSION, PHOTOSTAFF_METADATA_SCHEMA_VERSION, libraryUpdatedAt) as {
     total: number;
     indexed: number | null;
     partial: number | null;
   };
   const indexed = row.indexed ?? 0;
   return {
-    schemaVersion: PHOTO_METADATA_SCHEMA_VERSION,
+    schemaVersion: PHOTOSTAFF_METADATA_SCHEMA_VERSION,
     total: row.total,
     indexed,
     partial: row.partial ?? 0,
@@ -320,7 +323,7 @@ export function getPhotoMetadataIndexStatus(
   };
 }
 
-export function photoQueryFingerprint(request: Omit<PhotoQueryRequest, "cursor">): string {
+export function photostaffQueryFingerprint(request: Omit<PhotostaffQueryRequest, "cursor">): string {
   const fingerprintedRequest = {
     filters: request.filters ?? {},
     sort: request.sort ?? { field: "captured_at", direction: "desc" }
@@ -328,14 +331,14 @@ export function photoQueryFingerprint(request: Omit<PhotoQueryRequest, "cursor">
   return createHash("sha256").update(stableStringify(fingerprintedRequest)).digest("base64url").slice(0, 24);
 }
 
-export function queryPhotoAssets(
+export function queryPhotostaffAssets(
   db: SigmaDatabase,
   input: {
     libraryUpdatedAt: string;
-    request: PhotoQueryRequest;
-    cursor?: PhotoQueryCursor | null;
+    request: PhotostaffQueryRequest;
+    cursor?: PhotostaffQueryCursor | null;
   }
-): { photos: PhotoQueryAsset[]; hasMore: boolean; total: number; facets: PhotoQueryFacets | null } {
+): { photostaff: PhotostaffQueryAsset[]; hasMore: boolean; total: number; facets: PhotostaffQueryFacets | null } {
   const request = input.request;
   const limit = Math.max(1, Math.min(request.limit ?? 60, 100));
   const query = buildQuery(input.libraryUpdatedAt, request.filters ?? {}, request.sort);
@@ -355,7 +358,7 @@ export function queryPhotoAssets(
   const pageRows = rows.slice(0, limit);
   const keywords = loadKeywords(db, pageRows.map((row) => row.id));
   return {
-    photos: pageRows.map((row) => mapQueryAsset(row, keywords.get(row.id) ?? [])),
+    photostaff: pageRows.map((row) => mapQueryAsset(row, keywords.get(row.id) ?? [])),
     hasMore: rows.length > limit,
     total,
     facets: request.includeFacets
@@ -364,25 +367,25 @@ export function queryPhotoAssets(
   };
 }
 
-export function listPhotoMetadataFields(
+export function listPhotostaffMetadataFields(
   db: SigmaDatabase,
   input: { libraryUpdatedAt: string; query?: string; limit?: number }
-): PhotoMetadataField[] {
+): PhotostaffMetadataField[] {
   const limit = Math.max(1, Math.min(input.limit ?? 100, 200));
   const query = normalizeText(input.query ?? "");
   const rows = db.prepare(`
     SELECT v.key, v.value_type, COUNT(DISTINCT v.asset_id) AS count
-    FROM photo_metadata_values v
-    JOIN photo_assets a ON a.id = v.asset_id
-    JOIN photo_asset_metadata m ON m.asset_id = a.id AND m.schema_version = ?
+    FROM photostaff_metadata_values v
+    JOIN photostaff_assets a ON a.id = v.asset_id
+    JOIN photostaff_asset_metadata m ON m.asset_id = a.id AND m.schema_version = ?
     WHERE a.library_updated_at = ? AND a.status = 'ready' AND v.sensitive = 0
       AND (? = '' OR lower(v.key) LIKE '%' || ? || '%')
     GROUP BY v.key, v.value_type
     ORDER BY count DESC, v.key ASC
     LIMIT ?
-  `).all(PHOTO_METADATA_SCHEMA_VERSION, input.libraryUpdatedAt, query, query, limit) as Array<{
+  `).all(PHOTOSTAFF_METADATA_SCHEMA_VERSION, input.libraryUpdatedAt, query, query, limit) as Array<{
     key: string;
-    value_type: PhotoMetadataValueType;
+    value_type: PhotostaffMetadataValueType;
     count: number;
   }>;
   return rows.map((row) => ({
@@ -393,15 +396,15 @@ export function listPhotoMetadataFields(
   }));
 }
 
-export function getPhotoMetadataDetail(
+export function getPhotostaffMetadataDetail(
   db: SigmaDatabase,
   input: { assetId: string; libraryUpdatedAt: string; includeSensitive?: boolean }
-): PhotoMetadataDetail | null {
+): PhotostaffMetadataDetail | null {
   const row = db.prepare(`
     SELECT ${QUERY_COLUMNS}, NULL AS distance_m, NULL AS sort_value,
            m.raw_metadata_json, m.warnings_json
-    FROM photo_assets a
-    LEFT JOIN photo_asset_metadata m ON m.asset_id = a.id
+    FROM photostaff_assets a
+    LEFT JOIN photostaff_asset_metadata m ON m.asset_id = a.id
     WHERE a.id = ? AND a.library_updated_at = ?
   `).get(input.assetId, input.libraryUpdatedAt) as (QueryRow & {
     raw_metadata_json: string | null;
@@ -410,11 +413,11 @@ export function getPhotoMetadataDetail(
   if (!row) return null;
   const raw = parseGroups(row.raw_metadata_json);
   const sensitiveKeys = db.prepare(`
-    SELECT DISTINCT key FROM photo_metadata_values WHERE asset_id = ? AND sensitive = 1
+    SELECT DISTINCT key FROM photostaff_metadata_values WHERE asset_id = ? AND sensitive = 1
   `).all(input.assetId) as Array<{ key: string }>;
   const sensitiveSet = new Set(sensitiveKeys.map((entry) => entry.key));
-  const groups: Record<string, Record<string, PhotoMetadataScalar[]>> = {};
-  const sensitiveGroups: Record<string, Record<string, PhotoMetadataScalar[]>> = {};
+  const groups: Record<string, Record<string, PhotostaffMetadataScalar[]>> = {};
+  const sensitiveGroups: Record<string, Record<string, PhotostaffMetadataScalar[]>> = {};
   for (const [source, entries] of Object.entries(raw)) {
     for (const [key, values] of Object.entries(entries)) {
       const fullKey = `${source}.${key}`;
@@ -433,13 +436,13 @@ export function getPhotoMetadataDetail(
   };
 }
 
-export function queryPhotoMap(
+export function queryPhotostaffMap(
   db: SigmaDatabase,
-  input: { libraryUpdatedAt: string; request: PhotoMapQueryRequest }
-): PhotoMapCluster[] {
+  input: { libraryUpdatedAt: string; request: PhotostaffMapQueryRequest }
+): PhotostaffMapCluster[] {
   const columns = Math.max(1, Math.min(input.request.columns ?? 64, 64));
   const rows = Math.max(1, Math.min(input.request.rows ?? 64, 64));
-  const filters: PhotoQueryFilters = { ...(input.request.filters ?? {}), location: input.request.bounds };
+  const filters: PhotostaffQueryFilters = { ...(input.request.filters ?? {}), location: input.request.bounds };
   const query = buildQuery(input.libraryUpdatedAt, filters, { field: "captured_at", direction: "desc" });
   const west = input.request.bounds.west;
   const east = input.request.bounds.east;
@@ -485,8 +488,8 @@ export function queryPhotoMap(
 
 function buildQuery(
   libraryUpdatedAt: string,
-  filters: PhotoQueryFilters,
-  sort: PhotoQueryRequest["sort"]
+  filters: PhotostaffQueryFilters,
+  sort: PhotostaffQueryRequest["sort"]
 ): { cte: string; params: unknown[]; postWhere: string; postParams: unknown[] } {
   const where = ["a.library_updated_at = ?", "a.status = 'ready'"];
   const whereParams: unknown[] = [libraryUpdatedAt];
@@ -495,7 +498,7 @@ function buildQuery(
   let requiresMetadata = false;
 
   if (filters.text?.trim()) {
-    where.push("a.id IN (SELECT asset_id FROM photo_metadata_fts WHERE photo_metadata_fts MATCH ?)");
+    where.push("a.id IN (SELECT asset_id FROM photostaff_metadata_fts WHERE photostaff_metadata_fts MATCH ?)");
     whereParams.push(toFtsQuery(filters.text));
     requiresMetadata = true;
   }
@@ -517,7 +520,7 @@ function buildQuery(
       filters.exposureTimeSeconds || filters.focalLengthMm || filters.rating) requiresMetadata = true;
   if (filters.keywords?.length) {
     where.push(`EXISTS (
-      SELECT 1 FROM photo_keywords k
+      SELECT 1 FROM photostaff_keywords k
       WHERE k.asset_id = a.id AND k.normalized_keyword IN (${placeholders(filters.keywords.length)})
     )`);
     whereParams.push(...filters.keywords.map(normalizeText));
@@ -550,7 +553,7 @@ function buildQuery(
   }
   if (requiresMetadata) {
     where.push("m.schema_version = ?");
-    whereParams.push(PHOTO_METADATA_SCHEMA_VERSION);
+    whereParams.push(PHOTOSTAFF_METADATA_SCHEMA_VERSION);
   }
 
   const sortExpression = sort?.field === "indexed_at" ? "a.indexed_at"
@@ -565,8 +568,8 @@ function buildQuery(
   const cte = `
     WITH candidates AS (
       SELECT ${QUERY_COLUMNS}, ${distanceExpression} AS distance_m, ${sortExpression} AS base_sort_value
-      FROM photo_assets a
-      LEFT JOIN photo_asset_metadata m ON m.asset_id = a.id
+      FROM photostaff_assets a
+      LEFT JOIN photostaff_asset_metadata m ON m.asset_id = a.id
       WHERE ${where.join(" AND ")}
     ), matches AS (
       SELECT candidates.*,
@@ -577,7 +580,7 @@ function buildQuery(
   return { cte, params: [...selectParams, ...whereParams], postWhere: postWhere.join(" AND "), postParams };
 }
 
-function buildCursorSql(cursor: PhotoQueryCursor | null, direction: "asc" | "desc") {
+function buildCursorSql(cursor: PhotostaffQueryCursor | null, direction: "asc" | "desc") {
   if (!cursor) return { sql: "", params: [] as unknown[] };
   if (cursor.sortValue === null) {
     return { sql: `AND sort_value IS NULL AND id ${direction === "asc" ? ">" : "<"} ?`, params: [cursor.id] };
@@ -589,11 +592,11 @@ function buildCursorSql(cursor: PhotoQueryCursor | null, direction: "asc" | "des
   };
 }
 
-function buildMetadataCondition(condition: NonNullable<PhotoQueryFilters["advanced"]>["conditions"][number], params: unknown[]): string {
+function buildMetadataCondition(condition: NonNullable<PhotostaffQueryFilters["advanced"]>["conditions"][number], params: unknown[]): string {
   const base = ["v.asset_id = a.id", "v.sensitive = 0", "v.key = ?"];
   params.push(condition.key);
-  if (condition.operator === "exists") return `EXISTS (SELECT 1 FROM photo_metadata_values v WHERE ${base.join(" AND ")})`;
-  if (condition.operator === "not_exists") return `NOT EXISTS (SELECT 1 FROM photo_metadata_values v WHERE ${base.join(" AND ")})`;
+  if (condition.operator === "exists") return `EXISTS (SELECT 1 FROM photostaff_metadata_values v WHERE ${base.join(" AND ")})`;
+  if (condition.operator === "not_exists") return `NOT EXISTS (SELECT 1 FROM photostaff_metadata_values v WHERE ${base.join(" AND ")})`;
   const value = Array.isArray(condition.value) ? condition.value : [condition.value].filter((entry) => entry !== undefined);
   let comparison: string;
   if (condition.operator === "contains" || condition.operator === "prefix") {
@@ -623,7 +626,7 @@ function buildMetadataCondition(condition: NonNullable<PhotoQueryFilters["advanc
       params.push(normalizeText(String(first ?? "")));
     }
   }
-  return `EXISTS (SELECT 1 FROM photo_metadata_values v WHERE ${[...base, comparison].join(" AND ")})`;
+  return `EXISTS (SELECT 1 FROM photostaff_metadata_values v WHERE ${[...base, comparison].join(" AND ")})`;
 }
 
 function addBoundsFilter(where: string[], params: unknown[], bounds: { west: number; south: number; east: number; north: number }) {
@@ -634,7 +637,7 @@ function addBoundsFilter(where: string[], params: unknown[], bounds: { west: num
     ? "m.gps_longitude BETWEEN ? AND ?"
     : "(m.gps_longitude >= ? OR m.gps_longitude <= ?)";
   where.push(`EXISTS (
-    SELECT 1 FROM photo_geo_index g
+    SELECT 1 FROM photostaff_geo_index g
     WHERE g.metadata_rowid = m.rowid
       AND g.max_latitude >= ? AND g.min_latitude <= ? AND ${rtreeLongitudeClause}
   ) AND m.gps_latitude BETWEEN ? AND ? AND ${exactLongitudeClause}`);
@@ -669,16 +672,16 @@ function haversineExpression(): string {
 function loadFacets(
   db: SigmaDatabase,
   libraryUpdatedAt: string,
-  filters: PhotoQueryFilters
-): PhotoQueryFacets {
-  const facetQuery = (excluded: keyof PhotoQueryFilters) => {
+  filters: PhotostaffQueryFilters
+): PhotostaffQueryFacets {
+  const facetQuery = (excluded: keyof PhotostaffQueryFilters) => {
     const next = { ...filters };
     delete next[excluded];
     return buildQuery(libraryUpdatedAt, next, { field: "captured_at", direction: "desc" });
   };
   const categorical = (
     expression: string,
-    excluded: keyof PhotoQueryFilters
+    excluded: keyof PhotostaffQueryFilters
   ): Array<{ value: string; count: number }> => {
     const query = facetQuery(excluded);
     return db.prepare(`
@@ -687,16 +690,16 @@ function loadFacets(
       FROM matches
       WHERE ${query.postWhere} AND schema_version = ? AND ${expression} IS NOT NULL AND ${expression} <> ''
       GROUP BY ${expression} ORDER BY count DESC, value ASC LIMIT 100
-    `).all(...query.params, ...query.postParams, PHOTO_METADATA_SCHEMA_VERSION) as Array<{ value: string; count: number }>;
+    `).all(...query.params, ...query.postParams, PHOTOSTAFF_METADATA_SCHEMA_VERSION) as Array<{ value: string; count: number }>;
   };
   const keywordQuery = facetQuery("keywords");
   const keywordRows = db.prepare(`
     ${keywordQuery.cte}
     SELECT k.keyword AS value, COUNT(DISTINCT k.asset_id) AS count
-    FROM matches q JOIN photo_keywords k ON k.asset_id = q.id
+    FROM matches q JOIN photostaff_keywords k ON k.asset_id = q.id
     WHERE ${keywordQuery.postWhere} AND q.schema_version = ?
     GROUP BY k.normalized_keyword ORDER BY count DESC, value ASC LIMIT 100
-  `).all(...keywordQuery.params, ...keywordQuery.postParams, PHOTO_METADATA_SCHEMA_VERSION) as Array<{ value: string; count: number }>;
+  `).all(...keywordQuery.params, ...keywordQuery.postParams, PHOTOSTAFF_METADATA_SCHEMA_VERSION) as Array<{ value: string; count: number }>;
   const query = buildQuery(libraryUpdatedAt, filters, { field: "captured_at", direction: "desc" });
   const numericRow = db.prepare(`
     ${query.cte}
@@ -707,7 +710,7 @@ function loadFacets(
       MIN(focal_length_mm) AS focal_min, MAX(focal_length_mm) AS focal_max,
       MIN(rating) AS rating_min, MAX(rating) AS rating_max
     FROM matches WHERE ${query.postWhere} AND schema_version = ?
-  `).get(...query.params, ...query.postParams, PHOTO_METADATA_SCHEMA_VERSION) as {
+  `).get(...query.params, ...query.postParams, PHOTOSTAFF_METADATA_SCHEMA_VERSION) as {
     iso_min: number | null;
     iso_max: number | null;
     aperture_min: number | null;
@@ -719,7 +722,7 @@ function loadFacets(
     rating_min: number | null;
     rating_max: number | null;
   };
-  const numeric: PhotoQueryFacets["numeric"] = {
+  const numeric: PhotostaffQueryFacets["numeric"] = {
     iso: { min: numericRow.iso_min, max: numericRow.iso_max },
     aperture: { min: numericRow.aperture_min, max: numericRow.aperture_max },
     exposureTimeSeconds: { min: numericRow.exposure_min, max: numericRow.exposure_max },
@@ -740,7 +743,7 @@ function loadKeywords(db: SigmaDatabase, assetIds: string[]): Map<string, string
   const result = new Map<string, string[]>();
   if (!assetIds.length) return result;
   const rows = db.prepare(`
-    SELECT asset_id, keyword FROM photo_keywords
+    SELECT asset_id, keyword FROM photostaff_keywords
     WHERE asset_id IN (${placeholders(assetIds.length)})
     ORDER BY normalized_keyword ASC
   `).all(...assetIds) as Array<{ asset_id: string; keyword: string }>;
@@ -752,7 +755,7 @@ function loadKeywords(db: SigmaDatabase, assetIds: string[]): Map<string, string
   return result;
 }
 
-function mapQueryAsset(row: QueryRow, keywords: string[]): PhotoQueryAsset {
+function mapQueryAsset(row: QueryRow, keywords: string[]): PhotostaffQueryAsset {
   return {
     id: row.id,
     rootId: row.root_id,
@@ -772,6 +775,9 @@ function mapQueryAsset(row: QueryRow, keywords: string[]): PhotoQueryAsset {
     previewKey: row.preview_key,
     status: row.status,
     error: row.error,
+    errorCode: row.error_code,
+    errorRetryable: row.error_retryable === 1,
+    derivativeSchemaVersion: row.derivative_schema_version,
     indexedAt: row.indexed_at,
     metadata: mapMetadataSummary(row),
     keywords,
@@ -779,7 +785,7 @@ function mapQueryAsset(row: QueryRow, keywords: string[]): PhotoQueryAsset {
   };
 }
 
-function mapMetadataSummary(row: QueryRow): PhotoMetadataSummary | null {
+function mapMetadataSummary(row: QueryRow): PhotostaffMetadataSummary | null {
   if (row.schema_version === null || row.metadata_status === null || row.media_kind === null || row.capture_source === null) return null;
   return {
     schemaVersion: row.schema_version,
@@ -877,10 +883,10 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(value) ?? "null";
 }
 
-function parseGroups(value: string | null): Record<string, Record<string, PhotoMetadataScalar[]>> {
+function parseGroups(value: string | null): Record<string, Record<string, PhotostaffMetadataScalar[]>> {
   if (!value) return {};
   try {
-    return JSON.parse(value) as Record<string, Record<string, PhotoMetadataScalar[]>>;
+    return JSON.parse(value) as Record<string, Record<string, PhotostaffMetadataScalar[]>>;
   } catch {
     return {};
   }

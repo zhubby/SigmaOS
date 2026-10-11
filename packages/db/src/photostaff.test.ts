@@ -2,32 +2,32 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PHOTO_METADATA_SCHEMA_VERSION, type PhotoMetadataCondition } from "@sigmaos/shared";
-import type { PhotoMetadataWriteInput } from "./index.js";
+import { PHOTOSTAFF_METADATA_SCHEMA_VERSION, type PhotostaffMetadataCondition } from "@sigmaos/shared";
+import type { PhotostaffMetadataWriteInput } from "./index.js";
 import {
-  claimNextPhotoJob,
-  enqueuePhotoJob,
-  ensurePeriodicPhotoScan,
+  claimNextPhotostaffJob,
+  enqueuePhotostaffJob,
+  ensurePeriodicPhotostaffScan,
   ensureNasRoots,
-  findPhotoAssetByHash,
-  finishPhotoJob,
-  getPhotoMetadataDetail,
-  getPhotoMetadataIndexStatus,
-  getPhotoLibrarySettings,
-  getPhotoLibraryStatus,
-  hasCompletedPhotoScan,
-  listPhotoAssets,
-  listPhotoMetadataFields,
+  findPhotostaffAssetByHash,
+  finishPhotostaffJob,
+  getPhotostaffMetadataDetail,
+  getPhotostaffMetadataIndexStatus,
+  getPhotostaffLibrarySettings,
+  getPhotostaffLibraryStatus,
+  hasCompletedPhotostaffScan,
+  listPhotostaffAssets,
+  listPhotostaffMetadataFields,
   openSigmaDb,
-  releasePhotoUploadReservation,
-  removeStalePhotoAssets,
-  removeStalePhotoUploadReservations,
-  reservePhotoUpload,
-  queryPhotoAssets,
-  queryPhotoMap,
-  savePhotoLibrarySettings,
-  updatePhotoJobProgress,
-  upsertPhotoAsset,
+  releasePhotostaffUploadReservation,
+  removeStalePhotostaffAssets,
+  removeStalePhotostaffUploadReservations,
+  reservePhotostaffUpload,
+  queryPhotostaffAssets,
+  queryPhotostaffMap,
+  savePhotostaffLibrarySettings,
+  updatePhotostaffJobProgress,
+  upsertPhotostaffAsset,
   type SigmaDatabase
 } from "./index.js";
 
@@ -35,7 +35,7 @@ let tempDir: string;
 let db: SigmaDatabase;
 
 beforeEach(async () => {
-  tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-photos-db-"));
+  tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-photostaff-db-"));
   db = openSigmaDb(path.join(tempDir, "sigmaos.sqlite"));
   ensureNasRoots(db, [{ id: "local", name: "Local", path: tempDir }]);
 });
@@ -45,70 +45,73 @@ afterEach(async () => {
   await rm(tempDir, { recursive: true, force: true });
 });
 
-describe("photo repositories", () => {
+describe("photostaff repositories", () => {
   it("persists one library and invalidates prior assets and jobs when it changes", () => {
-    const first = savePhotoLibrarySettings(db, {
+    const first = savePhotostaffLibrarySettings(db, {
       rootId: "local",
       storagePoolId: "pool-a",
-      path: "Photos"
+      path: "Photostaff"
     }, new Date("2026-01-01T00:00:00.000Z"));
-    enqueuePhotoJob(db, { settings: first });
-    upsertReady(first, "Photos/one.jpg", "hash-one", "2025-01-01T00:00:00.000Z");
+    const retrying = enqueuePhotostaffJob(db, { settings: first });
+    db.prepare("UPDATE photostaff_jobs SET status = 'retrying', next_retry_at = ? WHERE id = ?")
+      .run("2026-01-01T00:10:00.000Z", retrying.id);
+    upsertReady(first, "Photostaff/one.jpg", "hash-one", "2025-01-01T00:00:00.000Z");
 
-    const second = savePhotoLibrarySettings(db, {
+    const second = savePhotostaffLibrarySettings(db, {
       rootId: "local",
       storagePoolId: "pool-b",
       path: "Pictures"
     }, new Date("2026-01-02T00:00:00.000Z"));
 
-    expect(getPhotoLibrarySettings(db)).toEqual(second);
-    expect(listPhotoAssets(db, { libraryUpdatedAt: first.updatedAt, limit: 10 }).photos).toEqual([]);
-    expect(getPhotoLibraryStatus(db, second).state).toBe("queued");
+    expect(getPhotostaffLibrarySettings(db)).toEqual(second);
+    expect(listPhotostaffAssets(db, { libraryUpdatedAt: first.updatedAt, limit: 10 }).photostaff).toEqual([]);
+    expect(db.prepare("SELECT status FROM photostaff_jobs WHERE id = ?").pluck().get(retrying.id)).toBe("failed");
+    expect(getPhotostaffLibraryStatus(db, second).state).toBe("queued");
   });
 
   it("claims jobs with leases and reports progress through completion", () => {
     const settings = saveSettings();
-    const queued = enqueuePhotoJob(db, { settings });
-    expect(hasCompletedPhotoScan(db, settings.updatedAt)).toBe(false);
-    expect(enqueuePhotoJob(db, { settings }).id).toBe(queued.id);
+    const queued = enqueuePhotostaffJob(db, { settings });
+    expect(hasCompletedPhotostaffScan(db, settings.updatedAt)).toBe(false);
+    expect(enqueuePhotostaffJob(db, { settings }).id).toBe(queued.id);
 
-    const claimed = claimNextPhotoJob(db, {
+    const claimed = claimNextPhotostaffJob(db, {
       workerId: "worker-1",
       leaseMs: 30_000,
       now: new Date("2026-01-01T00:00:01.000Z")
     });
     expect(claimed).toMatchObject({ id: queued.id, status: "running", workerId: "worker-1" });
-    expect(updatePhotoJobProgress(db, {
+    expect(updatePhotostaffJobProgress(db, {
       id: queued.id,
       workerId: "worker-1",
       scanned: 3,
       processed: 2,
       failed: 1,
-      currentPath: "Photos/bad.jpg",
+      currentPath: "Photostaff/bad.jpg",
       leaseMs: 30_000
     })).toBe(true);
-    expect(finishPhotoJob(db, { id: queued.id, workerId: "worker-1" })).toMatchObject({
+    expect(finishPhotostaffJob(db, { id: queued.id, workerId: "worker-1" })).toMatchObject({
       status: "completed",
       scanned: 3,
       processed: 2,
       failed: 1
     });
-    expect(hasCompletedPhotoScan(db, settings.updatedAt)).toBe(true);
-    expect(getPhotoLibraryStatus(db, settings)).toMatchObject({ state: "ready", scanned: 3, processed: 2 });
+    expect(hasCompletedPhotostaffScan(db, settings.updatedAt)).toBe(true);
+    expect(getPhotostaffLibraryStatus(db, settings)).toMatchObject({ state: "ready", scanned: 3, processed: 2 });
   });
 
   it("queues stale metadata immediately without waiting for the periodic interval", () => {
     const settings = saveSettings();
-    const initial = enqueuePhotoJob(db, { settings, now: new Date("2026-01-01T00:00:00.000Z") });
-    expect(claimNextPhotoJob(db, {
+    const initial = enqueuePhotostaffJob(db, { settings, now: new Date("2026-01-01T00:00:00.000Z") });
+    expect(claimNextPhotostaffJob(db, {
       workerId: "worker-1",
       leaseMs: 30_000,
       now: new Date("2026-01-01T00:00:01.000Z")
     })?.id).toBe(initial.id);
-    finishPhotoJob(db, { id: initial.id, workerId: "worker-1" });
-    upsertReady(settings, "Photos/stale-metadata.jpg", "stale-metadata", "2026-01-01T00:00:00.000Z");
+    finishPhotostaffJob(db, { id: initial.id, workerId: "worker-1" });
+    upsertReady(settings, "Photostaff/stale-metadata.jpg", "stale-metadata", "2026-01-01T00:00:00.000Z");
 
-    const queued = ensurePeriodicPhotoScan(db, settings, {
+    const queued = ensurePeriodicPhotostaffScan(db, settings, {
       intervalMs: 30 * 60 * 1_000,
       now: new Date("2026-01-01T00:00:02.000Z")
     });
@@ -118,39 +121,39 @@ describe("photo repositories", () => {
 
   it("rejects stale asset writes and keeps library revisions monotonic", () => {
     const now = new Date("2026-01-01T00:00:00.000Z");
-    const first = savePhotoLibrarySettings(db, {
+    const first = savePhotostaffLibrarySettings(db, {
       rootId: "local",
       storagePoolId: "pool-a",
-      path: "Photos"
+      path: "Photostaff"
     }, now);
-    const second = savePhotoLibrarySettings(db, {
+    const second = savePhotostaffLibrarySettings(db, {
       rootId: "local",
       storagePoolId: "pool-b",
       path: "Pictures"
     }, now);
 
     expect(Date.parse(second.updatedAt)).toBeGreaterThan(Date.parse(first.updatedAt));
-    expect(() => upsertReady(first, "Photos/stale.jpg", "stale", now.toISOString())).toThrow(
-      "Photo library configuration changed"
+    expect(() => upsertReady(first, "Photostaff/stale.jpg", "stale", now.toISOString())).toThrow(
+      "Photostaff library configuration changed"
     );
   });
 
   it("returns a stable chronological page and supports stale cleanup and hash lookup", () => {
     const settings = saveSettings();
-    const old = upsertReady(settings, "Photos/old.jpg", "same-hash", "2024-01-01T00:00:00.000Z", new Date("2026-01-01T00:00:01.000Z"));
-    const newest = upsertReady(settings, "Photos/new.jpg", "new-hash", "2025-01-01T00:00:00.000Z", new Date("2026-01-01T00:00:02.000Z"));
+    const old = upsertReady(settings, "Photostaff/old.jpg", "same-hash", "2024-01-01T00:00:00.000Z", new Date("2026-01-01T00:00:01.000Z"));
+    const newest = upsertReady(settings, "Photostaff/new.jpg", "new-hash", "2025-01-01T00:00:00.000Z", new Date("2026-01-01T00:00:02.000Z"));
 
-    const firstPage = listPhotoAssets(db, { libraryUpdatedAt: settings.updatedAt, limit: 1 });
-    expect(firstPage.photos.map((photo) => photo.id)).toEqual([newest.id]);
+    const firstPage = listPhotostaffAssets(db, { libraryUpdatedAt: settings.updatedAt, limit: 1 });
+    expect(firstPage.photostaff.map((photostaff) => photostaff.id)).toEqual([newest.id]);
     expect(firstPage.hasMore).toBe(true);
-    const secondPage = listPhotoAssets(db, {
+    const secondPage = listPhotostaffAssets(db, {
       libraryUpdatedAt: settings.updatedAt,
       limit: 1,
       cursor: { takenAt: newest.takenAt, id: newest.id }
     });
-    expect(secondPage.photos.map((photo) => photo.id)).toEqual([old.id]);
-    expect(findPhotoAssetByHash(db, { libraryUpdatedAt: settings.updatedAt, contentHash: "same-hash" })?.id).toBe(old.id);
-    expect(removeStalePhotoAssets(db, {
+    expect(secondPage.photostaff.map((photostaff) => photostaff.id)).toEqual([old.id]);
+    expect(findPhotostaffAssetByHash(db, { libraryUpdatedAt: settings.updatedAt, contentHash: "same-hash" })?.id).toBe(old.id);
+    expect(removeStalePhotostaffAssets(db, {
       libraryUpdatedAt: settings.updatedAt,
       indexedBefore: "2026-01-01T00:00:02.000Z"
     })).toBe(1);
@@ -158,60 +161,60 @@ describe("photo repositories", () => {
 
   it("reserves upload hashes transactionally until the worker indexes them", () => {
     const settings = saveSettings();
-    const first = reservePhotoUpload(db, {
+    const first = reservePhotostaffUpload(db, {
       settings,
-      path: "Photos/one.jpg",
+      path: "Photostaff/one.jpg",
       contentHash: "pending-hash",
       now: new Date("2026-01-01T00:00:00.000Z")
     });
-    const duplicate = reservePhotoUpload(db, {
+    const duplicate = reservePhotostaffUpload(db, {
       settings,
-      path: "Photos/two.jpg",
+      path: "Photostaff/two.jpg",
       contentHash: "pending-hash",
       now: new Date("2026-01-01T00:00:01.000Z")
     });
 
-    expect(first).toMatchObject({ reservation: { path: "Photos/one.jpg" }, conflict: null });
+    expect(first).toMatchObject({ reservation: { path: "Photostaff/one.jpg" }, conflict: null });
     expect(duplicate).toMatchObject({ reservation: null, duplicate: { id: first.reservation!.id }, conflict: "content_hash" });
-    expect(getPhotoLibraryStatus(db, settings).total).toBe(0);
-    expect(releasePhotoUploadReservation(db, {
+    expect(getPhotostaffLibraryStatus(db, settings).total).toBe(0);
+    expect(releasePhotostaffUploadReservation(db, {
       id: first.reservation!.id,
       libraryUpdatedAt: settings.updatedAt
     })).toBe(true);
-    expect(reservePhotoUpload(db, {
+    expect(reservePhotostaffUpload(db, {
       settings,
-      path: "Photos/two.jpg",
+      path: "Photostaff/two.jpg",
       contentHash: "pending-hash"
     }).reservation).not.toBeNull();
   });
 
   it("reserves upload paths, clears indexed reservations, and prunes stale reservations", () => {
     const settings = saveSettings();
-    const first = reservePhotoUpload(db, {
+    const first = reservePhotostaffUpload(db, {
       settings,
-      path: "Photos/one.jpg",
+      path: "Photostaff/one.jpg",
       contentHash: "hash-one",
       now: new Date("2026-01-01T00:00:00.000Z")
     });
-    expect(reservePhotoUpload(db, {
+    expect(reservePhotostaffUpload(db, {
       settings,
-      path: "Photos/one.jpg",
+      path: "Photostaff/one.jpg",
       contentHash: "hash-two"
     })).toMatchObject({ reservation: null, duplicate: { id: first.reservation!.id }, conflict: "path" });
 
-    upsertReady(settings, "Photos/one.jpg", "hash-one", "2026-01-01T00:00:00.000Z");
-    expect(releasePhotoUploadReservation(db, {
+    upsertReady(settings, "Photostaff/one.jpg", "hash-one", "2026-01-01T00:00:00.000Z");
+    expect(releasePhotostaffUploadReservation(db, {
       id: first.reservation!.id,
       libraryUpdatedAt: settings.updatedAt
     })).toBe(false);
 
-    reservePhotoUpload(db, {
+    reservePhotostaffUpload(db, {
       settings,
-      path: "Photos/stale.jpg",
+      path: "Photostaff/stale.jpg",
       contentHash: "stale-hash",
       now: new Date("2026-01-01T00:00:00.000Z")
     });
-    expect(removeStalePhotoUploadReservations(db, {
+    expect(removeStalePhotostaffUploadReservations(db, {
       libraryUpdatedAt: settings.updatedAt,
       createdBefore: "2026-01-01T00:00:01.000Z"
     })).toBe(1);
@@ -221,7 +224,7 @@ describe("photo repositories", () => {
     const settings = saveSettings();
     upsertReady(
       settings,
-      "Photos/east.jpg",
+      "Photostaff/east.jpg",
       "east-hash",
       "2026-01-01T00:00:00.000Z",
       new Date("2026-01-01T00:00:01.000Z"),
@@ -239,7 +242,7 @@ describe("photo repositories", () => {
     );
     upsertReady(
       settings,
-      "Photos/west.jpg",
+      "Photostaff/west.jpg",
       "west-hash",
       "2026-01-02T00:00:00.000Z",
       new Date("2026-01-01T00:00:02.000Z"),
@@ -247,14 +250,14 @@ describe("photo repositories", () => {
     );
     upsertReady(
       settings,
-      "Photos/other-camera.jpg",
+      "Photostaff/other-camera.jpg",
       "other-hash",
       "2026-01-03T00:00:00.000Z",
       new Date("2026-01-01T00:00:03.000Z"),
       metadata({ cameraModel: "Alpha 7", iso: 800, gpsLatitude: 31.25, gpsLongitude: 179.7, keywords: ["Travel"] })
     );
 
-    const result = queryPhotoAssets(db, {
+    const result = queryPhotostaffAssets(db, {
       libraryUpdatedAt: settings.updatedAt,
       request: {
         filters: {
@@ -267,18 +270,18 @@ describe("photo repositories", () => {
       }
     });
 
-    expect(result.photos.map((photo) => photo.name)).toEqual(["east.jpg"]);
-    expect(result.photos[0]?.metadata).toMatchObject({ cameraModel: "Alpha 1", iso: 800, hasLocation: true });
+    expect(result.photostaff.map((photostaff) => photostaff.name)).toEqual(["east.jpg"]);
+    expect(result.photostaff[0]?.metadata).toMatchObject({ cameraModel: "Alpha 1", iso: 800, hasLocation: true });
     expect(result.facets?.cameraModels).toContainEqual({ value: "Alpha 1", count: 1 });
-    expect(getPhotoMetadataIndexStatus(db, settings.updatedAt)).toMatchObject({ total: 3, indexed: 3, pending: 0 });
-    expect(listPhotoMetadataFields(db, { libraryUpdatedAt: settings.updatedAt })).toContainEqual({
+    expect(getPhotostaffMetadataIndexStatus(db, settings.updatedAt)).toMatchObject({ total: 3, indexed: 3, pending: 0 });
+    expect(listPhotostaffMetadataFields(db, { libraryUpdatedAt: settings.updatedAt })).toContainEqual({
       key: "exif.ISO",
       valueType: "number",
       count: 3,
       sensitive: false
     });
 
-    const selfExcludingFacet = queryPhotoAssets(db, {
+    const selfExcludingFacet = queryPhotostaffAssets(db, {
       libraryUpdatedAt: settings.updatedAt,
       request: { filters: { cameraModels: ["Alpha 1"] }, includeFacets: true }
     });
@@ -287,17 +290,17 @@ describe("photo repositories", () => {
       { value: "Alpha 7", count: 1 }
     ]));
 
-    const nearby = queryPhotoAssets(db, {
+    const nearby = queryPhotostaffAssets(db, {
       libraryUpdatedAt: settings.updatedAt,
       request: {
         filters: { location: { kind: "near", latitude: 31.23, longitude: 179.8, radiusMeters: 50_000 } },
         sort: { field: "distance", direction: "asc" }
       }
     });
-    expect(nearby.photos[0]).toMatchObject({ name: "east.jpg", distanceMeters: 0 });
-    expect(nearby.photos.map((photo) => photo.name)).toEqual(expect.arrayContaining(["west.jpg", "other-camera.jpg"]));
+    expect(nearby.photostaff[0]).toMatchObject({ name: "east.jpg", distanceMeters: 0 });
+    expect(nearby.photostaff.map((photostaff) => photostaff.name)).toEqual(expect.arrayContaining(["west.jpg", "other-camera.jpg"]));
 
-    const map = queryPhotoMap(db, {
+    const map = queryPhotostaffMap(db, {
       libraryUpdatedAt: settings.updatedAt,
       request: {
         bounds: { kind: "bounds", west: 179, south: 30, east: -179, north: 32 },
@@ -309,7 +312,7 @@ describe("photo repositories", () => {
     expect(map[0]).toMatchObject({ count: 3, assetId: null });
     expect(Math.abs(map[0]!.longitude)).toBeGreaterThan(170);
 
-    const booleanSet = queryPhotoAssets(db, {
+    const booleanSet = queryPhotostaffAssets(db, {
       libraryUpdatedAt: settings.updatedAt,
       request: {
         filters: {
@@ -317,14 +320,14 @@ describe("photo repositories", () => {
         }
       }
     });
-    expect(booleanSet.photos.map((photo) => photo.name)).toEqual(["east.jpg"]);
+    expect(booleanSet.photostaff.map((photostaff) => photostaff.name)).toEqual(["east.jpg"]);
   });
 
   it("supports every advanced scalar operator with literal text matching", () => {
     const settings = saveSettings();
     upsertReady(
       settings,
-      "Photos/operator-match.jpg",
+      "Photostaff/operator-match.jpg",
       "operator-match",
       "2026-01-02T00:00:00.000Z",
       new Date("2026-01-02T00:00:01.000Z"),
@@ -343,7 +346,7 @@ describe("photo repositories", () => {
     );
     upsertReady(
       settings,
-      "Photos/operator-other.jpg",
+      "Photostaff/operator-other.jpg",
       "operator-other",
       "2026-01-01T00:00:00.000Z",
       new Date("2026-01-01T00:00:01.000Z"),
@@ -360,11 +363,11 @@ describe("photo repositories", () => {
       })
     );
 
-    const names = (condition: PhotoMetadataCondition) =>
-      queryPhotoAssets(db, {
+    const names = (condition: PhotostaffMetadataCondition) =>
+      queryPhotostaffAssets(db, {
         libraryUpdatedAt: settings.updatedAt,
         request: { filters: { advanced: { mode: "all", conditions: [condition] } } }
-      }).photos.map((photo) => photo.name);
+      }).photostaff.map((photostaff) => photostaff.name);
 
     expect(names({ key: "xmp.Title", operator: "eq", value: "Field % Notes" })).toEqual(["operator-match.jpg"]);
     expect(names({ key: "xmp.Title", operator: "contains", value: "%" })).toEqual(["operator-match.jpg"]);
@@ -384,7 +387,7 @@ describe("photo repositories", () => {
       valueTo: "2026-01-02T12:00:00"
     })).toEqual(["operator-match.jpg"]);
 
-    const any = queryPhotoAssets(db, {
+    const any = queryPhotostaffAssets(db, {
       libraryUpdatedAt: settings.updatedAt,
       request: {
         filters: {
@@ -398,14 +401,14 @@ describe("photo repositories", () => {
         }
       }
     });
-    expect(any.photos.map((photo) => photo.name)).toEqual(["operator-match.jpg"]);
+    expect(any.photostaff.map((photostaff) => photostaff.name)).toEqual(["operator-match.jpg"]);
   });
 
   it("replaces all metadata indexes atomically and rolls back failed replacements", () => {
     const settings = saveSettings();
     const asset = upsertReady(
       settings,
-      "Photos/replace.jpg",
+      "Photostaff/replace.jpg",
       "replace-old",
       "2026-01-01T00:00:00.000Z",
       new Date("2026-01-01T00:00:01.000Z"),
@@ -419,21 +422,21 @@ describe("photo repositories", () => {
 
     expect(() => upsertReady(
       settings,
-      "Photos/replace.jpg",
+      "Photostaff/replace.jpg",
       "replace-invalid",
       "2026-01-02T00:00:00.000Z",
       new Date("2026-01-02T00:00:01.000Z"),
       metadata({ schemaVersion: 0, title: "Invalid Replacement", keywords: ["Invalid"] })
     )).toThrow();
-    expect(getPhotoMetadataDetail(db, { assetId: asset.id, libraryUpdatedAt: settings.updatedAt })).toMatchObject({
+    expect(getPhotostaffMetadataDetail(db, { assetId: asset.id, libraryUpdatedAt: settings.updatedAt })).toMatchObject({
       summary: { title: "Legacy Title", hasLocation: true },
       keywords: ["Legacy"]
     });
-    expect((db.prepare("SELECT COUNT(*) FROM photo_geo_index").pluck().get() as number)).toBe(1);
+    expect((db.prepare("SELECT COUNT(*) FROM photostaff_geo_index").pluck().get() as number)).toBe(1);
 
     const replaced = upsertReady(
       settings,
-      "Photos/replace.jpg",
+      "Photostaff/replace.jpg",
       "replace-new",
       "2026-01-03T00:00:00.000Z",
       new Date("2026-01-03T00:00:01.000Z"),
@@ -449,55 +452,55 @@ describe("photo repositories", () => {
 
     expect(replaced.id).toBe(asset.id);
     expect(replaced.contentHash).toBe("replace-new");
-    expect(queryPhotoAssets(db, {
+    expect(queryPhotostaffAssets(db, {
       libraryUpdatedAt: settings.updatedAt,
       request: { filters: { text: "Legacy" } }
     }).total).toBe(0);
-    expect(queryPhotoAssets(db, {
+    expect(queryPhotostaffAssets(db, {
       libraryUpdatedAt: settings.updatedAt,
       request: { filters: { text: "Current" } }
     }).total).toBe(1);
-    expect((db.prepare("SELECT COUNT(*) FROM photo_geo_index").pluck().get() as number)).toBe(0);
-    expect((db.prepare("SELECT keyword FROM photo_keywords WHERE asset_id = ?").pluck().all(asset.id) as string[])).toEqual(["Current"]);
-    expect((db.prepare("SELECT key FROM photo_metadata_values WHERE asset_id = ?").pluck().all(asset.id) as string[])).toEqual(["xmp.Title"]);
+    expect((db.prepare("SELECT COUNT(*) FROM photostaff_geo_index").pluck().get() as number)).toBe(0);
+    expect((db.prepare("SELECT keyword FROM photostaff_keywords WHERE asset_id = ?").pluck().all(asset.id) as string[])).toEqual(["Current"]);
+    expect((db.prepare("SELECT key FROM photostaff_metadata_values WHERE asset_id = ?").pluck().all(asset.id) as string[])).toEqual(["xmp.Title"]);
   });
 
   it("redacts sensitive metadata details by default and removes virtual index rows on asset deletion", () => {
     const settings = saveSettings();
     const asset = upsertReady(
       settings,
-      "Photos/private.jpg",
+      "Photostaff/private.jpg",
       "private-hash",
       "2026-01-01T00:00:00.000Z",
       new Date("2026-01-01T00:00:01.000Z"),
       metadata({ gpsLatitude: 10, gpsLongitude: 20, bodySerial: "SERIAL-1" })
     );
 
-    const redacted = getPhotoMetadataDetail(db, {
+    const redacted = getPhotostaffMetadataDetail(db, {
       assetId: asset.id,
       libraryUpdatedAt: settings.updatedAt
     });
     expect(redacted?.sensitiveOmitted).toBe(true);
     expect(redacted?.sensitiveGroups).toBeUndefined();
-    expect(getPhotoMetadataDetail(db, {
+    expect(getPhotostaffMetadataDetail(db, {
       assetId: asset.id,
       libraryUpdatedAt: settings.updatedAt,
       includeSensitive: true
     })?.sensitiveGroups).toEqual({ exif: { BodySerialNumber: ["SERIAL-1"], GPSLatitude: [10], GPSLongitude: [20] } });
 
-    expect(removeStalePhotoAssets(db, {
+    expect(removeStalePhotostaffAssets(db, {
       libraryUpdatedAt: settings.updatedAt,
       indexedBefore: "2026-01-01T00:00:02.000Z"
     })).toBe(1);
-    expect((db.prepare("SELECT COUNT(*) FROM photo_geo_index").pluck().get() as number)).toBe(0);
-    expect((db.prepare("SELECT COUNT(*) FROM photo_metadata_fts").pluck().get() as number)).toBe(0);
+    expect((db.prepare("SELECT COUNT(*) FROM photostaff_geo_index").pluck().get() as number)).toBe(0);
+    expect((db.prepare("SELECT COUNT(*) FROM photostaff_metadata_fts").pluck().get() as number)).toBe(0);
   });
 
   it("excludes stale metadata schemas from facets while retaining assets in the unfiltered timeline", () => {
     const settings = saveSettings();
     const current = upsertReady(
       settings,
-      "Photos/current.jpg",
+      "Photostaff/current.jpg",
       "current-hash",
       "2026-01-02T00:00:00.000Z",
       new Date("2026-01-02T00:00:01.000Z"),
@@ -505,20 +508,20 @@ describe("photo repositories", () => {
     );
     const stale = upsertReady(
       settings,
-      "Photos/stale.jpg",
+      "Photostaff/stale.jpg",
       "stale-hash",
       "2026-01-01T00:00:00.000Z",
       new Date("2026-01-01T00:00:01.000Z"),
       metadata({ cameraModel: "Stale Camera", iso: 6400, keywords: ["Stale"] })
     );
-    db.prepare("UPDATE photo_asset_metadata SET schema_version = 999 WHERE asset_id = ?").run(stale.id);
+    db.prepare("UPDATE photostaff_asset_metadata SET schema_version = 999 WHERE asset_id = ?").run(stale.id);
 
-    const result = queryPhotoAssets(db, {
+    const result = queryPhotostaffAssets(db, {
       libraryUpdatedAt: settings.updatedAt,
       request: { includeFacets: true }
     });
 
-    expect(result.photos.map((photo) => photo.id)).toEqual(expect.arrayContaining([current.id, stale.id]));
+    expect(result.photostaff.map((photostaff) => photostaff.id)).toEqual(expect.arrayContaining([current.id, stale.id]));
     expect(result.facets?.cameraModels).toEqual([{ value: "Current Camera", count: 1 }]);
     expect(result.facets?.keywords).toEqual([{ value: "Current", count: 1 }]);
     expect(result.facets?.numeric.iso).toEqual({ min: 200, max: 200 });
@@ -528,7 +531,7 @@ describe("photo repositories", () => {
     const settings = saveSettings();
     const asset = upsertReady(
       settings,
-      "Photos/contact.jpg",
+      "Photostaff/contact.jpg",
       "contact-hash",
       "2026-01-01T00:00:00.000Z",
       new Date("2026-01-01T00:00:01.000Z"),
@@ -545,10 +548,10 @@ describe("photo repositories", () => {
       })
     );
 
-    expect(listPhotoMetadataFields(db, { libraryUpdatedAt: settings.updatedAt })).not.toContainEqual(
+    expect(listPhotostaffMetadataFields(db, { libraryUpdatedAt: settings.updatedAt })).not.toContainEqual(
       expect.objectContaining({ key: "xmp.CreatorContactInfo.Email" })
     );
-    expect(queryPhotoAssets(db, {
+    expect(queryPhotostaffAssets(db, {
       libraryUpdatedAt: settings.updatedAt,
       request: {
         filters: {
@@ -556,7 +559,7 @@ describe("photo repositories", () => {
         }
       }
     }).total).toBe(0);
-    expect(getPhotoMetadataDetail(db, {
+    expect(getPhotostaffMetadataDetail(db, {
       assetId: asset.id,
       libraryUpdatedAt: settings.updatedAt
     })?.summary?.hasSensitiveMetadata).toBe(true);
@@ -564,25 +567,25 @@ describe("photo repositories", () => {
 });
 
 function saveSettings() {
-  return savePhotoLibrarySettings(db, {
+  return savePhotostaffLibrarySettings(db, {
     rootId: "local",
     storagePoolId: "pool-a",
-    path: "Photos"
+    path: "Photostaff"
   }, new Date("2026-01-01T00:00:00.000Z"));
 }
 
 function upsertReady(
   settings: ReturnType<typeof saveSettings>,
-  photoPath: string,
+  photostaffPath: string,
   contentHash: string,
   takenAt: string,
   indexedAt = new Date("2026-01-01T00:00:01.000Z"),
-  photoMetadata?: PhotoMetadataWriteInput
+  photostaffMetadata?: PhotostaffMetadataWriteInput
 ) {
-  return upsertPhotoAsset(db, {
+  return upsertPhotostaffAsset(db, {
     settings,
-    path: photoPath,
-    name: path.basename(photoPath),
+    path: photostaffPath,
+    name: path.basename(photostaffPath),
     mimeType: "image/jpeg",
     sizeBytes: 100,
     mtimeMs: indexedAt.getTime(),
@@ -596,12 +599,12 @@ function upsertReady(
     previewKey: `${contentHash}-preview.webp`,
     status: "ready",
     error: null,
-    ...(photoMetadata ? { metadata: photoMetadata } : {}),
+    ...(photostaffMetadata ? { metadata: photostaffMetadata } : {}),
     indexedAt
   });
 }
 
-function metadata(overrides: Partial<PhotoMetadataWriteInput> = {}): PhotoMetadataWriteInput {
+function metadata(overrides: Partial<PhotostaffMetadataWriteInput> = {}): PhotostaffMetadataWriteInput {
   const gpsLatitude = overrides.gpsLatitude ?? null;
   const gpsLongitude = overrides.gpsLongitude ?? null;
   const bodySerial = overrides.bodySerial ?? null;
@@ -614,7 +617,7 @@ function metadata(overrides: Partial<PhotoMetadataWriteInput> = {}): PhotoMetada
     }
   };
   return {
-    schemaVersion: PHOTO_METADATA_SCHEMA_VERSION,
+    schemaVersion: PHOTOSTAFF_METADATA_SCHEMA_VERSION,
     status: "ready",
     mediaKind: "image",
     capturedAt: "2026-01-01T00:00:00.000Z",

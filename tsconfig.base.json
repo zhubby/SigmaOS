@@ -20,7 +20,7 @@
       "@sigmaos/nas-tools": ["packages/nas-tools/src/index.ts"],
       "@sigmaos/shared": ["packages/shared/src/index.ts"],
       "@sigmaos/shared/docker-images": ["packages/shared/src/docker-images.ts"],
-      "@sigmaos/shared/photo-config": ["packages/shared/src/photo-config.ts"]
+      "@sigmaos/shared/photostaff-config": ["packages/shared/src/photostaff-config.ts"]
     }
   }
 }

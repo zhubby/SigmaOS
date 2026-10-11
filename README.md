@@ -49,12 +49,12 @@ The following surfaces are intentionally limited today:
 - Approval records for dangerous Pi tool calls before execution.
 - A model-free, read-only local fallback for development and testing.
 
-### Photo library
+### Photostaff library
 
 - Bind one directory on a mounted storage pool and index common images, videos, and RAW camera files recursively.
 - Build a chronological EXIF-first media timeline with cached WebP thumbnails and previews, plus in-panel video playback.
 - Upload with SHA-256 duplicate detection, view metadata, download originals or ZIP selections, and request approval-gated batch move/trash operations.
-- Run immediate and periodic scans in a dedicated non-root photo worker without following symbolic links.
+- Run resumable immediate and periodic scans in the non-root Rust Photostaff daemon, with worker heartbeats, bounded media tools, and journaled derivative publication.
 
 ### Host management
 
@@ -79,7 +79,7 @@ flowchart LR
   API["Fastify API"]
   DB[("SQLite WAL + FTS5")]
   Worker["Agent worker"]
-  PhotoWorker["Photo worker"]
+  Photostaff["Photostaff worker"]
   Agent["Pi agent runtime"]
   Indexer["Filesystem indexer"]
   Scheduler["Scheduler / maintenance"]
@@ -94,8 +94,8 @@ flowchart LR
   API <--> DB
   Worker <--> DB
   Worker --> Agent
-  PhotoWorker <--> DB
-  PhotoWorker --> Roots
+  Photostaff <--> DB
+  Photostaff --> Roots
   Agent --> Tools
   API --> Tools
   Tools <--> Roots
@@ -116,7 +116,7 @@ The main runtime components are:
 | `apps/web` | React 19 workspace UI, previews, settings, activity, and management panels. |
 | `apps/api` | REST API, SSE event feed, WebSocket terminals, static production UI, and approved operation execution. |
 | `apps/worker` | Claims queued jobs, runs agent turns, persists events, and pauses work for approvals. |
-| `apps/photo-worker` | Claims photo jobs, extracts metadata, and generates hash-addressed image derivatives. |
+| `apps/photostaff` | Rust media worker with resumable scans, metadata extraction, and journaled image derivatives. |
 | `apps/indexer` | Walks NAS roots, hashes files, extracts bounded text, and maintains the FTS index. |
 | `apps/scheduler` | Generates duplicate, backup, provider, and health reports; checkpoints and optimizes SQLite. |
 | `apps/hostd` | Rust host integration daemon for approved shares, storage, Docker daemon, and NetworkManager changes. |
@@ -188,7 +188,7 @@ npm run dev
 
 Open [http://127.0.0.1:5173](http://127.0.0.1:5173). Vite proxies `/api`, `/health`, and WebSocket traffic to the API at `127.0.0.1:3010`.
 
-`npm run dev` starts the API, agent worker, photo worker, Rust downloader, and web UI. The downloader uses the same SQLite schema as the Node services and waits for the API-owned migrations before claiming work. The indexer and scheduled tasks remain explicit during development:
+`npm run dev` starts the API, agent worker, Rust Photostaff, Rust downloader, Rust VOD player, and web UI. The Rust services use the API-owned TypeScript migrations and wait for their required schema versions before claiming work. The indexer and scheduled tasks remain explicit during development:
 
 ```bash
 npm run index

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getDownloadWorkerHealth, listHealthAlerts, listNasRoots, listRootReadiness, getIndexRootStatus, listBackupRuns } from "@sigmaos/db";
+import { getDownloadWorkerHealth, getPhotostaffWorkerHealth, listHealthAlerts, listNasRoots, listRootReadiness, getIndexRootStatus, listBackupRuns } from "@sigmaos/db";
 import type { SystemHealthSummary } from "@sigmaos/shared";
 import type { ApiRouteContext } from "../context.js";
 import { createVodPlayerRuntime } from "../lib/vod-player.js";
@@ -41,13 +41,21 @@ export function registerHealthStatusRoutes(server: FastifyInstance, context: Api
         message: downloader.status === "stale" ? "Downloader heartbeat is stale" : "Downloader is unavailable"
       });
     }
+    const photostaff = getPhotostaffWorkerHealth(db);
+    if (photostaff.status !== "ready") {
+      issues.push({
+        code: "photostaff_unavailable",
+        severity: photostaff.activeJobs + photostaff.queuedJobs + photostaff.retryingJobs > 0 ? "critical" : "warning",
+        message: photostaff.status === "stale" ? "Photostaff heartbeat is stale" : "Photostaff is unavailable"
+      });
+    }
     const vodPlayer = await getVodPlayerHealth(context, checkedAt);
     if (vodPlayer.status === "degraded") {
       issues.push({ code: "vod_player_recovering", severity: "warning", message: "VOD Player is recovering playback" });
     } else if (vodPlayer.status === "critical") {
       issues.push({ code: "vod_player_unavailable", severity: "critical", message: "VOD Player is unavailable" });
     }
-    return { status: issues.some((issue) => issue.severity === "critical") ? "failed" : issues.length ? "degraded" : "ready", checkedAt, issues, roots: readiness, indexerFreshnessMs: indexerFreshness.length ? Math.max(...indexerFreshness) : null, backupFreshnessMs, downloader, vodPlayer };
+    return { status: issues.some((issue) => issue.severity === "critical") ? "failed" : issues.length ? "degraded" : "ready", checkedAt, issues, roots: readiness, indexerFreshnessMs: indexerFreshness.length ? Math.max(...indexerFreshness) : null, backupFreshnessMs, downloader, photostaff, vodPlayer };
   });
 }
 

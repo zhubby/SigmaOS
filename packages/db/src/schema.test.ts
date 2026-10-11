@@ -17,13 +17,10 @@ import {
   getApproval,
   getDockerOperation,
   getJob,
-  getPhotoAsset,
   getVmOperation,
   listOperationNotifications,
   migrations,
   openSigmaDb,
-  savePhotoLibrarySettings,
-  upsertPhotoAsset,
   updateApprovalStatus,
   updateDockerOperationStatus,
   updateVmOperationStatus
@@ -92,7 +89,8 @@ describe("SQLite schema migrations", () => {
       "019_photo_metadata_index",
       "020_docker_compose_apps",
       "021_vm_direct_actions",
-      "022_downloader_reliability"
+      "022_downloader_reliability",
+      "023_photostaff_reliability"
     ]);
   });
 
@@ -236,6 +234,144 @@ describe("SQLite schema migrations", () => {
     }
   });
 
+  it("migrates legacy photo data and indexes to photostaff without data loss", () => {
+    const databasePath = path.join(tempDir, "legacy-photostaff.sqlite");
+    const legacy = new Database(databasePath);
+    const appliedAt = "2026-01-01T00:00:00.000Z";
+    const libraryUpdatedAt = "2025-12-01T00:00:00.000Z";
+    const reliabilityIndex = migrations.findIndex((item) => item.id === "023_photostaff_reliability");
+    legacy.pragma("foreign_keys = OFF");
+    legacy.exec(`
+      CREATE TABLE schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at TEXT NOT NULL
+      );
+    `);
+    const recordMigration = legacy.prepare(
+      "INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)"
+    );
+    for (const migration of migrations.slice(0, reliabilityIndex)) {
+      legacy.exec(migration.sql);
+      recordMigration.run(migration.id, appliedAt);
+    }
+    legacy.prepare(`
+      INSERT INTO nas_roots (id, name, path, created_at, updated_at, enabled)
+      VALUES ('local', 'Local', ?, ?, ?, 1)
+    `).run(tempDir, appliedAt, appliedAt);
+    legacy.prepare(`
+      INSERT INTO photo_assets (
+        id, root_id, storage_pool_id, path, name, mime_type, size_bytes, mtime_ms,
+        content_hash, width, height, orientation, taken_at, taken_at_source,
+        thumbnail_key, preview_key, status, error, library_updated_at, indexed_at
+      ) VALUES (
+        'asset-1', 'local', 'pool-1', 'Photos/legacy.jpg', 'legacy.jpg',
+        'image/jpeg', 123, 456, 'legacy-hash', 40, 30, 1, ?, 'exif',
+        'thumbnail/legacy.webp', 'preview/legacy.webp', 'ready', NULL, ?, ?
+      )
+    `).run(appliedAt, libraryUpdatedAt, appliedAt);
+    legacy.prepare(`
+      INSERT INTO photo_jobs (
+        id, kind, status, root_id, storage_pool_id, path, library_updated_at,
+        scanned, processed, failed, current_path, error, worker_id,
+        lease_expires_at, created_at, updated_at, started_at, finished_at
+      ) VALUES (
+        'job-1', 'full_scan', 'running', 'local', 'pool-1', 'Photos', ?,
+        10, 8, 1, 'Photos/legacy.jpg', NULL, 'node-worker', ?, ?, ?, ?, NULL
+      )
+    `).run(libraryUpdatedAt, appliedAt, appliedAt, appliedAt, appliedAt);
+    legacy.prepare(`
+      INSERT INTO photo_upload_reservations
+        (id, library_updated_at, content_hash, path, created_at)
+      VALUES ('upload-1', ?, 'upload-hash', 'Photos/upload.jpg', ?)
+    `).run(libraryUpdatedAt, appliedAt);
+    legacy.prepare(`
+      INSERT INTO photo_asset_metadata (
+        rowid, asset_id, schema_version, status, media_kind, captured_at,
+        capture_source, camera_make, camera_model, title, description, rating,
+        gps_latitude, gps_longitude, raw_metadata_json, warnings_json, updated_at
+      ) VALUES (
+        42, 'asset-1', 2, 'ready', 'image', ?, 'exif', 'Sigma', 'fp L',
+        'Legacy title', 'Legacy description', 4, 31.2, 121.5, '{}', '[]', ?
+      )
+    `).run(appliedAt, appliedAt);
+    legacy.prepare(`
+      INSERT INTO photo_keywords (asset_id, keyword, normalized_keyword)
+      VALUES ('asset-1', 'Travel', 'travel')
+    `).run();
+    legacy.prepare(`
+      INSERT INTO photo_metadata_values (
+        id, asset_id, source, key, value_type, text_value,
+        normalized_text_value, sensitive, ordinal
+      ) VALUES (7, 'asset-1', 'xmp', 'xmp.Label', 'text', 'Featured', 'featured', 0, 0)
+    `).run();
+    legacy.prepare(`
+      INSERT INTO photo_metadata_fts (
+        rowid, asset_id, name, path, title, description, creator, copyright,
+        keywords, camera, lens
+      ) VALUES (
+        42, 'asset-1', 'legacy.jpg', 'Photos/legacy.jpg', 'Legacy title',
+        'Legacy description', '', '', 'Travel', 'Sigma fp L', ''
+      )
+    `).run();
+    legacy.prepare(`
+      INSERT INTO photo_geo_index
+        (metadata_rowid, min_latitude, max_latitude, min_longitude, max_longitude)
+      VALUES (42, 31.2, 31.2, 121.5, 121.5)
+    `).run();
+    legacy.prepare(`
+      INSERT INTO system_settings (key, value_json, updated_at) VALUES
+        ('photo_library', ?, ?),
+        ('photo_map_settings', ?, ?)
+    `).run(
+      JSON.stringify({ rootId: "local", storagePoolId: "pool-1", path: "Photos", updatedAt: libraryUpdatedAt }),
+      libraryUpdatedAt,
+      JSON.stringify({ rootId: "local", storagePoolId: "pool-1", path: "Photos/map.pmtiles", tileType: "png", minZoom: 0, maxZoom: 4, updatedAt: libraryUpdatedAt }),
+      libraryUpdatedAt
+    );
+    legacy.close();
+
+    const upgraded = openSigmaDb(databasePath);
+    try {
+      expect(upgraded.prepare("SELECT id, content_hash FROM photostaff_assets").get())
+        .toEqual({ id: "asset-1", content_hash: "legacy-hash" });
+      expect(upgraded.prepare("SELECT rowid, camera_model FROM photostaff_asset_metadata").get())
+        .toEqual({ rowid: 42, camera_model: "fp L" });
+      expect(upgraded.prepare("SELECT keyword FROM photostaff_keywords").pluck().get()).toBe("Travel");
+      expect(upgraded.prepare("SELECT id, text_value FROM photostaff_metadata_values").get())
+        .toEqual({ id: 7, text_value: "Featured" });
+      expect(upgraded.prepare("SELECT asset_id FROM photostaff_metadata_fts WHERE photostaff_metadata_fts MATCH 'Legacy'").pluck().all())
+        .toEqual(["asset-1"]);
+      expect(upgraded.prepare("SELECT metadata_rowid FROM photostaff_geo_index").pluck().all()).toEqual([42]);
+      expect(upgraded.prepare("SELECT id FROM photostaff_upload_reservations").pluck().all()).toEqual(["upload-1"]);
+      expect(upgraded.prepare(`
+        SELECT status, worker_id, lease_expires_at, started_at, scan_generation
+        FROM photostaff_jobs WHERE id = 'job-1'
+      `).get()).toEqual({
+        status: "queued",
+        worker_id: null,
+        lease_expires_at: null,
+        started_at: null,
+        scan_generation: "job-1"
+      });
+      expect(upgraded.prepare("SELECT key FROM system_settings WHERE key LIKE 'photostaff_%_settings' ORDER BY key").pluck().all())
+        .toEqual(["photostaff_library_settings", "photostaff_map_settings", "photostaff_processing_settings"]);
+      expect(upgraded.prepare("SELECT key FROM system_settings WHERE key IN ('photo_library', 'photo_map_settings')").pluck().all())
+        .toEqual([]);
+      const legacyTables = upgraded.prepare(`
+        SELECT name FROM sqlite_master
+        WHERE type = 'table' AND name IN (
+          'photo_assets', 'photo_jobs', 'photo_upload_reservations',
+          'photo_asset_metadata', 'photo_keywords', 'photo_metadata_values',
+          'photo_metadata_fts', 'photo_geo_index'
+        )
+      `).pluck().all();
+      expect(legacyTables).toEqual([]);
+      expect(upgraded.pragma("foreign_key_check")).toEqual([]);
+    } finally {
+      upgraded.close();
+    }
+  });
+
   it("retires pending VM approvals and preserves console authorizations for direct actions", () => {
     const databasePath = path.join(tempDir, "vm-direct-actions.sqlite");
     const current = openSigmaDb(databasePath);
@@ -308,23 +444,23 @@ describe("SQLite schema migrations", () => {
     }
   });
 
-  it("adds photo metadata, scalar, text, and spatial indexes without replacing photo assets", () => {
-    const databasePath = path.join(tempDir, "photo-metadata.sqlite");
+  it("adds photostaff metadata, scalar, text, and spatial indexes without replacing photostaff assets", () => {
+    const databasePath = path.join(tempDir, "photostaff-metadata.sqlite");
     const database = openSigmaDb(databasePath);
     try {
       const tables = database.prepare(`
         SELECT name FROM sqlite_master
         WHERE type IN ('table', 'trigger')
-          AND (name LIKE 'photo_%' OR name = 'trg_photo_asset_metadata_delete_indexes')
+          AND (name LIKE 'photostaff_%' OR name = 'trg_photostaff_asset_metadata_delete_indexes')
       `).pluck().all() as string[];
       expect(tables).toEqual(expect.arrayContaining([
-        "photo_assets",
-        "photo_asset_metadata",
-        "photo_metadata_values",
-        "photo_metadata_fts",
-        "photo_geo_index",
-        "photo_keywords",
-        "trg_photo_asset_metadata_delete_indexes"
+        "photostaff_assets",
+        "photostaff_asset_metadata",
+        "photostaff_metadata_values",
+        "photostaff_metadata_fts",
+        "photostaff_geo_index",
+        "photostaff_keywords",
+        "trg_photostaff_asset_metadata_delete_indexes"
       ]));
     } finally {
       database.close();
@@ -355,56 +491,6 @@ describe("SQLite schema migrations", () => {
       expect(tables).toEqual(["docker_app_environment", "docker_apps"]);
       expect(migrated.prepare("SELECT value_json FROM system_settings WHERE key = 'legacy_test'").pluck().get())
         .toBe('{"preserved":true}');
-    } finally {
-      migrated.close();
-    }
-  });
-
-  it("preserves existing photo assets when applying the metadata index migration", () => {
-    const databasePath = path.join(tempDir, "legacy-photo-assets.sqlite");
-    const current = openSigmaDb(databasePath);
-    ensureNasRoots(current, [{ id: "local", name: "Local", path: tempDir }]);
-    const settings = savePhotoLibrarySettings(current, {
-      rootId: "local",
-      storagePoolId: "pool-a",
-      path: "Photos"
-    });
-    const asset = upsertPhotoAsset(current, {
-      settings,
-      path: "Photos/legacy.jpg",
-      name: "legacy.jpg",
-      mimeType: "image/jpeg",
-      sizeBytes: 100,
-      mtimeMs: 1,
-      contentHash: "legacy-hash",
-      width: 10,
-      height: 10,
-      orientation: 1,
-      takenAt: "2025-01-01T00:00:00.000Z",
-      takenAtSource: "exif",
-      thumbnailKey: null,
-      previewKey: null,
-      status: "ready",
-      error: null
-    });
-    current.exec(`
-      DROP TABLE photo_asset_metadata;
-      DROP TABLE photo_keywords;
-      DROP TABLE photo_metadata_values;
-      DROP TABLE photo_metadata_fts;
-      DROP TABLE photo_geo_index;
-      DELETE FROM schema_migrations WHERE id = '019_photo_metadata_index';
-    `);
-    current.close();
-
-    const migrated = openSigmaDb(databasePath);
-    try {
-      expect(getPhotoAsset(migrated, asset.id, settings.updatedAt)).toMatchObject({
-        id: asset.id,
-        name: "legacy.jpg",
-        contentHash: "legacy-hash"
-      });
-      expect(migrated.pragma("foreign_key_check")).toEqual([]);
     } finally {
       migrated.close();
     }

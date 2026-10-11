@@ -2,9 +2,23 @@ import type {
   DownloadSettingsRecord,
   DockerSettingsRecord,
   ModelProviderSettingsRecord,
-  PhotoMapSettingsRecord,
+  PhotostaffMapSettingsRecord,
+  PhotostaffProcessingSettingsRecord,
   PiToolPolicySettingsRecord,
   ShareSettingsRecord
+} from "@sigmaos/shared";
+import {
+  PHOTOSTAFF_DEFAULT_COMMAND_TIMEOUT_MS,
+  PHOTOSTAFF_DEFAULT_MAX_AUTO_RETRIES,
+  PHOTOSTAFF_DEFAULT_MAX_DECODED_PIXELS,
+  PHOTOSTAFF_DEFAULT_MAX_INTERMEDIATE_BYTES,
+  PHOTOSTAFF_DEFAULT_MIN_FREE_SPACE_BYTES,
+  PHOTOSTAFF_DEFAULT_PROCESSING_CONCURRENCY,
+  PHOTOSTAFF_DEFAULT_RETRY_BASE_DELAY_MS,
+  PHOTOSTAFF_DEFAULT_RETRY_MAX_DELAY_MS,
+  PHOTOSTAFF_DEFAULT_SCAN_INTERVAL_MS,
+  PHOTOSTAFF_MAX_FILE_SIZE_BYTES,
+  PHOTOSTAFF_XMP_MAX_FILE_SIZE_BYTES
 } from "@sigmaos/shared";
 import type { SigmaDatabase } from "../connection.js";
 import {
@@ -23,7 +37,8 @@ const PI_TOOL_POLICY_SETTING_KEY = "pi_tool_policy";
 const DOCKER_SETTING_KEY = "docker_settings";
 const SHARE_SETTING_KEY = "share_settings";
 const DOWNLOAD_SETTING_KEY = "download_settings";
-const PHOTO_MAP_SETTING_KEY = "photo_map_settings";
+const PHOTOSTAFF_MAP_SETTING_KEY = "photostaff_map_settings";
+const PHOTOSTAFF_PROCESSING_SETTING_KEY = "photostaff_processing_settings";
 
 export const DEFAULT_DOWNLOAD_CONCURRENCY = 1;
 export const DEFAULT_DOWNLOAD_SETTINGS: Omit<DownloadSettingsRecord, "updatedAt"> = {
@@ -39,6 +54,20 @@ export const DEFAULT_DOWNLOAD_SETTINGS: Omit<DownloadSettingsRecord, "updatedAt"
   readIdleTimeoutMs: 60_000,
   minFreeSpaceBytes: 0,
   maxFileSizeBytes: null
+};
+
+export const DEFAULT_PHOTOSTAFF_PROCESSING_SETTINGS: Omit<PhotostaffProcessingSettingsRecord, "updatedAt"> = {
+  processingConcurrency: PHOTOSTAFF_DEFAULT_PROCESSING_CONCURRENCY,
+  scanIntervalMs: PHOTOSTAFF_DEFAULT_SCAN_INTERVAL_MS,
+  maxAutoRetries: PHOTOSTAFF_DEFAULT_MAX_AUTO_RETRIES,
+  retryBaseDelayMs: PHOTOSTAFF_DEFAULT_RETRY_BASE_DELAY_MS,
+  retryMaxDelayMs: PHOTOSTAFF_DEFAULT_RETRY_MAX_DELAY_MS,
+  commandTimeoutMs: PHOTOSTAFF_DEFAULT_COMMAND_TIMEOUT_MS,
+  maxFileSizeBytes: PHOTOSTAFF_MAX_FILE_SIZE_BYTES,
+  maxXmpSizeBytes: PHOTOSTAFF_XMP_MAX_FILE_SIZE_BYTES,
+  maxIntermediateBytes: PHOTOSTAFF_DEFAULT_MAX_INTERMEDIATE_BYTES,
+  minFreeSpaceBytes: PHOTOSTAFF_DEFAULT_MIN_FREE_SPACE_BYTES,
+  maxDecodedPixels: PHOTOSTAFF_DEFAULT_MAX_DECODED_PIXELS
 };
 
 export { DEFAULT_PI_TOOL_POLICY_SETTINGS } from "./settings-constants.js";
@@ -198,12 +227,12 @@ export function saveDownloadSettings(
   return record;
 }
 
-export function getPhotoMapSettings(db: SigmaDatabase): PhotoMapSettingsRecord | null {
+export function getPhotostaffMapSettings(db: SigmaDatabase): PhotostaffMapSettingsRecord | null {
   const row = db
     .prepare("SELECT value_json, updated_at FROM system_settings WHERE key = ?")
-    .get(PHOTO_MAP_SETTING_KEY) as Pick<DbSystemSettingRow, "value_json" | "updated_at"> | undefined;
+    .get(PHOTOSTAFF_MAP_SETTING_KEY) as Pick<DbSystemSettingRow, "value_json" | "updated_at"> | undefined;
   if (!row) return null;
-  const parsed = JSON.parse(row.value_json) as Partial<PhotoMapSettingsRecord>;
+  const parsed = JSON.parse(row.value_json) as Partial<PhotostaffMapSettingsRecord>;
   if (
     typeof parsed.rootId !== "string" ||
     typeof parsed.storagePoolId !== "string" ||
@@ -227,19 +256,49 @@ export function getPhotoMapSettings(db: SigmaDatabase): PhotoMapSettingsRecord |
   };
 }
 
-export function savePhotoMapSettings(
+export function savePhotostaffMapSettings(
   db: SigmaDatabase,
-  settings: Omit<PhotoMapSettingsRecord, "updatedAt">
-): PhotoMapSettingsRecord {
+  settings: Omit<PhotostaffMapSettingsRecord, "updatedAt">
+): PhotostaffMapSettingsRecord {
   const updatedAt = new Date().toISOString();
-  const record: PhotoMapSettingsRecord = { ...settings, updatedAt };
+  const record: PhotostaffMapSettingsRecord = { ...settings, updatedAt };
   db.prepare(`
     INSERT INTO system_settings (key, value_json, updated_at)
     VALUES (?, ?, ?)
     ON CONFLICT(key) DO UPDATE SET
       value_json = excluded.value_json,
       updated_at = excluded.updated_at
-  `).run(PHOTO_MAP_SETTING_KEY, JSON.stringify(record), updatedAt);
+  `).run(PHOTOSTAFF_MAP_SETTING_KEY, JSON.stringify(record), updatedAt);
+  return record;
+}
+
+export function getPhotostaffProcessingSettings(db: SigmaDatabase): PhotostaffProcessingSettingsRecord | null {
+  const row = db.prepare("SELECT value_json, updated_at FROM system_settings WHERE key = ?")
+    .get(PHOTOSTAFF_PROCESSING_SETTING_KEY) as Pick<DbSystemSettingRow, "value_json" | "updated_at"> | undefined;
+  if (!row) return null;
+  try {
+    const parsed = JSON.parse(row.value_json) as Partial<PhotostaffProcessingSettingsRecord>;
+    return normalizePhotostaffProcessingSettings(parsed, typeof parsed.updatedAt === "string" ? parsed.updatedAt : row.updated_at);
+  } catch {
+    return null;
+  }
+}
+
+export function defaultPhotostaffProcessingSettings(): PhotostaffProcessingSettingsRecord {
+  return { ...DEFAULT_PHOTOSTAFF_PROCESSING_SETTINGS, updatedAt: new Date(0).toISOString() };
+}
+
+export function savePhotostaffProcessingSettings(
+  db: SigmaDatabase,
+  settings: Partial<Omit<PhotostaffProcessingSettingsRecord, "updatedAt">>
+): PhotostaffProcessingSettingsRecord {
+  const updatedAt = new Date().toISOString();
+  const record = normalizePhotostaffProcessingSettings(settings, updatedAt);
+  db.prepare(`
+    INSERT INTO system_settings (key, value_json, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at
+  `).run(PHOTOSTAFF_PROCESSING_SETTING_KEY, JSON.stringify(record), updatedAt);
   return record;
 }
 
@@ -280,6 +339,35 @@ function normalizeDownloadSettings(
     readIdleTimeoutMs: integer("Download read idle timeout", value.readIdleTimeoutMs, 5_000, 900_000),
     minFreeSpaceBytes: integer("Download minimum free space", value.minFreeSpaceBytes, 0, Number.MAX_SAFE_INTEGER),
     maxFileSizeBytes,
+    updatedAt
+  };
+}
+
+function normalizePhotostaffProcessingSettings(
+  settings: Partial<Omit<PhotostaffProcessingSettingsRecord, "updatedAt">>,
+  updatedAt: string
+): PhotostaffProcessingSettingsRecord {
+  const value = { ...DEFAULT_PHOTOSTAFF_PROCESSING_SETTINGS, ...settings };
+  const integer = (name: string, candidate: unknown, minimum: number, maximum: number): number => {
+    if (typeof candidate !== "number" || !Number.isSafeInteger(candidate) || candidate < minimum || candidate > maximum) {
+      throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`);
+    }
+    return candidate;
+  };
+  const retryBaseDelayMs = integer("Photostaff retry base delay", value.retryBaseDelayMs, 500, 1_800_000);
+  const retryMaxDelayMs = integer("Photostaff retry maximum delay", value.retryMaxDelayMs, retryBaseDelayMs, 1_800_000);
+  return {
+    processingConcurrency: integer("Photostaff processing concurrency", value.processingConcurrency, 1, 4),
+    scanIntervalMs: integer("Photostaff scan interval", value.scanIntervalMs, 60_000, 86_400_000),
+    maxAutoRetries: integer("Photostaff automatic retries", value.maxAutoRetries, 0, 20),
+    retryBaseDelayMs,
+    retryMaxDelayMs,
+    commandTimeoutMs: integer("Photostaff command timeout", value.commandTimeoutMs, 5_000, 900_000),
+    maxFileSizeBytes: integer("Photostaff maximum file size", value.maxFileSizeBytes, 1024 ** 2, 1024 ** 4),
+    maxXmpSizeBytes: integer("Photostaff maximum XMP size", value.maxXmpSizeBytes, 1024, 64 * 1024 ** 2),
+    maxIntermediateBytes: integer("Photostaff maximum intermediate size", value.maxIntermediateBytes, 64 * 1024 ** 2, 8 * 1024 ** 3),
+    minFreeSpaceBytes: integer("Photostaff minimum free space", value.minFreeSpaceBytes, 0, 1024 ** 4),
+    maxDecodedPixels: integer("Photostaff maximum decoded pixels", value.maxDecodedPixels, 1_000_000, 268_402_689),
     updatedAt
   };
 }

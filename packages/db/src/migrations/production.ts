@@ -664,5 +664,357 @@ export const productionMigrations: Migration[] = [
       CREATE INDEX idx_download_workers_heartbeat
         ON download_workers(heartbeat_at DESC);
     `
+  },
+  {
+    id: "023_photostaff_reliability",
+    disableForeignKeys: true,
+    sql: `
+      CREATE TABLE photostaff_assets (
+        id TEXT PRIMARY KEY,
+        root_id TEXT NOT NULL REFERENCES nas_roots(id) ON DELETE CASCADE,
+        storage_pool_id TEXT NOT NULL,
+        path TEXT NOT NULL,
+        name TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+        mtime_ms INTEGER NOT NULL CHECK (mtime_ms >= 0),
+        content_hash TEXT,
+        width INTEGER CHECK (width IS NULL OR width > 0),
+        height INTEGER CHECK (height IS NULL OR height > 0),
+        orientation INTEGER,
+        taken_at TEXT NOT NULL,
+        taken_at_source TEXT NOT NULL CHECK (taken_at_source IN ('exif', 'file_mtime')),
+        thumbnail_key TEXT,
+        preview_key TEXT,
+        status TEXT NOT NULL CHECK (status IN ('ready', 'failed')),
+        error TEXT,
+        error_code TEXT,
+        error_retryable INTEGER NOT NULL DEFAULT 0 CHECK (error_retryable IN (0, 1)),
+        source_device INTEGER,
+        source_inode INTEGER,
+        source_size_bytes INTEGER CHECK (source_size_bytes IS NULL OR source_size_bytes >= 0),
+        source_mtime_ns INTEGER,
+        source_ctime_ns INTEGER,
+        sidecar_path TEXT,
+        sidecar_device INTEGER,
+        sidecar_inode INTEGER,
+        sidecar_size_bytes INTEGER CHECK (sidecar_size_bytes IS NULL OR sidecar_size_bytes >= 0),
+        sidecar_mtime_ns INTEGER,
+        sidecar_ctime_ns INTEGER,
+        derivative_schema_version INTEGER NOT NULL DEFAULT 1 CHECK (derivative_schema_version > 0),
+        scan_generation TEXT,
+        library_updated_at TEXT NOT NULL,
+        indexed_at TEXT NOT NULL,
+        UNIQUE(root_id, storage_pool_id, path)
+      );
+
+      INSERT INTO photostaff_assets (
+        id, root_id, storage_pool_id, path, name, mime_type, size_bytes, mtime_ms,
+        content_hash, width, height, orientation, taken_at, taken_at_source,
+        thumbnail_key, preview_key, status, error, source_size_bytes, source_mtime_ns,
+        derivative_schema_version, scan_generation, library_updated_at, indexed_at
+      )
+      SELECT id, root_id, storage_pool_id, path, name, mime_type, size_bytes, mtime_ms,
+        content_hash, width, height, orientation, taken_at, taken_at_source,
+        thumbnail_key, preview_key, status, error, size_bytes, mtime_ms * 1000000,
+        1, NULL, library_updated_at, indexed_at
+      FROM photo_assets;
+
+      CREATE INDEX idx_photostaff_assets_timeline
+        ON photostaff_assets(library_updated_at, status, taken_at DESC, id DESC);
+      CREATE INDEX idx_photostaff_assets_content_hash
+        ON photostaff_assets(library_updated_at, content_hash)
+        WHERE content_hash IS NOT NULL;
+
+      CREATE TABLE photostaff_jobs (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL CHECK (kind IN ('full_scan', 'path_refresh')),
+        status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'retrying', 'completed', 'failed')),
+        root_id TEXT NOT NULL REFERENCES nas_roots(id) ON DELETE CASCADE,
+        storage_pool_id TEXT NOT NULL,
+        path TEXT NOT NULL,
+        library_updated_at TEXT NOT NULL,
+        scanned INTEGER NOT NULL DEFAULT 0 CHECK (scanned >= 0),
+        processed INTEGER NOT NULL DEFAULT 0 CHECK (processed >= 0),
+        failed INTEGER NOT NULL DEFAULT 0 CHECK (failed >= 0),
+        current_path TEXT,
+        phase TEXT CHECK (phase IS NULL OR phase IN ('discovering', 'processing', 'publishing', 'cleanup', 'retry_wait')),
+        error TEXT,
+        error_code TEXT,
+        error_retryable INTEGER NOT NULL DEFAULT 0 CHECK (error_retryable IN (0, 1)),
+        retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+        next_retry_at TEXT,
+        scan_generation TEXT NOT NULL,
+        worker_id TEXT,
+        lease_expires_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT
+      );
+
+      INSERT INTO photostaff_jobs (
+        id, kind, status, root_id, storage_pool_id, path, library_updated_at,
+        scanned, processed, failed, current_path, error, scan_generation,
+        worker_id, lease_expires_at, created_at, updated_at, started_at, finished_at
+      )
+      SELECT id, kind, CASE WHEN status = 'running' THEN 'queued' ELSE status END,
+        root_id, storage_pool_id, path, library_updated_at, scanned, processed,
+        failed, current_path, error, id, NULL, NULL, created_at, updated_at,
+        CASE WHEN status = 'running' THEN NULL ELSE started_at END,
+        CASE WHEN status = 'running' THEN NULL ELSE finished_at END
+      FROM photo_jobs;
+
+      CREATE INDEX idx_photostaff_jobs_claim
+        ON photostaff_jobs(status, next_retry_at, created_at);
+      CREATE INDEX idx_photostaff_jobs_library_created_at
+        ON photostaff_jobs(library_updated_at, created_at DESC);
+
+      CREATE TABLE photostaff_upload_reservations (
+        id TEXT PRIMARY KEY,
+        library_updated_at TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        path TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(library_updated_at, content_hash),
+        UNIQUE(library_updated_at, path)
+      );
+      INSERT INTO photostaff_upload_reservations
+        SELECT * FROM photo_upload_reservations;
+      CREATE INDEX idx_photostaff_upload_reservations_created_at
+        ON photostaff_upload_reservations(library_updated_at, created_at);
+
+      CREATE TABLE photostaff_asset_metadata (
+        asset_id TEXT PRIMARY KEY REFERENCES photostaff_assets(id) ON DELETE CASCADE,
+        schema_version INTEGER NOT NULL CHECK (schema_version > 0),
+        status TEXT NOT NULL CHECK (status IN ('ready', 'partial')),
+        media_kind TEXT NOT NULL CHECK (media_kind IN ('image', 'video', 'raw')),
+        captured_at TEXT,
+        captured_at_local TEXT,
+        capture_offset_minutes INTEGER,
+        capture_source TEXT NOT NULL CHECK (
+          capture_source IN ('sidecar_xmp', 'embedded_xmp', 'iptc', 'exif', 'video', 'file_mtime')
+        ),
+        duration_ms INTEGER CHECK (duration_ms IS NULL OR duration_ms >= 0),
+        container TEXT,
+        video_codec TEXT,
+        audio_codec TEXT,
+        camera_make TEXT,
+        camera_model TEXT,
+        software TEXT,
+        body_serial TEXT,
+        lens_make TEXT,
+        lens_model TEXT,
+        lens_serial TEXT,
+        iso REAL CHECK (iso IS NULL OR iso >= 0),
+        exposure_time_seconds REAL CHECK (exposure_time_seconds IS NULL OR exposure_time_seconds >= 0),
+        aperture REAL CHECK (aperture IS NULL OR aperture >= 0),
+        focal_length_mm REAL CHECK (focal_length_mm IS NULL OR focal_length_mm >= 0),
+        focal_length_35_mm REAL CHECK (focal_length_35_mm IS NULL OR focal_length_35_mm >= 0),
+        exposure_bias_ev REAL,
+        exposure_program TEXT,
+        metering_mode TEXT,
+        flash TEXT,
+        white_balance TEXT,
+        title TEXT,
+        description TEXT,
+        creator TEXT,
+        copyright TEXT,
+        rating REAL,
+        gps_latitude REAL CHECK (gps_latitude IS NULL OR (gps_latitude >= -90 AND gps_latitude <= 90)),
+        gps_longitude REAL CHECK (gps_longitude IS NULL OR (gps_longitude >= -180 AND gps_longitude <= 180)),
+        gps_altitude_m REAL,
+        gps_direction_deg REAL,
+        raw_metadata_json TEXT NOT NULL,
+        warnings_json TEXT NOT NULL,
+        sidecar_path TEXT,
+        sidecar_size_bytes INTEGER CHECK (sidecar_size_bytes IS NULL OR sidecar_size_bytes >= 0),
+        sidecar_mtime_ms INTEGER CHECK (sidecar_mtime_ms IS NULL OR sidecar_mtime_ms >= 0),
+        updated_at TEXT NOT NULL
+      );
+
+      INSERT INTO photostaff_asset_metadata (
+        rowid, asset_id, schema_version, status, media_kind, captured_at,
+        captured_at_local, capture_offset_minutes, capture_source, duration_ms,
+        container, video_codec, audio_codec, camera_make, camera_model, software,
+        body_serial, lens_make, lens_model, lens_serial, iso, exposure_time_seconds,
+        aperture, focal_length_mm, focal_length_35_mm, exposure_bias_ev,
+        exposure_program, metering_mode, flash, white_balance, title, description,
+        creator, copyright, rating, gps_latitude, gps_longitude, gps_altitude_m,
+        gps_direction_deg, raw_metadata_json, warnings_json, sidecar_path,
+        sidecar_size_bytes, sidecar_mtime_ms, updated_at
+      )
+      SELECT rowid, asset_id, schema_version, status, media_kind, captured_at,
+        captured_at_local, capture_offset_minutes, capture_source, duration_ms,
+        container, video_codec, audio_codec, camera_make, camera_model, software,
+        body_serial, lens_make, lens_model, lens_serial, iso, exposure_time_seconds,
+        aperture, focal_length_mm, focal_length_35_mm, exposure_bias_ev,
+        exposure_program, metering_mode, flash, white_balance, title, description,
+        creator, copyright, rating, gps_latitude, gps_longitude, gps_altitude_m,
+        gps_direction_deg, raw_metadata_json, warnings_json, sidecar_path,
+        sidecar_size_bytes, sidecar_mtime_ms, updated_at
+      FROM photo_asset_metadata;
+
+      CREATE INDEX idx_photostaff_asset_metadata_version
+        ON photostaff_asset_metadata(schema_version, status);
+      CREATE INDEX idx_photostaff_asset_metadata_camera
+        ON photostaff_asset_metadata(camera_model, asset_id);
+      CREATE INDEX idx_photostaff_asset_metadata_lens
+        ON photostaff_asset_metadata(lens_model, asset_id);
+      CREATE INDEX idx_photostaff_asset_metadata_capture
+        ON photostaff_asset_metadata(captured_at, asset_id);
+      CREATE INDEX idx_photostaff_asset_metadata_rating
+        ON photostaff_asset_metadata(rating, asset_id);
+
+      CREATE TABLE photostaff_keywords (
+        asset_id TEXT NOT NULL REFERENCES photostaff_assets(id) ON DELETE CASCADE,
+        keyword TEXT NOT NULL,
+        normalized_keyword TEXT NOT NULL,
+        PRIMARY KEY(asset_id, normalized_keyword)
+      );
+      INSERT INTO photostaff_keywords SELECT * FROM photo_keywords;
+      CREATE INDEX idx_photostaff_keywords_value
+        ON photostaff_keywords(normalized_keyword, asset_id);
+
+      CREATE TABLE photostaff_metadata_values (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id TEXT NOT NULL REFERENCES photostaff_assets(id) ON DELETE CASCADE,
+        source TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value_type TEXT NOT NULL CHECK (value_type IN ('text', 'number', 'date', 'boolean')),
+        text_value TEXT,
+        normalized_text_value TEXT,
+        number_value REAL,
+        date_value TEXT,
+        boolean_value INTEGER CHECK (boolean_value IS NULL OR boolean_value IN (0, 1)),
+        sensitive INTEGER NOT NULL DEFAULT 0 CHECK (sensitive IN (0, 1)),
+        ordinal INTEGER NOT NULL CHECK (ordinal >= 0)
+      );
+      INSERT INTO photostaff_metadata_values SELECT * FROM photo_metadata_values;
+      CREATE INDEX idx_photostaff_metadata_values_key_type
+        ON photostaff_metadata_values(key, value_type, asset_id);
+      CREATE INDEX idx_photostaff_metadata_values_text
+        ON photostaff_metadata_values(key, normalized_text_value, asset_id)
+        WHERE normalized_text_value IS NOT NULL;
+      CREATE INDEX idx_photostaff_metadata_values_number
+        ON photostaff_metadata_values(key, number_value, asset_id)
+        WHERE number_value IS NOT NULL;
+      CREATE INDEX idx_photostaff_metadata_values_date
+        ON photostaff_metadata_values(key, date_value, asset_id)
+        WHERE date_value IS NOT NULL;
+
+      CREATE VIRTUAL TABLE photostaff_metadata_fts USING fts5(
+        asset_id UNINDEXED, name, path, title, description, creator, copyright,
+        keywords, camera, lens, tokenize = 'unicode61 remove_diacritics 2'
+      );
+      INSERT INTO photostaff_metadata_fts (
+        rowid, asset_id, name, path, title, description, creator, copyright,
+        keywords, camera, lens
+      )
+      SELECT rowid, asset_id, name, path, title, description, creator, copyright,
+        keywords, camera, lens FROM photo_metadata_fts;
+
+      CREATE VIRTUAL TABLE photostaff_geo_index USING rtree(
+        metadata_rowid, min_latitude, max_latitude, min_longitude, max_longitude
+      );
+      INSERT INTO photostaff_geo_index SELECT * FROM photo_geo_index;
+
+      CREATE TRIGGER trg_photostaff_asset_metadata_delete_indexes
+      BEFORE DELETE ON photostaff_asset_metadata
+      BEGIN
+        DELETE FROM photostaff_geo_index WHERE metadata_rowid = OLD.rowid;
+        DELETE FROM photostaff_metadata_fts WHERE asset_id = OLD.asset_id;
+      END;
+
+      CREATE TABLE photostaff_scan_entries (
+        job_id TEXT NOT NULL REFERENCES photostaff_jobs(id) ON DELETE CASCADE,
+        path TEXT NOT NULL,
+        entry_type TEXT NOT NULL CHECK (entry_type IN ('directory', 'media', 'sidecar')),
+        status TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'skipped')),
+        parent_path TEXT,
+        error TEXT,
+        error_code TEXT,
+        error_retryable INTEGER NOT NULL DEFAULT 0 CHECK (error_retryable IN (0, 1)),
+        retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+        next_retry_at TEXT,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(job_id, path)
+      );
+      CREATE INDEX idx_photostaff_scan_entries_claim
+        ON photostaff_scan_entries(job_id, status, next_retry_at, path);
+
+      CREATE TABLE photostaff_publish_journal (
+        operation_id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL REFERENCES photostaff_jobs(id) ON DELETE CASCADE,
+        asset_id TEXT NOT NULL,
+        source_path TEXT NOT NULL,
+        thumbnail_temp_path TEXT,
+        thumbnail_path TEXT,
+        preview_temp_path TEXT,
+        preview_path TEXT,
+        source_device INTEGER NOT NULL,
+        source_inode INTEGER NOT NULL,
+        source_size_bytes INTEGER NOT NULL CHECK (source_size_bytes >= 0),
+        result_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE photostaff_space_reservations (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL REFERENCES photostaff_jobs(id) ON DELETE CASCADE,
+        storage_pool_id TEXT NOT NULL,
+        path TEXT NOT NULL,
+        reserved_bytes INTEGER NOT NULL CHECK (reserved_bytes >= 0),
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_photostaff_space_reservations_pool
+        ON photostaff_space_reservations(storage_pool_id);
+
+      CREATE TABLE photostaff_workers (
+        worker_id TEXT PRIMARY KEY,
+        version TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        heartbeat_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_photostaff_workers_heartbeat
+        ON photostaff_workers(heartbeat_at DESC);
+
+      INSERT OR IGNORE INTO system_settings (key, value_json, updated_at)
+      SELECT 'photostaff_library_settings', value_json, updated_at
+      FROM system_settings WHERE key = 'photo_library';
+      INSERT OR IGNORE INTO system_settings (key, value_json, updated_at)
+      SELECT 'photostaff_map_settings', value_json, updated_at
+      FROM system_settings WHERE key = 'photo_map_settings';
+      INSERT OR IGNORE INTO system_settings (key, value_json, updated_at)
+      VALUES (
+        'photostaff_processing_settings',
+        json_object(
+          'processingConcurrency', 1,
+          'scanIntervalMs', 1800000,
+          'maxAutoRetries', 5,
+          'retryBaseDelayMs', 2000,
+          'retryMaxDelayMs', 300000,
+          'commandTimeoutMs', 120000,
+          'maxFileSizeBytes', 536870912,
+          'maxXmpSizeBytes', 16777216,
+          'maxIntermediateBytes', 2147483648,
+          'minFreeSpaceBytes', 0,
+          'maxDecodedPixels', 268402689,
+          'updatedAt', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        ),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      );
+      DELETE FROM system_settings WHERE key IN ('photo_library', 'photo_map_settings');
+
+      DROP TRIGGER IF EXISTS trg_photo_asset_metadata_delete_indexes;
+      DROP TABLE photo_geo_index;
+      DROP TABLE photo_metadata_fts;
+      DROP TABLE photo_metadata_values;
+      DROP TABLE photo_keywords;
+      DROP TABLE photo_asset_metadata;
+      DROP TABLE photo_upload_reservations;
+      DROP TABLE photo_jobs;
+      DROP TABLE photo_assets;
+    `
   }
 ];

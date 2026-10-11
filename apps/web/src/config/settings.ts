@@ -5,8 +5,8 @@ import type {
   DownloadSettings,
   ModelProviderSettings,
   ModelProviderName,
-  PhotoLibrarySettings,
-  PhotoLibraryStatus,
+  PhotostaffLibrarySettings,
+  PhotostaffLibraryStatus,
   PiDangerousToolPolicyMode,
   PiToolPolicyMode,
   PiToolPolicySettings
@@ -21,7 +21,7 @@ export type SettingsSectionId =
   | "agents"
   | "docker"
   | "files"
-  | "photos"
+  | "photostaff"
   | "downloads"
   | "security"
   | "appearance"
@@ -85,7 +85,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     group: "workspace"
   },
   {
-    id: "photos",
+    id: "photostaff",
     group: "workspace"
   },
   {
@@ -113,7 +113,7 @@ const SECTION_TITLE_KEYS = {
   agents: "settings.sections.agents.title",
   docker: "settings.sections.docker.title",
   files: "settings.sections.files.title",
-  photos: "settings.sections.photos.title",
+  photostaff: "settings.sections.photostaff.title",
   downloads: "settings.sections.downloads.title",
   security: "settings.sections.security.title",
   appearance: "settings.sections.appearance.title",
@@ -127,7 +127,7 @@ const SECTION_DESCRIPTION_KEYS = {
   agents: "settings.sections.agents.description",
   docker: "settings.sections.docker.description",
   files: "settings.sections.files.description",
-  photos: "settings.sections.photos.description",
+  photostaff: "settings.sections.photostaff.description",
   downloads: "settings.sections.downloads.description",
   security: "settings.sections.security.description",
   appearance: "settings.sections.appearance.description",
@@ -200,7 +200,7 @@ export function settingsSectionState(
   dockerSettings: DockerSettings | null,
   buildInfo: BuildInfo | null = null,
   downloadSettings: DownloadSettings | null = null,
-  photoStatus: PhotoLibraryStatus | null = null
+  photostaffStatus: PhotostaffLibraryStatus | null = null
 ): SettingsState {
   if (section.id === "model-providers") {
     return settings?.apiKeyConfigured ? "ready" : "missing";
@@ -214,14 +214,19 @@ export function settingsSectionState(
   if (section.id === "downloads") {
     return downloadSettings ? "ready" : "missing";
   }
-  if (section.id === "photos") {
-    if (photoStatus?.state === "queued" || photoStatus?.state === "scanning") {
+  if (section.id === "photostaff") {
+    if (
+      photostaffStatus?.state === "queued" ||
+      photostaffStatus?.state === "discovering" ||
+      photostaffStatus?.state === "processing" ||
+      photostaffStatus?.state === "retrying"
+    ) {
       return "loading";
     }
-    if (photoStatus?.state === "degraded" || photoStatus?.state === "offline" || photoStatus?.state === "unconfigured") {
+    if (photostaffStatus?.state === "degraded" || photostaffStatus?.state === "offline" || photostaffStatus?.state === "unconfigured") {
       return "missing";
     }
-    return photoStatus?.state === "ready" ? "ready" : "missing";
+    return photostaffStatus?.state === "ready" ? "ready" : "missing";
   }
   return "ready";
 }
@@ -234,8 +239,8 @@ export function settingsSectionLabel(
   dockerSettings: DockerSettings | null,
   buildInfo: BuildInfo | null = null,
   downloadSettings: DownloadSettings | null = null,
-  photoSettings: PhotoLibrarySettings | null = null,
-  photoStatus: PhotoLibraryStatus | null = null
+  photostaffSettings: PhotostaffLibrarySettings | null = null,
+  photostaffStatus: PhotostaffLibraryStatus | null = null
 ): string {
   if (
     loading &&
@@ -243,7 +248,7 @@ export function settingsSectionLabel(
       section.id === "docker" ||
       section.id === "version" ||
       section.id === "downloads" ||
-      section.id === "photos")
+      section.id === "photostaff")
   ) {
     return t("common.states.loading");
   }
@@ -264,11 +269,11 @@ export function settingsSectionLabel(
       ? t("settings.downloads.connectionCount", { count: downloadSettings.concurrency })
       : t("settings.downloads.notLoaded");
   }
-  if (section.id === "photos") {
-    if (!photoStatus) {
-      return photoSettings ? t("common.states.configured") : t("common.states.unavailable");
+  if (section.id === "photostaff") {
+    if (!photostaffStatus) {
+      return photostaffSettings ? t("common.states.configured") : t("common.states.unavailable");
     }
-    return t(`settings.photos.states.${photoStatus.state}`);
+    return t(`settings.photostaff.states.${photostaffStatus.state}`);
   }
   const state = settingsSectionState(
     section,
@@ -276,7 +281,7 @@ export function settingsSectionLabel(
     dockerSettings,
     buildInfo,
     downloadSettings,
-    photoStatus
+    photostaffStatus
   );
   if (state === "ready") {
     return t("common.states.configured");

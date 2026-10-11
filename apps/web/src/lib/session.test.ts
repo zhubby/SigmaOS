@@ -64,7 +64,7 @@ describe("session helpers", () => {
     expect(sessionTitle({ ...baseSession, lastMessage: "Last" })).toBe("Last");
     expect(sessionTitle(baseSession)).toBe("Root agent");
     expect(sessionTitle(baseSession, "Root session")).toBe("Root session");
-    expect(sessionTitle({ ...baseSession, currentPath: "media/photos" })).toBe("media/photos");
+    expect(sessionTitle({ ...baseSession, currentPath: "media/photostaff" })).toBe("media/photostaff");
   });
 
   it("keeps the existing 34-character truncation rule", () => {

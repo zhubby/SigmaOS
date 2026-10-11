@@ -4,21 +4,21 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  claimNextPhotoJob,
+  claimNextPhotostaffJob,
   createSession,
-  enqueuePhotoJob,
+  enqueuePhotostaffJob,
   ensureNasRoots,
-  finishPhotoJob,
-  getPhotoLibrarySettings,
+  finishPhotostaffJob,
+  getPhotostaffLibrarySettings,
   openSigmaDb,
-  upsertPhotoAsset,
-  type PhotoMetadataWriteInput,
+  upsertPhotostaffAsset,
+  type PhotostaffMetadataWriteInput,
   type SigmaDatabase
 } from "@sigmaos/db";
-import { PHOTO_METADATA_SCHEMA_VERSION, type PhotoLibrarySettingsRecord, type SigmaConfig } from "@sigmaos/shared";
+import { PHOTOSTAFF_METADATA_SCHEMA_VERSION, type PhotostaffLibrarySettingsRecord, type SigmaConfig } from "@sigmaos/shared";
 import { buildServer } from "../server.js";
 
-const poolId = "/dev/md/test-photos";
+const poolId = "/dev/md/test-photostaff";
 let tempDir: string | null = null;
 let db: SigmaDatabase | null = null;
 
@@ -29,104 +29,164 @@ afterEach(async () => {
   tempDir = null;
 });
 
-describe("photo API", () => {
+describe("photostaff API", () => {
+  it("serves and validates processing settings, worker health, and no legacy routes", async () => {
+    const { app } = await setup();
+
+    const defaults = await app.inject({ method: "GET", url: "/api/settings/photostaff" });
+    expect(defaults.statusCode).toBe(200);
+    expect(defaults.json().settings).toMatchObject({
+      processingConcurrency: 1,
+      maxAutoRetries: 5,
+      commandTimeoutMs: 120_000,
+      maxDecodedPixels: 268_402_689
+    });
+
+    const updated = await app.inject({
+      method: "PATCH",
+      url: "/api/settings/photostaff",
+      payload: { processingConcurrency: 4, maxAutoRetries: 8, minFreeSpaceBytes: 1024 }
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json().settings).toMatchObject({
+      processingConcurrency: 4,
+      maxAutoRetries: 8,
+      minFreeSpaceBytes: 1024
+    });
+
+    const rejected = await app.inject({
+      method: "PATCH",
+      url: "/api/settings/photostaff",
+      payload: { processingConcurrency: 5 }
+    });
+    expect(rejected.statusCode).toBe(400);
+    expect(rejected.json().error).toContain("between 1 and 4");
+
+    const heartbeatAt = new Date().toISOString();
+    db!.prepare(`
+      INSERT INTO photostaff_workers (worker_id, version, started_at, heartbeat_at)
+      VALUES ('worker-1', 'test', ?, ?)
+    `).run(heartbeatAt, heartbeatAt);
+    const status = await app.inject({ method: "GET", url: "/api/photostaff/status" });
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toMatchObject({
+      status: { state: "unconfigured" },
+      workerHealth: { status: "ready", freshWorkers: 1, lastHeartbeatAt: heartbeatAt }
+    });
+
+    expect((await app.inject({ method: "GET", url: "/api/photos/status" })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: "/api/photos" })).statusCode).toBe(404);
+
+    await configure(app);
+    db!.prepare("DELETE FROM photostaff_workers").run();
+    const health = await app.inject({ method: "GET", url: "/api/system/health" });
+    expect(health.json()).toMatchObject({
+      status: "failed",
+      photostaff: { status: "unavailable", queuedJobs: 1 }
+    });
+    expect(health.json().issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "photostaff_unavailable", severity: "critical" })
+    ]));
+    await app.close();
+  });
+
   it("configures a library, reports scan state, and returns a stable timeline", async () => {
     const { app, root } = await setup();
     const configured = await configure(app);
     expect(configured.statusCode).toBe(200);
-    expect(configured.json().settings.path).toBe("Photos");
+    expect(configured.json().settings.path).toBe("Photostaff");
 
-    const settings = getPhotoLibrarySettings(db!)!;
+    const settings = getPhotostaffLibrarySettings(db!)!;
     completeInitialScan(settings);
-    await addPhoto(root, settings, "one.jpg", "2025-01-02T00:00:00.000Z");
-    await addPhoto(root, settings, "two.jpg", "2025-01-01T00:00:00.000Z");
+    await addPhotostaff(root, settings, "one.jpg", "2025-01-02T00:00:00.000Z");
+    await addPhotostaff(root, settings, "two.jpg", "2025-01-01T00:00:00.000Z");
 
-    const status = await app.inject({ method: "GET", url: "/api/photos/status" });
+    const status = await app.inject({ method: "GET", url: "/api/photostaff/status" });
     expect(status.json().status).toMatchObject({ state: "ready", total: 2 });
-    const first = await app.inject({ method: "GET", url: "/api/photos?limit=1" });
+    const first = await app.inject({ method: "GET", url: "/api/photostaff?limit=1" });
     expect(first.statusCode).toBe(200);
-    expect(first.json().photos.map((photo: { name: string }) => photo.name)).toEqual(["one.jpg"]);
+    expect(first.json().photostaff.map((photostaff: { name: string }) => photostaff.name)).toEqual(["one.jpg"]);
     expect(first.json().nextCursor).toEqual(expect.any(String));
-    const second = await app.inject({ method: "GET", url: `/api/photos?limit=1&cursor=${encodeURIComponent(first.json().nextCursor)}` });
-    expect(second.json().photos.map((photo: { name: string }) => photo.name)).toEqual(["two.jpg"]);
-    expect((await app.inject({ method: "GET", url: "/api/photos?cursor=bad" })).statusCode).toBe(400);
+    const second = await app.inject({ method: "GET", url: `/api/photostaff?limit=1&cursor=${encodeURIComponent(first.json().nextCursor)}` });
+    expect(second.json().photostaff.map((photostaff: { name: string }) => photostaff.name)).toEqual(["two.jpg"]);
+    expect((await app.inject({ method: "GET", url: "/api/photostaff?cursor=bad" })).statusCode).toBe(400);
     await app.close();
   });
 
   it("paginates filename sorting with the same SQLite case folding used by the cursor", async () => {
     const { app, root } = await setup();
     await configure(app);
-    const settings = getPhotoLibrarySettings(db!)!;
+    const settings = getPhotostaffLibrarySettings(db!)!;
     completeInitialScan(settings);
-    await addPhoto(root, settings, "Ä-first.jpg", "2025-01-02T00:00:00.000Z");
-    await addPhoto(root, settings, "Ö-second.jpg", "2025-01-01T00:00:00.000Z");
+    await addPhotostaff(root, settings, "Ä-first.jpg", "2025-01-02T00:00:00.000Z");
+    await addPhotostaff(root, settings, "Ö-second.jpg", "2025-01-01T00:00:00.000Z");
 
     const first = await app.inject({
       method: "POST",
-      url: "/api/photos/query",
+      url: "/api/photostaff/query",
       payload: { sort: { field: "name", direction: "asc" }, limit: 1 }
     });
-    expect(first.json().photos.map((photo: { name: string }) => photo.name)).toEqual(["Ä-first.jpg"]);
+    expect(first.json().photostaff.map((photostaff: { name: string }) => photostaff.name)).toEqual(["Ä-first.jpg"]);
     const second = await app.inject({
       method: "POST",
-      url: "/api/photos/query",
+      url: "/api/photostaff/query",
       payload: {
         sort: { field: "name", direction: "asc" },
         limit: 1,
         cursor: first.json().nextCursor
       }
     });
-    expect(second.json().photos.map((photo: { name: string }) => photo.name)).toEqual(["Ö-second.jpg"]);
+    expect(second.json().photostaff.map((photostaff: { name: string }) => photostaff.name)).toEqual(["Ö-second.jpg"]);
     await app.close();
   });
 
   it("streams originals and rejects duplicate uploads after the initial scan", async () => {
     const { app, root } = await setup();
     await configure(app);
-    const settings = getPhotoLibrarySettings(db!)!;
+    const settings = getPhotostaffLibrarySettings(db!)!;
     const earlyUpload = await app.inject({
       method: "PUT",
-      url: "/api/photos/upload?name=too-early.jpg",
+      url: "/api/photostaff/upload?name=too-early.jpg",
       headers: { "content-type": "application/octet-stream" },
       payload: Buffer.from("too-early")
     });
     expect(earlyUpload.statusCode).toBe(409);
-    expect(earlyUpload.json().error).toContain("initial photo scan");
+    expect(earlyUpload.json().error).toContain("initial photostaff scan");
     completeInitialScan(settings);
 
     const uploadedVideo = await app.inject({
       method: "PUT",
-      url: "/api/photos/upload?name=clip.MP4",
+      url: "/api/photostaff/upload?name=clip.MP4",
       headers: { "content-type": "application/octet-stream" },
       payload: Buffer.from("video-upload")
     });
     expect(uploadedVideo.statusCode).toBe(201);
     const uploadedRaw = await app.inject({
       method: "PUT",
-      url: "/api/photos/upload?name=camera.CR3",
+      url: "/api/photostaff/upload?name=camera.CR3",
       headers: { "content-type": "application/octet-stream" },
       payload: Buffer.from("raw-upload")
     });
     expect(uploadedRaw.statusCode).toBe(201);
     const unsupported = await app.inject({
       method: "PUT",
-      url: "/api/photos/upload?name=notes.txt",
+      url: "/api/photostaff/upload?name=notes.txt",
       headers: { "content-type": "application/octet-stream" },
       payload: Buffer.from("text-upload")
     });
     expect(unsupported.statusCode).toBe(400);
 
     const body = Buffer.from("jpeg-like-test-data");
-    const existing = await addPhoto(root, settings, "existing.jpg", "2025-01-01T00:00:00.000Z", body);
+    const existing = await addPhotostaff(root, settings, "existing.jpg", "2025-01-01T00:00:00.000Z", body);
 
-    const original = await app.inject({ method: "GET", url: `/api/photos/${existing.id}/original?download=1` });
+    const original = await app.inject({ method: "GET", url: `/api/photostaff/${existing.id}/original?download=1` });
     expect(original.statusCode).toBe(200);
     expect(original.rawPayload).toEqual(body);
     expect(original.headers["content-disposition"]).toContain("existing.jpg");
 
     const duplicate = await app.inject({
       method: "PUT",
-      url: "/api/photos/upload?name=copy.jpg",
+      url: "/api/photostaff/upload?name=copy.jpg",
       headers: { "content-type": "application/octet-stream" },
       payload: body
     });
@@ -134,41 +194,41 @@ describe("photo API", () => {
 
     const uploaded = await app.inject({
       method: "PUT",
-      url: "/api/photos/upload?name=new.jpg",
+      url: "/api/photostaff/upload?name=new.jpg",
       headers: { "content-type": "application/octet-stream" },
-      payload: Buffer.from("new-photo")
+      payload: Buffer.from("new-photostaff")
     });
     expect(uploaded.statusCode).toBe(201);
-    expect(uploaded.json().path).toBe(path.join("Photos", "new.jpg"));
+    expect(uploaded.json().path).toBe(path.join("Photostaff", "new.jpg"));
     const secondUpload = await app.inject({
       method: "PUT",
-      url: "/api/photos/upload?name=second.jpg",
+      url: "/api/photostaff/upload?name=second.jpg",
       headers: { "content-type": "application/octet-stream" },
-      payload: Buffer.from("second-photo")
+      payload: Buffer.from("second-photostaff")
     });
     expect(secondUpload.statusCode).toBe(201);
     const pendingDuplicate = await app.inject({
       method: "PUT",
-      url: "/api/photos/upload?name=new-copy.jpg",
+      url: "/api/photostaff/upload?name=new-copy.jpg",
       headers: { "content-type": "application/octet-stream" },
-      payload: Buffer.from("new-photo")
+      payload: Buffer.from("new-photostaff")
     });
     expect(pendingDuplicate.statusCode).toBe(409);
-    expect(pendingDuplicate.json().duplicate).toMatchObject({ path: path.join("Photos", "new.jpg") });
+    expect(pendingDuplicate.json().duplicate).toMatchObject({ path: path.join("Photostaff", "new.jpg") });
     await app.close();
   });
 
-  it("streams native photo videos and reuses the transcode cache for other containers", async () => {
+  it("streams native photostaff videos and reuses the transcode cache for other containers", async () => {
     const { app, root } = await setup();
     await configure(app);
-    const settings = getPhotoLibrarySettings(db!)!;
+    const settings = getPhotostaffLibrarySettings(db!)!;
     completeInitialScan(settings);
-    const native = await addPhoto(root, settings, "native.mp4", "2025-01-01T00:00:00.000Z", Buffer.from("native-video"), "video/mp4");
-    const webm = await addPhoto(root, settings, "native.webm", "2025-01-01T00:00:00.000Z", Buffer.from("native-webm"), "video/webm");
-    const converted = await addPhoto(root, settings, "converted.mkv", "2025-01-01T00:00:00.000Z", Buffer.from("source-video"), "video/x-matroska");
-    const broken = await addPhoto(root, settings, "broken.avi", "2025-01-01T00:00:00.000Z", Buffer.from("broken-video"), "video/x-msvideo");
-    const raw = await addPhoto(root, settings, "camera.cr3", "2025-01-01T00:00:00.000Z", Buffer.from("raw-source"), "image/x-canon-cr3");
-    const escaped = await addPhoto(root, settings, "../outside.mp4", "2025-01-01T00:00:00.000Z", Buffer.from("outside-video"), "video/mp4");
+    const native = await addPhotostaff(root, settings, "native.mp4", "2025-01-01T00:00:00.000Z", Buffer.from("native-video"), "video/mp4");
+    const webm = await addPhotostaff(root, settings, "native.webm", "2025-01-01T00:00:00.000Z", Buffer.from("native-webm"), "video/webm");
+    const converted = await addPhotostaff(root, settings, "converted.mkv", "2025-01-01T00:00:00.000Z", Buffer.from("source-video"), "video/x-matroska");
+    const broken = await addPhotostaff(root, settings, "broken.avi", "2025-01-01T00:00:00.000Z", Buffer.from("broken-video"), "video/x-msvideo");
+    const raw = await addPhotostaff(root, settings, "camera.cr3", "2025-01-01T00:00:00.000Z", Buffer.from("raw-source"), "image/x-canon-cr3");
+    const escaped = await addPhotostaff(root, settings, "../outside.mp4", "2025-01-01T00:00:00.000Z", Buffer.from("outside-video"), "video/mp4");
     let transcodeCalls = 0;
     const transcode = async (inputPath: string, outputPath: string) => {
       if (inputPath.endsWith("broken.avi")) {
@@ -188,7 +248,7 @@ describe("photo API", () => {
     });
     const nativeResponse = await server.inject({
       method: "GET",
-      url: `/api/photos/${native.id}/video`,
+      url: `/api/photostaff/${native.id}/video`,
       headers: { range: "bytes=1-5" }
     });
     expect(nativeResponse.statusCode).toBe(206);
@@ -196,35 +256,35 @@ describe("photo API", () => {
     expect(nativeResponse.payload).toBe("ative");
     const webmResponse = await server.inject({
       method: "GET",
-      url: `/api/photos/${webm.id}/video`,
+      url: `/api/photostaff/${webm.id}/video`,
       headers: { range: "bytes=0-5" }
     });
     expect(webmResponse.statusCode).toBe(206);
     expect(webmResponse.headers["content-type"]).toContain("video/webm");
     expect(webmResponse.payload).toBe("native");
-    const rawOriginal = await server.inject({ method: "GET", url: `/api/photos/${raw.id}/original?download=1` });
+    const rawOriginal = await server.inject({ method: "GET", url: `/api/photostaff/${raw.id}/original?download=1` });
     expect(rawOriginal.statusCode).toBe(200);
     expect(rawOriginal.headers["content-type"]).toContain("image/x-canon-cr3");
     expect(rawOriginal.payload).toBe("raw-source");
-    expect((await server.inject({ method: "GET", url: `/api/photos/${raw.id}/video` })).statusCode).toBe(415);
-    expect((await server.inject({ method: "GET", url: `/api/photos/${escaped.id}/video` })).statusCode).toBe(404);
+    expect((await server.inject({ method: "GET", url: `/api/photostaff/${raw.id}/video` })).statusCode).toBe(415);
+    expect((await server.inject({ method: "GET", url: `/api/photostaff/${escaped.id}/video` })).statusCode).toBe(404);
 
     const [first, second] = await Promise.all([
-      server.inject({ method: "GET", url: `/api/photos/${converted.id}/video` }),
-      server.inject({ method: "GET", url: `/api/photos/${converted.id}/video` })
+      server.inject({ method: "GET", url: `/api/photostaff/${converted.id}/video` }),
+      server.inject({ method: "GET", url: `/api/photostaff/${converted.id}/video` })
     ]);
     expect(first.statusCode).toBe(200);
     expect(first.payload).toBe("converted-video-1");
     expect(second.payload).toBe("converted-video-1");
     expect(transcodeCalls).toBe(1);
 
-    await writeFile(path.join(root, "Photos", "converted.mkv"), "changed-source-video");
-    const changed = await server.inject({ method: "GET", url: `/api/photos/${converted.id}/video` });
+    await writeFile(path.join(root, "Photostaff", "converted.mkv"), "changed-source-video");
+    const changed = await server.inject({ method: "GET", url: `/api/photostaff/${converted.id}/video` });
     expect(changed.statusCode).toBe(200);
     expect(changed.payload).toBe("converted-video-2");
     expect(transcodeCalls).toBe(2);
 
-    const failed = await server.inject({ method: "GET", url: `/api/photos/${broken.id}/video` });
+    const failed = await server.inject({ method: "GET", url: `/api/photostaff/${broken.id}/video` });
     expect(failed.statusCode).toBe(503);
     expect(failed.json().error).toBe("Video transcoding failed");
     const cacheEntries = await readdir(path.join(tempDir!, "media-cache", "videos"));
@@ -236,46 +296,46 @@ describe("photo API", () => {
     const storageState = { mounted: true };
     const { app, root } = await setup(storageState);
     await configure(app);
-    const settings = getPhotoLibrarySettings(db!)!;
+    const settings = getPhotostaffLibrarySettings(db!)!;
     completeInitialScan(settings);
-    const photo = await addPhoto(root, settings, "cached.jpg", "2025-01-01T00:00:00.000Z");
-    const video = await addPhoto(root, settings, "offline.mp4", "2025-01-01T00:00:00.000Z", Buffer.from("video"), "video/mp4");
+    const photostaff = await addPhotostaff(root, settings, "cached.jpg", "2025-01-01T00:00:00.000Z");
+    const video = await addPhotostaff(root, settings, "offline.mp4", "2025-01-01T00:00:00.000Z", Buffer.from("video"), "video/mp4");
     const thumbnail = Buffer.from("cached-webp");
-    const thumbnailPath = path.join(tempDir!, "photos", "thumbnail", "cached.jpg.webp");
+    const thumbnailPath = path.join(tempDir!, "photostaff", "thumbnail", "cached.jpg.webp");
     await mkdir(path.dirname(thumbnailPath), { recursive: true });
     await writeFile(thumbnailPath, thumbnail);
 
     storageState.mounted = false;
-    const response = await app.inject({ method: "GET", url: `/api/photos/${photo.id}/thumbnail` });
+    const response = await app.inject({ method: "GET", url: `/api/photostaff/${photostaff.id}/thumbnail` });
 
     expect(response.statusCode).toBe(200);
     expect(response.headers["content-type"]).toBe("image/webp");
     expect(response.rawPayload).toEqual(thumbnail);
-    expect((await app.inject({ method: "GET", url: `/api/photos/${photo.id}/preview` })).statusCode).toBe(404);
-    expect((await app.inject({ method: "GET", url: `/api/photos/${photo.id}/original` })).statusCode).toBe(404);
-    expect((await app.inject({ method: "GET", url: `/api/photos/${video.id}/video` })).statusCode).toBe(404);
-    expect((await app.inject({ method: "GET", url: "/api/photos/missing/video" })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: `/api/photostaff/${photostaff.id}/preview` })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: `/api/photostaff/${photostaff.id}/original` })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: `/api/photostaff/${video.id}/video` })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: "/api/photostaff/missing/video" })).statusCode).toBe(404);
     await app.close();
   });
 
-  it("creates one approval for batch moves and streams multi-photo zip exports", async () => {
+  it("creates one approval for batch moves and streams multi-photostaff zip exports", async () => {
     const { app, root } = await setup();
     await configure(app);
-    const settings = getPhotoLibrarySettings(db!)!;
+    const settings = getPhotostaffLibrarySettings(db!)!;
     completeInitialScan(settings);
-    const first = await addPhoto(root, settings, "one.jpg", "2025-01-02T00:00:00.000Z");
-    const second = await addPhoto(root, settings, "two.jpg", "2025-01-01T00:00:00.000Z");
-    await mkdir(path.join(root, "Photos", "Archive"));
+    const first = await addPhotostaff(root, settings, "one.jpg", "2025-01-02T00:00:00.000Z");
+    const second = await addPhotostaff(root, settings, "two.jpg", "2025-01-01T00:00:00.000Z");
+    await mkdir(path.join(root, "Photostaff", "Archive"));
     const session = createSession(db!, { rootId: "local" });
 
     const proposal = await app.inject({
       method: "POST",
-      url: "/api/photos/proposals",
+      url: "/api/photostaff/proposals",
       payload: {
         sessionId: session.id,
         assetIds: [first.id, second.id],
         operation: "move",
-        targetDirectory: path.join("Photos", "Archive")
+        targetDirectory: path.join("Photostaff", "Archive")
       }
     });
     expect(proposal.statusCode).toBe(202);
@@ -283,7 +343,7 @@ describe("photo API", () => {
 
     const createExport = await app.inject({
       method: "POST",
-      url: "/api/photos/exports",
+      url: "/api/photostaff/exports",
       payload: { assetIds: [first.id, second.id] }
     });
     expect(createExport.statusCode).toBe(201);
@@ -297,28 +357,28 @@ describe("photo API", () => {
       url: `/api/approvals/${proposal.json().approval.id}/approve`
     });
     expect(approved.statusCode).toBe(202);
-    expect(claimNextPhotoJob(db!, { workerId: "test", leaseMs: 30_000 })).toMatchObject({ kind: "full_scan" });
+    expect(claimNextPhotostaffJob(db!, { workerId: "test", leaseMs: 30_000 })).toMatchObject({ kind: "full_scan" });
     await app.close();
   });
 
-  it("rejects a batch move when selected photos share the same target name", async () => {
+  it("rejects a batch move when selected photostaff share the same target name", async () => {
     const { app, root } = await setup();
     await configure(app);
-    const settings = getPhotoLibrarySettings(db!)!;
+    const settings = getPhotostaffLibrarySettings(db!)!;
     completeInitialScan(settings);
-    const first = await addPhoto(root, settings, path.join("A", "same.jpg"), "2025-01-02T00:00:00.000Z", Buffer.from("first"));
-    const second = await addPhoto(root, settings, path.join("B", "same.jpg"), "2025-01-01T00:00:00.000Z", Buffer.from("second"));
-    await mkdir(path.join(root, "Photos", "Archive"));
+    const first = await addPhotostaff(root, settings, path.join("A", "same.jpg"), "2025-01-02T00:00:00.000Z", Buffer.from("first"));
+    const second = await addPhotostaff(root, settings, path.join("B", "same.jpg"), "2025-01-01T00:00:00.000Z", Buffer.from("second"));
+    await mkdir(path.join(root, "Photostaff", "Archive"));
     const session = createSession(db!, { rootId: "local" });
 
     const response = await app.inject({
       method: "POST",
-      url: "/api/photos/proposals",
+      url: "/api/photostaff/proposals",
       payload: {
         sessionId: session.id,
         assetIds: [first.id, second.id],
         operation: "move",
-        targetDirectory: path.join("Photos", "Archive")
+        targetDirectory: path.join("Photostaff", "Archive")
       }
     });
 
@@ -330,9 +390,9 @@ describe("photo API", () => {
   it("queries indexed metadata with stable cursors and redacts sensitive details by default", async () => {
     const { app, root } = await setup();
     await configure(app);
-    const settings = getPhotoLibrarySettings(db!)!;
+    const settings = getPhotostaffLibrarySettings(db!)!;
     completeInitialScan(settings);
-    const first = await addPhoto(
+    const first = await addPhotostaff(
       root,
       settings,
       "metadata-one.jpg",
@@ -341,7 +401,7 @@ describe("photo API", () => {
       "image/jpeg",
       indexedMetadata({ cameraModel: "Alpha 1", iso: 800, gpsLatitude: 31.23, gpsLongitude: 121.47 })
     );
-    await addPhoto(
+    await addPhotostaff(
       root,
       settings,
       "metadata-two.jpg",
@@ -353,7 +413,7 @@ describe("photo API", () => {
 
     const query = await app.inject({
       method: "POST",
-      url: "/api/photos/query",
+      url: "/api/photostaff/query",
       payload: {
         filters: { iso: { min: 400 } },
         sort: { field: "captured_at", direction: "desc" },
@@ -364,40 +424,40 @@ describe("photo API", () => {
     expect(query.statusCode).toBe(200);
     expect(query.json()).toMatchObject({
       total: 1,
-      photos: [{ id: first.id, metadata: { cameraModel: "Alpha 1", hasLocation: true } }],
+      photostaff: [{ id: first.id, metadata: { cameraModel: "Alpha 1", hasLocation: true } }],
       metadataIndex: { total: 2, indexed: 2, pending: 0 }
     });
     const firstPage = await app.inject({
       method: "POST",
-      url: "/api/photos/query",
+      url: "/api/photostaff/query",
       payload: { sort: { field: "name", direction: "asc" }, limit: 1, includeFacets: true }
     });
     expect(firstPage.json().nextCursor).toEqual(expect.any(String));
     const secondPage = await app.inject({
       method: "POST",
-      url: "/api/photos/query",
+      url: "/api/photostaff/query",
       payload: { sort: { field: "name", direction: "asc" }, limit: 2, includeFacets: false, cursor: firstPage.json().nextCursor }
     });
     expect(secondPage.statusCode).toBe(200);
-    expect(secondPage.json().photos[0].id).not.toBe(firstPage.json().photos[0].id);
+    expect(secondPage.json().photostaff[0].id).not.toBe(firstPage.json().photostaff[0].id);
     const mismatchedCursor = await app.inject({
       method: "POST",
-      url: "/api/photos/query",
+      url: "/api/photostaff/query",
       payload: { filters: { text: "different" }, sort: { field: "name", direction: "asc" }, limit: 1, cursor: firstPage.json().nextCursor }
     });
     expect(mismatchedCursor.statusCode).toBe(400);
 
-    const fields = await app.inject({ method: "GET", url: "/api/photos/metadata/fields?q=ISO" });
+    const fields = await app.inject({ method: "GET", url: "/api/photostaff/metadata/fields?q=ISO" });
     expect(fields.json().fields).toContainEqual(expect.objectContaining({ key: "exif.ISO", count: 2 }));
-    const redacted = await app.inject({ method: "GET", url: `/api/photos/${first.id}/metadata` });
+    const redacted = await app.inject({ method: "GET", url: `/api/photostaff/${first.id}/metadata` });
     expect(redacted.json().metadata).toMatchObject({ sensitiveOmitted: true });
     expect(redacted.json().metadata.sensitiveGroups).toBeUndefined();
-    const revealed = await app.inject({ method: "GET", url: `/api/photos/${first.id}/metadata?includeSensitive=1` });
+    const revealed = await app.inject({ method: "GET", url: `/api/photostaff/${first.id}/metadata?includeSensitive=1` });
     expect(revealed.json().metadata.sensitiveGroups.exif.GPSLatitude).toEqual([31.23]);
 
     const tooManyConditions = await app.inject({
       method: "POST",
-      url: "/api/photos/query",
+      url: "/api/photostaff/query",
       payload: {
         filters: {
           advanced: {
@@ -410,7 +470,7 @@ describe("photo API", () => {
     expect(tooManyConditions.statusCode).toBe(400);
     const unknownField = await app.inject({
       method: "POST",
-      url: "/api/photos/query",
+      url: "/api/photostaff/query",
       payload: { filters: { iso: { min: 100, typo: true } } }
     });
     expect(unknownField.statusCode).toBe(400);
@@ -420,22 +480,22 @@ describe("photo API", () => {
   it("uploads XMP sidecars, pairs them for operations and exports, and serves local PMTiles ranges", async () => {
     const { app, root } = await setup();
     await configure(app);
-    const settings = getPhotoLibrarySettings(db!)!;
+    const settings = getPhotostaffLibrarySettings(db!)!;
     completeInitialScan(settings);
-    const first = await addPhoto(root, settings, "paired.jpg", "2025-01-02T00:00:00.000Z");
-    const second = await addPhoto(root, settings, "other.jpg", "2025-01-01T00:00:00.000Z");
-    const runningRefresh = enqueuePhotoJob(db!, { settings, kind: "path_refresh", path: settings.path });
-    expect(claimNextPhotoJob(db!, { workerId: "upload-race", leaseMs: 30_000 })?.id).toBe(runningRefresh.id);
+    const first = await addPhotostaff(root, settings, "paired.jpg", "2025-01-02T00:00:00.000Z");
+    const second = await addPhotostaff(root, settings, "other.jpg", "2025-01-01T00:00:00.000Z");
+    const runningRefresh = enqueuePhotostaffJob(db!, { settings, kind: "path_refresh", path: settings.path });
+    expect(claimNextPhotostaffJob(db!, { workerId: "upload-race", leaseMs: 30_000 })?.id).toBe(runningRefresh.id);
     const sidecarBody = Buffer.from("<x:xmpmeta>paired</x:xmpmeta>");
     const upload = await app.inject({
       method: "PUT",
-      url: "/api/photos/upload?name=paired.jpg.xmp",
+      url: "/api/photostaff/upload?name=paired.jpg.xmp",
       headers: { "content-type": "application/octet-stream" },
       payload: sidecarBody
     });
     expect(upload.statusCode).toBe(201);
-    finishPhotoJob(db!, { id: runningRefresh.id, workerId: "upload-race" });
-    expect(claimNextPhotoJob(db!, { workerId: "follow-up", leaseMs: 30_000 })).toMatchObject({
+    finishPhotostaffJob(db!, { id: runningRefresh.id, workerId: "upload-race" });
+    expect(claimNextPhotostaffJob(db!, { workerId: "follow-up", leaseMs: 30_000 })).toMatchObject({
       kind: "path_refresh",
       path: settings.path,
       status: "running"
@@ -444,66 +504,66 @@ describe("photo API", () => {
     const session = createSession(db!, { rootId: "local" });
     const proposal = await app.inject({
       method: "POST",
-      url: "/api/photos/proposals",
+      url: "/api/photostaff/proposals",
       payload: { sessionId: session.id, assetIds: [first.id], operation: "trash" }
     });
     expect(proposal.statusCode).toBe(202);
     expect(proposal.json().approval.proposal.map((item: { sourcePath: string }) => item.sourcePath)).toEqual([
-      path.join("Photos", "paired.jpg"),
-      path.join("Photos", "paired.jpg.xmp")
+      path.join("Photostaff", "paired.jpg"),
+      path.join("Photostaff", "paired.jpg.xmp")
     ]);
 
     const exportRequest = await app.inject({
       method: "POST",
-      url: "/api/photos/exports",
+      url: "/api/photostaff/exports",
       payload: { assetIds: [first.id, second.id] }
     });
     const archive = await app.inject({ method: "GET", url: exportRequest.json().url });
     expect(archive.rawPayload.includes(Buffer.from("paired.jpg.xmp"))).toBe(true);
 
-    const rasterPath = path.join(root, "Photos", "offline.pmtiles");
+    const rasterPath = path.join(root, "Photostaff", "offline.pmtiles");
     await writeFile(rasterPath, pmtilesFixture(2));
     const mapSettings = await app.inject({
       method: "PUT",
-      url: "/api/photos/map/settings",
-      payload: { rootId: "local", storagePoolId: poolId, path: path.join("Photos", "offline.pmtiles") }
+      url: "/api/photostaff/map/settings",
+      payload: { rootId: "local", storagePoolId: poolId, path: path.join("Photostaff", "offline.pmtiles") }
     });
     expect(mapSettings.statusCode).toBe(200);
     expect(mapSettings.json().settings).toMatchObject({ tileType: "png", minZoom: 0, maxZoom: 4 });
     const range = await app.inject({
       method: "GET",
-      url: "/api/photos/map/archive",
+      url: "/api/photostaff/map/archive",
       headers: { range: "bytes=0-7" }
     });
     expect(range.statusCode).toBe(206);
     expect(range.rawPayload.toString()).toBe("PMTiles\u0003");
 
     await writeFile(rasterPath, pmtilesFixture(1));
-    const replacedArchive = await app.inject({ method: "GET", url: "/api/photos/map/archive" });
+    const replacedArchive = await app.inject({ method: "GET", url: "/api/photostaff/map/archive" });
     expect(replacedArchive.statusCode).toBe(503);
 
-    await writeFile(path.join(root, "Photos", "vector.pmtiles"), pmtilesFixture(1));
+    await writeFile(path.join(root, "Photostaff", "vector.pmtiles"), pmtilesFixture(1));
     const vector = await app.inject({
       method: "PUT",
-      url: "/api/photos/map/settings",
-      payload: { rootId: "local", storagePoolId: poolId, path: path.join("Photos", "vector.pmtiles") }
+      url: "/api/photostaff/map/settings",
+      payload: { rootId: "local", storagePoolId: poolId, path: path.join("Photostaff", "vector.pmtiles") }
     });
     expect(vector.statusCode).toBe(400);
     expect(vector.json().error).toContain("raster");
-    await writeFile(path.join(root, "Photos", "broken.pmtiles"), "broken");
+    await writeFile(path.join(root, "Photostaff", "broken.pmtiles"), "broken");
     expect((await app.inject({
       method: "PUT",
-      url: "/api/photos/map/settings",
-      payload: { rootId: "local", storagePoolId: poolId, path: path.join("Photos", "broken.pmtiles") }
+      url: "/api/photostaff/map/settings",
+      payload: { rootId: "local", storagePoolId: poolId, path: path.join("Photostaff", "broken.pmtiles") }
     })).statusCode).toBe(400);
     await app.close();
   });
 });
 
 async function setup(storageState = { mounted: true }) {
-  tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-photo-api-"));
+  tempDir = await mkdtemp(path.join(os.tmpdir(), "sigmaos-photostaff-api-"));
   const root = path.join(tempDir, "root");
-  await mkdir(path.join(root, "Photos"), { recursive: true });
+  await mkdir(path.join(root, "Photostaff"), { recursive: true });
   db = openSigmaDb(path.join(tempDir, "sigmaos.sqlite"));
   ensureNasRoots(db, [{ id: "local", name: "Local", path: root }]);
   const app = await buildServer({ config: testConfig(root), db, system: storageSystem(root, storageState) });
@@ -513,34 +573,34 @@ async function setup(storageState = { mounted: true }) {
 async function configure(app: Awaited<ReturnType<typeof buildServer>>) {
   return await app.inject({
     method: "PUT",
-    url: "/api/photos/settings",
-    payload: { rootId: "local", storagePoolId: poolId, path: "Photos" }
+    url: "/api/photostaff/settings",
+    payload: { rootId: "local", storagePoolId: poolId, path: "Photostaff" }
   });
 }
 
-function completeInitialScan(settings: PhotoLibrarySettingsRecord) {
-  const job = claimNextPhotoJob(db!, { workerId: "test", leaseMs: 30_000 });
+function completeInitialScan(settings: PhotostaffLibrarySettingsRecord) {
+  const job = claimNextPhotostaffJob(db!, { workerId: "test", leaseMs: 30_000 });
   expect(job).not.toBeNull();
-  finishPhotoJob(db!, { id: job!.id, workerId: "test" });
-  expect(getPhotoLibrarySettings(db!)).toEqual(settings);
+  finishPhotostaffJob(db!, { id: job!.id, workerId: "test" });
+  expect(getPhotostaffLibrarySettings(db!)).toEqual(settings);
 }
 
-async function addPhoto(
+async function addPhotostaff(
   root: string,
-  settings: PhotoLibrarySettingsRecord,
+  settings: PhotostaffLibrarySettingsRecord,
   name: string,
   takenAt: string,
   body = Buffer.from(name),
   mimeType = "image/jpeg",
-  metadata?: PhotoMetadataWriteInput
+  metadata?: PhotostaffMetadataWriteInput
 ) {
-  const photoPath = path.join(root, "Photos", name);
-  await mkdir(path.dirname(photoPath), { recursive: true });
-  await writeFile(photoPath, body);
+  const photostaffPath = path.join(root, "Photostaff", name);
+  await mkdir(path.dirname(photostaffPath), { recursive: true });
+  await writeFile(photostaffPath, body);
   const fileName = path.basename(name);
-  return upsertPhotoAsset(db!, {
+  return upsertPhotostaffAsset(db!, {
     settings,
-    path: path.join("Photos", name),
+    path: path.join("Photostaff", name),
     name: fileName,
     mimeType,
     sizeBytes: body.length,
@@ -564,11 +624,11 @@ function indexedMetadata(overrides: {
   iso: number;
   gpsLatitude?: number;
   gpsLongitude?: number;
-}): PhotoMetadataWriteInput {
+}): PhotostaffMetadataWriteInput {
   const latitude = overrides.gpsLatitude ?? null;
   const longitude = overrides.gpsLongitude ?? null;
   return {
-    schemaVersion: PHOTO_METADATA_SCHEMA_VERSION,
+    schemaVersion: PHOTOSTAFF_METADATA_SCHEMA_VERSION,
     status: "ready",
     mediaKind: "image",
     capturedAt: "2025-01-02T00:00:00.000Z",
@@ -679,7 +739,7 @@ function storageSystem(root: string, state: { mounted: boolean }) {
               : []
           });
         }
-        if (command === "mdadm") return `ARRAY ${poolId} name=photos UUID=photos`;
+        if (command === "mdadm") return `ARRAY ${poolId} name=photostaff UUID=photostaff`;
         if (command === "smartctl") return JSON.stringify({ devices: [] });
         return JSON.stringify({ blockdevices: [] });
       }

@@ -57,7 +57,7 @@ import {
 import { WorkspaceManagementPanel } from "./WorkspaceManagementPanel.js";
 import { LocalTerminalPanel } from "./LocalTerminalPanel.js";
 import { HttpDownloaderPanel } from "./HttpDownloaderPanel.js";
-import { PhotoLibraryPanel } from "./PhotoLibraryPanel.js";
+import { PhotostaffLibraryPanel } from "./PhotostaffLibraryPanel.js";
 import { FileListSkeleton, SkeletonBlock } from "./ManagementSkeleton.js";
 import { PanelHeader, PanelHeaderAction, PanelHeaderActions } from "./PanelHeader.js";
 import type { CodeFontSettings } from "../../lib/editor-settings.js";
@@ -73,9 +73,9 @@ const WORKSPACE_PANELS = [
     Icon: Files
   },
   {
-    id: "photos",
-    labelKey: "workspace.panels.photos",
-    shortLabelKey: "workspace.panels.photosShort",
+    id: "photostaff",
+    labelKey: "workspace.panels.photostaff",
+    shortLabelKey: "workspace.panels.photostaffShort",
     Icon: Images
   },
   {
@@ -1230,8 +1230,8 @@ export function WorkspacePane({
               onNotifySuccess={onNotifySuccess}
               onNotifyWarning={onNotifyWarning}
             />
-          ) : activePanel === "photos" ? (
-            <PhotoLibraryPanel
+          ) : activePanel === "photostaff" ? (
+            <PhotostaffLibraryPanel
               pools={storagePools}
               selectedRootId={selectedRootId}
               sessionId={sessionId}

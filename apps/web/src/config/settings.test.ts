@@ -71,35 +71,39 @@ describe("settings helpers", () => {
     expect(settingsSectionLabel(section, null, false, t, null, null)).toBe("common.states.unavailable");
   });
 
-  it("reflects photo library scan state in the settings navigation", () => {
+  it("reflects photostaff library scan state in the settings navigation", () => {
     const section: SettingsSection = {
-      id: "photos",
+      id: "photostaff",
       group: "workspace"
     };
-    const photoSettings = {
+    const photostaffSettings = {
       rootId: "nas",
       storagePoolId: "pool-a",
-      path: "Photos",
+      path: "Photostaff",
       updatedAt: "2026-09-24T00:00:00.000Z"
     };
-    const photoStatus = {
-      state: "scanning" as const,
+    const photostaffStatus = {
+      state: "processing" as const,
       total: 24,
       failed: 0,
       scanned: 30,
       processed: 24,
-      currentPath: "Photos/2026",
+      currentPath: "Photostaff/2026",
+      phase: "processing" as const,
       error: null,
+      errorCode: null,
+      retryCount: 0,
+      nextRetryAt: null,
       updatedAt: "2026-09-24T00:01:00.000Z"
     };
     const t = ((key: string) => key) as TFunction<"translation">;
 
-    expect(settingsSectionState(section, null, null, null, null, photoStatus)).toBe("loading");
-    expect(settingsSectionLabel(section, null, false, t, null, null, null, photoSettings, photoStatus)).toBe(
-      "settings.photos.states.scanning"
+    expect(settingsSectionState(section, null, null, null, null, photostaffStatus)).toBe("loading");
+    expect(settingsSectionLabel(section, null, false, t, null, null, null, photostaffSettings, photostaffStatus)).toBe(
+      "settings.photostaff.states.processing"
     );
     expect(settingsSectionState(section, null, null, null, null, {
-      ...photoStatus,
+      ...photostaffStatus,
       state: "unconfigured"
     })).toBe("missing");
   });

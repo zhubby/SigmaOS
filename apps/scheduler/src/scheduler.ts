@@ -1,6 +1,6 @@
 import { lstat, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { acquireExecutionLock, detectDuplicateIndexedFiles, getDownloadWorkerHealth, getIndexRootStatus, heartbeatExecutionLock, listBackupRuns, listIndexRunHistory, listNasRoots, listRootReadiness, pruneOperationNotifications, releaseExecutionLock, resolveHealthAlert, upsertHealthAlert, type SigmaDatabase } from "@sigmaos/db";
+import { acquireExecutionLock, detectDuplicateIndexedFiles, getDownloadWorkerHealth, getPhotostaffWorkerHealth, getIndexRootStatus, heartbeatExecutionLock, listBackupRuns, listIndexRunHistory, listNasRoots, listRootReadiness, pruneOperationNotifications, releaseExecutionLock, resolveHealthAlert, upsertHealthAlert, type SigmaDatabase } from "@sigmaos/db";
 import { randomUUID } from "node:crypto";
 import { createVodPlayerRuntime, type SigmaConfig, type SystemHealthSummary, type VodPlayerRuntime } from "@sigmaos/shared";
 import { checkMountReadiness, type MountCommandRunner } from "@sigmaos/nas-tools";
@@ -159,6 +159,14 @@ export async function runHealthOnce(input: { db: SigmaDatabase; config: SigmaCon
   } else if (vodPlayer.status === "critical") {
     issues.push({ code: "vod_player_unavailable", severity: "critical", message: "VOD Player is unavailable" });
   }
+  const photostaff = getPhotostaffWorkerHealth(input.db, now);
+  if (photostaff.status !== "ready") {
+    issues.push({
+      code: "photostaff_unavailable",
+      severity: photostaff.activeJobs + photostaff.queuedJobs + photostaff.retryingJobs > 0 ? "critical" : "warning",
+      message: photostaff.status === "stale" ? "Photostaff heartbeat is stale" : "Photostaff is unavailable"
+    });
+  }
   const summary: SystemHealthSummary = {
     status: issues.some((issue) => issue.severity === "critical") ? "failed" : issues.length ? "degraded" : "ready",
     checkedAt: now.toISOString(),
@@ -167,6 +175,7 @@ export async function runHealthOnce(input: { db: SigmaDatabase; config: SigmaCon
     indexerFreshnessMs: roots.map((root) => getIndexRootStatus(input.db, root.id, now).metrics?.freshnessMs ?? null).filter((value): value is number => value !== null).reduce((max, value) => Math.max(max, value), 0) || null,
     backupFreshnessMs: latestBackup?.finishedAt ? Math.max(0, now.getTime() - Date.parse(latestBackup.finishedAt)) : null,
     downloader: getDownloadWorkerHealth(input.db, now),
+    photostaff,
     vodPlayer
   };
   console.log(JSON.stringify({ event: "health.run.completed", status: summary.status, issueCount: summary.issues.length }));

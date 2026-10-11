@@ -31,8 +31,10 @@ import type {
   PendingApproval,
   ModelProviderSettings,
   PiToolPolicySettings,
-  PhotoLibrarySettings,
-  PhotoLibraryStatus,
+  PhotostaffLibrarySettings,
+  PhotostaffLibraryStatus,
+  PhotostaffProcessingSettings,
+  PhotostaffWorkerHealth,
   SystemInfo,
   SystemInfoStorageVolume
 } from "../../api.js";
@@ -80,8 +82,10 @@ interface SettingsModalProps {
   saving: boolean;
   dockerSettings: DockerSettings | null;
   downloadSettings: DownloadSettings | null;
-  photoSettings: PhotoLibrarySettings | null;
-  photoStatus: PhotoLibraryStatus | null;
+  photostaffSettings: PhotostaffLibrarySettings | null;
+  photostaffStatus: PhotostaffLibraryStatus | null;
+  photostaffProcessingSettings: PhotostaffProcessingSettings | null;
+  photostaffWorkerHealth: PhotostaffWorkerHealth | null;
   settings: ModelProviderSettings | null;
   systemInfo: SystemInfo | null;
   systemInfoError: string | null;
@@ -104,6 +108,9 @@ interface SettingsModalProps {
   onDockerFormChange: (form: DockerSettingsFormState) => void;
   onDownloadSettingsChange: (
     patch: Partial<Omit<DownloadSettings, "updatedAt">>
+  ) => Promise<void>;
+  onPhotostaffProcessingSettingsChange: (
+    patch: Partial<Omit<PhotostaffProcessingSettings, "updatedAt">>
   ) => Promise<void>;
   onToolPolicyFormChange: (form: ToolPolicyFormState) => void;
   onLanguagePreferenceChange: (preference: LanguagePreference) => void;
@@ -128,8 +135,10 @@ export function SettingsModal({
   saving,
   dockerSettings,
   downloadSettings,
-  photoSettings,
-  photoStatus,
+  photostaffSettings,
+  photostaffStatus,
+  photostaffProcessingSettings,
+  photostaffWorkerHealth,
   settings,
   systemInfo,
   systemInfoError,
@@ -151,6 +160,7 @@ export function SettingsModal({
   onFormChange,
   onDockerFormChange,
   onDownloadSettingsChange,
+  onPhotostaffProcessingSettingsChange,
   onToolPolicyFormChange,
   onLanguagePreferenceChange,
   onThemePreferenceChange,
@@ -182,7 +192,7 @@ export function SettingsModal({
     dockerSettings,
     buildInfo,
     downloadSettings,
-    photoStatus
+    photostaffStatus
   );
   const providerOptions = PROVIDER_OPTIONS.map((provider) => ({
     value: provider,
@@ -274,7 +284,7 @@ export function SettingsModal({
                     {settingsSectionIcon(section.id)}
                     <span>
                       <strong>{settingsSectionTitle(section, t)}</strong>
-                      <small>{settingsSectionLabel(section, settings, loading, t, dockerSettings, buildInfo, downloadSettings, photoSettings, photoStatus)}</small>
+                      <small>{settingsSectionLabel(section, settings, loading, t, dockerSettings, buildInfo, downloadSettings, photostaffSettings, photostaffStatus)}</small>
                     </span>
                   </button>
                 ))}
@@ -300,17 +310,12 @@ export function SettingsModal({
               <div className="settings-header-meta" aria-label={t("settings.status")}>
                 <span data-state={currentState}>
                   {settingsStateIcon(currentState)}
-                  {settingsSectionLabel(currentSection, settings, loading, t, dockerSettings, buildInfo, downloadSettings, photoSettings, photoStatus)}
+                  {settingsSectionLabel(currentSection, settings, loading, t, dockerSettings, buildInfo, downloadSettings, photostaffSettings, photostaffStatus)}
                 </span>
                 {activeSection === "version" ? (
                   <span>
                     <ShieldCheck aria-hidden="true" size={13} />
                     {t("settings.version.readOnly")}
-                  </span>
-                ) : activeSection === "photos" ? (
-                  <span>
-                    <ShieldCheck aria-hidden="true" size={13} />
-                    {t("settings.photos.readOnly")}
                   </span>
                 ) : (
                   <span>
@@ -334,8 +339,8 @@ export function SettingsModal({
               systemInfoError={systemInfoError}
               buildInfo={buildInfo}
               downloadSettings={downloadSettings}
-              photoSettings={photoSettings}
-              photoStatus={photoStatus}
+              photostaffSettings={photostaffSettings}
+              photostaffStatus={photostaffStatus}
               locale={resolvedLocale}
               onSectionChange={onSectionChange}
             />
@@ -571,13 +576,17 @@ export function SettingsModal({
             />
           ) : null}
 
-          {activeSection === "photos" ? (
-            <SettingsPhotosPage
-              settings={photoSettings}
-              status={photoStatus}
-              runtime={systemInfo?.sigma.photos ?? null}
+          {activeSection === "photostaff" ? (
+            <SettingsPhotostaffPage
+              settings={photostaffSettings}
+              status={photostaffStatus}
+              processingSettings={photostaffProcessingSettings}
+              workerHealth={photostaffWorkerHealth}
+              runtime={systemInfo?.sigma.photostaff ?? null}
               loading={loading}
               locale={resolvedLocale}
+              onSettingsChange={onPhotostaffProcessingSettingsChange}
+              onClose={onClose}
             />
           ) : null}
 
@@ -615,8 +624,8 @@ function SettingsOverview({
   systemInfoError,
   buildInfo,
   downloadSettings,
-  photoSettings,
-  photoStatus,
+  photostaffSettings,
+  photostaffStatus,
   locale,
   onSectionChange
 }: {
@@ -627,8 +636,8 @@ function SettingsOverview({
   systemInfoError: string | null;
   buildInfo: BuildInfo | null;
   downloadSettings: DownloadSettings | null;
-  photoSettings: PhotoLibrarySettings | null;
-  photoStatus: PhotoLibraryStatus | null;
+  photostaffSettings: PhotostaffLibrarySettings | null;
+  photostaffStatus: PhotostaffLibraryStatus | null;
   locale: SupportedLocale;
   onSectionChange: (section: SettingsSectionId) => void;
 }) {
@@ -664,7 +673,7 @@ function SettingsOverview({
         },
         {
           value: formatLocaleNumber(
-            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings, dockerSettings, buildInfo, downloadSettings, photoStatus) === "ready")
+            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings, dockerSettings, buildInfo, downloadSettings, photostaffStatus) === "ready")
               .length,
             locale
           ),
@@ -672,7 +681,7 @@ function SettingsOverview({
         },
         {
           value: formatLocaleNumber(
-            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings, dockerSettings, buildInfo, downloadSettings, photoStatus) === "missing")
+            SETTINGS_SECTIONS.filter((section) => settingsSectionState(section, settings, dockerSettings, buildInfo, downloadSettings, photostaffStatus) === "missing")
               .length,
             locale
           ),
@@ -749,8 +758,8 @@ function SettingsOverview({
                 <strong>{settingsSectionTitle(section, t)}</strong>
                 <small>{settingsSectionDescription(section, t)}</small>
               </span>
-              <em data-state={settingsSectionState(section, settings, dockerSettings, buildInfo, downloadSettings, photoStatus)}>
-                {settingsSectionLabel(section, settings, loading, t, dockerSettings, buildInfo, downloadSettings, photoSettings, photoStatus)}
+              <em data-state={settingsSectionState(section, settings, dockerSettings, buildInfo, downloadSettings, photostaffStatus)}>
+                {settingsSectionLabel(section, settings, loading, t, dockerSettings, buildInfo, downloadSettings, photostaffSettings, photostaffStatus)}
               </em>
             </button>
           ))}
@@ -1520,106 +1529,171 @@ function SettingsFilesPage({
   );
 }
 
-export function SettingsPhotosPage({
+export function SettingsPhotostaffPage({
   settings,
   status,
+  processingSettings,
+  workerHealth,
   runtime,
   loading,
-  locale
+  locale,
+  onSettingsChange,
+  onClose
 }: {
-  settings: PhotoLibrarySettings | null;
-  status: PhotoLibraryStatus | null;
-  runtime: SystemInfo["sigma"]["photos"] | null;
+  settings: PhotostaffLibrarySettings | null;
+  status: PhotostaffLibraryStatus | null;
+  processingSettings: PhotostaffProcessingSettings | null;
+  workerHealth: PhotostaffWorkerHealth | null;
+  runtime: SystemInfo["sigma"]["photostaff"] | null;
   loading: boolean;
   locale: SupportedLocale;
+  onSettingsChange: (patch: Partial<PhotostaffSettingsDraft>) => Promise<void>;
+  onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const [draft, setDraft] = useState<PhotostaffSettingsDraft>(() => photostaffSettingsDraft(processingSettings));
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setDraft(photostaffSettingsDraft(processingSettings));
+    setSaved(false);
+  }, [processingSettings]);
+
   const state: SettingsState = loading && !status
     ? "loading"
     : status?.state === "ready"
       ? "ready"
-      : status?.state === "queued" || status?.state === "scanning"
+      : status && isPhotostaffActiveState(status.state)
         ? "loading"
         : "missing";
-  const stateLabel = loading && !status
+  const stateLabel = String(loading && !status
     ? t("common.states.loading")
     : status
-      ? t(`settings.photos.states.${status.state}`)
-      : t("common.states.unavailable");
-  const unavailable = t("common.states.unavailable");
+      ? t(`settings.photostaff.states.${status.state}`)
+      : t("common.states.unavailable"));
+  const unavailable = String(t("common.states.unavailable"));
   const libraryRows: SettingsInfoRow[] = [
     {
-      label: t("settings.photos.libraryPath"),
-      value: settings?.path ?? t("settings.photos.notConfigured"),
+      label: t("settings.photostaff.libraryPath"),
+      value: settings?.path ?? t("settings.photostaff.notConfigured"),
       mono: Boolean(settings)
     },
     {
-      label: t("settings.photos.rootId"),
+      label: t("settings.photostaff.rootId"),
       value: settings?.rootId ?? unavailable
     },
     {
-      label: t("settings.photos.storagePoolId"),
+      label: t("settings.photostaff.storagePoolId"),
       value: settings?.storagePoolId ?? unavailable
     },
     {
-      label: t("settings.photos.libraryUpdatedAt"),
+      label: t("settings.photostaff.libraryUpdatedAt"),
       value: settings ? formatDate(settings.updatedAt, locale) : unavailable
     }
   ];
   const scanRows: SettingsInfoRow[] = [
     {
-      label: t("settings.photos.scanState"),
+      label: t("settings.photostaff.scanState"),
       value: stateLabel,
       ...(status?.error ? { detail: status.error } : {})
     },
     {
-      label: t("settings.photos.currentPath"),
+      label: t("settings.photostaff.phase"),
+      value: status?.phase ? String(t(`settings.photostaff.phases.${status.phase}`)) : t("common.dash")
+    },
+    {
+      label: t("settings.photostaff.currentPath"),
       value: status?.currentPath ?? t("common.dash"),
       mono: Boolean(status?.currentPath)
     },
     {
-      label: t("settings.photos.statusUpdatedAt"),
+      label: t("settings.photostaff.statusUpdatedAt"),
       value: status?.updatedAt ? formatDate(status.updatedAt, locale) : t("common.dash")
+    },
+    {
+      label: t("settings.photostaff.retryCount"),
+      value: status ? formatLocaleNumber(status.retryCount, locale) : t("common.dash"),
+      ...(status?.nextRetryAt ? { detail: t("settings.photostaff.nextRetryAt", { value: formatDate(status.nextRetryAt, locale) }) } : {})
+    },
+    {
+      label: t("settings.photostaff.errorCode"),
+      value: status?.errorCode ?? t("common.dash"),
+      mono: Boolean(status?.errorCode)
+    }
+  ];
+  const workerRows: SettingsInfoRow[] = [
+    {
+      label: t("settings.photostaff.workerState"),
+      value: workerHealth ? String(t(`settings.photostaff.workerStates.${workerHealth.status}`)) : unavailable
+    },
+    {
+      label: t("settings.photostaff.lastHeartbeat"),
+      value: workerHealth?.lastHeartbeatAt ? formatDate(workerHealth.lastHeartbeatAt, locale) : t("common.dash")
+    },
+    {
+      label: t("settings.photostaff.activeJobs"),
+      value: workerHealth ? formatLocaleNumber(workerHealth.activeJobs, locale) : t("common.dash")
+    },
+    {
+      label: t("settings.photostaff.pendingJobs"),
+      value: workerHealth
+        ? `${formatLocaleNumber(workerHealth.queuedJobs, locale)} / ${formatLocaleNumber(workerHealth.retryingJobs, locale)}`
+        : t("common.dash")
     }
   ];
   const runtimeRows: SettingsInfoRow[] = [
     {
-      label: t("settings.photos.dataDir"),
+      label: t("settings.photostaff.dataDir"),
       value: runtime?.dataDir ?? unavailable,
       mono: Boolean(runtime)
     },
     {
-      label: t("settings.photos.maxFileSize"),
+      label: t("settings.photostaff.maxFileSize"),
       value: runtime ? formatBytes(runtime.maxFileSizeBytes, locale) : unavailable
     },
     {
-      label: t("settings.photos.thumbnailSize"),
+      label: t("settings.photostaff.thumbnailSize"),
       value: runtime
-        ? t("settings.photos.squarePixels", { value: formatLocaleNumber(runtime.thumbnailSizePx, locale) })
+        ? t("settings.photostaff.squarePixels", { value: formatLocaleNumber(runtime.thumbnailSizePx, locale) })
         : unavailable
     },
     {
-      label: t("settings.photos.previewSize"),
+      label: t("settings.photostaff.previewSize"),
       value: runtime
-        ? t("settings.photos.maxEdgePixels", { value: formatLocaleNumber(runtime.previewMaxEdgePx, locale) })
+        ? t("settings.photostaff.maxEdgePixels", { value: formatLocaleNumber(runtime.previewMaxEdgePx, locale) })
         : unavailable
     },
     {
-      label: t("settings.photos.supportedFormats"),
+      label: t("settings.photostaff.supportedFormats"),
       value: runtime
         ? runtime.supportedExtensions.map((extension) => extension.slice(1).toUpperCase()).join(", ")
         : unavailable
     }
   ];
 
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (saving || loading || !processingSettings) return;
+    setSaving(true);
+    setSaved(false);
+    try {
+      await onSettingsChange(draft);
+      setSaved(true);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <div className="settings-content-body">
-      <div className="settings-page-grid">
+    <form className="settings-form" onSubmit={(event) => void submit(event)}>
+      <div className="settings-content-body">
+        <div className="settings-page-grid">
         <section className="settings-section-card">
           <header>
             <div>
-              <h3>{t("settings.photos.libraryTitle")}</h3>
-              <p>{t("settings.photos.libraryDescription")}</p>
+              <h3>{t("settings.photostaff.libraryTitle")}</h3>
+              <p>{t("settings.photostaff.libraryDescription")}</p>
             </div>
             <span data-state={settings ? "ready" : state}>{settings ? t("common.states.configured") : stateLabel}</span>
           </header>
@@ -1629,17 +1703,17 @@ export function SettingsPhotosPage({
         <section className="settings-section-card">
           <header>
             <div>
-              <h3>{t("settings.photos.scanTitle")}</h3>
-              <p>{t("settings.photos.scanDescription")}</p>
+              <h3>{t("settings.photostaff.scanTitle")}</h3>
+              <p>{t("settings.photostaff.scanDescription")}</p>
             </div>
             <span data-state={state}>{stateLabel}</span>
           </header>
           <div className="settings-metric-grid settings-system-metric-grid">
             {[
-              { label: t("settings.photos.assets"), value: status?.total },
-              { label: t("settings.photos.scanned"), value: status?.scanned },
-              { label: t("settings.photos.processed"), value: status?.processed },
-              { label: t("settings.photos.failed"), value: status?.failed }
+              { label: t("settings.photostaff.assets"), value: status?.total },
+              { label: t("settings.photostaff.scanned"), value: status?.scanned },
+              { label: t("settings.photostaff.processed"), value: status?.processed },
+              { label: t("settings.photostaff.failed"), value: status?.failed }
             ].map((metric) => (
               <article key={metric.label}>
                 <strong>
@@ -1655,18 +1729,93 @@ export function SettingsPhotosPage({
         <section className="settings-section-card">
           <header>
             <div>
-              <h3>{t("settings.photos.processingTitle")}</h3>
-              <p>{t("settings.photos.processingDescription")}</p>
+              <h3>{t("settings.photostaff.workerTitle")}</h3>
+              <p>{t("settings.photostaff.workerDescription")}</p>
+            </div>
+            <span data-state={workerHealth?.status === "ready" ? "ready" : workerHealth?.status === "stale" ? "loading" : "missing"}>
+              {workerHealth ? t(`settings.photostaff.workerStates.${workerHealth.status}`) : unavailable}
+            </span>
+          </header>
+          <SettingsInfoList rows={workerRows} />
+        </section>
+
+        <section className="settings-section-card">
+          <header>
+            <div>
+              <h3>{t("settings.photostaff.processingTitle")}</h3>
+              <p>{t("settings.photostaff.processingDescription")}</p>
+            </div>
+            <span data-state={processingSettings ? "ready" : loading ? "loading" : "missing"}>
+              {processingSettings ? t("common.states.configured") : loading ? t("common.states.loading") : unavailable}
+            </span>
+          </header>
+          <fieldset className="settings-field-grid settings-download-fields" disabled={loading || saving || !processingSettings}>
+            <DownloadNumberField label={t("settings.photostaff.processingConcurrency")} value={draft.processingConcurrency} min={1} max={4} onChange={(value) => setDraft((current) => ({ ...current, processingConcurrency: value ?? 1 }))} />
+            <DownloadNumberField label={t("settings.photostaff.scanIntervalMs")} value={draft.scanIntervalMs} min={60_000} max={86_400_000} step={60_000} onChange={(value) => setDraft((current) => ({ ...current, scanIntervalMs: value ?? 60_000 }))} />
+            <DownloadNumberField label={t("settings.photostaff.maxAutoRetries")} value={draft.maxAutoRetries} min={0} max={20} onChange={(value) => setDraft((current) => ({ ...current, maxAutoRetries: value ?? 0 }))} />
+            <DownloadNumberField label={t("settings.photostaff.retryBaseDelayMs")} value={draft.retryBaseDelayMs} min={500} max={1_800_000} step={500} onChange={(value) => setDraft((current) => ({ ...current, retryBaseDelayMs: value ?? 500 }))} />
+            <DownloadNumberField label={t("settings.photostaff.retryMaxDelayMs")} value={draft.retryMaxDelayMs} min={draft.retryBaseDelayMs} max={1_800_000} step={1_000} onChange={(value) => setDraft((current) => ({ ...current, retryMaxDelayMs: value ?? current.retryBaseDelayMs }))} />
+            <DownloadNumberField label={t("settings.photostaff.commandTimeoutMs")} value={draft.commandTimeoutMs} min={5_000} max={900_000} step={1_000} onChange={(value) => setDraft((current) => ({ ...current, commandTimeoutMs: value ?? 5_000 }))} />
+            <DownloadNumberField label={t("settings.photostaff.maxFileSizeBytes")} value={draft.maxFileSizeBytes} min={1024 ** 2} max={1024 ** 4} step={1024 ** 2} onChange={(value) => setDraft((current) => ({ ...current, maxFileSizeBytes: value ?? 1024 ** 2 }))} />
+            <DownloadNumberField label={t("settings.photostaff.maxXmpSizeBytes")} value={draft.maxXmpSizeBytes} min={1024} max={64 * 1024 ** 2} step={1024} onChange={(value) => setDraft((current) => ({ ...current, maxXmpSizeBytes: value ?? 1024 }))} />
+            <DownloadNumberField label={t("settings.photostaff.maxIntermediateBytes")} value={draft.maxIntermediateBytes} min={64 * 1024 ** 2} max={8 * 1024 ** 3} step={1024 ** 2} onChange={(value) => setDraft((current) => ({ ...current, maxIntermediateBytes: value ?? 64 * 1024 ** 2 }))} />
+            <DownloadNumberField label={t("settings.photostaff.minFreeSpaceBytes")} value={draft.minFreeSpaceBytes} min={0} max={1024 ** 4} step={1024 ** 2} onChange={(value) => setDraft((current) => ({ ...current, minFreeSpaceBytes: value ?? 0 }))} />
+            <DownloadNumberField label={t("settings.photostaff.maxDecodedPixels")} value={draft.maxDecodedPixels} min={1_000_000} max={268_402_689} step={1_000_000} onChange={(value) => setDraft((current) => ({ ...current, maxDecodedPixels: value ?? 1_000_000 }))} />
+          </fieldset>
+        </section>
+
+        <section className="settings-section-card">
+          <header>
+            <div>
+              <h3>{t("settings.photostaff.runtimeTitle")}</h3>
+              <p>{t("settings.photostaff.runtimeDescription")}</p>
             </div>
             <span data-state={runtime ? "ready" : loading ? "loading" : "missing"}>
-              {runtime ? t("settings.photos.readOnly") : loading ? t("common.states.loading") : unavailable}
+              {runtime ? t("settings.photostaff.readOnly") : loading ? t("common.states.loading") : unavailable}
             </span>
           </header>
           <SettingsInfoList rows={runtimeRows} />
         </section>
+        </div>
       </div>
-    </div>
+
+      <footer className="settings-actions">
+        <span>{saved ? t("settings.photostaff.saved") : processingSettings ? t("settings.photostaff.ready") : t("common.states.unavailable")}</span>
+        <div>
+          <button className="secondary-button" type="button" onClick={onClose} disabled={saving}>{t("common.actions.cancel")}</button>
+          <button className="primary-button" type="submit" disabled={loading || saving || !processingSettings} aria-busy={saving || undefined}>
+            {saving ? t("common.actions.saving") : saved ? <><Check aria-hidden="true" size={14} />{t("settings.photostaff.saved")}</> : t("common.actions.saveChanges")}
+          </button>
+        </div>
+      </footer>
+    </form>
   );
+}
+
+type PhotostaffSettingsDraft = Omit<PhotostaffProcessingSettings, "updatedAt">;
+
+function photostaffSettingsDraft(settings: PhotostaffProcessingSettings | null): PhotostaffSettingsDraft {
+  if (settings) {
+    const { updatedAt: _updatedAt, ...draft } = settings;
+    return draft;
+  }
+  return {
+    processingConcurrency: 1,
+    scanIntervalMs: 1_800_000,
+    maxAutoRetries: 5,
+    retryBaseDelayMs: 2_000,
+    retryMaxDelayMs: 300_000,
+    commandTimeoutMs: 120_000,
+    maxFileSizeBytes: 512 * 1024 ** 2,
+    maxXmpSizeBytes: 16 * 1024 ** 2,
+    maxIntermediateBytes: 2 * 1024 ** 3,
+    minFreeSpaceBytes: 0,
+    maxDecodedPixels: 268_402_689
+  };
+}
+
+function isPhotostaffActiveState(state: PhotostaffLibraryStatus["state"]): boolean {
+  return state === "queued" || state === "discovering" || state === "processing" || state === "retrying";
 }
 
 type DownloadSettingsDraft = Omit<DownloadSettings, "updatedAt">;
@@ -2676,7 +2825,7 @@ function settingsSectionIcon(section: SettingsSectionId) {
       return <Server aria-hidden="true" size={16} />;
     case "files":
       return <Folder aria-hidden="true" size={16} />;
-    case "photos":
+    case "photostaff":
       return <Images aria-hidden="true" size={16} />;
     case "downloads":
       return <Download aria-hidden="true" size={16} />;

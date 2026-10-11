@@ -7,7 +7,7 @@
     "./vod-player-client": "./src/vod-player-client.ts",
     "./docker-images": "./src/docker-images.ts",
     "./docker-resources": "./src/docker-resources.ts",
-    "./photo-config": "./src/photo-config.ts"
+    "./photostaff-config": "./src/photostaff-config.ts"
   },
   "types": "./src/index.ts",
   "dependencies": {

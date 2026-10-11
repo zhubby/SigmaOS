@@ -9,11 +9,11 @@ import type {
   SigmaConfig
 } from "@sigmaos/shared";
 import {
-  PHOTO_DATA_DIRECTORY_NAME,
-  PHOTO_MAX_FILE_SIZE_BYTES,
-  PHOTO_PREVIEW_MAX_EDGE_PX,
-  PHOTO_SUPPORTED_EXTENSIONS,
-  PHOTO_THUMBNAIL_SIZE_PX
+  PHOTOSTAFF_DATA_DIRECTORY_NAME,
+  PHOTOSTAFF_MAX_FILE_SIZE_BYTES,
+  PHOTOSTAFF_PREVIEW_MAX_EDGE_PX,
+  PHOTOSTAFF_SUPPORTED_EXTENSIONS,
+  PHOTOSTAFF_THUMBNAIL_SIZE_PX
 } from "@sigmaos/shared";
 
 interface StorageCandidate {
@@ -95,12 +95,12 @@ export async function collectSystemInfo(config: SigmaConfig): Promise<PublicSyst
       modelProvider: config.model.provider,
       localEndpointConfigured: Boolean(config.model.localEndpoint),
       dockerEnabled: config.docker.enabled,
-      photos: {
-        dataDir: path.join(config.dataDir, PHOTO_DATA_DIRECTORY_NAME),
-        maxFileSizeBytes: PHOTO_MAX_FILE_SIZE_BYTES,
-        thumbnailSizePx: PHOTO_THUMBNAIL_SIZE_PX,
-        previewMaxEdgePx: PHOTO_PREVIEW_MAX_EDGE_PX,
-        supportedExtensions: [...PHOTO_SUPPORTED_EXTENSIONS]
+      photostaff: {
+        dataDir: path.join(config.dataDir, PHOTOSTAFF_DATA_DIRECTORY_NAME),
+        maxFileSizeBytes: PHOTOSTAFF_MAX_FILE_SIZE_BYTES,
+        thumbnailSizePx: PHOTOSTAFF_THUMBNAIL_SIZE_PX,
+        previewMaxEdgePx: PHOTOSTAFF_PREVIEW_MAX_EDGE_PX,
+        supportedExtensions: [...PHOTOSTAFF_SUPPORTED_EXTENSIONS]
       },
       nasRoots: config.nasRoots
     }

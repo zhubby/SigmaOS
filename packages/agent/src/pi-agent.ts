@@ -38,9 +38,9 @@ import type {
   PiToolCallApproval,
   PiToolName,
   PiToolPolicySettingsRecord,
-  PhotoMetadataDetail,
-  PhotoQueryPage,
-  PhotoQueryRequest
+  PhotostaffMetadataDetail,
+  PhotostaffQueryPage,
+  PhotostaffQueryRequest
 } from "@sigmaos/shared";
 
 export interface PiAgentEmitEvent {
@@ -82,13 +82,13 @@ export interface PiAgentInput {
   createToolApproval: (approval: PiToolCallApproval) => Promise<PendingApprovalRecord>;
   getApprovalStatus: (approvalId: string) => Promise<ApprovalStatus | null> | ApprovalStatus | null;
   markWaitingForApproval?: () => void | Promise<void>;
-  photoTools?: PhotoAgentToolService;
+  photostaffTools?: PhotostaffAgentToolService;
   runner?: PiAgentRunner;
 }
 
-export interface PhotoAgentToolService {
-  searchPhotos: (request: PhotoQueryRequest) => Promise<PhotoQueryPage>;
-  getPhotoMetadata: (assetId: string) => Promise<PhotoMetadataDetail | null>;
+export interface PhotostaffAgentToolService {
+  searchPhotostaff: (request: PhotostaffQueryRequest) => Promise<PhotostaffQueryPage>;
+  getPhotostaffMetadata: (assetId: string) => Promise<PhotostaffMetadataDetail | null>;
 }
 
 export type PiAgentRunner = (input: PiAgentRuntimeInput) => Promise<PiAgentTurnResult>;
@@ -107,7 +107,7 @@ export interface PiAgentRuntimeInput {
   createToolApproval: PiAgentInput["createToolApproval"];
   getApprovalStatus: PiAgentInput["getApprovalStatus"];
   markWaitingForApproval?: PiAgentInput["markWaitingForApproval"];
-  photoTools?: PhotoAgentToolService;
+  photostaffTools?: PhotostaffAgentToolService;
 }
 
 type TextToolResult = {
@@ -467,36 +467,36 @@ function createSigmaPiTools(input: PiAgentRuntimeInput): ToolDefinition[] {
       }
     } as typeof write;
 
-  const photoTools = input.photoTools ? createPhotoAgentTools(input.photoTools) : [];
-  return [readTool, lsTool, findTool, grepTool, ...photoTools, bashTool, editTool, writeTool] as unknown as ToolDefinition[];
+  const photostaffTools = input.photostaffTools ? createPhotostaffAgentTools(input.photostaffTools) : [];
+  return [readTool, lsTool, findTool, grepTool, ...photostaffTools, bashTool, editTool, writeTool] as unknown as ToolDefinition[];
 }
 
-const photoScalarSchema = Type.Union([Type.String({ maxLength: 65_536 }), Type.Number(), Type.Boolean()]);
-const photoRangeSchema = Type.Object({
+const photostaffScalarSchema = Type.Union([Type.String({ maxLength: 65_536 }), Type.Number(), Type.Boolean()]);
+const photostaffRangeSchema = Type.Object({
   min: Type.Optional(Type.Number()),
   max: Type.Optional(Type.Number())
 });
-const photoConditionSchema = Type.Object({
+const photostaffConditionSchema = Type.Object({
   key: Type.String({ minLength: 1, maxLength: 256 }),
   operator: Type.Union([
     Type.Literal("eq"), Type.Literal("contains"), Type.Literal("prefix"), Type.Literal("in"),
     Type.Literal("exists"), Type.Literal("not_exists"), Type.Literal("lt"), Type.Literal("lte"),
     Type.Literal("gt"), Type.Literal("gte"), Type.Literal("between")
   ]),
-  value: Type.Optional(Type.Union([photoScalarSchema, Type.Array(photoScalarSchema, { maxItems: 100 })])),
+  value: Type.Optional(Type.Union([photostaffScalarSchema, Type.Array(photostaffScalarSchema, { maxItems: 100 })])),
   valueTo: Type.Optional(Type.Union([Type.String(), Type.Number()]))
 });
-const photoFiltersSchema = Type.Object({
+const photostaffFiltersSchema = Type.Object({
   text: Type.Optional(Type.String({ maxLength: 512 })),
   capturedAt: Type.Optional(Type.Object({ from: Type.Optional(Type.String({ maxLength: 64 })), to: Type.Optional(Type.String({ maxLength: 64 })) })),
   mediaKinds: Type.Optional(Type.Array(Type.Union([Type.Literal("image"), Type.Literal("video"), Type.Literal("raw")]), { maxItems: 3 })),
   cameraModels: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 512 }), { maxItems: 100 })),
   lensModels: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 512 }), { maxItems: 100 })),
-  iso: Type.Optional(photoRangeSchema),
-  aperture: Type.Optional(photoRangeSchema),
-  exposureTimeSeconds: Type.Optional(photoRangeSchema),
-  focalLengthMm: Type.Optional(photoRangeSchema),
-  rating: Type.Optional(photoRangeSchema),
+  iso: Type.Optional(photostaffRangeSchema),
+  aperture: Type.Optional(photostaffRangeSchema),
+  exposureTimeSeconds: Type.Optional(photostaffRangeSchema),
+  focalLengthMm: Type.Optional(photostaffRangeSchema),
+  rating: Type.Optional(photostaffRangeSchema),
   keywords: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 512 }), { maxItems: 100 })),
   hasLocation: Type.Optional(Type.Boolean()),
   location: Type.Optional(Type.Union([
@@ -516,17 +516,17 @@ const photoFiltersSchema = Type.Object({
   ])),
   advanced: Type.Optional(Type.Object({
     mode: Type.Union([Type.Literal("all"), Type.Literal("any")]),
-    conditions: Type.Array(photoConditionSchema, { maxItems: 25 })
+    conditions: Type.Array(photostaffConditionSchema, { maxItems: 25 })
   }))
 });
 
-export function createPhotoAgentTools(service: PhotoAgentToolService): ToolDefinition[] {
-  const searchPhotos = {
-    name: "search_photos",
-    label: "Search photos",
-    description: "Search the current SigmaOS photo library by text, camera, exposure, rating, keyword, date, location, or indexed metadata fields. Location filtering is local; results never include exact coordinates or other sensitive metadata.",
+export function createPhotostaffAgentTools(service: PhotostaffAgentToolService): ToolDefinition[] {
+  const searchPhotostaff = {
+    name: "search_photostaff",
+    label: "Search Photostaff",
+    description: "Search the current SigmaOS photostaff library by text, camera, exposure, rating, keyword, date, location, or indexed metadata fields. Location filtering is local; results never include exact coordinates or other sensitive metadata.",
     parameters: Type.Object({
-      filters: Type.Optional(photoFiltersSchema),
+      filters: Type.Optional(photostaffFiltersSchema),
       sort: Type.Optional(Type.Object({
         field: Type.Union([
           Type.Literal("captured_at"), Type.Literal("indexed_at"), Type.Literal("name"),
@@ -536,62 +536,62 @@ export function createPhotoAgentTools(service: PhotoAgentToolService): ToolDefin
       })),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 25 }))
     }),
-    execute: async (_toolCallId: string, params: PhotoQueryRequest) => {
+    execute: async (_toolCallId: string, params: PhotostaffQueryRequest) => {
       if (params.sort?.field === "distance" && params.filters?.location?.kind !== "near") {
         return textResult("Distance sorting requires a nearby location filter.");
       }
-      const result = await service.searchPhotos({ ...params, limit: Math.min(params.limit ?? 25, 25), includeFacets: false });
-      return textResult(JSON.stringify(redactPhotoSearchResult(result), null, 2));
+      const result = await service.searchPhotostaff({ ...params, limit: Math.min(params.limit ?? 25, 25), includeFacets: false });
+      return textResult(JSON.stringify(redactPhotostaffSearchResult(result), null, 2));
     }
   };
-  const getPhotoMetadata = {
-    name: "get_photo_metadata",
-    label: "Get photo metadata",
-    description: "Get non-sensitive indexed metadata for one photo in the current SigmaOS photo library. Exact GPS, serial numbers, contact details, and person regions are always omitted.",
+  const getPhotostaffMetadata = {
+    name: "get_photostaff_metadata",
+    label: "Get photostaff metadata",
+    description: "Get non-sensitive indexed metadata for one photostaff in the current SigmaOS photostaff library. Exact GPS, serial numbers, contact details, and person regions are always omitted.",
     parameters: Type.Object({ assetId: Type.String({ minLength: 1, maxLength: 256 }) }),
     execute: async (_toolCallId: string, params: { assetId: string }) => {
-      const detail = await service.getPhotoMetadata(params.assetId);
-      return textResult(detail ? JSON.stringify(redactPhotoMetadataDetail(detail), null, 2) : "Photo not found.");
+      const detail = await service.getPhotostaffMetadata(params.assetId);
+      return textResult(detail ? JSON.stringify(redactPhotostaffMetadataDetail(detail), null, 2) : "Photostaff not found.");
     }
   };
-  return [searchPhotos, getPhotoMetadata] as unknown as ToolDefinition[];
+  return [searchPhotostaff, getPhotostaffMetadata] as unknown as ToolDefinition[];
 }
 
-function redactPhotoSearchResult(result: PhotoQueryPage) {
+function redactPhotostaffSearchResult(result: PhotostaffQueryPage) {
   return {
     total: result.total,
     metadataIndex: result.metadataIndex,
-    photos: result.photos.map((photo) => ({
-      id: photo.id,
-      path: photo.path,
-      name: photo.name,
-      mimeType: photo.mimeType,
-      sizeBytes: photo.sizeBytes,
-      width: photo.width,
-      height: photo.height,
-      takenAt: photo.takenAt,
-      indexedAt: photo.indexedAt,
-      keywords: photo.keywords,
-      metadata: photo.metadata
+    photostaff: result.photostaff.map((photostaff) => ({
+      id: photostaff.id,
+      path: photostaff.path,
+      name: photostaff.name,
+      mimeType: photostaff.mimeType,
+      sizeBytes: photostaff.sizeBytes,
+      width: photostaff.width,
+      height: photostaff.height,
+      takenAt: photostaff.takenAt,
+      indexedAt: photostaff.indexedAt,
+      keywords: photostaff.keywords,
+      metadata: photostaff.metadata
     }))
   };
 }
 
-function redactPhotoMetadataDetail(detail: PhotoMetadataDetail): PhotoMetadataDetail {
+function redactPhotostaffMetadataDetail(detail: PhotostaffMetadataDetail): PhotostaffMetadataDetail {
   return {
     assetId: detail.assetId,
     summary: detail.summary,
     keywords: detail.keywords,
-    groups: redactPhotoGroups(detail.groups),
+    groups: redactPhotostaffGroups(detail.groups),
     sensitiveOmitted: detail.sensitiveOmitted || Boolean(detail.sensitiveGroups),
     warnings: detail.warnings
   };
 }
 
-function redactPhotoGroups(
-  groups: PhotoMetadataDetail["groups"]
-): PhotoMetadataDetail["groups"] {
-  const redacted: PhotoMetadataDetail["groups"] = {};
+function redactPhotostaffGroups(
+  groups: PhotostaffMetadataDetail["groups"]
+): PhotostaffMetadataDetail["groups"] {
+  const redacted: PhotostaffMetadataDetail["groups"] = {};
   const sensitiveKey = /(gps|latitude|longitude|serial|contact|email|phone|person|people|face|region)/iu;
   for (const [source, entries] of Object.entries(groups)) {
     if (source.toLocaleLowerCase("und") === "gps") continue;

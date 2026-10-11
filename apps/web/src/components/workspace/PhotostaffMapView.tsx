@@ -2,18 +2,18 @@ import { Crosshair, LoaderCircle, Map as MapIcon, MapPinned, Search } from "luci
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  getPhotoMapSettings,
-  queryPhotoMap,
-  type PhotoMapQueryResult,
-  type PhotoMapSettings,
-  type PhotoQueryRequest
+  getPhotostaffMapSettings,
+  queryPhotostaffMap,
+  type PhotostaffMapQueryResult,
+  type PhotostaffMapSettings,
+  type PhotostaffQueryRequest
 } from "../../api.js";
-import type { PhotoLocationBounds } from "@sigmaos/shared";
+import type { PhotostaffLocationBounds } from "@sigmaos/shared";
 import "maplibre-gl/dist/maplibre-gl.css";
 
-const WORLD_BOUNDS: PhotoLocationBounds = { kind: "bounds", west: -180, south: -85, east: 180, north: 85 };
+const WORLD_BOUNDS: PhotostaffLocationBounds = { kind: "bounds", west: -180, south: -85, east: 180, north: 85 };
 
-export function PhotoMapView({
+export function PhotostaffMapView({
   filters,
   refreshKey,
   onConfigure,
@@ -21,11 +21,11 @@ export function PhotoMapView({
   onSearchBounds,
   onError
 }: {
-  filters: PhotoQueryRequest["filters"];
+  filters: PhotostaffQueryRequest["filters"];
   refreshKey: number;
   onConfigure: () => void;
   onOpenAsset: (assetId: string) => void | Promise<void>;
-  onSearchBounds: (bounds: PhotoLocationBounds) => void;
+  onSearchBounds: (bounds: PhotostaffLocationBounds) => void;
   onError: (message: string) => void;
 }) {
   const { t } = useTranslation();
@@ -35,24 +35,24 @@ export function PhotoMapView({
   const errorRef = useRef(onError);
   const filtersRef = useRef(filters);
   const searchBoundsRef = useRef(onSearchBounds);
-  const clustersRef = useRef<PhotoMapQueryResult["clusters"]>([]);
+  const clustersRef = useRef<PhotostaffMapQueryResult["clusters"]>([]);
   const loadRequestRef = useRef(0);
-  const boundsRef = useRef<PhotoLocationBounds>(WORLD_BOUNDS);
-  const [settings, setSettings] = useState<PhotoMapSettings | null>(null);
+  const boundsRef = useRef<PhotostaffLocationBounds>(WORLD_BOUNDS);
+  const [settings, setSettings] = useState<PhotostaffMapSettings | null>(null);
   const [settingsUnavailable, setSettingsUnavailable] = useState(false);
-  const [result, setResult] = useState<PhotoMapQueryResult | null>(null);
-  const [bounds, setBounds] = useState<PhotoLocationBounds>(WORLD_BOUNDS);
-  const [pendingBounds, setPendingBounds] = useState<PhotoLocationBounds | null>(null);
+  const [result, setResult] = useState<PhotostaffMapQueryResult | null>(null);
+  const [bounds, setBounds] = useState<PhotostaffLocationBounds>(WORLD_BOUNDS);
+  const [pendingBounds, setPendingBounds] = useState<PhotostaffLocationBounds | null>(null);
   const [loading, setLoading] = useState(true);
 
   filtersRef.current = filters;
   searchBoundsRef.current = onSearchBounds;
 
-  const loadPoints = useCallback(async (nextBounds: PhotoLocationBounds, commitBounds = false) => {
+  const loadPoints = useCallback(async (nextBounds: PhotostaffLocationBounds, commitBounds = false) => {
     const requestId = ++loadRequestRef.current;
     setLoading(true);
     try {
-      const next = await queryPhotoMap({
+      const next = await queryPhotostaffMap({
         ...(filtersRef.current ? { filters: filtersRef.current } : {}),
         bounds: nextBounds,
         columns: 64,
@@ -80,7 +80,7 @@ export function PhotoMapView({
 
   useEffect(() => {
     let active = true;
-    void getPhotoMapSettings().then((response) => {
+    void getPhotostaffMapSettings().then((response) => {
       if (!active) return;
       setSettings(response.settings);
       setSettingsUnavailable(Boolean(response.unavailable));
@@ -111,7 +111,7 @@ export function PhotoMapView({
       const protocol = new pmtilesModule.Protocol();
       maplibre.addProtocol("pmtiles", protocol.tile);
       removeProtocol = () => maplibre.removeProtocol("pmtiles");
-      const archiveUrl = `${window.location.origin}/api/photos/map/archive`;
+      const archiveUrl = `${window.location.origin}/api/photostaff/map/archive`;
       const initialBounds = settings.bounds ?? [-180, -85, 180, 85];
       const map = new maplibre.Map({
         container: hostRef.current,
@@ -129,14 +129,14 @@ export function PhotoMapView({
               tileSize: 256,
               attribution: settings.attribution ?? ""
             },
-            photos: { type: "geojson", data: emptyFeatureCollection() }
+            photostaff: { type: "geojson", data: emptyFeatureCollection() }
           },
           layers: [
             { id: "offline", type: "raster", source: "offline" },
             {
-              id: "photo-points",
+              id: "photostaff-points",
               type: "circle",
-              source: "photos",
+              source: "photostaff",
               paint: {
                 "circle-radius": ["interpolate", ["linear"], ["get", "count"], 1, 7, 100, 18],
                 "circle-color": "#f4c95d",
@@ -145,9 +145,9 @@ export function PhotoMapView({
               }
             },
             {
-              id: "photo-counts",
+              id: "photostaff-counts",
               type: "symbol",
-              source: "photos",
+              source: "photostaff",
               filter: [">", ["get", "count"], 1],
               layout: { "text-field": ["to-string", ["get", "count"]], "text-size": 11 },
               paint: { "text-color": "#16191f" }
@@ -157,16 +157,16 @@ export function PhotoMapView({
       });
       mapRef.current = map;
       map.on("load", () => {
-        const source = map.getSource("photos") as import("maplibre-gl").GeoJSONSource | undefined;
+        const source = map.getSource("photostaff") as import("maplibre-gl").GeoJSONSource | undefined;
         source?.setData(pointsToGeoJson(clustersRef.current));
       });
       map.on("moveend", () => {
         const viewport = map.getBounds();
-        setPendingBounds(photoViewportBounds(
+        setPendingBounds(photostaffViewportBounds(
           viewport.getWest(), viewport.getSouth(), viewport.getEast(), viewport.getNorth()
         ));
       });
-      map.on("click", "photo-points", (event: import("maplibre-gl").MapLayerMouseEvent) => {
+      map.on("click", "photostaff-points", (event: import("maplibre-gl").MapLayerMouseEvent) => {
         const feature = event.features?.[0];
         if (!feature || feature.geometry.type !== "Point") return;
         const count = Number(feature.properties?.count ?? 0);
@@ -186,13 +186,13 @@ export function PhotoMapView({
 
   useEffect(() => {
     clustersRef.current = result?.clusters ?? [];
-    const source = mapRef.current?.getSource("photos") as import("maplibre-gl").GeoJSONSource | undefined;
+    const source = mapRef.current?.getSource("photostaff") as import("maplibre-gl").GeoJSONSource | undefined;
     source?.setData(pointsToGeoJson(clustersRef.current));
   }, [result]);
 
   function useCurrentLocation() {
     if (!navigator.geolocation) {
-      onError(t("workspace.photos.locationUnavailable"));
+      onError(t("workspace.photostaff.locationUnavailable"));
       return;
     }
     navigator.geolocation.getCurrentPosition((position) => {
@@ -207,49 +207,49 @@ export function PhotoMapView({
 
   const localCanvas = !settings || settingsUnavailable;
   return (
-    <section className="photo-map-view" aria-label={t("workspace.photos.mapView")}>
-      <div className="photo-map-toolbar">
-        <span>{localCanvas ? t("workspace.photos.localCoordinateMap") : settings.path}</span>
+    <section className="photostaff-map-view" aria-label={t("workspace.photostaff.mapView")}>
+      <div className="photostaff-map-toolbar">
+        <span>{localCanvas ? t("workspace.photostaff.localCoordinateMap") : settings.path}</span>
         <div>
-          <button type="button" onClick={useCurrentLocation} title={t("workspace.photos.myLocation")} aria-label={t("workspace.photos.myLocation")}>
+          <button type="button" onClick={useCurrentLocation} title={t("workspace.photostaff.myLocation")} aria-label={t("workspace.photostaff.myLocation")}>
             <Crosshair aria-hidden="true" size={15} />
           </button>
-          <button type="button" onClick={onConfigure} title={t("workspace.photos.configureMap")} aria-label={t("workspace.photos.configureMap")}>
+          <button type="button" onClick={onConfigure} title={t("workspace.photostaff.configureMap")} aria-label={t("workspace.photostaff.configureMap")}>
             <MapPinned aria-hidden="true" size={15} />
           </button>
           <button type="button" onClick={() => void loadPoints(pendingBounds ?? bounds, true)} disabled={!pendingBounds || loading}>
-            <Search aria-hidden="true" size={14} />{t("workspace.photos.searchArea")}
+            <Search aria-hidden="true" size={14} />{t("workspace.photostaff.searchArea")}
           </button>
         </div>
       </div>
-      <div className="photo-map-canvas">
+      <div className="photostaff-map-canvas">
         {localCanvas ? (
-          <div className="photo-coordinate-canvas" role="img" aria-label={t("workspace.photos.localCoordinateMap")}>
-            <div className="photo-coordinate-grid" aria-hidden="true" />
+          <div className="photostaff-coordinate-canvas" role="img" aria-label={t("workspace.photostaff.localCoordinateMap")}>
+            <div className="photostaff-coordinate-grid" aria-hidden="true" />
             {(result?.clusters ?? []).map((cluster, index) => (
               <button
                 key={`${cluster.longitude}:${cluster.latitude}:${index}`}
                 type="button"
-                className="photo-map-point"
+                className="photostaff-map-point"
                 style={pointStyle(cluster.longitude, cluster.latitude, bounds)}
                 onClick={() => cluster.assetId
                   ? void onOpenAsset(cluster.assetId)
                   : void loadPoints(around(cluster.longitude, cluster.latitude, boundsSpan(bounds) / 4))}
-                aria-label={t("workspace.photos.mapPhotoCount", { count: cluster.count })}
+                aria-label={t("workspace.photostaff.mapPhotostaffCount", { count: cluster.count })}
               >
                 {cluster.count > 1 ? cluster.count : ""}
               </button>
             ))}
-            <div className="photo-map-empty-label">
+            <div className="photostaff-map-empty-label">
               <MapIcon aria-hidden="true" size={20} />
-              <span>{settingsUnavailable ? t("workspace.photos.mapOffline") : t("workspace.photos.noBaseMap")}</span>
+              <span>{settingsUnavailable ? t("workspace.photostaff.mapOffline") : t("workspace.photostaff.noBaseMap")}</span>
             </div>
           </div>
-        ) : <div ref={hostRef} className="photo-maplibre" />}
-        {loading ? <div className="photo-map-loading"><LoaderCircle className="is-spinning" aria-hidden="true" size={20} /></div> : null}
+        ) : <div ref={hostRef} className="photostaff-maplibre" />}
+        {loading ? <div className="photostaff-map-loading"><LoaderCircle className="is-spinning" aria-hidden="true" size={20} /></div> : null}
       </div>
       {result?.metadataIndex.pending ? (
-        <p className="photo-index-progress">{t("workspace.photos.metadataProgress", {
+        <p className="photostaff-index-progress">{t("workspace.photostaff.metadataProgress", {
           indexed: result.metadataIndex.indexed,
           total: result.metadataIndex.total
         })}</p>
@@ -258,7 +258,7 @@ export function PhotoMapView({
   );
 }
 
-function tupleToBounds(bounds: [number, number, number, number]): PhotoLocationBounds {
+function tupleToBounds(bounds: [number, number, number, number]): PhotostaffLocationBounds {
   return { kind: "bounds", west: bounds[0], south: bounds[1], east: bounds[2], north: bounds[3] };
 }
 
@@ -269,7 +269,7 @@ function midpoint(bounds: [number, number, number, number]): [number, number] {
   return [longitude, (bounds[1] + bounds[3]) / 2];
 }
 
-function pointsToGeoJson(clusters: PhotoMapQueryResult["clusters"]): GeoJSON.FeatureCollection {
+function pointsToGeoJson(clusters: PhotostaffMapQueryResult["clusters"]): GeoJSON.FeatureCollection {
   return {
     type: "FeatureCollection",
     features: clusters.map((cluster) => ({
@@ -284,7 +284,7 @@ function emptyFeatureCollection(): GeoJSON.FeatureCollection {
   return { type: "FeatureCollection", features: [] };
 }
 
-function pointStyle(longitude: number, latitude: number, bounds: PhotoLocationBounds) {
+function pointStyle(longitude: number, latitude: number, bounds: PhotostaffLocationBounds) {
   const span = bounds.west <= bounds.east ? bounds.east - bounds.west : 360 - bounds.west + bounds.east;
   const adjusted = longitude < bounds.west ? longitude + 360 : longitude;
   const left = Math.max(0, Math.min(100, ((adjusted - bounds.west) / Math.max(span, 0.000001)) * 100));
@@ -292,7 +292,7 @@ function pointStyle(longitude: number, latitude: number, bounds: PhotoLocationBo
   return { left: `${left}%`, top: `${top}%` };
 }
 
-function around(longitude: number, latitude: number, span: number): PhotoLocationBounds {
+function around(longitude: number, latitude: number, span: number): PhotostaffLocationBounds {
   const half = Math.max(0.05, Math.min(90, span / 2));
   return {
     kind: "bounds",
@@ -303,16 +303,16 @@ function around(longitude: number, latitude: number, span: number): PhotoLocatio
   };
 }
 
-function boundsSpan(bounds: PhotoLocationBounds): number {
+function boundsSpan(bounds: PhotostaffLocationBounds): number {
   return bounds.west <= bounds.east ? bounds.east - bounds.west : 360 - bounds.west + bounds.east;
 }
 
-export function photoViewportBounds(
+export function photostaffViewportBounds(
   west: number,
   south: number,
   east: number,
   north: number
-): PhotoLocationBounds {
+): PhotostaffLocationBounds {
   if (east - west >= 360) {
     return { kind: "bounds", west: -180, south: Math.max(-90, south), east: 180, north: Math.min(90, north) };
   }

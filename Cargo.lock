@@ -1262,6 +1262,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "sigmaos-photostaff"
+version = "0.9.13"
+dependencies = [
+ "futures-util",
+ "nix",
+ "rand",
+ "rusqlite",
+ "sd-notify",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "time",
+ "tokio",
+ "tokio-util",
+ "toml_edit",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "sigmaos-termux"
 version = "0.8.0"
 dependencies = [

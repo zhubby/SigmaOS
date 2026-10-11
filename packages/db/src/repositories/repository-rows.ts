@@ -23,10 +23,12 @@ import type {
   OperationNotificationStatus,
   PendingApprovalKind,
   RootReadinessStatus,
-  PhotoAssetStatus,
-  PhotoJobKind,
-  PhotoJobStatus,
-  PhotoTakenAtSource,
+  PhotostaffAssetStatus,
+  PhotostaffErrorCode,
+  PhotostaffJobKind,
+  PhotostaffJobPhase,
+  PhotostaffJobStatus,
+  PhotostaffTakenAtSource,
   ShareOperationAction,
   ShareOperationStatus,
   StorageOperationStatus
@@ -250,7 +252,7 @@ export type DbDownloadTaskRow = {
   segment_count: number;
 };
 
-export type DbPhotoAssetRow = {
+export type DbPhotostaffAssetRow = {
   id: string;
   root_id: string;
   storage_pool_id: string;
@@ -264,19 +266,22 @@ export type DbPhotoAssetRow = {
   height: number | null;
   orientation: number | null;
   taken_at: string;
-  taken_at_source: PhotoTakenAtSource;
+  taken_at_source: PhotostaffTakenAtSource;
   thumbnail_key: string | null;
   preview_key: string | null;
-  status: PhotoAssetStatus;
+  status: PhotostaffAssetStatus;
   error: string | null;
+  error_code: PhotostaffErrorCode | null;
+  error_retryable: 0 | 1;
+  derivative_schema_version: number;
   library_updated_at: string;
   indexed_at: string;
 };
 
-export type DbPhotoJobRow = {
+export type DbPhotostaffJobRow = {
   id: string;
-  kind: PhotoJobKind;
-  status: PhotoJobStatus;
+  kind: PhotostaffJobKind;
+  status: PhotostaffJobStatus;
   root_id: string;
   storage_pool_id: string;
   path: string;
@@ -285,7 +290,13 @@ export type DbPhotoJobRow = {
   processed: number;
   failed: number;
   current_path: string | null;
+  phase: PhotostaffJobPhase | null;
   error: string | null;
+  error_code: PhotostaffErrorCode | null;
+  error_retryable: 0 | 1;
+  retry_count: number;
+  next_retry_at: string | null;
+  scan_generation: string;
   worker_id: string | null;
   lease_expires_at: string | null;
   created_at: string;

@@ -26,10 +26,10 @@ describe("share settings form helpers", () => {
       },
       shares: [
         {
-          id: "photos",
-          name: "Photos",
+          id: "photostaff",
+          name: "Photostaff",
           rootId: "media",
-          path: "photos",
+          path: "photostaff",
           description: "family archive",
           protocols: {
             smb: {
@@ -43,7 +43,7 @@ describe("share settings form helpers", () => {
               readOnly: true,
               allowGuest: false,
               port: 8088,
-              pathPrefix: "/shares/photos"
+              pathPrefix: "/shares/photostaff"
             },
             ftp: {
               enabled: false,
@@ -64,7 +64,7 @@ describe("share settings form helpers", () => {
               mediaTypes: ["pictures"],
               bindInterface: "eth0",
               bindAddress: null,
-              friendlyName: "Photos"
+              friendlyName: "Photostaff"
             }
           }
         }
@@ -82,11 +82,11 @@ describe("share settings form helpers", () => {
 
   it("converts strings and write-only password fields to API input", () => {
     const share = createShareFormState(roots);
-    share.id = "photos";
-    share.name = "Photos";
-    share.path = "photos";
+    share.id = "photostaff";
+    share.name = "Photostaff";
+    share.path = "photostaff";
     share.protocols.webdav.enabled = true;
-    share.protocols.webdav.pathPrefix = "dav/photos";
+    share.protocols.webdav.pathPrefix = "dav/photostaff";
     share.protocols.nfs.enabled = true;
     share.protocols.nfs.allowedCidrs = "192.168.1.0/24\nfd00::/64";
     share.protocols.dlna.enabled = true;
@@ -105,7 +105,7 @@ describe("share settings form helpers", () => {
     });
 
     expect(input.account.password).toBe("new-secret");
-    expect(input.shares[0]?.protocols.webdav.pathPrefix).toBe("/dav/photos");
+    expect(input.shares[0]?.protocols.webdav.pathPrefix).toBe("/dav/photostaff");
     expect(input.shares[0]?.protocols.nfs.allowedCidrs).toEqual(["192.168.1.0/24", "fd00::/64"]);
     expect(input.shares[0]?.protocols.dlna.bindAddress).toBe("192.168.1.5");
   });

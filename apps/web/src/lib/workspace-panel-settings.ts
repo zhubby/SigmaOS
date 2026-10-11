@@ -2,7 +2,7 @@ export const WORKSPACE_PANEL_STORAGE_KEY = "sigmaos:last-workspace-panel";
 
 export const WORKSPACE_PANEL_IDS = [
   "files",
-  "photos",
+  "photostaff",
   "terminal",
   "downloads",
   "docker",

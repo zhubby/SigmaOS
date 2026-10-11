@@ -1,7 +1,7 @@
 import {
   runPiAgentTurn,
   runReadOnlyAgentTurn,
-  type PhotoAgentToolService,
+  type PhotostaffAgentToolService,
   type PiAgentRunner
 } from "@sigmaos/agent";
 import {
@@ -16,13 +16,13 @@ import {
   getMessage,
   getModelProviderSettings,
   getNasRoot,
-  getPhotoLibrarySettings,
-  getPhotoMetadataDetail,
-  getPhotoMetadataIndexStatus,
+  getPhotostaffLibrarySettings,
+  getPhotostaffMetadataDetail,
+  getPhotostaffMetadataIndexStatus,
   getPiToolPolicySettings,
   getSession,
   queryIndexedText,
-  queryPhotoAssets,
+  queryPhotostaffAssets,
   saveAgentProviderSession,
   updateJobStatus,
   type SigmaDatabase
@@ -147,7 +147,7 @@ export async function processNextJob({ db, config, agentRunner, allowLocalFallba
           markWaitingForApproval: () => {
             updateJobStatus(db, job.id, "waiting_approval", null, ["running"]);
           },
-          ...photoAgentTools(db, root.id)
+          ...photostaffAgentTools(db, root.id)
         });
 
     if (result.status === "cancelled" || getJob(db, job.id)?.status === "cancelled") {
@@ -202,31 +202,31 @@ export async function processNextJob({ db, config, agentRunner, allowLocalFallba
   return true;
 }
 
-export function photoAgentTools(db: SigmaDatabase, sessionRootId: string): { photoTools?: PhotoAgentToolService } {
-  const settings = getPhotoLibrarySettings(db);
+export function photostaffAgentTools(db: SigmaDatabase, sessionRootId: string): { photostaffTools?: PhotostaffAgentToolService } {
+  const settings = getPhotostaffLibrarySettings(db);
   if (!settings || settings.rootId !== sessionRootId) return {};
   return {
-    photoTools: {
-      searchPhotos: async (request) => {
+    photostaffTools: {
+      searchPhotostaff: async (request) => {
         const safeRequest = {
           ...request,
           cursor: null,
           limit: Math.max(1, Math.min(request.limit ?? 25, 25)),
           includeFacets: false
         };
-        const result = queryPhotoAssets(db, {
+        const result = queryPhotostaffAssets(db, {
           libraryUpdatedAt: settings.updatedAt,
           request: safeRequest
         });
         return {
-          photos: result.photos,
+          photostaff: result.photostaff,
           nextCursor: null,
           total: result.total,
           facets: null,
-          metadataIndex: getPhotoMetadataIndexStatus(db, settings.updatedAt)
+          metadataIndex: getPhotostaffMetadataIndexStatus(db, settings.updatedAt)
         };
       },
-      getPhotoMetadata: async (assetId) => getPhotoMetadataDetail(db, {
+      getPhotostaffMetadata: async (assetId) => getPhotostaffMetadataDetail(db, {
         assetId,
         libraryUpdatedAt: settings.updatedAt,
         includeSensitive: false

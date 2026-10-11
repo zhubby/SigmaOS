@@ -1,4 +1,4 @@
-import type { PhotoMediaKind } from "./photo-config.js";
+import type { PhotostaffMediaKind } from "./photostaff-config.js";
 import type { VodPlayerErrorCode, VodPlayerState } from "./vod-player-protocol.js";
 
 export type JobStatus =
@@ -152,19 +152,35 @@ export interface DownloadWorkerHealth {
   retryWaitTasks: number;
 }
 
-export type PhotoTakenAtSource = "exif" | "file_mtime";
-export type PhotoAssetStatus = "ready" | "failed";
-export type PhotoJobKind = "full_scan" | "path_refresh";
-export type PhotoJobStatus = "queued" | "running" | "completed" | "failed";
+export type PhotostaffTakenAtSource = "exif" | "file_mtime";
+export type PhotostaffAssetStatus = "ready" | "failed";
+export type PhotostaffJobKind = "full_scan" | "path_refresh";
+export type PhotostaffJobStatus = "queued" | "running" | "retrying" | "completed" | "failed";
+export type PhotostaffJobPhase = "discovering" | "processing" | "publishing" | "cleanup" | "retry_wait";
+export type PhotostaffErrorCode =
+  | "PHOTOSTAFF_STORAGE_UNAVAILABLE"
+  | "SOURCE_CHANGED"
+  | "INVALID_PATH"
+  | "UNSUPPORTED_MEDIA"
+  | "CORRUPT_MEDIA"
+  | "SIZE_LIMIT"
+  | "DISK_SPACE"
+  | "TOOL_UNAVAILABLE"
+  | "COMMAND_TIMEOUT"
+  | "COMMAND_FAILED"
+  | "PUBLISH_CONFLICT"
+  | "PERMISSION_DENIED"
+  | "DATABASE"
+  | "INTERNAL";
 
-export interface PhotoLibrarySettingsRecord {
+export interface PhotostaffLibrarySettingsRecord {
   rootId: string;
   storagePoolId: string;
   path: string;
   updatedAt: string;
 }
 
-export interface PhotoAssetRecord {
+export interface PhotostaffAssetRecord {
   id: string;
   rootId: string;
   storagePoolId: string;
@@ -178,32 +194,50 @@ export interface PhotoAssetRecord {
   height: number | null;
   orientation: number | null;
   takenAt: string;
-  takenAtSource: PhotoTakenAtSource;
+  takenAtSource: PhotostaffTakenAtSource;
   thumbnailKey: string | null;
   previewKey: string | null;
-  status: PhotoAssetStatus;
+  status: PhotostaffAssetStatus;
   error: string | null;
+  errorCode: PhotostaffErrorCode | null;
+  errorRetryable: boolean;
+  derivativeSchemaVersion: number;
   indexedAt: string;
 }
 
-export interface PhotoTimelinePage {
-  photos: PhotoAssetRecord[];
+export interface PhotostaffProcessingSettingsRecord {
+  processingConcurrency: number;
+  scanIntervalMs: number;
+  maxAutoRetries: number;
+  retryBaseDelayMs: number;
+  retryMaxDelayMs: number;
+  commandTimeoutMs: number;
+  maxFileSizeBytes: number;
+  maxXmpSizeBytes: number;
+  maxIntermediateBytes: number;
+  minFreeSpaceBytes: number;
+  maxDecodedPixels: number;
+  updatedAt: string;
+}
+
+export interface PhotostaffTimelinePage {
+  photostaff: PhotostaffAssetRecord[];
   nextCursor: string | null;
 }
 
-export type PhotoMetadataStatus = "ready" | "partial";
-export type PhotoMetadataScalar = string | number | boolean;
-export type PhotoMetadataValueType = "text" | "number" | "date" | "boolean";
-export type PhotoMetadataCaptureSource = "sidecar_xmp" | "embedded_xmp" | "iptc" | "exif" | "video" | "file_mtime";
+export type PhotostaffMetadataStatus = "ready" | "partial";
+export type PhotostaffMetadataScalar = string | number | boolean;
+export type PhotostaffMetadataValueType = "text" | "number" | "date" | "boolean";
+export type PhotostaffMetadataCaptureSource = "sidecar_xmp" | "embedded_xmp" | "iptc" | "exif" | "video" | "file_mtime";
 
-export interface PhotoMetadataSummary {
+export interface PhotostaffMetadataSummary {
   schemaVersion: number;
-  status: PhotoMetadataStatus;
-  mediaKind: PhotoMediaKind;
+  status: PhotostaffMetadataStatus;
+  mediaKind: PhotostaffMediaKind;
   capturedAt: string | null;
   capturedAtLocal: string | null;
   captureOffsetMinutes: number | null;
-  captureSource: PhotoMetadataCaptureSource;
+  captureSource: PhotostaffMetadataCaptureSource;
   durationMs: number | null;
   container: string | null;
   videoCodec: string | null;
@@ -232,7 +266,7 @@ export interface PhotoMetadataSummary {
   hasSensitiveMetadata: boolean;
 }
 
-export interface PhotoMetadataIndexStatus {
+export interface PhotostaffMetadataIndexStatus {
   schemaVersion: number;
   total: number;
   indexed: number;
@@ -240,7 +274,7 @@ export interface PhotoMetadataIndexStatus {
   pending: number;
 }
 
-export type PhotoMetadataOperator =
+export type PhotostaffMetadataOperator =
   | "eq"
   | "contains"
   | "prefix"
@@ -253,24 +287,24 @@ export type PhotoMetadataOperator =
   | "gte"
   | "between";
 
-export interface PhotoMetadataCondition {
+export interface PhotostaffMetadataCondition {
   key: string;
-  operator: PhotoMetadataOperator;
-  value?: PhotoMetadataScalar | PhotoMetadataScalar[];
+  operator: PhotostaffMetadataOperator;
+  value?: PhotostaffMetadataScalar | PhotostaffMetadataScalar[];
   valueTo?: string | number;
 }
 
-export interface PhotoNumberRange {
+export interface PhotostaffNumberRange {
   min?: number;
   max?: number;
 }
 
-export interface PhotoDateRange {
+export interface PhotostaffDateRange {
   from?: string;
   to?: string;
 }
 
-export interface PhotoLocationBounds {
+export interface PhotostaffLocationBounds {
   kind: "bounds";
   west: number;
   south: number;
@@ -278,108 +312,108 @@ export interface PhotoLocationBounds {
   north: number;
 }
 
-export interface PhotoLocationNear {
+export interface PhotostaffLocationNear {
   kind: "near";
   latitude: number;
   longitude: number;
   radiusMeters: number;
 }
 
-export interface PhotoQueryFilters {
+export interface PhotostaffQueryFilters {
   text?: string;
-  capturedAt?: PhotoDateRange;
-  mediaKinds?: PhotoMediaKind[];
+  capturedAt?: PhotostaffDateRange;
+  mediaKinds?: PhotostaffMediaKind[];
   cameraModels?: string[];
   lensModels?: string[];
-  iso?: PhotoNumberRange;
-  aperture?: PhotoNumberRange;
-  exposureTimeSeconds?: PhotoNumberRange;
-  focalLengthMm?: PhotoNumberRange;
-  rating?: PhotoNumberRange;
+  iso?: PhotostaffNumberRange;
+  aperture?: PhotostaffNumberRange;
+  exposureTimeSeconds?: PhotostaffNumberRange;
+  focalLengthMm?: PhotostaffNumberRange;
+  rating?: PhotostaffNumberRange;
   keywords?: string[];
   hasLocation?: boolean;
-  location?: PhotoLocationBounds | PhotoLocationNear;
+  location?: PhotostaffLocationBounds | PhotostaffLocationNear;
   advanced?: {
     mode: "all" | "any";
-    conditions: PhotoMetadataCondition[];
+    conditions: PhotostaffMetadataCondition[];
   };
 }
 
-export type PhotoQuerySortField = "captured_at" | "indexed_at" | "name" | "size_bytes" | "rating" | "distance";
+export type PhotostaffQuerySortField = "captured_at" | "indexed_at" | "name" | "size_bytes" | "rating" | "distance";
 
-export interface PhotoQueryRequest {
-  filters?: PhotoQueryFilters;
-  sort?: { field: PhotoQuerySortField; direction: "asc" | "desc" };
+export interface PhotostaffQueryRequest {
+  filters?: PhotostaffQueryFilters;
+  sort?: { field: PhotostaffQuerySortField; direction: "asc" | "desc" };
   cursor?: string | null;
   limit?: number;
   includeFacets?: boolean;
 }
 
-export interface PhotoQueryAsset extends PhotoAssetRecord {
-  metadata: PhotoMetadataSummary | null;
+export interface PhotostaffQueryAsset extends PhotostaffAssetRecord {
+  metadata: PhotostaffMetadataSummary | null;
   keywords: string[];
   distanceMeters: number | null;
 }
 
-export interface PhotoFacetValue {
+export interface PhotostaffFacetValue {
   value: string;
   count: number;
 }
 
-export interface PhotoQueryFacets {
-  mediaKinds: PhotoFacetValue[];
-  cameraModels: PhotoFacetValue[];
-  lensModels: PhotoFacetValue[];
-  ratings: PhotoFacetValue[];
-  keywords: PhotoFacetValue[];
+export interface PhotostaffQueryFacets {
+  mediaKinds: PhotostaffFacetValue[];
+  cameraModels: PhotostaffFacetValue[];
+  lensModels: PhotostaffFacetValue[];
+  ratings: PhotostaffFacetValue[];
+  keywords: PhotostaffFacetValue[];
   numeric: Record<string, { min: number | null; max: number | null }>;
 }
 
-export interface PhotoQueryPage {
-  photos: PhotoQueryAsset[];
+export interface PhotostaffQueryPage {
+  photostaff: PhotostaffQueryAsset[];
   nextCursor: string | null;
   total: number;
-  facets: PhotoQueryFacets | null;
-  metadataIndex: PhotoMetadataIndexStatus;
+  facets: PhotostaffQueryFacets | null;
+  metadataIndex: PhotostaffMetadataIndexStatus;
 }
 
-export interface PhotoMetadataField {
+export interface PhotostaffMetadataField {
   key: string;
-  valueType: PhotoMetadataValueType;
+  valueType: PhotostaffMetadataValueType;
   count: number;
   sensitive: boolean;
 }
 
-export interface PhotoMetadataDetail {
+export interface PhotostaffMetadataDetail {
   assetId: string;
-  summary: PhotoMetadataSummary | null;
+  summary: PhotostaffMetadataSummary | null;
   keywords: string[];
-  groups: Record<string, Record<string, PhotoMetadataScalar[]>>;
-  sensitiveGroups?: Record<string, Record<string, PhotoMetadataScalar[]>>;
+  groups: Record<string, Record<string, PhotostaffMetadataScalar[]>>;
+  sensitiveGroups?: Record<string, Record<string, PhotostaffMetadataScalar[]>>;
   sensitiveOmitted: boolean;
   warnings: string[];
 }
 
-export interface PhotoMapQueryRequest {
-  filters?: PhotoQueryFilters;
-  bounds: PhotoLocationBounds;
+export interface PhotostaffMapQueryRequest {
+  filters?: PhotostaffQueryFilters;
+  bounds: PhotostaffLocationBounds;
   columns?: number;
   rows?: number;
 }
 
-export interface PhotoMapCluster {
+export interface PhotostaffMapCluster {
   latitude: number;
   longitude: number;
   count: number;
   assetId: string | null;
 }
 
-export interface PhotoMapQueryResult {
-  clusters: PhotoMapCluster[];
-  metadataIndex: PhotoMetadataIndexStatus;
+export interface PhotostaffMapQueryResult {
+  clusters: PhotostaffMapCluster[];
+  metadataIndex: PhotostaffMetadataIndexStatus;
 }
 
-export interface PhotoMapSettingsRecord {
+export interface PhotostaffMapSettingsRecord {
   rootId: string;
   storagePoolId: string;
   path: string;
@@ -391,10 +425,10 @@ export interface PhotoMapSettingsRecord {
   updatedAt: string;
 }
 
-export interface PhotoJobRecord {
+export interface PhotostaffJobRecord {
   id: string;
-  kind: PhotoJobKind;
-  status: PhotoJobStatus;
+  kind: PhotostaffJobKind;
+  status: PhotostaffJobStatus;
   rootId: string;
   storagePoolId: string;
   path: string;
@@ -403,7 +437,13 @@ export interface PhotoJobRecord {
   processed: number;
   failed: number;
   currentPath: string | null;
+  phase: PhotostaffJobPhase | null;
   error: string | null;
+  errorCode: PhotostaffErrorCode | null;
+  errorRetryable: boolean;
+  retryCount: number;
+  nextRetryAt: string | null;
+  scanGeneration: string;
   workerId: string | null;
   leaseExpiresAt: string | null;
   createdAt: string;
@@ -412,16 +452,29 @@ export interface PhotoJobRecord {
   finishedAt: string | null;
 }
 
-export interface PhotoLibraryStatus {
-  state: "unconfigured" | "queued" | "scanning" | "ready" | "degraded" | "offline";
+export interface PhotostaffLibraryStatus {
+  state: "unconfigured" | "queued" | "discovering" | "processing" | "retrying" | "ready" | "degraded" | "offline";
   total: number;
-  metadataIndex?: PhotoMetadataIndexStatus;
+  metadataIndex?: PhotostaffMetadataIndexStatus;
   failed: number;
   scanned: number;
   processed: number;
   currentPath: string | null;
+  phase: PhotostaffJobPhase | null;
   error: string | null;
+  errorCode: PhotostaffErrorCode | null;
+  retryCount: number;
+  nextRetryAt: string | null;
   updatedAt: string | null;
+}
+
+export interface PhotostaffWorkerHealth {
+  status: "ready" | "stale" | "unavailable";
+  freshWorkers: number;
+  lastHeartbeatAt: string | null;
+  activeJobs: number;
+  queuedJobs: number;
+  retryingJobs: number;
 }
 
 export type GitFileStatus = "tracked" | "staged" | "modified" | "untracked" | "conflicted";
@@ -581,6 +634,7 @@ export interface SystemHealthSummary {
   indexerFreshnessMs: number | null;
   backupFreshnessMs: number | null;
   downloader: DownloadWorkerHealth;
+  photostaff: PhotostaffWorkerHealth;
   vodPlayer: VodPlayerHealth;
 }
 
@@ -884,7 +938,7 @@ export interface PublicSystemInfo {
     modelProvider: "pi" | "cloud" | "local";
     localEndpointConfigured: boolean;
     dockerEnabled: boolean;
-    photos: {
+    photostaff: {
       dataDir: string;
       maxFileSizeBytes: number;
       thumbnailSizePx: number;

@@ -41,7 +41,7 @@ describe("workspace panel settings helpers", () => {
     };
 
     expect(readStoredWorkspacePanel(unavailableStorage)).toBe(DEFAULT_WORKSPACE_PANEL);
-    expect(() => writeStoredWorkspacePanel("photos", unavailableStorage)).not.toThrow();
+    expect(() => writeStoredWorkspacePanel("photostaff", unavailableStorage)).not.toThrow();
   });
 
   it("tolerates a browser that throws while exposing localStorage", () => {

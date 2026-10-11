@@ -29,8 +29,9 @@ import {
   getModelProviderSettings,
   getNotifications,
   getPiToolPolicySettings,
-  getPhotoLibrarySettings,
-  getPhotoLibraryStatus,
+  getPhotostaffLibrarySettings,
+  getPhotostaffProcessingSettings,
+  getPhotostaffStatus,
   proposeFileOperation,
   rejectRequest,
   requestSystemPower,
@@ -45,6 +46,7 @@ import {
   sendVodPlayerCommand,
   updateSessionPath,
   updateDownloadSettings,
+  updatePhotostaffProcessingSettings,
   uploadFile,
   type AgentEvent,
   type BuildInfo,
@@ -61,8 +63,10 @@ import {
   type NasRoot,
   type OperationNotification,
   type PendingApproval,
-  type PhotoLibrarySettings,
-  type PhotoLibraryStatus,
+  type PhotostaffLibrarySettings,
+  type PhotostaffLibraryStatus,
+  type PhotostaffProcessingSettings,
+  type PhotostaffWorkerHealth,
   type PiToolPolicySettings,
   type Session,
   type SessionSummary,
@@ -219,8 +223,10 @@ export function App() {
   const [toolPolicySettings, setToolPolicySettings] = useState<PiToolPolicySettings | null>(null);
   const [dockerSettings, setDockerSettings] = useState<DockerSettings | null>(null);
   const [downloadSettings, setDownloadSettings] = useState<DownloadSettings | null>(null);
-  const [photoSettings, setPhotoSettings] = useState<PhotoLibrarySettings | null>(null);
-  const [photoStatus, setPhotoStatus] = useState<PhotoLibraryStatus | null>(null);
+  const [photostaffSettings, setPhotostaffSettings] = useState<PhotostaffLibrarySettings | null>(null);
+  const [photostaffStatus, setPhotostaffStatus] = useState<PhotostaffLibraryStatus | null>(null);
+  const [photostaffProcessingSettings, setPhotostaffProcessingSettings] = useState<PhotostaffProcessingSettings | null>(null);
+  const [photostaffWorkerHealth, setPhotostaffWorkerHealth] = useState<PhotostaffWorkerHealth | null>(null);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [systemInfoError, setSystemInfoError] = useState<string | null>(null);
   const [buildInfo, setBuildInfo] = useState<BuildInfo | null>(null);
@@ -833,8 +839,9 @@ export function App() {
         toolPolicyResult,
         dockerSettingsResult,
         downloadSettingsResult,
-        photoSettingsResult,
-        photoStatusResult,
+        photostaffSettingsResult,
+        photostaffProcessingSettingsResult,
+        photostaffStatusResult,
         systemInfoResult,
         buildInfoResult
       ] = await Promise.allSettled([
@@ -842,8 +849,9 @@ export function App() {
         getPiToolPolicySettings(),
         getDockerSettings(),
         getDownloadSettings(),
-        getPhotoLibrarySettings(),
-        getPhotoLibraryStatus(),
+        getPhotostaffLibrarySettings(),
+        getPhotostaffProcessingSettings(),
+        getPhotostaffStatus(),
         getSystemInfo(),
         getBuildInfo()
       ]);
@@ -877,18 +885,27 @@ export function App() {
         errors.push(toErrorMessage(downloadSettingsResult.reason));
       }
 
-      if (photoSettingsResult.status === "fulfilled") {
-        setPhotoSettings(photoSettingsResult.value);
+      if (photostaffSettingsResult.status === "fulfilled") {
+        setPhotostaffSettings(photostaffSettingsResult.value);
       } else {
-        setPhotoSettings(null);
-        errors.push(toErrorMessage(photoSettingsResult.reason));
+        setPhotostaffSettings(null);
+        errors.push(toErrorMessage(photostaffSettingsResult.reason));
       }
 
-      if (photoStatusResult.status === "fulfilled") {
-        setPhotoStatus(photoStatusResult.value);
+      if (photostaffProcessingSettingsResult.status === "fulfilled") {
+        setPhotostaffProcessingSettings(photostaffProcessingSettingsResult.value);
       } else {
-        setPhotoStatus(null);
-        errors.push(toErrorMessage(photoStatusResult.reason));
+        setPhotostaffProcessingSettings(null);
+        errors.push(toErrorMessage(photostaffProcessingSettingsResult.reason));
+      }
+
+      if (photostaffStatusResult.status === "fulfilled") {
+        setPhotostaffStatus(photostaffStatusResult.value.status);
+        setPhotostaffWorkerHealth(photostaffStatusResult.value.workerHealth);
+      } else {
+        setPhotostaffStatus(null);
+        setPhotostaffWorkerHealth(null);
+        errors.push(toErrorMessage(photostaffStatusResult.reason));
       }
 
       if (systemInfoResult.status === "fulfilled") {
@@ -980,6 +997,18 @@ export function App() {
     setError(null);
     try {
       setDownloadSettings(await updateDownloadSettings(patch));
+    } catch (nextError) {
+      setError(toErrorMessage(nextError));
+      throw nextError;
+    }
+  }
+
+  async function changePhotostaffProcessingSettings(
+    patch: Partial<Omit<PhotostaffProcessingSettings, "updatedAt">>
+  ) {
+    setError(null);
+    try {
+      setPhotostaffProcessingSettings(await updatePhotostaffProcessingSettings(patch));
     } catch (nextError) {
       setError(toErrorMessage(nextError));
       throw nextError;
@@ -2262,8 +2291,10 @@ export function App() {
           settings={modelSettings}
           dockerSettings={dockerSettings}
           downloadSettings={downloadSettings}
-          photoSettings={photoSettings}
-          photoStatus={photoStatus}
+          photostaffSettings={photostaffSettings}
+          photostaffStatus={photostaffStatus}
+          photostaffProcessingSettings={photostaffProcessingSettings}
+          photostaffWorkerHealth={photostaffWorkerHealth}
           dockerForm={dockerSettingsForm}
           systemInfo={systemInfo}
           systemInfoError={systemInfoError}
@@ -2285,6 +2316,7 @@ export function App() {
           onFormChange={setModelSettingsForm}
           onDockerFormChange={setDockerSettingsForm}
           onDownloadSettingsChange={changeDownloadSettings}
+          onPhotostaffProcessingSettingsChange={changePhotostaffProcessingSettings}
           onToolPolicyFormChange={setToolPolicyForm}
           onLanguagePreferenceChange={changeLanguagePreference}
           onThemePreferenceChange={changeThemePreference}

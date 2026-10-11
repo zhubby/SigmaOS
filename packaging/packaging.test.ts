@@ -14,7 +14,6 @@ describe("native packaging artifacts", () => {
     const serviceNames = [
       "sigmaos-api.service",
       "sigmaos-worker@.service",
-      "sigmaos-photo-worker.service",
       "sigmaos-indexer.service",
       "sigmaos-scheduler.service",
       "sigmaos-maintenance.service",
@@ -66,6 +65,15 @@ describe("native packaging artifacts", () => {
     expect(vodPlayerUnit).toContain("TimeoutStopSec=30s");
     expect(vodPlayerUnit).toContain("ProtectSystem=strict");
     expect(vodPlayerUnit).not.toContain("RequiresMountsFor=/srv/nas");
+    const photostaffUnit = await readPackagingFile("systemd", "sigmaos-photostaff.service");
+    expect(photostaffUnit).toContain("ExecStart=/usr/lib/sigmaos/bin/sigmaos-photostaff");
+    expect(photostaffUnit).toContain("Type=notify");
+    expect(photostaffUnit).toContain("WatchdogSec=20s");
+    expect(photostaffUnit).toContain("TimeoutStopSec=30s");
+    expect(photostaffUnit).toContain("KillMode=control-group");
+    expect(photostaffUnit).toContain("RestrictAddressFamilies=AF_UNIX");
+    expect(photostaffUnit).not.toContain("RequiresMountsFor=/srv/nas");
+    await expect(readPackagingFile("systemd", "sigmaos-photo-worker.service")).rejects.toMatchObject({ code: "ENOENT" });
 
     await expect(readPackagingFile("systemd", "sigmaos-maintenance.timer")).resolves.toContain(
       "OnCalendar=daily"
@@ -100,7 +108,9 @@ describe("native packaging artifacts", () => {
     expect(install).toContain("target/release/sigmaos-termux usr/lib/sigmaos/bin/");
     expect(install).not.toContain("apps/terminal-helper");
     expect(install).toContain("usr/lib/sigmaos/apps/worker/dist/");
-    expect(install).toContain("usr/lib/sigmaos/apps/photo-worker/dist/");
+    expect(install).toContain("target/release/sigmaos-photostaff usr/lib/sigmaos/bin/");
+    expect(install).not.toContain("apps/photo-worker");
+    expect(install).not.toContain("apps/photostaff/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/indexer/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/backup/dist/");
     expect(install).toContain("usr/lib/sigmaos/apps/scheduler/dist/");
@@ -149,6 +159,8 @@ describe("native packaging artifacts", () => {
     expect(control).toContain("Build-Depends: debhelper-compat (= 13), nodejs, npm, cargo, rustc, acl");
     expect(control).toContain("mpv");
     expect(control).toContain("libheif-examples");
+    expect(control).toContain("libimage-exiftool-perl");
+    expect(control).toContain("libvips-tools");
     expect(control).toMatch(/^Depends:.*ffmpeg.*libraw-bin/m);
     expect(control).not.toMatch(/^Suggests:.*ffmpeg/m);
     expect(control).toContain("Suggests:");
@@ -164,6 +176,9 @@ describe("native packaging artifacts", () => {
     const postinst = await readPackagingFile("debian", "postinst");
     const refreshVodPlayer = await readPackagingFile("scripts", "sigmaos-refresh-vod-player.sh");
     expect(postinst).toContain("legacy_vod_player_active");
+    expect(postinst).toContain("photostaff_was_enabled");
+    expect(postinst).toContain("systemctl disable --now sigmaos-photo-worker.service");
+    expect(postinst).toContain("systemctl restart sigmaos-photostaff.service");
     expect(postinst).toContain("systemctl start sigmaos-vod-player.service");
     expect(refreshVodPlayer).toContain("SIGMAOS_VOD_PLAYER_SOCKET_PATH");
     expect(refreshVodPlayer).toContain("SIGMAOS_VOD_PLAYER_STATE_PATH");
@@ -206,7 +221,7 @@ describe("native packaging artifacts", () => {
     expect(manifest).toContain("sigmaos-termux.service");
     expect(manifest).not.toContain("sigmaos-terminal-helper.service");
     expect(manifest).toContain("sigmaos-downloader.service");
-    expect(manifest).toContain("sigmaos-photo-worker.service");
+    expect(manifest).toContain("sigmaos-photostaff.service");
     expect(manifest).toContain("sigmaos-vod-player.service");
     expect(manifest).not.toContain("sigmaos-player-helper.service");
     expect(manifest).toContain("mpv");
@@ -215,9 +230,13 @@ describe("native packaging artifacts", () => {
     expect(buildImage).toMatch(/--include=.*(^|,)samba(,|\\|\s)/s);
     expect(manifest).toContain("tesseract-ocr");
     expect(manifest).toContain("libheif-examples");
+    expect(manifest).toContain("libimage-exiftool-perl");
+    expect(manifest).toContain("libvips-tools");
     expect(manifest).toContain("ffmpeg");
     expect(manifest).toContain("libraw-bin");
     expect(buildImage).toContain("libheif-examples");
+    expect(buildImage).toContain("libimage-exiftool-perl");
+    expect(buildImage).toContain("libvips-tools");
     expect(buildImage).toContain("ffmpeg");
     expect(buildImage).toContain("libraw-bin");
     expect(manifest).toContain("mdadm");

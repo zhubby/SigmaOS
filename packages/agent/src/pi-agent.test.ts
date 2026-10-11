@@ -2,9 +2,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { ModelProviderSettingsRecord, PhotoMetadataDetail, PhotoQueryPage } from "@sigmaos/shared";
+import type { ModelProviderSettingsRecord, PhotostaffMetadataDetail, PhotostaffQueryPage } from "@sigmaos/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createPhotoAgentTools, registerConfiguredProvider } from "./pi-agent.js";
+import { createPhotostaffAgentTools, registerConfiguredProvider } from "./pi-agent.js";
 
 let tempDir: string;
 
@@ -61,15 +61,15 @@ describe("Pi agent provider configuration", () => {
   });
 });
 
-describe("photo agent tools", () => {
+describe("photostaff agent tools", () => {
   it("exposes structured read-only tools and strips sensitive metadata defensively", async () => {
-    const page: PhotoQueryPage = {
-      photos: [{
-        id: "photo-1",
+    const page: PhotostaffQueryPage = {
+      photostaff: [{
+        id: "photostaff-1",
         rootId: "root-1",
         storagePoolId: "pool-1",
-        path: "Photos/photo-1.jpg",
-        name: "photo-1.jpg",
+        path: "Photostaff/photostaff-1.jpg",
+        name: "photostaff-1.jpg",
         mimeType: "image/jpeg",
         sizeBytes: 100,
         mtimeMs: 0,
@@ -83,6 +83,9 @@ describe("photo agent tools", () => {
         previewKey: null,
         status: "ready",
         error: null,
+        errorCode: null,
+        errorRetryable: false,
+        derivativeSchemaVersion: 1,
         indexedAt: "2026-01-01T00:00:00.000Z",
         metadata: null,
         keywords: [],
@@ -93,8 +96,8 @@ describe("photo agent tools", () => {
       facets: null,
       metadataIndex: { schemaVersion: 1, total: 0, indexed: 0, partial: 0, pending: 0 }
     };
-    const detail: PhotoMetadataDetail = {
-      assetId: "photo-1",
+    const detail: PhotostaffMetadataDetail = {
+      assetId: "photostaff-1",
       summary: null,
       keywords: ["Travel"],
       groups: {
@@ -106,21 +109,21 @@ describe("photo agent tools", () => {
       sensitiveOmitted: false,
       warnings: []
     };
-    const searchPhotos = vi.fn(async () => page);
-    const tools = createPhotoAgentTools({
-      searchPhotos,
-      getPhotoMetadata: async () => detail
+    const searchPhotostaff = vi.fn(async () => page);
+    const tools = createPhotostaffAgentTools({
+      searchPhotostaff,
+      getPhotostaffMetadata: async () => detail
     }) as unknown as Array<{
       name: string;
       execute: (toolCallId: string, params: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>;
     }>;
 
-    expect(tools.map((tool) => tool.name)).toEqual(["search_photos", "get_photo_metadata"]);
-    const searchOutput = await tools.find((tool) => tool.name === "search_photos")!.execute("call-0", {
+    expect(tools.map((tool) => tool.name)).toEqual(["search_photostaff", "get_photostaff_metadata"]);
+    const searchOutput = await tools.find((tool) => tool.name === "search_photostaff")!.execute("call-0", {
       filters: { location: { kind: "near", latitude: 31.23, longitude: 121.47, radiusMeters: 1_000 } },
       limit: 100
     });
-    expect(searchPhotos).toHaveBeenCalledWith(expect.objectContaining({
+    expect(searchPhotostaff).toHaveBeenCalledWith(expect.objectContaining({
       filters: { location: { kind: "near", latitude: 31.23, longitude: 121.47, radiusMeters: 1_000 } },
       includeFacets: false,
       limit: 25
@@ -128,13 +131,13 @@ describe("photo agent tools", () => {
     expect(searchOutput.content[0]?.text).toContain('"total": 1');
     expect(searchOutput.content[0]?.text).not.toContain("distanceMeters");
 
-    const invalidDistance = await tools.find((tool) => tool.name === "search_photos")!.execute("call-distance", {
+    const invalidDistance = await tools.find((tool) => tool.name === "search_photostaff")!.execute("call-distance", {
       sort: { field: "distance", direction: "asc" }
     });
     expect(invalidDistance.content[0]?.text).toContain("nearby location filter");
-    expect(searchPhotos).toHaveBeenCalledTimes(1);
+    expect(searchPhotostaff).toHaveBeenCalledTimes(1);
 
-    const output = await tools.find((tool) => tool.name === "get_photo_metadata")!.execute("call-1", { assetId: "photo-1" });
+    const output = await tools.find((tool) => tool.name === "get_photostaff_metadata")!.execute("call-1", { assetId: "photostaff-1" });
     expect(output.content[0]?.text).toContain("Shanghai");
     expect(output.content[0]?.text).not.toMatch(/31\.23|121\.47|secret|private@example/u);
   });
