@@ -1,3 +1,9 @@
+sigmaos (0.9.17) unstable; urgency=medium
+
+  * Repair worker startup when upgrading installations with the legacy Pi runtime directory
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Sun, 11 Oct 2026 05:25:25 +0000
+
 sigmaos (0.9.16) unstable; urgency=medium
 
   * Fix CM5 upgrade compatibility and production worker dependencies
