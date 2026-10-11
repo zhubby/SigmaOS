@@ -1,3 +1,9 @@
+sigmaos (0.9.14) unstable; urgency=medium
+
+  * Replace the photo worker with the Rust Photostaff service
+
+ -- SigmaOS Maintainers <maintainers@sigmaos.local>  Sun, 11 Oct 2026 03:35:12 +0000
+
 sigmaos (0.9.13) unstable; urgency=medium
 
   * Fix photo metadata extraction and refresh existing records

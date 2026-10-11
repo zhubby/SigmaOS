@@ -1,6 +1,6 @@
 {
   "name": "@sigmaos/shared",
-  "version": "0.9.13",
+  "version": "0.9.14",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
