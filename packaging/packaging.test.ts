@@ -101,6 +101,7 @@ describe("native packaging artifacts", () => {
   it("declares Debian install paths required by the spec", async () => {
     const install = await readPackagingFile("debian", "install");
     const links = await readPackagingFile("debian", "links");
+    const maintscript = await readPackagingFile("debian", "sigmaos.maintscript");
     const control = await readPackagingFile("debian", "control");
     const tmpfiles = await readPackagingFile("tmpfiles.d", "sigmaos.conf");
 
@@ -125,6 +126,9 @@ describe("native packaging artifacts", () => {
     );
     expect(links).toContain(
       "usr/lib/sigmaos/packages/agent/node_modules/@earendil-works/pi-coding-agent usr/lib/sigmaos/node_modules/@earendil-works/pi-coding-agent"
+    );
+    expect(maintscript).toContain(
+      "dir_to_symlink /usr/lib/sigmaos/node_modules/@earendil-works/pi-coding-agent ../../packages/agent/node_modules/@earendil-works/pi-coding-agent 0.9.17~"
     );
     expect(links).toContain(
       "lib/systemd/system/sigmaos-photostaff.service lib/systemd/system/sigmaos-photo-worker.service"
